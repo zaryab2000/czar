@@ -241,25 +241,28 @@
 - **Inputs:** `contracts/` Foundry project and `contracts/src/interfaces/*.sol` from T-003.
 - **Acceptance tests:**
   - `arc-forge test --match-contract MockSelfTest` passes: the USDC mock rejects a reused nonce, an expired authorization, and an `isValidSignature` that returns anything but `0x1626ba7e`.
+  - The Czar ERC-8183 mock supports partial claims (`settledAmount`) and `claimRefund` from `Open`, as `ERC8183.sol` lines 814–885 (RV-009). The test RPC in front of `arc-anvil` is a fault-injecting JSON-RPC proxy (returns `-32012` for wide `eth_getLogs` ranges and `-32014` at random), because `arc-anvil` itself has no log-range cap (RV-057); T-030 reuses it.
 
 ### T-011 OpenEvidenceLog implementation and tests
 - **Milestone / group / who:** M1 / M1-a / agent. **Size:** M. **Deps:** T-003.
-- **Spec refs:** `S03/open-evidence-log.md` §1–§13 (SL §7.1 verbatim, invariants OEL-1..5, D54 `archiveUri` in §11).
+- **Spec refs:** `S03/open-evidence-log.md` §1–§13 (SL §7.1 verbatim plus the §1.1 RV-014 amendment, invariants OEL-1..6, D54/D78 `archiveUri` in §11).
 - **Outputs:** `contracts/src/OpenEvidenceLog.sol`, `contracts/test/OpenEvidenceLogTest.t.sol`.
-- **Steps:** tests first for `commit`, `reveal`, `PrevMismatch`, `UnknownIntent`, `AlreadyRevealed`, views; then the contract (no owner, no pause, no upgrade).
+- **Steps:** tests first for `commit`, `reveal`, `PrevMismatch`, `UnknownIntent`, `AlreadyRevealed`, `AlreadyCommitted` (RV-014), views; then the contract (no owner, no pause, no upgrade).
 - **Inputs:** `contracts/` project and `contracts/src/interfaces/IOpenEvidenceLog.sol` from T-003.
 - **Acceptance tests:**
   - `arc-forge test --match-contract OpenEvidenceLogTest` passes, one test per function and per error.
   - Gas for `commit` within the 120–135k estimate (§13) or the measured value is recorded.
+  - **Review fixes (2026-10-19):** the named tests in `S03/security-and-testing.md` §3.7 for RV-014 pass (`test_commitProbeIntent_twice_revertsAlreadyCommitted`, `test_recommitAfterReveal_reverts`).
 
 ### T-012 CzarVaultFactory implementation and tests
 - **Milestone / group / who:** M1 / M1-a / agent. **Size:** M. **Deps:** T-003.
-- **Spec refs:** `S03/czar-vault-factory.md` §2–§10; `S03/interfaces/ICzarVaultFactory.sol`; FAC-1..4; A9-15.
+- **Spec refs:** `S03/czar-vault-factory.md` §2–§10; `S03/interfaces/ICzarVaultFactory.sol`; FAC-1..5; A9-15; D73.
 - **Outputs:** `contracts/src/CzarVaultFactory.sol`, `contracts/test/FactoryTest.t.sol`.
-- **Steps:** tests first for `createVault`, `predictVault`, `pause`/`unpause`, version and guardian timelocks (48 h), `setDefaults`, Ownable2Step; the vault constructor is a stub until T-013.
+- **Steps:** tests first for `createVault(owner)`, `predictVault(owner)`, `pause`/`unpause`, guardian and defaults timelocks (48 h, `queueDefaults`/`applyDefaults`), `networkConfig()`, Ownable2Step; no version register (D73, RV-015); the vault constructor is a stub that reads `networkConfig()` and `defaults()` from `msg.sender` until T-013.
 - **Inputs:** `contracts/` project and `contracts/src/interfaces/ICzarVaultFactory.sol` from T-003.
 - **Acceptance tests:**
-  - `arc-forge test --match-contract FactoryTest` passes, including: second `createVault` for one owner reverts `VaultExists`; `applyVersion` before the eta reverts `TooEarly`; only the guardian can pause.
+  - `arc-forge test --match-contract FactoryTest` passes, including: second `createVault` for one owner reverts `VaultExists`; `applyDefaults` before the eta reverts `TooEarly`; only the guardian can pause.
+  - **Review fixes (2026-10-19):** the named tests in `S03/security-and-testing.md` §3.7 for RV-015 pass (`test_predictVault_stableAcrossDefaultsChange`, `test_createVault_anyCaller_sameAddress`, `test_queueDefaults_appliesOnlyAfter48h`).
 
 ### T-013 CzarVault core: storage, roles, freeBalance/sync/withdraw, limits, freeze/unfreeze, rotateSigners, guardian read
 - **Milestone / group / who:** M1 / M1-b / agent. **Size:** L. **Deps:** T-010, T-012.
@@ -268,70 +271,77 @@
 - **Steps:**
   - Constants and immutables exactly as §3 (USDC domain separator built in the constructor from `block.chainid`).
   - Role checks matching the §2 table; `ReentrancyGuardTransient` on every externally-calling function.
-  - `freeBalance = balanceOf − committedTotal`; `withdraw` only up to `freeBalance`; `receive()` emits `NativeReceived`.
+  - `freeBalance = sat(balanceOf, committedTotal)` (never reverts, RV-011); `withdraw` only up to `freeBalance`; `receive()` emits `NativeReceived`; `freeze()` bumps `autonomyNonce` (RV-030); `setMaxPullbackFee` bounded by `MAX_PULLBACK_FEE_CEILING` (D81).
 - **Inputs:** mocks in `contracts/test/mocks/` from T-010; `contracts/src/CzarVaultFactory.sol` from T-012; `contracts/src/interfaces/ICzarVault.sol`.
 - **Acceptance tests:**
   - `arc-forge test --match-contract VaultCoreTest` passes, including a role-matrix test that tries every (role × function) cell from §2 and expects success or the exact error.
   - `USDC_DOMAIN_SEPARATOR` equals `0x3611…c6b0` on chain id 5042002 (`S02/data-and-protocol.md` §6.1).
+  - **Review fixes (2026-10-19):** the named tests in `S03/security-and-testing.md` §3.7 for RV-011 (`test_freeBalance_saturatesInSettleWindow`) and RV-037 (`test_setMaxPullbackFee_aboveCeiling_reverts`) pass.
 
 ### T-014 Envelopes: openEnvelope (owner/agent allowance), closeEnvelope, forceCloseEnvelope
 - **Milestone / group / who:** M1 / M1-c / agent. **Size:** M. **Deps:** T-013.
-- **Spec refs:** `S03/czar-vault.md` §5.2, §5.6 (allowance period), §8.1, INV-1, INV-2, INV-9; D11.
+- **Spec refs:** `S03/czar-vault.md` §5.2, §5.6 (allowance period), §8.1, INV-1, INV-2, INV-9 (restated, RV-008), INV-14; D11, D71.
 - **Outputs:** envelope functions in `CzarVault.sol`; `contracts/test/EnvelopeTest.t.sol`.
-- **Steps:** tests first: owner opens any cap ≤ free balance; agent opens only within `autoLimit − usedInPeriod`; period roll; close needs zero open reservations, pockets, jobs; force close after expiry + 1 day.
+- **Steps:** tests first: owner opens any cap ≤ free balance; agent opens only within `sat(autoLimit, usedInPeriod)` and with `pocketCapBps ≤ 2500`; period roll; close needs zero open reservations, pockets, jobs; force close after expiry + 1 day closes the envelope's pocket and releases unfunded jobs exactly as `czar-vault.md` §5.2 (RV-005).
 - **Inputs:** `contracts/src/CzarVault.sol` core from T-013.
 - **Acceptance tests:**
   - `arc-forge test --match-contract EnvelopeTest` passes, including `AllowanceExceeded`, `InsufficientFree`, `EnvelopeBusy`, `FrozenVault`, `Paused`.
+  - **Review fixes (2026-10-19):** the named tests in `S03/security-and-testing.md` §3.7 for RV-003 (`test_openEnvelope_agentPocketCapAbove2500_reverts`), RV-005 (`test_forceClose_*`) and RV-008 (`test_lowerBelowUsed_openEnvelopeRevertsAllowanceExceeded`) pass.
 
 ### T-015 Reservations: reserve, reserveWithDigests, derivedNonce, settle, finalize
 - **Milestone / group / who:** M1 / M1-c / agent. **Size:** L. **Deps:** T-014.
-- **Spec refs:** `S03/czar-vault.md` §5.3, §6.6, §8.2, INV-5, INV-8; `S02/data-and-protocol.md` §5.3 (payee leaves), §7.2; D36, D39, D43.
+- **Spec refs:** `S03/czar-vault.md` §5.3, §6.6, §8.2, INV-5, INV-8, INV-12, INV-13; `S02/data-and-protocol.md` §5.3 (payee leaves), §7.2; D36, D39, D43.
 - **Outputs:** reservation functions; `contracts/test/ReserveTest.t.sol`.
-- **Steps:** tests first: Merkle proof against `payeeRoot` with `PAYEE_LEAF` kind 1; `count ≤ 128`; TTL bounds; `settle` only when `authorizationState == true`; `finalize` only after `validBefore`, chunked by 32; digest mode stores `digestSlot` for `count ≤ 8`.
+- **Steps:** tests first: Merkle proof against `payeeRoot` with `PAYEE_LEAF` kind 1; `stepCap ≤ maxStepAmount`; per-step `stepUsed` bound shared with alternates and jobs (RV-002); `count ≤ 128`; TTL bounds with `validBefore ≤ expiresAt` (RV-056); `settle` only when `authorizationState == true`; `finalize` only after `validBefore`, chunked by 32, skipping done indices; `_finalizeIfDone` in both (RV-001); digest mode stores `digestSlot` for `count ≤ 8`.
 - **Inputs:** `contracts/src/CzarVault.sol` with envelopes from T-014.
 - **Acceptance tests:**
   - `arc-forge test --match-contract ReserveTest` passes, including `PayeeNotInPlan`, `StepCapExceeded`, `CapExceeded`, `BadTtl`, `BadCount`, `NotUsed`, `AlreadyDone`, `NotExpired`.
   - `derivedNonce(12, 3)` for the example vault equals `0x1f7eb762…fd59f` from the vectors file.
+  - **Review fixes (2026-10-19):** the named tests in `S03/security-and-testing.md` §3.7 for RV-001, RV-002 and RV-056 pass.
 
 ### T-016 isValidSignature: USDC_3009, 65-byte fallback, SL_RECEIPT; exposure-bound tests
 - **Milestone / group / who:** M1 / M1-c / agent. **Size:** L. **Deps:** T-015, T-007.
 - **Spec refs:** `S03/czar-vault.md` §6, §6.1, §6.3, §6.4, §6.5, INV-4, INV-5, INV-11; `S02/data-and-protocol.md` §6.3.1, §6.3.3, §6.3.4, §6.3.5; A1-03, A1-09.
 - **Outputs:** dispatcher in `CzarVault.sol`; `contracts/test/SignatureTest.t.sol`.
-- **Steps:** tests first, one per numbered check in §6.1 failing alone; then the dispatcher; never revert, return `0xffffffff` on any failure.
+- **Steps:** tests first, one per numbered check in §6.1 failing alone; then the dispatcher; never revert, return `0xffffffff` on any failure. `SL_RECEIPT` is the v2 kind: recompute the `Receipt` struct hash from the 13 fields and verify the agent's `ReceiptAttestation` under the vault's own domain (RV-013).
 - **Inputs:** `contracts/src/CzarVault.sol` with reservations from T-015; `packages/hashing` from T-007 (vector fixtures).
 - **Acceptance tests:**
-  - `arc-forge test --match-contract SignatureTest` passes: wrong nonce, index ≥ count, done bit, wrong `to`, `value > unitAmount`, `validAfter != 0`, wrong `validBefore`, expired, frozen, paused, wrong digest, wrong signer, high-s, bad `v` → each returns `0xffffffff`; a bare 65-byte signature against an unregistered digest → `0xffffffff`.
+  - `arc-forge test --match-contract SignatureTest` passes: wrong nonce, index ≥ count, done bit, wrong `to`, `value != unitAmount` (RV-035), `validAfter != 0`, wrong `validBefore`, expired, frozen, paused, wrong digest, wrong signer, high-s, bad `v` → each returns `0xffffffff`; a bare 65-byte signature against an unregistered digest → `0xffffffff`.
   - Through the USDC mock, an exposure test signs 1,000 authorizations against a `count = 10` reservation and asserts total moved ≤ `10 × unitAmount` (§6.5).
+  - **Review fixes (2026-10-19):** the named tests in `S03/security-and-testing.md` §3.7 for RV-013 (`test_slReceipt_*`) and RV-035 pass.
 
 ### T-017 Pockets and GATEWAY_BURN kind: register, gas, fund, requestPullback, confirm, cancel, writeOff, recordManualReturn
 - **Milestone / group / who:** M1 / M1-d / agent. **Size:** L. **Deps:** T-016.
-- **Spec refs:** `S03/czar-vault.md` §5.4, §6.2, §8.3, INV-6, INV-7; `S02/data-and-protocol.md` §6.3.2, §7.3; D22, D41; A2-02, A2-04, A2-05, A2-18.
+- **Spec refs:** `S03/czar-vault.md` §5.4, §6.2, §8.3, INV-6, INV-7, INV-14, INV-15; `S02/data-and-protocol.md` §4.7 (kind-4 pocket leaf), §6.3.2, §7.3; D22, D41, D71, D81; A2-02, A2-04, A2-05, A2-18.
 - **Outputs:** pocket functions and the `GATEWAY_BURN` branch; `contracts/test/PocketTest.t.sol`.
-- **Steps:** tests first: `NotEoa`, `DelegateNotSet`, 25% cap (`PocketCapExceeded`), gas grant cap, each `TransferSpec` field mutated → `INVALID`, cross-chain domain → `INVALID`, cancelled record → `INVALID`, confirm only when `isTransferSpecHashUsed`; `recordManualReturn` owner-only.
+- **Steps:** tests first: `NotEoa`, `PocketNotInPlan` (pocket leaf proof, D71), `DelegateNotSet`, 25% cap (`PocketCapExceeded`), gas grant cap and freeze/pause/expiry gates on `grantPocketGas` (RV-006), each `TransferSpec` field mutated → `INVALID`, cross-chain domain → `INVALID`, cancelled record → `INVALID`, intent past `maxBlockHeight` → `INVALID` (RV-036), confirm only when `isTransferSpecHashUsed` with the three crediting branches (RV-005, RV-011), recovery pullbacks on `Closed` pockets (RV-004), `writeOffPocket` on `Registered` (RV-049), `recordManualReturn` owner-only with the RV-010 bound, `maxPullbackFee` (D81).
 - **Inputs:** `contracts/src/CzarVault.sol` with the dispatcher from T-016; `MockGatewayWallet.sol`, `MockGatewayMinter.sol` from T-010.
 - **Acceptance tests:**
   - `arc-forge test --match-contract PocketTest` passes.
   - The burn-intent struct hash built by the vault for the `gatewayBurnIntent_sameChain` vector equals `0xbaa687f2…6ec8` and `transferSpecHash` equals `0xa2f49c1a…3616`.
+  - **Review fixes (2026-10-19):** the named tests in `S03/security-and-testing.md` §3.7 for RV-003, RV-004, RV-005, RV-006, RV-010, RV-011, RV-036, RV-037 and RV-049 pass.
 
 ### T-018 Job adapter (CircleTestnet kind) and openJob/fundJob/syncJob/claimJobRefund
 - **Milestone / group / who:** M1 / M1-d / agent. **Size:** L. **Deps:** T-014.
 - **Spec refs:** `S03/job-escrow-adapter.md` §2–§9 (JOB-1..4); `S03/czar-vault.md` §5.5, §8.4, §9.1 (`JobSynced.state` mapping, AM-19); D27, D32; A4-03, A4-05, A4-07.
 - **Outputs:** `contracts/src/JobEscrowAdapter.sol` (internal library), job functions in `CzarVault.sol`; `contracts/test/JobTest.t.sol` against both mocks.
-- **Steps:** tests first: budget read and `fund` in one tx; fee check (both 0 on the Circle kind); `BudgetExceedsReserved`; description is exactly `"czar:" + 64 hex`; `optParams` empty; refunds credit the envelope or free balance.
+- **Steps:** tests first: budget read and `fund` in one tx; fee check (both 0 on the Circle kind); `BudgetExceedsReserved`; `fundJob` gated by freeze, pause, envelope state and expiry (RV-006); per-step `stepUsed` (RV-002); description is exactly `"czar:" + 64 hex`; `optParams` empty; `syncJob` from `Opened` (`Released`), refunds from escrow status only, Czar-kind refunds of `budget − settledAmount` (RV-009); refunds credit the envelope (bounded, RV-011) or free balance.
 - **Inputs:** `contracts/src/CzarVault.sol` with envelopes from T-014; ERC-8183 mocks from T-010.
 - **Acceptance tests:**
   - `arc-forge test --match-contract JobTest` passes on both mock ABIs, including a provider front-running `setBudget` in the same block (rejected) and a refund after the envelope closed (`creditedToEnvelope = false`).
+  - **Review fixes (2026-10-19):** the named tests in `S03/security-and-testing.md` §3.7 for RV-002 (`test_openJob_afterReserveOnSameStep_reverts`), RV-006 (`test_fundJob_whileFrozenOrPaused_reverts`) and RV-009 pass.
 
 ### T-019 Earned autonomy (raiseAutoLimit/lowerAutoLimit, AutonomyRaise) and executeOwnerAction with WebAuthn/P-256
 - **Milestone / group / who:** M1 / M1-d / agent. **Size:** L. **Deps:** T-014.
 - **Spec refs:** `S03/czar-vault.md` §5.6 (empty `sig` for the owner, AM-20; D60 note), §7; `S02/data-and-protocol.md` §6.2 (`AutonomyRaise`, `OwnerAction`); D30, D40; A6-01 to A6-03.
 - **Outputs:** autonomy and owner-action functions; `contracts/test/AutonomyTest.t.sol`, `contracts/test/OwnerActionTest.t.sol`, a captured WebAuthn fixture in `contracts/test/fixtures/`.
-- **Steps:** tests first: one raise per period, ≤ 20% of `userMax`, signer recovery, nonce and deadline; WebAuthn with UV required, `rpIdHash` check, P-256 at `0x100` costing 6,900 gas.
+- **Steps:** tests first: raises spaced by `PERIOD_LENGTH` from `lastRaiseAt` (RV-031), ≤ 20% of `userMax`, `newLimit > autoLimit` (RV-008), refused while frozen or paused and invalidated by a freeze or lowering (RV-030), signer recovery, nonce and deadline; `lowerAutoLimit` allows equal; WebAuthn with UV required, `rpIdHash` check (RP ID `localhost`, D78), `P256.verify` with low-s normalisation by the client (RV-034), 6,900 gas per precompile call; `OwnerActionKind` 1–16 (RV-033).
 - **Inputs:** `contracts/src/CzarVault.sol` with envelopes from T-014; a captured WebAuthn assertion fixture.
 - **Acceptance tests:**
   - `arc-forge test --match-contract AutonomyTest` passes, including `RaiseTooLarge`, `RaiseAlreadyThisPeriod`, `BadSigner`, `Expired`.
   - `arc-forge test --match-contract OwnerActionTest` passes on `arc-anvil --network arc` (real P-256 precompile, A9-14), including wrong `rpIdHash`, missing UV and wrong challenge → `InvalidPasskeyAssertion`.
-  - The `autonomyRaise_5042002` and `ownerAction_5042002` digests reproduce on-chain.
+  - The `autonomyRaise_5042002` and `ownerAction_5042002` digests reproduce on-chain, and the `autonomyRaise` vector executes at its `deadline` (RV-061).
+  - **Review fixes (2026-10-19):** the named tests in `S03/security-and-testing.md` §3.7 for RV-008, RV-030, RV-031, RV-033 and RV-034 pass.
 
 ### T-020 Size build and D42 library split decision
 - **Milestone / group / who:** M1 / M1-e / agent. **Size:** S. **Deps:** T-017, T-018, T-019, G0-08.
@@ -343,16 +353,16 @@
   - `arc-forge build --sizes` shows `CzarVault` runtime size ≤ the limit recorded in G0-08.
   - All tests from T-011..T-019 still pass.
 
-### T-021 Fuzz and Foundry invariant suites (INV-1..11, FAC-1..4, JOB-1..4, OEL-1..5)
+### T-021 Fuzz and Foundry invariant suites (INV-1..15, FAC-1..5, JOB-1..4, OEL-1..6)
 - **Milestone / group / who:** M1 / M1-e / agent. **Size:** L. **Deps:** T-020, T-011.
 - **Spec refs:** `S03/security-and-testing.md` §2, §3.2, §3.3; `S03/czar-vault.md` §11.
 - **Outputs:** `contracts/test/invariant/InvariantVault.t.sol`, handlers per role, `contracts/test/fuzz/*.t.sol`.
-- **Steps:** handlers for owner, agent, autonomy, guardian, USDC mock (consumes nonces), Gateway mock, job mocks; assert every invariant after each call.
+- **Steps:** handlers for owner (including `withdraw`, `forceCloseEnvelope`, `recordManualReturn`), agent, autonomy, guardian, USDC mock (consumes nonces), Gateway mock, job mocks (partial claims); assert every invariant after each call, including the restated INV-2, INV-7 and INV-9 and the new INV-12 to INV-15 and OEL-6.
 - **Inputs:** all contracts from T-011 and T-020; mocks from T-010.
 - **Acceptance tests:**
   - `arc-forge test --match-contract InvariantVault -vv` passes with `invariant.runs ≥ 256` and `depth ≥ 64`.
   - `arc-forge test --match-path 'test/fuzz/*'` passes with `fuzz.runs ≥ 10000`.
-  - Mutation check: deleting the `payeeRoot` proof check makes INV-3 fail (recorded in the task report, change reverted).
+  - Mutation check: deleting the `payeeRoot` proof check makes INV-3 fail; deleting the `stepUsed` check makes INV-12 fail; deleting the pocket-leaf proof makes INV-14 fail (recorded in the task report, changes reverted).
 
 ### T-022 Fork tests on arc-anvil testnet fork: USDC bytes overload, authorizationState, GatewayWallet depositFor/addDelegate, Circle ERC-8183
 - **Milestone / group / who:** M1 / M1-e / agent. **Size:** L. **Deps:** T-020.
@@ -377,7 +387,7 @@
   - Recompute each digest, `transferSpecHash` and the derived nonce in Solidity.
   - Assert equality for every vector.
 - **Acceptance tests:**
-  - `arc-forge test --match-contract VectorsTest` passes: all six digests, `transferSpecHash` and the derived nonce match.
+  - `arc-forge test --match-contract VectorsTest` passes: all seven digests (including `receiptAttestation_5042002`, RV-013), the `Receipt` struct hash, `transferSpecHash` and the derived nonce match.
 
 ### T-024 Gas snapshot and measured gas table for routing
 - **Milestone / group / who:** M1 / M1-e / agent. **Size:** S. **Deps:** T-020.
@@ -409,25 +419,42 @@
 - **Milestone / group / who:** M1 / M1-e / agent. **Size:** L. **Deps:** T-020, T-007.
 - **Spec refs:** `S04/cross-cutting.md` §2; `S02/data-and-protocol.md` §6.3; `S03/interfaces/*.sol`; `S03/czar-vault.md` §9.2.
 - **Outputs:** `packages/vault-client/` (viem 2.57.x).
-- **Steps:** ABI from compiled interfaces; encoders for `USDC_3009`, `GATEWAY_BURN`, `SL_RECEIPT` and the 65-byte fallback; revert decoding to error names; `maxFeePerGas ≥ 20 Gwei` (p1-A6).
+- **Steps:** ABI from compiled interfaces; encoders for `USDC_3009`, `GATEWAY_BURN`, `SL_RECEIPT` v2 (13 receipt fields + `ReceiptAttestation` signature, RV-013) and the 65-byte fallback; low-s normalisation of P-256 assertions before `executeOwnerAction` (RV-034); revert decoding to error names; `maxFeePerGas ≥ 20 Gwei` (p1-A6).
 - **Inputs:** compiled ABIs from T-020; `packages/hashing` from T-007.
 - **Acceptance tests:**
   - `pnpm --filter @czar/vault-client test` passes; an `arc-anvil` integration test calls every `ICzarVault` function once and decodes every custom error by name.
   - The encoder's `USDC_3009` bytes are exactly 416 bytes and accepted by the T-016 contract.
 
 ### T-027 Testnet deployment via Arachnid CREATE2, bytecode hash publication, verified sources
-- **Milestone / group / who:** M1 / M1-f / agent, after Zaryab approves funds. **Size:** M. **Deps:** T-021..T-026.
+- **Milestone / group / who:** M1 / M1-f / agent, after Zaryab approves funds. **Size:** M. **Deps:** T-021..T-026, T-105 (RV-016).
 - **Spec refs:** `S03/security-and-testing.md` §4 steps 1–4; `S03/czar-vault-factory.md` §3, §12; A9-10, A9-15.
 - **Outputs:** `contracts/script/Deploy.s.sol`, `deployments/arc-testnet.json` (addresses, constructor args, creation-code hash, runtime hash).
 - **Steps:**
   - Deploy `OpenEvidenceLog` and `CzarVaultFactory` through `0x4e59b44847b379578588920cA78FbF26c0B4956C` with fixed salts.
-  - Admin accepts ownership; register vault version 1.
+  - Constructor `defaults` (K3, K5, K7), guardian (K6) and admin (K20) are the addresses T-105 recorded in `deployments/arc-testnet-keys.json`; never placeholders (RV-016).
+  - Admin accepts ownership. (Superseded by D73 / RV-015: "register vault version 1"; there is no version register.)
   - Verify sources on the testnet explorer (keyless, rate-limited).
 - **Inputs:** tested contracts from T-021..T-025; `packages/vault-client` from T-026; Zaryab's written funds approval.
 - **Acceptance tests:**
   - `arc-cast code <factory> --rpc-url https://rpc.testnet.arc.io` is non-empty and its keccak equals the published runtime hash.
   - `arc-cast call <factory> "guardianPaused()(bool)"` returns `false`.
   - Re-running the script is a no-op (addresses already exist).
+  - `arc-cast call <factory> "defaults()((address,address,address))"` returns the K3, K5, K7 addresses from `deployments/arc-testnet-keys.json`.
+
+### T-105 Create Phase 1 server keys in the local keystore and record their addresses (RV-016)
+- **Milestone / group / who:** M1 / M1-f / agent, after Zaryab approves key creation. **Size:** S. **Deps:** T-004.
+- **Spec refs:** `S04/server-autonomy-roi-keys.md` CZ-27 §2, §3 (keystore location, passphrase rule, key table); `S03/security-and-testing.md` §4 step 2; D70, D78, D80.
+- **Outputs:** the signer service's encrypted keystore at the path CZ-27 fixes (`~/Library/Application Support/Czar/signer/keystore/`, outside the repository); `deployments/arc-testnet-keys.json` holding **addresses and key references only** (K3 agent, K5 autonomy, K6 guardian, K7 evaluator, K8 evidence publisher, the relayer gas key, K20 factory admin; K9 is the Phase 2 claim relayer and is not created).
+- **Steps:**
+  - Use the T-035 signer CLI's `create-key` command if it exists; otherwise a minimal one-off script in `apps/signer/scripts/create-keys.ts` that uses the same keystore format (CZ-27 §3). T-035 later adopts the keystore unchanged.
+  - The passphrase comes from the macOS keychain item CZ-27 names, read by the process itself; never from argv, environment variables or a file (D78).
+  - Print only addresses. Record them in `deployments/arc-testnet-keys.json`.
+- **Inputs:** `@czar/config` from T-004 (`signer.backend = local-keystore`, `signer.keystorePath`); Zaryab's written approval.
+- **Acceptance tests:**
+  - `git ls-files | grep -iE 'keystore|\.key$|\.env'` prints nothing; the keystore path resolves outside the repository root.
+  - `deployments/arc-testnet-keys.json` validates: seven distinct checksummed addresses, no field named `key`, `secret`, `private` or `mnemonic`.
+  - `ps -o args` captured during key creation contains no passphrase; the process environment of the CLI contains no `CZAR_SIGNER_PASSPHRASE`-style variable (test in `apps/signer/test/no-secret-in-argv-env.test.ts`).
+- **Note (D80):** all seven keys sit on one Mac in Phase 1; this is the accepted testnet exception. Dual control for K6 and K20 arrives with Cloud KMS (`stage-2-backlog.md` §6).
 
 ---
 
@@ -1338,4 +1365,5 @@
 | 2026-10-19 | D64 | Test-keystore owner limited to testnet M3–M4; T-082 removes it. |
 | 2026-10-19 | D67 | T-060 macOS only. |
 | 2026-10-19 | D68 | T-046 reads model prices and files an SCR; budgets stay in tokens until then. |
-- 2026-10-19 · D70: Phase 1 runs on Zaryab's Mac with a local software signer (encrypted keystore); Google Cloud (KMS, Cloud Run, e2-micro VM) moves to stage 2.
+| 2026-10-19 | D70 | Phase 1 runs on Zaryab's Mac with a local software signer (encrypted keystore); Google Cloud (KMS, Cloud Run, e2-micro VM) moves to stage 2. |
+| 2026-10-19 | G0-01 review (Pass A) | M1 acceptance criteria for RV-001…RV-015, RV-030…RV-037, RV-049, RV-056, RV-061 (named tests in `S03/security-and-testing.md` §3.7); T-105 key creation before T-027 (RV-016); T-027 no version registration (D73). |
