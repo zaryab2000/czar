@@ -64,13 +64,13 @@ describe("sidecar supervisor", () => {
       command: "x",
       socketPath,
       spawn: fakeSpawn([]),
-      idleMs: 200,
+      idleMs: 1_000,
       startTimeoutMs: 5000,
     });
     supervisors.push(supervisor);
     await supervisor.ensureRunning();
     expect(supervisor.running).toBe(true);
-    await new Promise((resolve) => setTimeout(resolve, 600));
+    await new Promise((resolve) => setTimeout(resolve, 3_000));
     expect(supervisor.running).toBe(false);
     // Start-up may take up to startTimeoutMs on a loaded machine; leave room above it.
   }, 15_000);
