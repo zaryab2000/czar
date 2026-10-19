@@ -19,5 +19,10 @@ remappings = [
 network = "arc"
 # Hardfork pin (RV-058): not set until the hardfork Arc testnet runs is recorded (SCR-101).
 
+# forge-lint runs on production sources. Test mocks copy upstream code (block.timestamp checks,
+# string-to-bytes32 casts) on purpose and are excluded; compiler warnings still fail the build.
+[lint]
+ignore = ["test/**/*.sol"]
+
 [fmt]
 line_length = 120
