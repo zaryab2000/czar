@@ -6,3 +6,16 @@ b187082d343942fe3311aadffb313997fb63ab42:specs/02-data-and-protocol/vectors/eip7
 dd198662429bb8ffb2841c23530702f3386ee3eb:research/evidence/experiments/a1-erc1271-usdc/raw/fund-transfer.json:generic-api-key:3
 dd198662429bb8ffb2841c23530702f3386ee3eb:research/evidence/arc-circle-docs-2026-10-18.md:generic-api-key:77
 dd198662429bb8ffb2841c23530702f3386ee3eb:research/evidence/experiments/a2-gateway-e2e/raw/fund-transfer.json:generic-api-key:3
+# Reviewed false positives (T-004): registry entries whose field is named key, e.g. key: "kms.maxSignaturesPerMin.K10".
+dff8c0999617e327870a9192bf5a911878321c34:packages/config/test/__snapshots__/loader.test.ts.snap:generic-api-key:639
+dff8c0999617e327870a9192bf5a911878321c34:packages/config/test/__snapshots__/loader.test.ts.snap:generic-api-key:645
+dff8c0999617e327870a9192bf5a911878321c34:packages/config/test/__snapshots__/loader.test.ts.snap:generic-api-key:651
+dff8c0999617e327870a9192bf5a911878321c34:packages/config/test/__snapshots__/loader.test.ts.snap:generic-api-key:657
+dff8c0999617e327870a9192bf5a911878321c34:packages/config/test/__snapshots__/loader.test.ts.snap:generic-api-key:663
+dff8c0999617e327870a9192bf5a911878321c34:packages/config/test/__snapshots__/loader.test.ts.snap:generic-api-key:669
+dff8c0999617e327870a9192bf5a911878321c34:packages/config/src/registry.ts:generic-api-key:889
+dff8c0999617e327870a9192bf5a911878321c34:packages/config/src/registry.ts:generic-api-key:897
+dff8c0999617e327870a9192bf5a911878321c34:packages/config/src/registry.ts:generic-api-key:906
+dff8c0999617e327870a9192bf5a911878321c34:packages/config/src/registry.ts:generic-api-key:915
+dff8c0999617e327870a9192bf5a911878321c34:packages/config/src/registry.ts:generic-api-key:923
+dff8c0999617e327870a9192bf5a911878321c34:packages/config/src/registry.ts:generic-api-key:931
