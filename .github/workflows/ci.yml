@@ -111,7 +111,9 @@ jobs:
       # T-030: the fault proxy sits in front of arc-anvil, which has no log-range cap of its own (RV-057).
       - name: start arc-anvil and mine 50,001 blocks
         run: |
-          arc-anvil --network arc --chain-id 5042002 --port 8545 > "$RUNNER_TEMP/anvil.log" 2>&1 &
+          # --prune-history: keep no historical states; anvil otherwise spills them to disk and the runner
+          # filled its disk after about 30,000 blocks.
+          arc-anvil --network arc --chain-id 5042002 --port 8545 --prune-history > /dev/null 2>&1 &
           for _ in $(seq 1 30); do arc-cast chain-id --rpc-url http://127.0.0.1:8545 && break; sleep 1; done
           # arc-anvil mines a few hundred blocks a second and arc-cast gives up after 45 s, so mine
           # in 5,000-block chunks over curl with a long per-call limit, printing progress.
@@ -120,7 +122,7 @@ jobs:
               --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"anvil_mine\",\"params\":[\"$1\"]}" \
               http://127.0.0.1:8545 > /dev/null
           }
-          for i in $(seq 1 10); do mine 0x1388; echo "mined chunk $i at ${SECONDS}s"; done
+          for i in $(seq 1 10); do mine 0x1388; echo "mined chunk $i at ${SECONDS}s, $(df -h --output=avail / | tail -1) free"; done
           mine 0x1
           arc-cast block-number --rpc-url http://127.0.0.1:8545
       - name: 50,000-block sync through the fault proxy
