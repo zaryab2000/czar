@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://czar.dev/schemas/objective/1.0",
+  "$id": "https://czar.dev/schemas/objective.schema.json",
   "title": "Objective",
   "description": "A candidate objective produced by the drives engine before publication (spec 02 §4.3). Holds local evidence links.",
   "type": "object",
@@ -14,7 +14,7 @@
       "const": "1.0"
     },
     "objectiveId": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/ObjectiveId",
+      "$ref": "common.schema.json#/$defs/ObjectiveId",
       "description": "Objective id; the id itself is sent to the server.",
       "x-privacyClass": "redacted-to-server"
     },
@@ -47,7 +47,7 @@
     "capabilities": {
       "type": "array",
       "items": {
-        "$ref": "https://czar.dev/schemas/common/1.0#/$defs/CapabilityTag",
+        "$ref": "common.schema.json#/$defs/CapabilityTag",
         "description": "Capability tag.",
         "x-privacyClass": "redacted-to-server"
       },
@@ -56,7 +56,7 @@
       "maxItems": 10
     },
     "deadline": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Timestamp",
+      "$ref": "common.schema.json#/$defs/Timestamp",
       "description": "Deadline if known.",
       "x-privacyClass": "redacted-to-server"
     },
@@ -74,12 +74,12 @@
         "x-privacyClass": "local-only",
         "properties": {
           "eventId": {
-            "$ref": "https://czar.dev/schemas/common/1.0#/$defs/EventId",
+            "$ref": "common.schema.json#/$defs/EventId",
             "description": "Linked observation.",
             "x-privacyClass": "local-only"
           },
           "beliefId": {
-            "$ref": "https://czar.dev/schemas/common/1.0#/$defs/BeliefId",
+            "$ref": "common.schema.json#/$defs/BeliefId",
             "description": "Linked belief.",
             "x-privacyClass": "local-only"
           }
@@ -96,7 +96,7 @@
     "observationHashes": {
       "type": "array",
       "items": {
-        "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
+        "$ref": "common.schema.json#/$defs/Hash32",
         "description": "observationHash per linked event (spec 02 §5.2).",
         "x-privacyClass": "hash-on-chain"
       },

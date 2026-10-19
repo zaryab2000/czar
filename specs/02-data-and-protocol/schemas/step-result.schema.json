@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://czar.dev/schemas/step-result/1.0",
+  "$id": "https://czar.dev/schemas/step-result.schema.json",
   "title": "StepResult",
   "description": "The only form in which untrusted merchant output reaches the planner (spec 02 \u00a74.15; spec 01 \u00a713.1).",
   "type": "object",
@@ -44,12 +44,12 @@
           "maxLength": 2048
         },
         "payTo": {
-          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Address",
+          "$ref": "common.schema.json#/$defs/Address",
           "description": "Payee.",
           "x-privacyClass": "server-only"
         },
         "paymentRefHash": {
-          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
+          "$ref": "common.schema.json#/$defs/Hash32",
           "description": "Payment reference hash.",
           "x-privacyClass": "server-only"
         }
@@ -122,7 +122,7 @@
       "maxLength": 512
     },
     "bodyCommit": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
+      "$ref": "common.schema.json#/$defs/Hash32",
       "description": "SL responseCommit.",
       "x-privacyClass": "hash-on-chain"
     }

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://czar.dev/schemas/common/1.0",
+  "$id": "https://czar.dev/schemas/common.schema.json",
   "title": "Czar common primitives",
   "description": "Shared primitive formats referenced by every Czar schema (spec 02 \u00a72.1).",
   "$defs": {

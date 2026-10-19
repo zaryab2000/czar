@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://czar.dev/schemas/soul/1.0",
+  "$id": "https://czar.dev/schemas/soul.schema.json",
   "title": "soul.json",
   "description": "The machine-readable Work Soul (spec 02 §4.2): eight sections of beliefs with receipts. Local only.",
   "type": "object",
@@ -20,12 +20,12 @@
       "minimum": 1
     },
     "compiledAt": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Timestamp",
+      "$ref": "common.schema.json#/$defs/Timestamp",
       "description": "Compile time.",
       "x-privacyClass": "local-only"
     },
     "previousHash": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
+      "$ref": "common.schema.json#/$defs/Hash32",
       "description": "soulVersionHash of version minus 1.",
       "x-privacyClass": "hash-on-chain"
     },
@@ -117,7 +117,7 @@
       "x-privacyClass": "local-only",
       "properties": {
         "amount": {
-          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Amount6",
+          "$ref": "common.schema.json#/$defs/Amount6",
           "description": "Hourly value in USDC atomic units.",
           "x-privacyClass": "local-only"
         },
@@ -194,7 +194,7 @@
       "x-privacyClass": "local-only",
       "properties": {
         "beliefId": {
-          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/BeliefId",
+          "$ref": "common.schema.json#/$defs/BeliefId",
           "description": "Stable id across versions while the belief lives.",
           "x-privacyClass": "local-only"
         },
@@ -212,19 +212,19 @@
           "maximum": 1
         },
         "firstSeen": {
-          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Timestamp",
+          "$ref": "common.schema.json#/$defs/Timestamp",
           "description": "First observation.",
           "x-privacyClass": "local-only"
         },
         "lastSeen": {
-          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Timestamp",
+          "$ref": "common.schema.json#/$defs/Timestamp",
           "description": "Last observation; beliefs fade when not seen.",
           "x-privacyClass": "local-only"
         },
         "receipts": {
           "type": "array",
           "items": {
-            "$ref": "https://czar.dev/schemas/common/1.0#/$defs/EventId",
+            "$ref": "common.schema.json#/$defs/EventId",
             "description": "Observation behind the belief.",
             "x-privacyClass": "local-only"
           },

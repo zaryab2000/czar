@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://czar.dev/schemas/soul-version-leaf/1.0",
+  "$id": "https://czar.dev/schemas/soul-version-leaf.schema.json",
   "title": "SoulVersionLeaf",
   "description": "Soul version commitment anchored as an EVIDENCE_BATCH leaf (spec 02 \u00a74.18).",
   "type": "object",
@@ -26,7 +26,7 @@
       "const": 1
     },
     "userPseudonym": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
+      "$ref": "common.schema.json#/$defs/Hash32",
       "description": "Rotating per-user pseudonym.",
       "x-privacyClass": "public"
     },
@@ -37,17 +37,17 @@
       "minimum": 1
     },
     "soulVersionHash": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
+      "$ref": "common.schema.json#/$defs/Hash32",
       "description": "Soul version hash.",
       "x-privacyClass": "public"
     },
     "previousHash": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
+      "$ref": "common.schema.json#/$defs/Hash32",
       "description": "Previous soul version hash.",
       "x-privacyClass": "public"
     },
     "compiledAt": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/UnixSeconds",
+      "$ref": "common.schema.json#/$defs/UnixSeconds",
       "description": "Compile time.",
       "x-privacyClass": "public"
     }

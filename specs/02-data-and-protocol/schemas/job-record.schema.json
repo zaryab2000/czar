@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://czar.dev/schemas/job-record/1.0",
+  "$id": "https://czar.dev/schemas/job-record.schema.json",
   "title": "JobRecord",
   "description": "An ERC-8183 job opened by the vault as client (spec 02 §4.11).",
   "type": "object",
@@ -14,12 +14,12 @@
       "const": "1.1"
     },
     "vault": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Address",
+      "$ref": "common.schema.json#/$defs/Address",
       "description": "Vault.",
       "x-privacyClass": "public"
     },
     "envelopeId": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Uint64",
+      "$ref": "common.schema.json#/$defs/Uint64",
       "description": "Envelope.",
       "x-privacyClass": "public"
     },
@@ -31,52 +31,52 @@
       "maximum": 63
     },
     "jobEscrow": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Address",
+      "$ref": "common.schema.json#/$defs/Address",
       "description": "Escrow instance (Circle testnet or CzarJobEscrow).",
       "x-privacyClass": "public"
     },
     "jobId": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Uint256String",
+      "$ref": "common.schema.json#/$defs/Uint256String",
       "description": "The escrow's job id.",
       "x-privacyClass": "public"
     },
     "jobKey": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
+      "$ref": "common.schema.json#/$defs/Hash32",
       "description": "keccak256(abi.encode(jobEscrow, jobId)).",
       "x-privacyClass": "public"
     },
     "provider": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Address",
+      "$ref": "common.schema.json#/$defs/Address",
       "description": "Provider.",
       "x-privacyClass": "public"
     },
     "evaluator": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Address",
+      "$ref": "common.schema.json#/$defs/Address",
       "description": "Evaluator (Czar key K7).",
       "x-privacyClass": "public"
     },
     "reservedCap": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Amount6",
+      "$ref": "common.schema.json#/$defs/Amount6",
       "description": "Step cap reserved at openJob.",
       "x-privacyClass": "public"
     },
     "budget": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Amount6",
+      "$ref": "common.schema.json#/$defs/Amount6",
       "description": "Budget from BudgetSet / getJob.",
       "x-privacyClass": "public"
     },
     "descriptionHash": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
+      "$ref": "common.schema.json#/$defs/Hash32",
       "description": "Hash in the on-chain description string czar:<hash>.",
       "x-privacyClass": "public"
     },
     "deliverableHash": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
+      "$ref": "common.schema.json#/$defs/Hash32",
       "description": "From JobSubmitted.",
       "x-privacyClass": "public"
     },
     "reportHash": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
+      "$ref": "common.schema.json#/$defs/Hash32",
       "description": "The reason passed to complete or reject.",
       "x-privacyClass": "public"
     },
@@ -96,7 +96,7 @@
       "x-privacyClass": "public"
     },
     "expiredAt": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/UnixSeconds",
+      "$ref": "common.schema.json#/$defs/UnixSeconds",
       "description": "Job expiry.",
       "x-privacyClass": "public"
     },

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://czar.dev/schemas/envelope/1.0",
+  "$id": "https://czar.dev/schemas/envelope.schema.json",
   "title": "Envelope (mirror)",
   "description": "Server mirror of CzarVault envelope state, rebuilt from events (spec 02 \u00a74.8). The contract is the source of truth.",
   "type": "object",
@@ -14,62 +14,62 @@
       "const": "1.1"
     },
     "envelopeRef": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/EnvelopeRef",
+      "$ref": "common.schema.json#/$defs/EnvelopeRef",
       "description": "Global reference.",
       "x-privacyClass": "public"
     },
     "vault": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Address",
+      "$ref": "common.schema.json#/$defs/Address",
       "description": "Vault address.",
       "x-privacyClass": "public"
     },
     "envelopeId": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Uint64",
+      "$ref": "common.schema.json#/$defs/Uint64",
       "description": "Per-vault counter.",
       "x-privacyClass": "public"
     },
     "planId": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/PlanId",
+      "$ref": "common.schema.json#/$defs/PlanId",
       "description": "Plan id.",
       "x-privacyClass": "server-only"
     },
     "objectiveHash": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
+      "$ref": "common.schema.json#/$defs/Hash32",
       "description": "From EnvelopeOpened.",
       "x-privacyClass": "public"
     },
     "planHash": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
+      "$ref": "common.schema.json#/$defs/Hash32",
       "description": "From EnvelopeOpened.",
       "x-privacyClass": "public"
     },
     "payeeRoot": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
+      "$ref": "common.schema.json#/$defs/Hash32",
       "description": "From EnvelopeOpened.",
       "x-privacyClass": "public"
     },
     "categoryId": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
+      "$ref": "common.schema.json#/$defs/Hash32",
       "description": "keccak256 of the category string.",
       "x-privacyClass": "public"
     },
     "cap": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Amount6",
+      "$ref": "common.schema.json#/$defs/Amount6",
       "description": "Envelope cap.",
       "x-privacyClass": "public"
     },
     "maxStepAmount": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Amount6",
+      "$ref": "common.schema.json#/$defs/Amount6",
       "description": "Per-step cap.",
       "x-privacyClass": "public"
     },
     "pocketCapBps": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Bps",
+      "$ref": "common.schema.json#/$defs/Bps",
       "description": "Pocket cap in bps.",
       "x-privacyClass": "public"
     },
     "expiresAt": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/UnixSeconds",
+      "$ref": "common.schema.json#/$defs/UnixSeconds",
       "description": "Expiry.",
       "x-privacyClass": "public"
     },
@@ -83,37 +83,37 @@
       "x-privacyClass": "public"
     },
     "approvalTx": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
+      "$ref": "common.schema.json#/$defs/Hash32",
       "description": "Transaction hash of the opening call.",
       "x-privacyClass": "public"
     },
     "spent": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Amount6",
+      "$ref": "common.schema.json#/$defs/Amount6",
       "description": "Funds that left the vault permanently.",
       "x-privacyClass": "public"
     },
     "reserved": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Amount6",
+      "$ref": "common.schema.json#/$defs/Amount6",
       "description": "Open reservations.",
       "x-privacyClass": "public"
     },
     "pocketOutstanding": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Amount6",
+      "$ref": "common.schema.json#/$defs/Amount6",
       "description": "Deposited to Gateway, not yet pulled back.",
       "x-privacyClass": "public"
     },
     "jobEscrowed": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Amount6",
+      "$ref": "common.schema.json#/$defs/Amount6",
       "description": "In ERC-8183 escrow.",
       "x-privacyClass": "public"
     },
     "shortfall": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Amount6",
+      "$ref": "common.schema.json#/$defs/Amount6",
       "description": "Credits owed back to the envelope that the owner had already withdrawn; from ShortfallRecorded (RV-011). Absent means 0.",
       "x-privacyClass": "public"
     },
     "pocket": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Address",
+      "$ref": "common.schema.json#/$defs/Address",
       "description": "The envelope's single pocket, from PocketRegistered (D48, D71).",
       "x-privacyClass": "public"
     },
