@@ -1,3 +1,3 @@
 # czar
 
-Personal experiments.
+personal agent project
