@@ -1,6 +1,6 @@
 # Server: API, planner, payment router, paying agent (spec 04)
 
-- **Date:** 2026-10-18. **Status:** draft for review. Conventions: `cross-cutting.md`. Data shapes: specs/02 only. Contract calls: specs/03 only.
+- **Date:** 2026-10-18; amended 2026-10-19 (G0-01 review fixes, see change log). **Status:** draft for review. Conventions: `cross-cutting.md`. Data shapes: specs/02 only. Contract calls: specs/03 only.
 - Components: CZ-12 server API and objective store, CZ-13 planner, CZ-14 payment router, CZ-15 paying agent. All Phase 1.
 
 ---
@@ -27,23 +27,23 @@
 
 ### 5. Internal design
 
-Objective state machine:
+Objective state machine. The state names are exactly the values of `ObjectiveStatusValue` in `02/api/openapi.yaml` (one enum everywhere, RV-027): `received`, `planning`, `no-supplier`, `awaiting-approval`, `opening`, `executing`, `replanning`, `delivered`, `failed`, `expired`, `dismissed`. They are stored with hyphens. **Superseded by RV-027:** the underscore spellings (`no_supplier`, `awaiting_approval`) and the API-only values `approved`, `accepted`, `closed`, `cancelled`.
 
 ```mermaid
 stateDiagram-v2
   [*] --> received: submitObjective
   received --> planning: enqueue
-  planning --> no_supplier: planner found no eligible service
-  planning --> awaiting_approval: plan.ready and cap > allowance
-  planning --> opening: plan.ready and cap ≤ allowance (agent opens envelope)
-  awaiting_approval --> opening: createApprovalIntent → notifySubmitted
-  awaiting_approval --> expired: plan.expiresAt passed
-  awaiting_approval --> dismissed: user dismisses
+  planning --> no-supplier: planner found no eligible service
+  planning --> awaiting-approval: plan.ready and (cap > allowance or a new payee)
+  planning --> opening: plan.ready, cap ≤ allowance, no new payee (agent opens envelope)
+  awaiting-approval --> opening: createApprovalIntent → notifySubmitted
+  awaiting-approval --> expired: plan.expiresAt passed
+  awaiting-approval --> dismissed: user dismisses
   opening --> executing: EnvelopeOpened seen (CZ-19)
-  opening --> awaiting_approval: UserOp failed or not seen within api.approvalWaitMinutes
+  opening --> awaiting-approval: UserOp failed or not seen within api.approvalWaitMinutes
   executing --> delivered: all steps finished, result stored
   executing --> replanning: a step failed with no alternate
-  replanning --> awaiting_approval: new plan needs a new envelope
+  replanning --> awaiting-approval: new plan needs a new envelope
   replanning --> executing: alternate inside payeeRoot
   executing --> failed: unrecoverable
   delivered --> [*]
@@ -52,7 +52,7 @@ stateDiagram-v2
 | From | To | Trigger | Side effects |
 |---|---|---|---|
 | received | planning | queue worker | CZ-13 job |
-| planning | awaiting_approval | plan stored | appears in the pending list (`listApprovals`), the only Phase 1 channel; the CZ-23 `approval-needed` push is stage 2 (D69) |
+| planning | awaiting-approval | plan stored | appears in the pending list (`listApprovals`), the only Phase 1 channel; the CZ-23 `approval-needed` push is stage 2 (D69) |
 | planning | opening | plan stored, within allowance | CZ-15 `openEnvelope` (agent) |
 | opening | executing | `EnvelopeOpened` with matching `planHash` | CZ-15 starts |
 | executing | delivered | last step done | result stored; objective shown as delivered in the app (CZ-23 `result-delivered` push is stage 2, D69); CZ-17 `demand-proof` leaf at close |
@@ -61,15 +61,15 @@ Storage (Postgres):
 
 | Table | Key fields |
 |---|---|
-| `users` | `userId`, `msca`, `vault`, `network`, `displayCurrency`, `userSecret` (for pseudonyms, `SO`) |
+| `users` | `userId`, `msca`, `vault`, `network`, `userSecret` (for soul-version pseudonyms, `SO`), `demandSalt` (per-user secret for per-envelope demand-proof salts, `SO`, RV-026). **Superseded by D51 / RV-047:** `displayCurrency` (Phase 1 is USD only) |
 | `devices` | `deviceId`, `userId`, `tokenHash`, `platform`, `revokedAt` |
-| `objectives` | `objectiveId`, `userId`, `deviceId`, the `ObjectiveSubmission` fields, `state`, `planId`, `envelopeRef`, `resultId`, timestamps |
+| `objectives` | `objectiveId`, `userId`, `deviceId`, the `ObjectiveSubmission` fields, `state` (one of the eleven `ObjectiveStatusValue` values), `planId`, `envelopeRef`, `resultId`, timestamps |
 | `plans` | `planId`, `objectiveId`, the `Plan` object (JSONB), `planHash`, `payeeRoot`, `state` (`draft|offered|approved|superseded|expired`) |
-| `steps` | `planId`, `stepIndex`, the `Step` object, `state` (§CZ-15), `reservationId?`, `jobKey?`, `pocket?` |
+| `steps` | `planId`, `stepIndex`, the `Step` object, `state` (§CZ-15), `callsUsed` (paid calls so far, bounded by `expectedCalls`, RV-019), `reservationId?`, `jobKey?`, `pocket?` |
 | `step_executions` | append-only log: `planId`, `stepIndex`, `attempt`, `phase`, `payload` (signed authorization, headers), `at` |
 | `results` | `resultId`, `objectiveId`, rendered body, `provenance` spans |
-| `idempotency` | `key`, `fingerprint`, `status`, `responseHash`, `expiresAt` (24 h) |
-| `pay_requests` | `paymentId`, `deviceId`, fingerprint, `status` |
+| `idempotency` | `key`, `fingerprint`, `status`, `responseBody?` (stored for replay; never for `completeModelCall`, whose rows keep only `key`, `fingerprint` and token counts, RV-043), `responseHash`, `expiresAt` (24 h) |
+| `pay_requests` | `payRequestId` (client id, RV-050), `deviceId`, `planId`, `stepIndex`, fingerprint, `status`, `paymentIds[]` (per index, server-minted) |
 | `sessions`, `audit` | as named; `push_subscriptions` is stage 2 (D69) |
 
 Parameters: `api.approvalWaitMinutes` 15 (how long `opening` waits for `EnvelopeOpened` before falling back; UserOps on Arc mine in seconds, so this covers bundler retries), `api.planTtlHours` 24 (`Plan.expiresAt` for approval; after that a fresh plan is priced), `api.idempotencyTtlHours` 24, `api.rateLimitDaemonPerMin` 600, `api.rateLimitAppPerMin` 120 (02 §9.5).
@@ -78,7 +78,14 @@ Parameters: `api.approvalWaitMinutes` 15 (how long `opening` waits for `Envelope
 - `submitObjective`: validate schema; recompute `objectiveHash` (02 §5.2) → `422 hash-mismatch` on mismatch; reject any reused `objectiveId` from another device; store; emit `objective.received`.
 - `createApprovalIntent`: load the plan; refuse if `state != offered` or expired (`plan-expired`); return `ApprovalIntent` with `calldata` = `openEnvelope(OpenEnvelopeParams)` encoded by `@czar/vault-client` from the plan (cap, `maxStepAmount`, `pocketCapBps`, `expiresAt`, `categoryId = keccak256(category)`, `objectiveHash`, `planHash`, `payeeRoot`). The app submits the UserOp itself (D30).
 - `notifySubmitted`: store `userOpHash`; move to `opening`; CZ-19 matches `EnvelopeOpened` by `planHash`.
-- `createPayRequest` (MCP `pay`): resolve the quote; if an open envelope covers the step (payee in its `payeeRoot`, cap room) → `executing` and hand to CZ-15; else create a one-step plan and answer `approval-required` with `elicitationUrl`; `409 payment-id-conflict` on a reused `paymentId` with a different fingerprint (02 §7.4).
+- `createPayRequest` (MCP `pay`, D75; RV-019): the request names `(objectiveId, planId, stepIndex)`; there is no URL, payee or category in it. In order:
+  1. `409 payment-id-conflict` on a reused `payRequestId` with a different fingerprint (02 §7.4).
+  2. The plan must belong to this device's user and contain `stepIndex`, else `rejected: step-not-in-plan`.
+  3. If the plan is not approved (no `EnvelopeOpened` with its `planHash`), answer `approval-required` with `elicitationUrl` = `http://localhost/approve/<planId>` (D78). Quotes create draft plans; a draft is never paid until the person approves it or it is auto-approvable under earned autonomy with no new payee (`planner.newPayeeNeedsApproval`).
+  4. The envelope must be `Open`, not expired, and the vault not frozen or paused (`envelope-not-open`, `frozen`, `paused`).
+  5. `calls ≤ expectedCalls − callsUsed` for the step, else `rejected: step-calls-exhausted`; the amount fits the step's remaining `stepCap` (the vault enforces the same bound on-chain through `stepUsed`, RV-002), else `step-cap-exhausted`.
+  6. `input` keys ⊆ the step's `inputTemplate.inputKeys` with matching types and lengths, and no string value contains a redaction marker (`input-not-in-template`, `input-redaction-hit`, RV-021).
+  7. Hand to CZ-15 with the call budget; answer `executing`, then `accepted` or `failed` with the screened `StepResult` (a quarantined result carries no field values, D76).
 - `getResult`: body with `provenance` spans labelled per merchant (02 OpenAPI `Result`).
 
 ### 7. AI usage
@@ -93,21 +100,22 @@ None directly.
 ### 10. Failure handling
 | Failure | Behaviour | User sees |
 |---|---|---|
-| planner timeout | retry 2× with backoff `api.plannerRetryBackoffMs` 5,000; then `no_supplier` with reason | "No supplier found yet" |
-| `EnvelopeOpened` never seen | after `api.approvalWaitMinutes` back to `awaiting_approval` with "Try again" | "Approval didn't reach the network. Try again." |
+| planner timeout | retry 2× with backoff `api.plannerRetryBackoffMs` 5,000; then `no-supplier` with reason | "No supplier found yet" |
+| `EnvelopeOpened` never seen | after `api.approvalWaitMinutes` back to `awaiting-approval` with "Try again" | "Approval didn't reach the network. Try again." |
 | Postgres down | 503 `upstream-unavailable`; daemons queue | nothing new, cached state |
 
 ### 11. Observability
-Metrics: `czar_api_objectives_total{state}`, `czar_api_latency_seconds{op}`, `czar_api_errors_total{czarCode}`. Alert: `awaiting_approval → opening` conversion drop; 5xx rate > 1%.
+Metrics: `czar_api_objectives_total{state}`, `czar_api_latency_seconds{op}`, `czar_api_errors_total{czarCode}`. Alert: `awaiting-approval → opening` conversion drop; 5xx rate > 1%.
 
 ### 12. Interface wording
-Objective states shown through the daemon viewer and the app: `received` "Received", `planning` "Pricing…", `awaiting_approval` "Waiting for your approval", `opening` "Approved, waiting for the network", `executing` "Working…", `delivered` "Delivered", `no_supplier` "No supplier found yet", `expired` "Approval expired", `failed` "Stopped".
+Objective states shown through the daemon viewer and the app: `received` "Received", `planning` "Pricing…", `awaiting-approval` "Waiting for your approval", `opening` "Approved, waiting for the network", `executing` "Working…", `replanning` "Finding another supplier…", `delivered` "Delivered", `no-supplier` "No supplier found yet", `expired` "Approval expired", `dismissed` "Dismissed", `failed` "Stopped".
 
 ### 13. Performance and cost
 ≤ 1,000 objectives/day in Phase 1; one Postgres primary.
 
 ### 14. Tests and definition of done
-- Contract tests against `openapi.yaml` for every operation (schema validation of requests and responses); idempotency replay and conflict tests; state-machine transition tests; `422 hash-mismatch` test with a tampered goal. DoD: every operationId implemented and tested; no `local-only` field accepted by any route (schema guard).
+- Contract tests against `openapi.yaml` for every operation (schema validation of requests and responses); idempotency replay and conflict tests, and `completeModelCall` never replaying (`409 replay-not-stored`, RV-043); state-machine transition tests that store and return only `ObjectiveStatusValue` values (RV-027); `422 hash-mismatch` test with a tampered goal.
+- Named tests (RV fixes; also in 03 `security-and-testing.md` §3.8): `pay_unapprovedPlan_returnsApprovalRequired`, `pay_stepNotInPlan_rejected`, `pay_loopBeyondExpectedCalls_rejectedStepCallsExhausted`, `pay_payeeOrUrlField_rejectedBySchema` (RV-019, D75); `mcpPay_schemaEqualsPayRequest`, `mcpQuote_schemaEqualsQuoteRequest` (RV-020); `pay_inputKeyOutsideTemplate_rejected`, `pay_inputWithSecretFixture_redactedOrRejected` (RV-021); `objectiveStatus_onlyCanonicalValuesStored` (RV-027); `modelProxy_sameKey_409NoReplay` (RV-043); `pay_multiIndexCall_listsOnePaymentIdPerIndex` (RV-050). DoD: every operationId implemented and tested; no `local-only` field accepted by any route (schema guard).
 
 ### 15. Dependencies
 Fastify or Hono, Postgres 16, `@czar/schemas`, `@czar/hashing`, `@czar/vault-client` (encoding only).
@@ -156,7 +164,7 @@ Re-planning (step failed with `StepError.code` in `{delivery-failed, structural-
 Parameters: `planner.probeTopK` 3, `planner.stepSlackBps` 1000, `planner.maxStepAtomic` 5,000,000, `planner.defaultMaxUnitAtomic` 1,000,000, `planner.maxSteps` 64 (02 `Plan.steps` ≤ 64), `planner.maxAlternates` 2 (D36), `planner.newPayeeNeedsApproval` true, `planner.probeTimeoutMs` 5,000, `planner.modelTimeoutMs` 20,000.
 
 ### 6. Behaviour: alternate paths
-- No candidates after retrieval and probing → `no_supplier`; the objective is marked for the demand radar (Phase 3) with only hashes.
+- No candidates after retrieval and probing → `no-supplier`; the objective is marked for the demand radar (Phase 3) with only hashes.
 - Catalog live query fails → use Czar-registered merchants only; `Plan.rankingDecisionIds` records the degraded snapshot (02 §12.3: never serve stale Circle data).
 - P-03 fails or exceeds budget → **rule-based fallback**: one step per capability, top-ranked candidate, `expectedCalls = 1`, `inputTemplate` from the capability's default template; the plan is marked `fallbackPlanner: true` in `routingReason`.
 - Shadow mode: same pipeline, `shadow: true`, no envelope, returned to the daemon by `shadowQuote`.
@@ -175,7 +183,7 @@ Parameters: `planner.probeTopK` 3, `planner.stepSlackBps` 1000, `planner.maxStep
 |---|---|
 | probe 402 malformed | candidate dropped (`unsupported-offer`) |
 | all probes time out | plan from index prices with `routingReason: unprobed`; CZ-15 re-checks the live 402 before paying anyway |
-| CZ-18 down | Czar-registered merchants only, or `no_supplier` |
+| CZ-18 down | Czar-registered merchants only, or `no-supplier` |
 | model budget cap | rule-based fallback |
 
 ### 11. Observability

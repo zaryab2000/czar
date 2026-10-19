@@ -59,7 +59,8 @@
 
 - Every object carries `schemaVersion` as `"<major>.<minor>"`, starting at `"1.0"`.
 - Minor bump: fields added, all optional. Readers ignore unknown fields.
-- Major bump: a field removed, renamed, retyped, or a hash rule changed. New `$id`. Hashes computed under an older major stay valid; the hash rule version is part of the canonical form (§5.1).
+- Major bump: a field removed, renamed, retyped, or a hash rule changed. New file `<name>.v<major>.schema.json` with its own `$id` (`https://czar.dev/schemas/<file name>`); the older file stays, marked superseded. Hashes computed under an older major stay valid; the hash rule version is part of the canonical form (§5.1).
+- `$id` and `$ref` convention (2026-10-19): `$id` is `https://czar.dev/schemas/<file name>` and cross-file `$ref`s are file-relative, so they resolve the same way by `$id` and by path (`schemas/README.md`).
 - Hook payloads from Claude Code, Codex and Cursor are not under Czar's control; the mapping in §8 names each source field so a host change is visible as a diff.
 
 ### 2.3 Error model
@@ -248,7 +249,7 @@ Each object: purpose, fields (name, type, required, privacy class, description, 
 | `stepCap` | `Amount6` | yes | HC | ≥ `unitAmount × expectedCalls` |
 | `routingReason` | string | yes | SO | for example `below-pocket-threshold` |
 | `acceptanceProfileId` | SL `ProfileId` | yes | SO | |
-| `inputTemplate` | object | no | SO | structured input only, never user text (spec 01 §11.2 layer 3); optional `inputTemplate.expectedKeys: string[]` (≤ 50, each ≤ 64) names the output keys the `requirement` check (CZ-16) and the reader's `expectedFields` (P-02) look for (AM-09) |
+| `inputTemplate` | object | no | SO | structured input only, never user text (spec 01 §11.2 layer 3); optional `inputTemplate.expectedKeys: string[]` (≤ 50, each ≤ 64) names the output keys the `requirement` check (CZ-16) and the reader's `expectedFields` (P-02) look for (AM-09); `inputTemplate.inputKeys: [{name, type: string\|number\|boolean, maxLength?, enum?}]` (≤ 20) names the only input keys a `pay` call may send for this step (RV-021) |
 | `dependsOn` | array of `stepIndex` | no | SO | |
 
 ### 4.7 `PayeeLeaf`
@@ -599,7 +600,8 @@ Spec 03's Foundry tests MUST reproduce these seven entries from the same inputs 
 | `resultId` | `res_<Ulid>` | server | global | write-back download handle |
 | `userId` | `usr_<Ulid>` | server | global | |
 | `pushSubscriptionId` | `psh_<Ulid>` | server | per user | stage 2 (D69) |
-| `quoteId` | `qte_<Ulid>` | server | global | shadow-mode quotes |
+| `quoteId` | `qte_<Ulid>` | server | global | `createQuote` results (each names a `planId` and `stepIndex`) and shadow-mode quotes (RV-020) |
+| `payRequestId` | `prq_` + 32 lowercase hex | client (MCP `pay`) | per device | one id per `createPayRequest` call, reused on retry; maps to the per-index `paymentId`s the server mints (RV-050) |
 | `claimId` (P2) | `clm_<Ulid>` | claim server | global | |
 | `candidateId` | `cand_<Ulid>` | daemon | local only (belief candidate passed between the rules and P-04; never leaves the machine) | AM-15 |
 | `userPseudonym` | `keccak256(abi.encode(userSecret, epoch))` | server, rotating per 90-day epoch | public leaves | `userSecret` is `SO` |
@@ -619,7 +621,8 @@ Spec 03's Foundry tests MUST reproduce these seven entries from the same inputs 
 ### 7.4 Payment ids (`payment-identifier` extension)
 
 - Format: `pay_` + 32 lowercase hex (UUID v4 without dashes) = 36 characters, within the extension's 16–128 chars of `[A-Za-z0-9_-]` (`payment_identifier.md`, "id Format"; F1-06).
-- One `paymentId` per authorization index: `paymentId(reservationId, index)` is minted when the reservation is created and stored in `Reservation.paymentIds` (server). A retry of the same call reuses the same id and the same signed authorization. The server never signs a second authorization for an index that already has a payment id unless the first is proven unused (`authorizationState == false` after `validBefore`).
+- One `paymentId` per authorization index: `paymentId(reservationId, index)` is minted **by the server** when the reservation is created and stored in `Reservation.paymentIds`. It is the x402 `payment-identifier` value for that index only.
+- **Pay calls (RV-050):** a `createPayRequest` / MCP `pay` call carries a client-chosen `payRequestId` (`prq_` + 32 hex), not a `paymentId`. One call can use several indices; the response lists their `paymentIds`. `reportOutcome` takes the `payRequestId` and optionally one `paymentId`. **Superseded:** the MCP spec's "client-supplied `paymentId`". A retry of the same call reuses the same id and the same signed authorization. The server never signs a second authorization for an index that already has a payment id unless the first is proven unused (`authorizationState == false` after `validBefore`).
 - The client sends the extension only when the 402 advertises `extensions["payment-identifier"]`; otherwise idempotency rests on the nonce alone (a merchant cannot settle the same nonce twice).
 - `409 Conflict` from a merchant on a reused id with a different fingerprint is a hard stop for that step (no new authorization).
 
@@ -774,12 +777,12 @@ Full definition: `api/openapi.yaml` (OpenAPI 3.1; 28 paths, 29 operations; parse
 | GET | `/v1/results/{resultId}` | yes | → `Result` (labelled provenance per step) | |
 | POST | `/v1/soul-versions` | key required | `SoulVersionSubmission` (§4.18 minus pseudonym) → `202` | queued for the next evidence batch |
 | POST | `/v1/shadow/quotes` | key required | `ShadowQuoteRequest` → `Plan` with `shadow: true` | no envelope, no payment (CZ-08) |
-| POST | `/v1/pay/requests` | key + `paymentId` | `PayRequest` → `PayResponse` (`executing` \| `approval-required` + `elicitationUrl` \| `rejected`) | used by the MCP `pay` tool; `409` on a reused `paymentId` with a different request (§7.4) |
+| POST | `/v1/pay/requests` | key + `payRequestId` | `PayRequest` `{payRequestId, objectiveId, planId, stepIndex, calls?, maxAmount?, input?}` → `PayResponse` (`executing` \| `approval-required` + `elicitationUrl` \| `accepted` \| `rejected` \| `failed`) | canonical shape; the MCP `pay` tool mirrors it (D75). Pays only a step of an approved plan with an open envelope, within the step's `expectedCalls` (RV-019); `409` on a reused `payRequestId` with a different request (§7.4) |
 | POST | `/v1/hooks/ingest-report` | key required | `IngestReport` (counts only, optional `shadowTotals`, AM-04) → `204` | no events, no text |
 | POST | `/v1/services/search` (`findService`) | key required | `FindServiceRequest` → `FindServiceResponse` | backs MCP `find_service` (AM-01) |
 | POST | `/v1/quotes` (`createQuote`) | key required | `QuoteRequest` → `QuoteResponse` | backs MCP `quote`; moves no money (AM-01) |
 | POST | `/v1/outcomes` (`reportOutcome`) | key required | `OutcomeReport` → `OutcomeRecorded` | backs MCP `report_outcome` (AM-01) |
-| POST | `/v1/models/complete` (`completeModelCall`) | key required | `ModelCallRequest` → `ModelCallResponse` | model proxy for P-01, P-04, P-05, P-06; stores only token counts (D31, AM-02) |
+| POST | `/v1/models/complete` (`completeModelCall`) | key required, **never replayed** | `ModelCallRequest` → `ModelCallResponse` | model proxy for P-01, P-04, P-05, P-06; stores only token counts (D31, AM-02); a repeated key gets `409 replay-not-stored` (RV-043) |
 
 **App surface (`AppSession`)**
 
@@ -823,13 +826,14 @@ Full definition: `api/openapi.yaml` (OpenAPI 3.1; 28 paths, 29 operations; parse
 ### 9.3 Idempotency
 
 - Every creating `POST` requires `Idempotency-Key` (UUID). The server stores the key with a fingerprint of the body for 24 h. Same key and same body → the stored response is replayed with the original status code. Same key and different body → `409` with `czarCode: idempotency-conflict`.
-- `POST /v1/pay/requests` is additionally keyed by `paymentId` (§7.4); a different request under the same `paymentId` is `409`.
+- **Exception (RV-043):** `POST /v1/models/complete` never stores or replays a response, because D31 lets the proxy keep only token counts. It stores the key and fingerprint only; any second request with the same key gets `409 replay-not-stored`, and the daemon retries with a new key if it still needs the output.
+- `POST /v1/pay/requests` is additionally keyed by `payRequestId` (§7.4, RV-050); a different request under the same `payRequestId` is `409`.
 - `GET` and `DELETE` are naturally idempotent.
 
 ### 9.4 Error model
 
 - `application/problem+json` (RFC 9457): `type` under `https://czar.dev/problems/`, `title`, `status`, `detail` (no user text), `instance`, `czarCode`, `retryable` (§2.3).
-- Stable `czarCode` values used in Phase 1: `validation`, `idempotency-conflict`, `device-revoked`, `session-expired`, `hash-mismatch`, `plan-expired`, `envelope-not-open`, `approval-required`, `payment-id-conflict`, `rate-limited`, `upstream-unavailable` (retryable), `frozen`, `paused`.
+- Stable `czarCode` values used in Phase 1: `validation`, `idempotency-conflict`, `replay-not-stored` (RV-043), `device-revoked`, `session-expired`, `hash-mismatch`, `plan-expired`, `envelope-not-open`, `approval-required`, `payment-id-conflict` (now about `payRequestId`), `plan-not-approved`, `step-not-in-plan`, `step-calls-exhausted`, `step-cap-exhausted`, `input-not-in-template`, `input-redaction-hit` (RV-019, RV-021), `resource-not-indexed` (RV-019), `fetch-blocked` (RV-022), `rate-limited`, `upstream-unavailable` (retryable), `frozen`, `paused`.
 
 ### 9.5 Pagination and rate limits
 
@@ -863,11 +867,11 @@ Full definition: `mcp/czar-mcp-tools.md`. The local Czar MCP server (CZ-09) runs
 | `get_objectives` | lists objectives and their status | true | false | true | false | none |
 | `find_service` | ranked candidates from the Selection Layer through `findService` (`POST /v1/services/search`, AM-01); structured fields only, no merchant text (spec 01 §15.5) | true | false | true | true | none |
 | `quote` | prices and routes a step through `createQuote` (`POST /v1/quotes`, AM-01) (live 402, D37 routing); moves no money | true | false | false | true | URL mode to the approval page when a new envelope would be needed (D3-11) |
-| `pay` | forwards `POST /v1/pay/requests`; the server reserves, signs, settles, accepts and returns a `StepResult` (§4.15) | false | true | false | true | URL mode when the server answers `approval-required` (D3-04, D3-11); retry with the same `paymentId` after approval |
+| `pay` | forwards `POST /v1/pay/requests` with exactly its shape (D75): one `(planId, stepIndex)` of an approved plan; the server reserves, signs, settles, screens, accepts and returns a `StepResult` (§4.15) | false | true | false | true | URL mode when the server answers `approval-required` (D3-04, D3-11); retry with the same `payRequestId` after approval |
 | `report_outcome` | records useful / not useful / wrong / unused for a payment through `reportOutcome` (`POST /v1/outcomes`, AM-01); feeds receipts and earned autonomy | false | false | true | false | none |
 
-- Every `pay` call carries a client-supplied `paymentId` (`pay_` + 32 hex, §7.4) and an `idempotencyKey`; retries reuse both.
-- Form-mode elicitation is never used for spending or credentials (D3-11). URL mode points at `https://app.czar.dev/approve/<planId>`; the client must show the server name and target host before navigating.
+- Every `pay` call carries a client-chosen `payRequestId` (`prq_` + 32 hex, §7.4, RV-050) and an `idempotencyKey`; retries reuse both.
+- Form-mode elicitation is never used for spending or credentials (D3-11). URL mode points at `http://localhost/approve/<planId>` in Phase 1 (D78); the client must show the server name and target host before navigating.
 - Errors are `isError: true` with a `StepError` (§4.16) in `structuredContent`.
 - Dual era: `server/discover` plus the `_meta` protocol-version and client-capabilities keys for `2026-07-28`; `initialize` answered for `2025-11-25` and older. Which revision each host negotiates today is a GAP (part 2, D3), so both paths ship.
 - Configuration snippets for the Claude Code plugin `.mcp.json` (B1-36; tool names become `mcp__plugin_czar_czar__<tool>`, B1-25), Codex `[mcp_servers.czar]` (B2-22) and Cursor `mcp.json` (B3-13) are in `mcp/czar-mcp-tools.md` §5.

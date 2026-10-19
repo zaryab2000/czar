@@ -408,6 +408,8 @@ The user can override the estimate per objective in the app; actual minutes come
 
 #### 5.7 Objective state machine (local)
 
+Two fields, one enum each (RV-027): the local `status` (`objective.schema.json`: `candidate`, `dismissed`, `shadowed`, `published`) covers the objective until it is published; after that the daemon stores the server's status in `serverStatus`, whose values are exactly `ObjectiveStatusValue` in `02/api/openapi.yaml` (`received`, `planning`, `no-supplier`, `awaiting-approval`, `opening`, `executing`, `replanning`, `delivered`, `failed`, `expired`, `dismissed`). MCP `get_objectives` shows `candidate` for unpublished objectives and `serverStatus` for published ones.
+
 ```mermaid
 stateDiagram-v2
   [*] --> candidate: detector fired, filter pending
@@ -415,18 +417,11 @@ stateDiagram-v2
   candidate --> published: CZ-07 submitted (live mode)
   candidate --> shadowed: CZ-08 quoted (shadow mode)
   shadowed --> published: user switches to live and re-approves candidate
-  published --> awaiting_approval: server plan ready (getObjective status)
-  published --> executing: auto-approved within allowance
-  awaiting_approval --> executing: envelope opened
-  awaiting_approval --> dismissed: user rejects in app
-  executing --> delivered: result acked by CZ-11
-  executing --> failed: server reports failed
-  delivered --> [*]
-  failed --> [*]
+  published --> [*]: serverStatus now tracks the server (getObjective / listObjectives)
   dismissed --> [*]
 ```
 
-Local statuses mirror the server's `ObjectiveStatus.status` enum where they overlap (`candidate`, `awaiting-approval`, `executing`, `delivered`, `failed` per MCP `get_objectives`); `shadowed` and `published` are local-only.
+- **Superseded by RV-027:** the earlier diagram that moved the local status itself through `awaiting_approval`, `executing`, `delivered` and `failed` (underscore spellings that matched no API value).
 
 #### 5.8 Storage
 
@@ -638,3 +633,4 @@ CZ-06, CZ-07, server planner (CZ-13 in dry-run).
 | 2026-10-18 | AM-03, AM-04 | `Me.mode`, `shadowEndsAt`, `IngestReport.shadowTotals` referenced |
 | 2026-10-18 | AM-02 | model proxy is `completeModelCall` |
 | 2026-10-19 | D69 | soul pointer and shadow summary wording refer to the desktop web app; no push in Phase 1. |
+| 2026-10-19 | RV-027 | §5.7: local `status` and `serverStatus` are separate; `serverStatus` uses the one canonical enum. |
