@@ -5,7 +5,7 @@
 | ID | SCR-009 |
 | Filed by | Independent reviewer (G0-01), 2026-10-19 |
 | Spec and section | specs/03-smart-contracts/czar-vault.md §5.5 `syncJob` (line 162); §8.4 (line 356); `specs/03-smart-contracts/job-escrow-adapter.md` (line 71); `specs/04-components/server-planning-and-payment.md` (line 372) |
-| Status | Open |
+| Status | Accepted, applied in `czar-vault.md` §5.5 (`syncJob` from `Opened`, `Released` state, escrow status only, `budget − settledAmount`), §8.4; `job-escrow-adapter.md` §3, §6, §9; `IJobEscrowAdapter.sol` (`readOutcome`, `getJob`); T-018. Note: the Czar instance's `claimRefund` also moves `Open` jobs to `Expired`; handled. |
 | Review finding | RV-009 (High) in `specs/06-review/2026-10-19-spec-review.md` |
 
 ## Problem
@@ -33,4 +33,5 @@
 - T-018, T-054 (M1, M4)
 
 ## Decision
-- <filled in by Zaryab: accepted or rejected, and why>
+- Accepted under Zaryab's 2026-10-19 instruction to apply every review fix (D71–D81 record the decisions he approved for the items that needed one).
+- Applied 2026-10-19 on branch `spec/review-fixes`: Accepted, applied in `czar-vault.md` §5.5 (`syncJob` from `Opened`, `Released` state, escrow status only, `budget − settledAmount`), §8.4; `job-escrow-adapter.md` §3, §6, §9; `IJobEscrowAdapter.sol` (`readOutcome`, `getJob`); T-018. Note: the Czar instance's `claimRefund` also moves `Open` jobs to `Expired`; handled.

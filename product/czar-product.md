@@ -163,7 +163,7 @@ Components are numbered in the adopted priority order.
   - limit = base × f(purchases with positive evidence), never above the person's own maximum
   - separate limits per category (research, data, creative, and so on)
   - every change is an on-chain event
-  - a one-tap freeze stops all spending
+  - a one-tap freeze stops all new spending: the vault refuses new payments, Czar's signer refuses pocket payments and job payouts, and pocket funds are pulled back (D72). Payments signed just before the freeze can still settle
 - **Effect:** people delegate more as trust builds. The mechanism is reusable by other agent apps.
 
 ### 6.7 Shadow mode
@@ -379,3 +379,5 @@ Components are numbered in the adopted priority order.
 |---|---|---|
 | 2026-10-19 | D65 | §4.1 and §9.2: budgets shown in US dollars (USDC 1:1, D51) instead of the user's own currency. |
 - 2026-10-19 · D69: §9.1 surface renamed to the desktop web app; mobile is stage 2.
+
+- 2026-10-19 · D72 / RV-007: §6.6 freeze wording narrowed to what is enforced (new spending stops; pockets pulled back).

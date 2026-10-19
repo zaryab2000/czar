@@ -5,7 +5,7 @@
 | ID | SCR-003 |
 | Filed by | Independent reviewer (G0-01), 2026-10-19 |
 | Spec and section | specs/03-smart-contracts/czar-vault.md §5.4 `registerPocket` (line 140); §5.2 `openEnvelope` (line 118); `specs/04-components/server-planning-and-payment.md` §5 step 6 (line 143) |
-| Status | Open |
+| Status | Accepted with changes (D71): applied in `czar-vault.md` §3, §5.2, §5.4 (`registerPocket` takes a kind-4 leaf proof), INV-14; spec 02 §4.5, §4.7 and `plan.schema.json`; CZ-13 §5 step 6/6a. Change: pockets bound by a kind-4 `payeeRoot` leaf (`stepIndex` 2^32−1, `stepCap` 0) plus `MAX_AGENT_POCKET_CAP_BPS` 2500, as D71 decided. |
 | Review finding | RV-003 (Critical) in `specs/06-review/2026-10-19-spec-review.md` |
 
 ## Problem
@@ -35,4 +35,5 @@
 - T-014, T-017, T-045, T-052 (M1, M3, M4)
 
 ## Decision
-- <filled in by Zaryab: accepted or rejected, and why>
+- Accepted under Zaryab's 2026-10-19 instruction to apply every review fix (D71–D81 record the decisions he approved for the items that needed one).
+- Applied 2026-10-19 on branch `spec/review-fixes`: Accepted with changes (D71): applied in `czar-vault.md` §3, §5.2, §5.4 (`registerPocket` takes a kind-4 leaf proof), INV-14; spec 02 §4.5, §4.7 and `plan.schema.json`; CZ-13 §5 step 6/6a. Change: pockets bound by a kind-4 `payeeRoot` leaf (`stepIndex` 2^32−1, `stepCap` 0) plus `MAX_AGENT_POCKET_CAP_BPS` 2500, as D71 decided.

@@ -5,7 +5,7 @@
 | ID | SCR-015 |
 | Filed by | Independent reviewer (G0-01), 2026-10-19 |
 | Spec and section | `specs/03-smart-contracts/czar-vault-factory.md` §2 (line 14), §5 (lines 48, 51, 53); `security-and-testing.md` (lines 33, 95); FAC-3; specs/03-smart-contracts/czar-vault.md (line 486) |
-| Status | Open |
+| Status | Accepted (D73), applied in `czar-vault-factory.md` (rewritten: no version register, `createVault(owner)`, defaults read by the vault constructor, timelocked `queueDefaults`, FAC-3, FAC-5); `ICzarVaultFactory.sol`; `security-and-testing.md` §4; CZ-27 K20; T-012, T-027. |
 | Review finding | RV-015 (High) in `specs/06-review/2026-10-19-spec-review.md` |
 
 ## Problem
@@ -36,4 +36,5 @@
 - T-012, T-027, T-082 (M1, M6)
 
 ## Decision
-- <filled in by Zaryab: accepted or rejected, and why>
+- Accepted under Zaryab's 2026-10-19 instruction to apply every review fix (D71–D81 record the decisions he approved for the items that needed one).
+- Applied 2026-10-19 on branch `spec/review-fixes`: Accepted (D73), applied in `czar-vault-factory.md` (rewritten: no version register, `createVault(owner)`, defaults read by the vault constructor, timelocked `queueDefaults`, FAC-3, FAC-5); `ICzarVaultFactory.sol`; `security-and-testing.md` §4; CZ-27 K20; T-012, T-027.

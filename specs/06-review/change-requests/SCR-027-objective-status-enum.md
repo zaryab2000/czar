@@ -5,7 +5,7 @@
 | ID | SCR-027 |
 | Filed by | Independent reviewer (G0-01), 2026-10-19 |
 | Spec and section | `specs/04-components/server-planning-and-payment.md` CZ-12 (lines 33–47); `specs/02-data-and-protocol/api/openapi.yaml` (line 163); `mcp/czar-mcp-tools.md` (line 41) |
-| Status | Open |
+| Status | Accepted, applied in `openapi.yaml` (`ObjectiveStatusValue`), CZ-12 §5 and §12, MCP `get_objectives`, `local-soul-and-drives.md` §5.7 (`serverStatus`), scenario 3.2; T-009, T-041, T-073. |
 | Review finding | RV-027 (High) in `specs/06-review/2026-10-19-spec-review.md` |
 
 ## Problem
@@ -25,4 +25,5 @@
 - T-009, T-041, T-067, T-072, T-073 (M0, M3, M5)
 
 ## Decision
-- <filled in by Zaryab: accepted or rejected, and why>
+- Accepted under Zaryab's 2026-10-19 instruction to apply every review fix (D71–D81 record the decisions he approved for the items that needed one).
+- Applied 2026-10-19 on branch `spec/review-fixes`: Accepted, applied in `openapi.yaml` (`ObjectiveStatusValue`), CZ-12 §5 and §12, MCP `get_objectives`, `local-soul-and-drives.md` §5.7 (`serverStatus`), scenario 3.2; T-009, T-041, T-073.

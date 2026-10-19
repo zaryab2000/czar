@@ -5,7 +5,7 @@
 | ID | SCR-002 |
 | Filed by | Independent reviewer (G0-01), 2026-10-19 |
 | Spec and section | specs/03-smart-contracts/czar-vault.md §5.3 `reserve` (line 128); §5.5 `openJob` (line 160); §4 storage; `security-and-testing.md` line 10 |
-| Status | Open |
+| Status | Accepted, applied in `czar-vault.md` §4 (`stepUsed`), §5.3, §5.5, §6.5 step 7, INV-12; `ICzarVault.sol` (`StepUsed`, `StepCapExceeded(...)`, `stepUsed()`); T-015, T-018. |
 | Review finding | RV-002 (Critical) in `specs/06-review/2026-10-19-spec-review.md` |
 
 ## Problem
@@ -35,4 +35,5 @@
 - T-015, T-018, T-021, T-045 (M1, M3)
 
 ## Decision
-- <filled in by Zaryab: accepted or rejected, and why>
+- Accepted under Zaryab's 2026-10-19 instruction to apply every review fix (D71–D81 record the decisions he approved for the items that needed one).
+- Applied 2026-10-19 on branch `spec/review-fixes`: Accepted, applied in `czar-vault.md` §4 (`stepUsed`), §5.3, §5.5, §6.5 step 7, INV-12; `ICzarVault.sol` (`StepUsed`, `StepCapExceeded(...)`, `stepUsed()`); T-015, T-018.

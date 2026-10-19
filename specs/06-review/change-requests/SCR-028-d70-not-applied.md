@@ -5,7 +5,7 @@
 | ID | SCR-028 |
 | Filed by | Independent reviewer (G0-01), 2026-10-19 |
 | Spec and section | `phase-1-tasks.md` T-040 (lines 543–554), T-036 (lines 516–524); `build-plan.md` M2 exit (line 140), §8 (line 340); `gate-0-checks.md` G0-13 row (line 26); `builder-agent-rules.md` (line 34); spec 01 (lines 410, 455); CZ-22 (`app-and-notifications.md` lines 30, 260); CZ-27 (lines 342–348, 402, 508); `data-and-protocol.md` `archiveUri` (line 428) |
-| Status | Open |
+| Status | Accepted (D78), applied in CZ-27 §2–§5 and §15, `cross-cutting.md` §3.2–§3.3, CZ-22 hosting rows, spec 01 §5, `openapi.yaml` servers, MCP config, `open-evidence-log.md` §11 and spec 02 §4.20 (host-free `czar-archive:<root>`), G0-13, build plan M2 exit and §8, builder rules, T-036, T-040 (rewritten), T-004, T-057, T-080, T-082, `stage-2-backlog.md` GC-9. |
 | Review finding | RV-028 (High) in `specs/06-review/2026-10-19-spec-review.md` |
 
 ## Problem
@@ -33,4 +33,5 @@
 - T-004, T-035, T-036, T-040, T-057, T-080, T-082, G0-13 (Gate 0, M0, M2, M3, M4, M6)
 
 ## Decision
-- <filled in by Zaryab: accepted or rejected, and why>
+- Accepted under Zaryab's 2026-10-19 instruction to apply every review fix (D71–D81 record the decisions he approved for the items that needed one).
+- Applied 2026-10-19 on branch `spec/review-fixes`: Accepted (D78), applied in CZ-27 §2–§5 and §15, `cross-cutting.md` §3.2–§3.3, CZ-22 hosting rows, spec 01 §5, `openapi.yaml` servers, MCP config, `open-evidence-log.md` §11 and spec 02 §4.20 (host-free `czar-archive:<root>`), G0-13, build plan M2 exit and §8, builder rules, T-036, T-040 (rewritten), T-004, T-057, T-080, T-082, `stage-2-backlog.md` GC-9.

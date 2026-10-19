@@ -5,7 +5,7 @@
 | ID | SCR-018 |
 | Filed by | Independent reviewer (G0-01), 2026-10-19 |
 | Spec and section | `specs/04-components/server-planning-and-payment.md` (lines 141, 165 vs 385, 388); `specs/01-system-architecture/system-architecture.md` (lines 1032, 1034); `specs/02-data-and-protocol/data-and-protocol.md` (lines 375, 388); `phase-1-acceptance-scenario.md` 4.6 (line 51) |
-| Status | Open |
+| Status | Accepted (D74), applied in `ai-prompts.md` common rules and P-03; CZ-13 §5 and §7; CZ-15 §5.6; spec 01 §13.1 (planner tools wording superseded); T-045. Spec 02 §4.15 restated (StepResult never reaches the planner). |
 | Review finding | RV-018 (High) in `specs/06-review/2026-10-19-spec-review.md` |
 
 ## Problem
@@ -29,4 +29,5 @@
 - T-045, T-046, T-092, T-101 (M3, M7, M8)
 
 ## Decision
-- <filled in by Zaryab: accepted or rejected, and why>
+- Accepted under Zaryab's 2026-10-19 instruction to apply every review fix (D71–D81 record the decisions he approved for the items that needed one).
+- Applied 2026-10-19 on branch `spec/review-fixes`: Accepted (D74), applied in `ai-prompts.md` common rules and P-03; CZ-13 §5 and §7; CZ-15 §5.6; spec 01 §13.1 (planner tools wording superseded); T-045. Spec 02 §4.15 restated (StepResult never reaches the planner).

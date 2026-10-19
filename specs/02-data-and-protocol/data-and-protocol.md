@@ -376,7 +376,7 @@ type PaymentRef =
 
 ### 4.15 `StepResult`
 
-- **Purpose:** the only form in which untrusted merchant output reaches the planner (spec 01 §13.1). Produced by the reader model under a fixed schema.
+- **Purpose:** the only form in which untrusted merchant output leaves the reader: it goes to the paying agent (code), acceptance and write-back, **never to the planner** (D74, RV-018; the planner's re-plan input is only `{stepIndex, errorCode, flags}`). Produced by the reader model under a fixed schema. **Superseded by D74:** "the only form in which untrusted merchant output reaches the planner".
 - **Schema:** `schemas/step-result.schema.json`
 
 | Field | Type | R | PC | Description |
@@ -389,7 +389,7 @@ type PaymentRef =
 | `bodyRef` | string | no | SO | object-store key of the raw body (never inlined) |
 | `bodyCommit` | `Hash32` | yes | HC | SL `responseCommit` |
 
-- **Invariant:** no free-text field other than `fields[].value`, and the planner prompt wraps the whole object in a labelled `tool_result` (C3-04).
+- **Invariant:** no free-text field other than `fields[].value`; no model with tools or payment authority ever receives it (D74).
 
 ### 4.16 `StepError`
 
@@ -1218,3 +1218,4 @@ Agent-directed text met this session (not followed): the Circle and Arc doc head
 | 2026-10-19 | RV-025 | §4.21 `JobBrief`; `inputCommit` defined; `getJobBrief` route; `BriefRequest` EIP-712 type and vector. |
 | 2026-10-19 | RV-026 | §4.17 `DemandProofLeaf` v2 (no pseudonym, salted `soulVersionCommit`); `demandSalt`; v1 superseded. |
 | 2026-10-19 | RV-019, RV-020, RV-021, RV-027, RV-043, RV-050 / D75 | §4.6 `inputKeys`; §7.1 `quoteId`, `payRequestId`; §7.4; §9.2–§9.4; §10. |
+| 2026-10-19 | RV-018 / D74 | §4.15 `StepResult` never reaches the planner. |

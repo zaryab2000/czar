@@ -5,7 +5,7 @@
 | ID | SCR-026 |
 | Filed by | Independent reviewer (G0-01), 2026-10-19 |
 | Spec and section | `specs/02-data-and-protocol/data-and-protocol.md` §4.17 (lines 403, 408), §4.x (line 271); `schemas/demand-proof-leaf.schema.json` (lines 127, 132); spec 01 §11.3 (lines 969, 971) |
-| Status | Open |
+| Status | Accepted with changes: applied in spec 02 §4.17 (`DemandProofLeaf` v2), §4.18, §5.2, §7.1; `schemas/demand-proof-leaf.v2.schema.json` (v1 kept, marked superseded); CZ-17 §5.1, §5.3, §5.4; `open-evidence-log.md` §11; spec 01 §11.3; T-057. Change: removing `userPseudonym` alone was not enough, because the leaf's bare `soulVersionHash` also appears in the public soul-version leaf; it is replaced by a per-envelope salted `soulVersionCommit`. |
 | Review finding | RV-026 (High) in `specs/06-review/2026-10-19-spec-review.md` |
 
 ## Problem
@@ -26,4 +26,5 @@
 - T-007, T-057 (M0, M4)
 
 ## Decision
-- <filled in by Zaryab: accepted or rejected, and why>
+- Accepted under Zaryab's 2026-10-19 instruction to apply every review fix (D71–D81 record the decisions he approved for the items that needed one).
+- Applied 2026-10-19 on branch `spec/review-fixes`: Accepted with changes: applied in spec 02 §4.17 (`DemandProofLeaf` v2), §4.18, §5.2, §7.1; `schemas/demand-proof-leaf.v2.schema.json` (v1 kept, marked superseded); CZ-17 §5.1, §5.3, §5.4; `open-evidence-log.md` §11; spec 01 §11.3; T-057. Change: removing `userPseudonym` alone was not enough, because the leaf's bare `soulVersionHash` also appears in the public soul-version leaf; it is replaced by a per-envelope salted `soulVersionCommit`.

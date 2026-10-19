@@ -5,7 +5,7 @@
 | ID | SCR-025 |
 | Filed by | Independent reviewer (G0-01), 2026-10-19 |
 | Spec and section | `specs/04-components/server-planning-and-payment.md` CZ-15 (line 366); `specs/02-data-and-protocol/data-and-protocol.md` (lines 334, 452) |
-| Status | Open |
+| Status | Accepted, applied in spec 02 §4.21 (`JobBrief`), §5.2 (`inputCommit`), §6.2 (`BriefRequest` type), §6.4 vector, §9.2 (`getJobBrief`); `schemas/job-brief.schema.json`; `openapi.yaml`; CZ-15 §5.4; T-054. |
 | Review finding | RV-025 (High) in `specs/06-review/2026-10-19-spec-review.md` |
 
 ## Problem
@@ -27,4 +27,5 @@
 - T-007, T-054, T-055 (M0, M4)
 
 ## Decision
-- <filled in by Zaryab: accepted or rejected, and why>
+- Accepted under Zaryab's 2026-10-19 instruction to apply every review fix (D71–D81 record the decisions he approved for the items that needed one).
+- Applied 2026-10-19 on branch `spec/review-fixes`: Accepted, applied in spec 02 §4.21 (`JobBrief`), §5.2 (`inputCommit`), §6.2 (`BriefRequest` type), §6.4 vector, §9.2 (`getJobBrief`); `schemas/job-brief.schema.json`; `openapi.yaml`; CZ-15 §5.4; T-054.

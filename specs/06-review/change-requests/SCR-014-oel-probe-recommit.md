@@ -5,7 +5,7 @@
 | ID | SCR-014 |
 | Filed by | Independent reviewer (G0-01), 2026-10-19 |
 | Spec and section | `specs/03-smart-contracts/open-evidence-log.md` rules (line 61); OEL-2 (line 156) |
-| Status | Open |
+| Status | Accepted, applied in `open-evidence-log.md` §1.1, §6–§8, OEL-2, OEL-6; `IOpenEvidenceLog.sol` (`AlreadyCommitted`); `architecture/selection-layer-architecture.md` §7.1; T-011. |
 | Review finding | RV-014 (High) in `specs/06-review/2026-10-19-spec-review.md` |
 
 ## Problem
@@ -28,4 +28,5 @@
 - T-011, T-021 (M1)
 
 ## Decision
-- <filled in by Zaryab: accepted or rejected, and why>
+- Accepted under Zaryab's 2026-10-19 instruction to apply every review fix (D71–D81 record the decisions he approved for the items that needed one).
+- Applied 2026-10-19 on branch `spec/review-fixes`: Accepted, applied in `open-evidence-log.md` §1.1, §6–§8, OEL-2, OEL-6; `IOpenEvidenceLog.sol` (`AlreadyCommitted`); `architecture/selection-layer-architecture.md` §7.1; T-011.

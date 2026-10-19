@@ -5,7 +5,7 @@
 | ID | SCR-011 |
 | Filed by | Independent reviewer (G0-01), 2026-10-19 |
 | Spec and section | specs/03-smart-contracts/czar-vault.md §5.1 (lines 101, 104); INV-2 (line 419); `confirmPullback` (line 144); `syncJob` (line 162) |
-| Status | Open |
+| Status | Accepted with changes: applied in `czar-vault.md` §4 (`shortfall`), §5.1 (`freeBalance` saturates), §5.4/§5.5 credits, INV-2 restated. Change: the un-credited part is booked as an envelope `shortfall` (with `ShortfallRecorded`) rather than running confirmations inside `withdraw`, which cannot enumerate pending credits. |
 | Review finding | RV-011 (High) in `specs/06-review/2026-10-19-spec-review.md` |
 
 ## Problem
@@ -31,4 +31,5 @@
 - T-013, T-017, T-018, T-021 (M1)
 
 ## Decision
-- <filled in by Zaryab: accepted or rejected, and why>
+- Accepted under Zaryab's 2026-10-19 instruction to apply every review fix (D71–D81 record the decisions he approved for the items that needed one).
+- Applied 2026-10-19 on branch `spec/review-fixes`: Accepted with changes: applied in `czar-vault.md` §4 (`shortfall`), §5.1 (`freeBalance` saturates), §5.4/§5.5 credits, INV-2 restated. Change: the un-credited part is booked as an envelope `shortfall` (with `ShortfallRecorded`) rather than running confirmations inside `withdraw`, which cannot enumerate pending credits.

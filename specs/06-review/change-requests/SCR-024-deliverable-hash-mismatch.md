@@ -5,7 +5,7 @@
 | ID | SCR-024 |
 | Filed by | Independent reviewer (G0-01), 2026-10-19 |
 | Spec and section | `specs/05-build-plan/phase-1-tasks.md` T-055 (line 766); `specs/04-components/server-acceptance-evidence-selection.md` CZ-16 (line 277) |
-| Status | Open |
+| Status | Accepted (D77), applied in CZ-16 §5.5 step 2 and §10 (reject after `acceptance.deliverableRefetchTries` re-fetches; fetch failures stay inconclusive), `job-escrow-adapter.md` §9, T-055. |
 | Review finding | RV-024 (High) in `specs/06-review/2026-10-19-spec-review.md` |
 
 ## Problem
@@ -25,4 +25,5 @@
 - T-055 (M4)
 
 ## Decision
-- <filled in by Zaryab: accepted or rejected, and why>
+- Accepted under Zaryab's 2026-10-19 instruction to apply every review fix (D71–D81 record the decisions he approved for the items that needed one).
+- Applied 2026-10-19 on branch `spec/review-fixes`: Accepted (D77), applied in CZ-16 §5.5 step 2 and §10 (reject after `acceptance.deliverableRefetchTries` re-fetches; fetch failures stay inconclusive), `job-escrow-adapter.md` §9, T-055.
