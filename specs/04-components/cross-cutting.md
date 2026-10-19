@@ -194,4 +194,4 @@ Supply-chain rules (CLAUDE.md): `pnpm audit --audit-level=moderate`, `minimumRel
 | 2026-10-18 | D51, D54 | USD display and server-side archives in the mainnet table |
 | 2026-10-19 | D69 | `apps/web` runs in a desktop browser; push tagged stage 2. |
 | 2026-10-19 | D68 | model prices read in T-046; budgets stay in tokens and request counts until then. |
-- 2026-10-19 · D70: Phase 1 runs on Zaryab's Mac with a local software signer (encrypted keystore); Google Cloud (KMS, Cloud Run, e2-micro VM) moves to stage 2.
+| 2026-10-19 | D70 | Phase 1 runs on Zaryab's Mac with a local software signer (encrypted keystore); Google Cloud (KMS, Cloud Run, e2-micro VM) moves to stage 2. |
