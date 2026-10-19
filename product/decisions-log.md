@@ -2,7 +2,7 @@
 
 - **Purpose:** every product decision made so far, with the reasoning. Specs follow these decisions unless a later entry changes them.
 - **Format:** each decision states what was decided and why. Open items are listed at the end.
-- **Last updated:** 2026-10-18
+- **Last updated:** 2026-10-19 (D71–D81 from the G0-01 spec review)
 
 ---
 
@@ -66,6 +66,7 @@
 - **Decided:** not discussed yet. It will be decided later.
 
 ### D22. Two payment paths: vault-direct first, a small pocket wallet second
+- **Amended by D71:** a pocket exists only for plans with a Gateway step, and its address is part of what the user approves. **Amended by D72:** freeze also stops pocket spending, through the signer.
 - **Decided (2026-10-18):** Czar pays merchants in one of two ways, chosen per merchant.
   - **Vault-direct (default):** if the merchant accepts vanilla x402, the vault itself pays. Every payment is checked against the vault's rules (envelope, per-category limits, freeze).
   - **Pocket wallet (fallback):** if the merchant accepts only Circle's batched nanopayments, the vault funds a small executor wallet, and the agent pays from it.
@@ -142,6 +143,7 @@
 ## 7. Architecture choices (2026-10-18)
 
 ### D25. The paying agent runs on Czar's server
+- **Amended by D74:** the planner never sees merchant output; re-planning gets only step index, error code and flags.
 - **Relaxed by D70 for testnet:** in Phase 1 the server runs on Zaryab's Mac, so it is always-on only while the Mac is awake.
 - **Decided:** planning and paying run on Czar's server, so objectives keep moving when the user's computer is off.
 - **Privacy split:** the work soul and raw observations stay on the user's machine; only cleaned-up objectives go to the server.
@@ -156,6 +158,7 @@
 - **Before mainnet:** deploy a Czar-owned instance, since no official mainnet instance exists (A4-13).
 
 ### D28. Web app first, native app if passkeys fail on iPhone
+- **Amended by D78:** Phase 1 app origin is `http://localhost` with passkey RP ID `localhost`.
 - **Amended by D69:** Phase 1 runs the approval app in a desktop browser; the Home Screen web app and iPhone checks move to stage 2.
 - **Decided:** the user app ships first as a web app installed to the Home Screen.
 - **Early check:** test passkeys inside the installed web app on a real iPhone (gap D1-11). If they fail, switch to a native app.
@@ -169,6 +172,7 @@
 - **Amends:** product §11.1 and roadmap §3 ("one recipe with on-chain splits" moves to Phase 2). Follows D24.
 
 ### D30. Owner approvals go through a UserOp from the user's smart account (OD-2)
+- **Amended by D78:** the fallback passkey's RP ID is `localhost` in Phase 1; moving origin in stage 2 means registering a new passkey.
 - **Decided:** in Phase 1 the owner acts on the vault as `msg.sender` through a UserOp sent via Circle's bundler.
 - **Fallback:** an EIP-712 approval signed by the passkey and checked with the P-256 precompile, relayed by Czar (assumption AR-2).
 
@@ -213,6 +217,7 @@
 - **Decided:** a starting value, to be tuned later.
 
 ### D41. Owner-only manual credit for pocket funds returned through the 7-day withdrawal (OD-13)
+- **Clarified by RV-010 (no decision change):** the credit is bounded by `min(amount, outstanding − pendingPullback, freeBalance())`; the caller is the owner only.
 - **Decided:** only the owner can credit back funds returned through Gateway's slow withdrawal path.
 
 ### D42. Single vault contract vs external library decided after a size build (OD-14)
@@ -238,6 +243,7 @@
 - **Decided:** The user reviews the first five objectives before they leave the machine; after that they go automatically, with review still available.
 
 ### D48. Pocket-worthiness volume is measured per objective (OD-20)
+- **Amended by D71:** the one pocket per envelope is named in the plan's `payeeRoot`.
 - **Decided:** One pocket per envelope (spec 03 §5.4).
 
 ### D49. Phase 1 Czar merchants: `czar-spot`, `czar-extract`, `czar-search` (OD-21)
@@ -253,12 +259,15 @@
 - **Decided:** Shown as a separate "Network fee reserve" balance until Circle gas sponsorship on Arc is confirmed (A6-08, A6-19 GAP).
 
 ### D53. ERC-8183 deliverables use a `.well-known` path on the provider host (OD-25)
+- **Amended by D77:** fetched bytes that do not hash to the on-chain deliverable are a reject.
 - **Decided:** Defines amendment AM-08.
 
 ### D54. Evidence archives stay on Czar's server in Phase 1; IPFS pinning is Phase 2 (OD-26, changed)
+- **Amended by D78:** in Phase 1 "Czar's server" is the local server; the anchored URI is host-free so it stays valid when the public host arrives in stage 2.
 - **Decided:** Hashes are anchored on-chain, so archives remain verifiable. Pin providers are chosen in Phase 2.
 
 ### D55. A structural check with no schema and no history records `inconclusive` (OD-27)
+- **Amended by D76:** a result whose content screen is unavailable is quarantined, not delivered.
 - **Decided:** Never counted as a pass.
 
 ### D56. Minutes-saved defaults per detector ship as 20 / 15 / 30 min (OD-28)
@@ -274,9 +283,11 @@
 - **Decided:** `autonomy.baseAtomic` 0.50 USDC per score unit, `autonomy.minScore` 3, diversity weight `1/sqrt(k)` per payee. Starting values, to be tuned.
 
 ### D60. Freeze lowers every category's `autoLimit` to 0 on-chain (OD-32)
+- **Amended by D72:** freeze also stops off-vault spending (pocket nanopayments, evaluator payouts) through the signer, and starts pocket pullbacks.
 - **Decided:** as stated.
 
 ### D61. Key management: cloud KMS with a signer service; vendor chosen at build time (OD-33)
+- **Amended by D78 and D80:** the Phase 1 keystore lives outside the repo with its passphrase never on argv or env; single-Mac custody is an accepted testnet exception.
 - **Amended by D70:** Phase 1 uses a local software signer; Google Cloud KMS comes in stage 2.
 - **Decided:** Testnet uses cloud KMS. Whether an HSM is required is decided at the pre-mainnet audit (AR-1).
 
@@ -298,6 +309,7 @@
 - **Decided:** spec 01 §4.3 and §8.2, product §4.1 and §9.2 updated to USD-only wording.
 
 ### D66. One cloud provider for server, indexer and KMS, chosen before M2 (OD-38)
+- **Amended by D78:** the stable public archive host and app origin arrive with Google Cloud in stage 2.
 - **Amended by D70:** provider chosen: Google Cloud, in stage 2. Phase 1 runs locally.
 - **Decided:** provider still open; must offer a key-management service and managed Postgres.
 
@@ -308,6 +320,7 @@
 - **Decided:** cost budgets stay in tokens and request counts until then.
 
 ### D69. Phase 1 approvals run in a desktop browser; mobile work moves to stage 2
+- **Amended by D78:** the desktop browser loads the app from `http://localhost`.
 - **Decided (2026-10-19):** the approval app runs in a desktop browser in Phase 1 (passkeys work in desktop Safari and Chrome on macOS). The in-app pending-approvals list is the source of truth.
 - **Moves to stage 2:** iPhone Home Screen install, iPhone passkey test (G0-02), web push (G0-15, CZ-23), mobile layouts, native-app fallback. See `specs/05-build-plan/stage-2-backlog.md` §2.
 - **Amends:** D6 and D28 (the Home Screen web app comes in stage 2).
@@ -315,6 +328,7 @@
 ---
 
 ### D70. Phase 1 runs locally on Zaryab's Mac for $0; Google Cloud comes later
+- **Amended by D78** (origin, RP ID, archives, keystore location and passphrase handling) **and D80** (single-Mac custody is a documented testnet exception).
 - **Decided (2026-10-19):**
   - **Phase 1 (testnet):** the server, paying agent, indexer, Czar's merchants, Postgres (Docker) and the signer service run as local processes on Zaryab's Mac, against Arc testnet. No cloud cost.
   - **Keys:** a **local software signer** with an encrypted keystore. Its passphrase is held in the macOS keychain. Testnet keys only; never committed; never real funds.
@@ -325,7 +339,61 @@
 
 ---
 
-## 12. Open items (deferred)
+## 12. G0-01 review follow-ups (2026-10-19, from `specs/06-review/2026-10-19-spec-review.md`)
+
+Approved by Zaryab. Each entry cites the review finding it resolves.
+
+### D71. Pockets are named in the approved plan (RV-003)
+- **Decided:** each pocket address is committed in the approved plan's `payeeRoot` as a "pocket" leaf (kind 4). `pocketCapBps = 0` unless the plan has a `gateway-nano` step.
+- **Why:** the agent key alone could register an address it controls as a pocket and move 25–50% of every open envelope there.
+- **Amends:** D22, D48.
+
+### D72. Freeze is enforced off-vault too (RV-007)
+- **Decided:** the signer refuses pocket nanopayments and evaluator payouts while the vault is frozen or the guardian has paused, and the agent starts pocket pullbacks immediately on freeze.
+- **Why:** pocket money is already outside the vault, so the vault's freeze cannot stop it; the product promises that freeze stops spending.
+- **Amends:** D22, D60.
+
+### D73. No factory version register (RV-015)
+- **Decided:** a new vault version means a new factory. The factory has no version register.
+- **Why:** a factory can only deploy bytecode compiled into it, so a registered code hash protected nothing.
+
+### D74. The planner never receives merchant or seller output (RV-018)
+- **Decided:** P-03 never receives `StepResult` or any merchant-derived text. Re-planning gets only `{stepIndex, errorCode, flags}`.
+- **Amends:** D25 (split of planner and reader).
+
+### D75. MCP pay runs only approved plan steps; the HTTP API shape is canonical (RV-019, RV-020)
+- **Decided:** MCP `pay` may only execute steps of an approved plan. The HTTP API (`createPayRequest`) shape is canonical, and the MCP tool mirrors it.
+
+### D76. An unavailable content screen quarantines the result (RV-023)
+- **Decided:** if the P-01 content screen is unavailable, results are quarantined, not delivered.
+- **Amends:** D55 (applies to screening, not to structural checks).
+
+### D77. A deliverable hash mismatch is a reject (RV-024)
+- **Decided:** in ERC-8183 jobs, a deliverable whose fetched bytes do not hash to the on-chain deliverable is rejected, not recorded as inconclusive.
+- **Amends:** D53.
+
+### D78. Phase 1 origin, passkey RP ID, archives and keystore (RV-028)
+- **Decided:**
+  - Phase 1 app origin is `http://localhost`; the passkey RP ID is `localhost`.
+  - Evidence archives are served by the local server in Phase 1; the stable public archive host arrives with Google Cloud (stage 2).
+  - The keystore lives outside the repository; its passphrase is never passed through argv or environment variables.
+- **Amends:** D28, D30, D54, D61, D66, D69, D70.
+
+### D79. Acceptance-scenario numbers obey the real routing rules (RV-029)
+- **Decided:** the Phase 1 acceptance scenario's numbers are recomputed so it passes under the real D37/D38 routing rules. There is no test-only routing override.
+
+### D80. Single-Mac key custody is an accepted testnet exception (RV-045)
+- **Decided:** in Phase 1 every server key, including guardian (K6) and admin (K20), lives on Zaryab's Mac. This is an accepted, documented testnet exception. Real dual control arrives with Google Cloud KMS (stage-2 backlog §6).
+- **Amends:** D61, D70.
+
+### D81. The pullback fee cap is owner-adjustable under a hard contract bound (RV-037)
+- **Decided:** the vault's pullback fee cap (`maxPullbackFee`) is set by the owner, starting at 0.01 USDC, and can never exceed the contract constant `MAX_PULLBACK_FEE_CEILING` = 0.50 USDC.
+- **Why the bound:** the Gateway fee tracks Arc gas (measured 0.0035 USDC at 20 Gwei). 0.50 USDC is about 143× that, covering gas up to roughly 2,850 Gwei. Above that, instantly pulling back a pocket (at most 25% of an envelope, typically a few USDC) costs more than it saves, and the slow path is the right one. A higher ceiling would only widen what a hijacked agent key can waste on fees per pullback.
+- **Consistent with D33:** vaults stay immutable; the bound is in the code and only the value is owner state.
+
+---
+
+## 13. Open items (deferred)
 
 - **Tool manipulation:** tools that try to get agents to call them more often. To be researched.
 - **Conflict of interest:** Czar both recommends tools and routes money to them. An AI dispute judge may be added later.
