@@ -439,4 +439,4 @@ Each parallel agent works in its own worktree (CLAUDE.md worktree rule).
 | 2026-10-19 | D69 | Gate 0 drops G0-02 and G0-15 (stage 2); M6 is the desktop-browser app, CZ-23 and mobile work are stage 2; task total 87; DoD and R-1 updated. |
 | 2026-10-19 | D69 | §11 adds the stage-2 mobile milestone row. |
 | 2026-10-19 | D63–D68 | OD-35..OD-40 marked Decided; D64 fixture limited to M3–M4 and removed in M6 (plus pre-mainnet check); D66 cloud choice added to M2 entry; D67 macOS-only note. |
-- 2026-10-19 · D70: Phase 1 runs on Zaryab's Mac with a local software signer (encrypted keystore); Google Cloud (KMS, Cloud Run, e2-micro VM) moves to stage 2.
+| 2026-10-19 | D70 | Phase 1 runs on Zaryab's Mac with a local software signer (encrypted keystore); Google Cloud (KMS, Cloud Run, e2-micro VM) moves to stage 2. |

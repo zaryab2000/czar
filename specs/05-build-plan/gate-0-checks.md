@@ -147,4 +147,4 @@
 | Date | ID | Change |
 |---|---|---|
 | 2026-10-19 | D69 | G0-02 (iPhone passkeys) and G0-15 (web push) moved out of Gate 0 to stage 2; procedures kept and marked; header note added. |
-- 2026-10-19 · D70: Phase 1 runs on Zaryab's Mac with a local software signer (encrypted keystore); Google Cloud (KMS, Cloud Run, e2-micro VM) moves to stage 2.
+| 2026-10-19 | D70 | Phase 1 runs on Zaryab's Mac with a local software signer (encrypted keystore); Google Cloud (KMS, Cloud Run, e2-micro VM) moves to stage 2. |

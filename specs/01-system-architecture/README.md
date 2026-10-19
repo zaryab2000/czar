@@ -25,4 +25,4 @@
 | Date | ID | Change |
 |---|---|---|
 | 2026-10-19 | D69 | Summary says the Phase 1 app runs in a desktop browser; Home Screen app is stage 2. |
-- 2026-10-19 · D70: Phase 1 runs on Zaryab's Mac with a local software signer (encrypted keystore); Google Cloud (KMS, Cloud Run, e2-micro VM) moves to stage 2.
+| 2026-10-19 | D70 | Phase 1 runs on Zaryab's Mac with a local software signer (encrypted keystore); Google Cloud (KMS, Cloud Run, e2-micro VM) moves to stage 2. |

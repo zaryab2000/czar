@@ -1432,5 +1432,5 @@ No new agent-directed text was encountered in this session beyond what the groun
 | 2026-10-19 | D65 | Local-currency wording replaced with USD (§4.3, §8.2, §13). |
 | 2026-10-19 | D63 | §7.3 states that freeze lowers limits in a follow-up agent step, not atomically. |
 | 2026-10-19 | D69 | Context diagram subgraph id renamed from `Phone` to `Web` (label already said desktop browser). |
-- 2026-10-19 · D70: Phase 1 runs on Zaryab's Mac with a local software signer (encrypted keystore); Google Cloud (KMS, Cloud Run, e2-micro VM) moves to stage 2.
+| 2026-10-19 | D70 | Phase 1 runs on Zaryab's Mac with a local software signer (encrypted keystore); Google Cloud (KMS, Cloud Run, e2-micro VM) moves to stage 2. |
 - 2026-10-19 · D31 wording: §1 no longer says raw work data never leaves the machine.
