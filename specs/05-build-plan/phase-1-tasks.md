@@ -104,6 +104,7 @@
 | T-102 | Scenario on live testnet (desktop browser) | M8 | M | T-101 |
 | T-103 | Release security gates | M8 | M | T-101 |
 | T-104 | Phase 1 sign-off | M8 | S | T-102, T-103 |
+| T-105 | Create Phase 1 server keys in the local keystore (RV-016) | M1 | S | T-004 |
 
 ---
 
@@ -151,6 +152,7 @@
   - `arc-anvil --version` shows commit `d497beea…` (A9-13).
   - `cd contracts && arc-forge build --deny-warnings` compiles 7 interface files.
   - `diff -r contracts/src/interfaces specs/03-smart-contracts/interfaces` shows no differences.
+- **Review fixes (2026-10-19):** Pin `arc-anvil --hardfork` to the hardfork Arc testnet runs (read from the chain at task time and recorded), in local runs and CI; rule-sensitive behaviour is also covered by the T-022 fork tests (RV-058).
 
 ### T-004 @czar/config parameter registry
 - **Milestone / group / who:** M0 / M0-b / agent. **Size:** S. **Deps:** T-001.
@@ -164,6 +166,7 @@
 - **Acceptance tests:**
   - `pnpm --filter @czar/config test` passes, including: unknown key → startup error; env overlay overrides a default.
   - A script greps `S04/*.md` for `` `<component>.<name>` `` parameter names and the test asserts each exists in the registry (0 missing).
+- **Review fixes (2026-10-19):** Registry adds `signer.backend`, `signer.keystorePath`, `signer.keychainService`, `signer.socketPath`, `signer.freezeStateMaxAgeSec`, `signer.gas.*`, `signer.pocketKeyRetainHours`, `fetch.*`, `payer.pullbackWindowBlocks`, `acceptance.deliverableRefetch*`, `screen.chunkOverlapChars`, `api.briefSignatureMaxAgeSeconds` (RV-028 and others). Test: the loader refuses any key or `CZAR_*` variable whose name contains `passphrase`, `secret`, `private`, `mnemonic` or `seed` (D78).
 
 ### T-005 @czar/logging allowlist
 - **Milestone / group / who:** M0 / M0-b / agent. **Size:** S. **Deps:** T-001.
@@ -188,6 +191,7 @@
 - **Acceptance tests:**
   - `python3 -I specs/02-data-and-protocol/schemas/check-schemas.py` reports 0 problems.
   - `pnpm --filter @czar/schemas test` passes: every invented example in `S02/data-and-protocol.md` §4 validates; an `ObjectiveSubmission` with an added `evidence` field is rejected by the guard.
+- **Review fixes (2026-10-19):** Compiles all 21 schemas (including `demand-proof-leaf.v2` and `job-brief`) with ajv 2020-12, resolving `$ref`s by `$id` (file-relative, `schemas/README.md`); validates every file in `S02/examples/`; `node S02/schemas/validate-schemas.mjs` passes (RV-025, RV-026).
 
 ### T-007 @czar/hashing: JCS, named hashes, czar-merkle-v1, nonce/salt; reproduce vectors
 - **Milestone / group / who:** M0 / M0-c / agent. **Size:** M. **Deps:** T-006.
@@ -201,6 +205,7 @@
 - **Acceptance tests:**
   - `pnpm --filter @czar/hashing test` reproduces all type hashes, domain separators, the six digests, `transferSpecHash` and the derived nonce in `eip712-vectors.json` byte for byte.
   - A property test builds random trees and verifies every proof with the same rules as OpenZeppelin `MerkleProof.verify`.
+- **Review fixes (2026-10-19):** Adds `inputCommit`, `descriptionHash` from a `JobBrief`, `soulVersionCommit`/`demandSalt` (RV-025, RV-026), the kind-4 pocket leaf (D71), and reproduces all eight vectors including `receiptAttestation` and `briefRequest` (RV-013, RV-025).
 
 ### T-008 @czar/redaction layer 1 (vendored gitleaks v8.30.1 rules) and marker format
 - **Milestone / group / who:** M0 / M0-b / agent. **Size:** M. **Deps:** T-001.
@@ -225,6 +230,7 @@
   - Expose a helper that route tests call with a recorded request and response.
 - **Acceptance tests:**
   - `pnpm --filter @czar/api-contract test` parses both files, resolves every `$ref` (0 unresolved), and lists every `operationId` (37 in `openapi.yaml`, 6 in `local-openapi.yaml` at the time of writing).
+- **Review fixes (2026-10-19):** Contract tests cover the new shapes: `PayRequest`/`PayResponse` and `QuoteRequest`/`QuoteResponse` (D75), `ObjectiveStatusValue` (RV-027), `getJobBrief` (RV-025), `completeModelCall` 409 `replay-not-stored` (RV-043); a test asserts each MCP tool schema in `S02/mcp/czar-mcp-tools.md` equals its route's schema (RV-020). `redocly lint` passes with `S02/api/redocly.yaml`.
 
 ---
 
@@ -472,6 +478,7 @@
 - **Acceptance tests:**
   - Against a local `arc-anvil` that returns `-32012` for wide ranges and `-32014` randomly, the indexer syncs 50,000 blocks without gaps (test asserts every block range covered once).
   - Restart mid-sync resumes from the checkpoint (kill-and-resume test).
+- **Review fixes (2026-10-19):** The wide-range and random-error behaviour comes from the T-010 fault-injecting RPC proxy in front of `arc-anvil`, which has no log-range cap itself (RV-057).
 
 ### T-031 Indexer projections: vault and factory events → Envelope, Reservation, PocketRecord, JobRecord mirrors
 - **Milestone / group / who:** M2 / M2-b / agent. **Size:** L. **Deps:** T-030.
@@ -485,6 +492,7 @@
 - **Acceptance tests:**
   - A replay test runs the T-021 invariant handler sequence on `arc-anvil`, indexes it, and asserts every mirror field equals the on-chain view at the final block.
   - Mirrors validate against `S02/schemas/envelope.schema.json`, `reservation.schema.json`, `pocket-record.schema.json`, `job-record.schema.json`.
+- **Review fixes (2026-10-19):** Event decoders are generated from the `.sol` ABIs (RV-060). Derived states: envelope `Closing` and pocket `DelegateReady` per 02 §4.8, §4.10 (RV-048); job `Released` (RV-009); `shortfall`, `StepUsed`, `PullbackConfirmed.creditedToEnvelope`.
 
 ### T-032 Indexer external events: USDC Transfer/AuthorizationUsed (both emitters), Gateway, GatewayMinter, ERC-8183, OpenEvidenceLog; Gateway transfers poll
 - **Milestone / group / who:** M2 / M2-b / agent. **Size:** L. **Deps:** T-030.
@@ -525,7 +533,7 @@
   - `pnpm --filter @czar/indexer test` covers every query in §5.4 against a seeded database, including "reservations needing `settle`/`finalize`" and "pullbacks to confirm".
 
 ### T-035 Signer service (CZ-27) with request validation and a pluggable backend; Phase 1 backend `local-keystore` (D61, D70)
-- **Milestone / group / who:** M2 / M2-a / agent. **Size:** L. **Deps:** T-026, G0-13.
+- **Milestone / group / who:** M2 / M2-a / agent. **Size:** L. **Deps:** T-026, G0-13, T-105 (keys).
 - **Spec refs:** `S04/server-autonomy-roi-keys.md` CZ-27 §5.1, §5.2, §5.4, §9; D61, D62; AR-1.
 - **Outputs:** `apps/server/src/signer/` (separate process), policy tables per key K3, K4, K5, K7, K8, K9 (Phase 2), K10.
 - **Steps:**
@@ -536,19 +544,21 @@
 - **Acceptance tests:**
   - `pnpm --filter @czar/server test signer` passes: a USDC digest whose `to` is outside the reservation is denied before the KMS call; a `withdraw` call is denied; rate limit enforced; the audit row has no raw text.
   - Against the KMS test key from G0-13, a signature over a known digest recovers to the key's address.
+- **Review fixes (2026-10-19):** Policies exactly CZ-27 §5.2, including the full never-signable list for K3 (`withdraw`, `unfreeze`, `rotateSigners`, `setCategoryLimits`, `setPasskey`, `recordManualReturn`, `forceCloseEnvelope`, `setMaxPullbackFee`, `raiseAutoLimit`, `executeOwnerAction`, factory selectors) (RV-055); plan-checked `openEnvelope`/`reserve`/`openJob`/`registerPocket` args (RV-032); freeze/pause checks failing closed for `gateway-nano` and evaluator `complete` (D72); vault-bound `sl-receipt` (RV-013); K5 never sends a transaction (RV-017); keystore outside the repository, passphrase only from the keychain, refuse to start otherwise (D78); interactive confirmation for K6/K20 (D80); record whether the keychain item's ACL names the signer binary (RV-045). Named tests in CZ-27 §14 and `S03/security-and-testing.md` §3.8 pass.
 
 ### T-036 Signer policies tested on testnet, rate limits, relayer gas key in the `local-keystore` backend (D62, D70)
 - **Milestone / group / who:** M2 / M2-c / agent, after Zaryab approves funds. **Size:** M. **Deps:** T-035, T-027.
 - **Spec refs:** CZ-27 §5.2, §14; D61, D62.
-- **Outputs:** KMS keys for K3, K5, K7, K8, K10 and the relayer gas key on testnet; `deployments/arc-testnet-keys.json` (addresses only, no key material).
+- **Outputs:** signer policy evidence on testnet using the keys T-105 created (K3, K5, K7, K8, the relayer) plus K10; gas balances for K3, K7, K8 per CZ-27 §5.5 (RV-017). **Superseded by RV-016/RV-028:** "KMS keys … created here"; keys are created by T-105 in M1.
 - **Inputs:** `apps/server/src/signer/` from T-035; `deployments/arc-testnet.json` from T-027; Zaryab's funds approval.
 - **Steps:**
-  - Create the testnet KMS keys for K3, K5, K7, K8, K10 and the relayer.
-  - Record their addresses (no key material) in `deployments/arc-testnet-keys.json`.
+  - Load the T-105 keystore; add K10 keys for the merchants.
+  - Fund K3, K7, K8 with native gas up to `signer.gas.<key>.targetAtomic` from the relayer (after Zaryab's approval) and start the `gas-refill` job (RV-017).
   - Run the allowed and denied signing tests on testnet after Zaryab approves funds.
 - **Acceptance tests:**
-  - On testnet, the relayer key (KMS) sends one `OpenEvidenceLog.commit` with a zero test root under a test publisher; `arc-cast receipt` shows status 1.
-  - A denied request (wrong selector) never reaches the KMS (KMS audit log shows no call).
+  - On testnet, K8 sends one `OpenEvidenceLog.commit` with a zero test root under its own address, paying its own gas; `arc-cast receipt` shows status 1 (RV-017).
+  - A denied request (wrong selector) never reaches the keystore: the signer's own audit table records `kms_denied` and no backend sign call (there is no KMS audit log in Phase 1; RV-028).
+  - `gasRefill_keepsK3K7K8WithinBounds`: with K3 drained below `minAtomic`, the job refills it to target and never above `maxAtomic`; an alert fires if the relayer cannot (RV-017).
 
 ### T-037 Pocket key lifecycle in the signer (create, sign, destroy)
 - **Milestone / group / who:** M2 / M2-c / agent. **Size:** M. **Deps:** T-035.
@@ -562,23 +572,26 @@
 - **Acceptance tests:**
   - Unit test: a pocket key cannot sign a burn intent (those are signed by K3 as the vault) or any transfer to a non-Gateway address.
   - Destroy is called when a fixture `PocketClosed` event arrives; a later sign request fails.
+- **Review fixes (2026-10-19):** Pocket keys are created at planning (`createPocketKey(planId)`, D71) and retired only under CZ-27 §5.3's zero-balance rule, not at `PocketClosed` (RV-004). Allowed K4 kinds: `gateway-nano`, `pocket-delegate`, `pocket-return` (USDC transfer and native send to the owning vault only), `pocket-slow-withdraw`. Every other USDC call (`approve`, `permit`, `transfer` elsewhere) is denied (RV-055). Tests `signer_k4_usdcApproveOrTransferElsewhere_denied`, `signer_k4_returnToOwningVault_allowed`, `signer_retirePocketKey_nonZeroBalance_refused`. **Superseded:** "destroy the key when `PocketClosed` is indexed".
 
 ---
 
 ## M3 First money path
 
-### T-040 Testnet hosting: server, indexer, merchants, Postgres, object store, secret references
-- **Milestone / group / who:** M3 / M3-a / agent, after Zaryab approves accounts. **Size:** M. **Deps:** T-034, T-036.
-- **Spec refs:** `S01/system-architecture.md` §5; `S04/cross-cutting.md` §3.1, §3.3.
-- **Outputs:** infrastructure definitions (one region), `env/testnet.toml` with parameter overlays and secret references only.
-- **Inputs:** indexer query API from T-034; testnet KMS keys from T-036; Zaryab's account approval.
+### T-040 Local testnet hosting on Zaryab's Mac: server, indexer, merchants, Postgres, local object store (D70, D78)
+- **Milestone / group / who:** M3 / M3-a / agent. **Size:** M. **Deps:** T-034, T-036.
+- **Spec refs:** `S01/system-architecture.md` §5; `S04/cross-cutting.md` §2.1, §3.1, §3.3; CZ-27 §3; D70, D78.
+- **Outputs:** `ops/local/` (launchd plists or a process manager file for server, indexer, merchants; Docker Compose for Postgres), `env/testnet.toml` with parameter overlays only, a local object-store directory outside the repository.
+- **Inputs:** indexer query API from T-034; the signer and keystore from T-035/T-105.
 - **Steps:**
-  - Define server, indexer, merchants, Postgres and object store in one region.
-  - Write `env/testnet.toml` with parameter overlays and secret references only.
+  - Run the server (API and web app on origin `http://localhost`), indexer and merchants (`127.0.0.1` ports listed in `fetch.localMerchantOrigins`) as local processes; Postgres in Docker bound to `127.0.0.1`.
+  - Write `env/testnet.toml` with parameter overlays only; no secret, passphrase or key reference in env or argv (D78).
   - Add health checks.
 - **Acceptance tests:**
-  - Health checks for server, indexer and merchants return 200 on testnet hosting.
-  - A scan of deployed environment variables finds no key material (only KMS ids).
+  - Health checks for server, indexer and merchants return 200 on the Mac.
+  - A scan of every process's argv and environment finds no key material and no passphrase (D78); `git ls-files` contains no keystore or `.env` file.
+  - `safeFetch` from the server to `http://127.0.0.1:<postgres-port>` is refused and to a configured merchant origin succeeds (RV-022).
+- **Superseded by D70 / RV-028:** cloud hosting, account approval and "only KMS ids"; cloud hosting is `stage-2-backlog.md` §6.
 
 ### T-041 Server skeleton CZ-12: device tokens, idempotency, RFC 9457 errors, rate limits, Postgres schema, objective state machine
 - **Milestone / group / who:** M3 / M3-a / agent. **Size:** L. **Deps:** T-006, T-009, T-004, T-005.
@@ -606,6 +619,7 @@
 - **Acceptance tests:**
   - `pnpm --filter @czar/x402 test` passes a 402 corpus: v2 header, v1 body, Gateway offer, `upto` (refused), `batch-settlement` (refused), cross-chain (refused), malformed, oversized header (> 16 KiB, dropped), extension with external `$ref` (dropped).
   - `PAYMENT-RESPONSE` then `X-PAYMENT-RESPONSE` fallback; `settlement_pending` decoded as non-terminal.
+- **Review fixes (2026-10-19):** `safeFetch` (cross-cutting §2.1, RV-022) with its SSRF corpus test; every probe and merchant call uses it.
 
 ### T-043 Merchant czar-search vanilla x402 route with Facilitator keyless trial and payment-identifier store
 - **Milestone / group / who:** M3 / M3-b / agent. **Size:** M. **Deps:** T-042, T-040, G0-04.
@@ -633,6 +647,7 @@
 - **Acceptance tests:**
   - Table-driven tests for every branch in CZ-14 §5, including `unitAmount == pocketThreshold(n)`.
   - Property test: no route ever has on-chain cost greater than the payment (D37 hard rule) for random inputs.
+- **Review fixes (2026-10-19):** Cost model per CZ-14 as amended (RV-039): `⌈n/32⌉` settle calls, one `finalize`, the pocket sweep; worked defaults 39,600 / 5,040 / 1,764 and `V ≥ 156,600`.
 
 ### T-045 Planner core CZ-13: rule-based plan, live probe, caps, alternates, payee leaves, payeeRoot, planHash (Czar-registered candidates only)
 - **Milestone / group / who:** M3 / M3-b / agent. **Size:** L. **Deps:** T-041, T-042, T-044, T-007.
@@ -648,9 +663,10 @@
   - Property test: every payee and alternate has a leaf with its `stepIndex` and `stepCap`, and `payeeRoot` verifies each leaf with the T-007 rules.
   - `planHash` recomputes from the stored plan.
   - A probe that shows price drift above the step budget drops the candidate.
+- **Review fixes (2026-10-19):** `pocketCapBps = 0` without a `gateway-nano` step, pocket key and kind-4 leaf with one (D71); re-plan input `{stepIndex, errorCode, flags}` only (D74); test `planner_replan_inputHasNoMerchantText`.
 
 ### T-046 Injection boundary: P-01 screen, P-02 reader, StepResult pipeline, eval suites
-- **Milestone / group / who:** M3 / M3-b / agent. **Size:** L. **Deps:** T-006, T-005.
+- **Milestone / group / who:** M3 / M3-b / agent. **Size:** L. **Deps:** T-006, T-005, G0-16 (RV-062).
 - **Spec refs:** `S04/server-planning-and-payment.md` CZ-15 §5.6; `S04/ai-prompts.md` P-01, P-02 (system prompts, schemas, post-validation, eval cases); `S02/data-and-protocol.md` §4.15; C3-04, C3-09.
 - **Outputs:** `models/P-01.md`, `models/P-02.md`, `models/evals/P-01/`, `models/evals/P-02/`, `apps/server/src/boundary/`.
 - **Inputs:** `packages/schemas` (T-006); `packages/logging` (T-005); prompt texts in `specs/04-components/ai-prompts.md`.
@@ -664,6 +680,7 @@
   - The task report lists the model prices with source and date, and the SCR ID (D68).
   - `pnpm --filter @czar/server eval P-01 P-02` passes every listed eval case, including all injection cases; CI fails if any injection case changes a protected field.
   - The regex pre-screen alone (model disabled) flags eval cases 2–6 and 9 of P-01.
+- **Review fixes (2026-10-19):** P-01 chunked over everything P-02 reads, regex over the whole body (RV-041); screen unavailable → quarantine (D76); one flag rule, quarantine recorded `inconclusive` (RV-042); before the first hosted call, G0-16's record and Zaryab's account approval exist (RV-062).
 
 ### T-047 Acceptance checker minimal: delivery and structural in a sandbox, AcceptanceReport, reportHash
 - **Milestone / group / who:** M3 / M3-b / agent. **Size:** M. **Deps:** T-006, T-007.
@@ -678,6 +695,7 @@
   - Fixtures: 2xx JSON matching a schema → `pass`; body over `acceptance.maxBodyBytes` → `delivery` fail; no schema and no history → `inconclusive` (D55).
   - A check script that tries `fetch` inside the sandbox fails.
   - `reportHash` recomputes from the stored report.
+- **Review fixes (2026-10-19):** Decision rule per CZ-16 §5.3 as amended: quarantine → `inconclusive`; labels `none`/`injection-suspect`/`pii-suspect` (RV-042, D76).
 
 ### T-048 Paying agent vault-direct loop with step_executions and crash recovery
 - **Milestone / group / who:** M3 / M3-c / agent. **Size:** L. **Deps:** T-045, T-046, T-047, T-034, T-036.
@@ -692,6 +710,7 @@
   - Integration test: reserve → sign → call → settle → finalize; `Envelope.spent` equals the payment.
   - Kill-and-resume test kills the executor after each persisted phase (`reserve.sent`, `reserve.mined`, `auth.signed`, `call.sent`, `call.result`, before `finalize`) and asserts no second authorization is signed and the final state is correct.
   - `settlement_pending` fixture reconciles through `authorizationState` without re-signing.
+- **Review fixes (2026-10-19):** `validBefore ≤ expiresAt`; `n` bounded by remaining `expectedCalls` and step cap (RV-002, RV-056); receipts use `SL_RECEIPT` v2 (RV-013); no envelope self-opened until D63 lowerings after a freeze are mined (RV-030).
 
 ### T-049 Receipts under SL_RECEIPT and evidence store (no publishing yet)
 - **Milestone / group / who:** M3 / M3-c / agent. **Size:** M. **Deps:** T-048.
@@ -751,6 +770,7 @@
 - **Acceptance tests:**
   - Fork integration: register → gas → `addDelegate` → fund → four nanopayments to a local Gateway seller; ledger shows `pending` then `completed` from a recorded Gateway fixture.
   - Kill-and-resume after `pocket.registered`, gas sent, `fundPocket` sent, and a nanopayment sent: no double funding, no double charge.
+- **Review fixes (2026-10-19):** Register with the pocket-leaf proof (D71); pull back every funded pocket on `Frozen`/`GuardianPaused` (D72); close with the gas sweep (RV-004).
 
 ### T-053 Pullback: burn intent, /v1/transfer, relayer gatewayMint, confirm, cancel and re-request, API-down fallback
 - **Milestone / group / who:** M4 / M4-b / agent. **Size:** L. **Deps:** T-052, G0-05.
@@ -766,6 +786,7 @@
   - Fork test with mocked Gateway API: `requestPullback` → signed envelope accepted by the vault's `isValidSignature` → mocked attestation → `gatewayMint` from the KMS relayer → `confirmPullback`.
   - Expired attestation path: `cancelPullback` after `PULLBACK_CANCEL_DELAY_BLOCKS`, new request with a new salt succeeds.
   - Kill-and-resume between `/v1/transfer` and `gatewayMint`.
+- **Review fixes (2026-10-19):** Pullback `value = min(outstanding − pending, availableBalance − maxFee − safety)` (RV-012); `maxBlockHeight = head + payer.pullbackWindowBlocks` (RV-036); recovery pullbacks for `Closed` pockets (RV-004); slow path ends with `pocket-return` and an app prompt for `recordManualReturn`. Tests `pullback_fullBalanceDrain_valuePlusFeeFitsBalance`, `payer_pocketClose_sweepsGasAndRecoversLateBalance`.
 
 ### T-054 Paying agent job loop on Circle's instance
 - **Milestone / group / who:** M4 / M4-b / agent. **Size:** L. **Deps:** T-050.
@@ -779,6 +800,7 @@
 - **Acceptance tests:**
   - Fork test on Circle's instance: open → provider `setBudget` → fund → submit → (evaluator fixture) complete → `syncJob`; and reject and expiry paths with `claimJobRefund`.
   - Kill-and-resume at each step re-reads `getJob` and ends in the right state.
+- **Review fixes (2026-10-19):** Builds and serves the `JobBrief` at `getJobBrief` with `BriefRequest` auth; `descriptionHash` from `inputCommit` (RV-025); duplicate jobs released by `syncJob` (RV-009).
 
 ### T-055 ERC-8183 evaluator service with K7 and the .well-known deliverable (D53)
 - **Milestone / group / who:** M4 / M4-c / agent. **Size:** M. **Deps:** T-054, T-056.
@@ -793,6 +815,7 @@
   - A deliverable whose content keccak256 equals `deliverable` passes and calls `complete(jobId, reportHash, "")` with K7; a mismatch calls `reject`.
   - An unreachable deliverable stays `inconclusive` until `expiredAt`, then the job is refunded via `claimJobRefund`.
   - K3 is never used for `complete`/`reject` (signer audit log).
+- **Review fixes (2026-10-19):** A deliverable whose fetched bytes do not hash to `deliverable` (after `acceptance.deliverableRefetchTries` re-fetches) → `fail` → `reject` (D77, RV-024; this matches CZ-16 as amended). The signer refuses `complete` while the client vault is frozen or paused (D72). Quarantine → `inconclusive`, never `reject` (RV-042). Fetches through `safeFetch` (RV-022).
 
 ### T-056 Acceptance profiles complete: requirement check, D55 inconclusive rule, report vocabulary
 - **Milestone / group / who:** M4 / M4-a / agent. **Size:** M. **Deps:** T-047.
@@ -819,6 +842,7 @@
   - A batch built twice from the same leaves gives the same root.
   - On `arc-anvil`, `commit(EVIDENCE_BATCH, root, prev, keccak256(utf8(archiveUri)), archiveUri)` lands; a stale `prev` reverts `PrevMismatch` and the publisher retries with the latest root.
   - No IPFS call anywhere in Phase 1 code (grep test).
+- **Review fixes (2026-10-19):** Demand-proof leaves are version 2 (no pseudonym, `soulVersionCommit`, RV-026); `archiveUri = czar-archive:<root>`, archives served by the local server (D78).
 
 ### T-058 Third-party verification script (recompute from Committed event)
 - **Milestone / group / who:** M4 / M4-c / agent. **Size:** M. **Deps:** T-057.
@@ -875,7 +899,7 @@
   - An 8-digit code pairs once; reuse fails; an expired code (> 5 min) fails; the token is in the keychain and never on a command line or in logs.
 
 ### T-062 Observer plugin czar-observer: hooks.json, .mcp.json, validate --strict, http default with command fallback (D46)
-- **Milestone / group / who:** M5 / M5-b / agent. **Size:** M. **Deps:** T-060, G0-11.
+- **Milestone / group / who:** M5 / M5-b / agent. **Size:** M. **Deps:** T-060, G0-11, G0-17 (B3-10 re-check).
 - **Spec refs:** `S04/local-observers-and-daemon.md` CZ-01 §5.1–§5.4; `S02/data-and-protocol.md` §8.2; `S02/mcp/czar-mcp-tools.md` §5; D46; B1-08 to B1-11, B1-18, B1-22, B1-25, B1-34 to B1-39.
 - **Outputs:** `plugins/claude-code/` (`.claude-plugin/plugin.json`, `hooks/hooks.json`, `.mcp.json`, `skills/czar/SKILL.md`, `bin/czar-hook`).
 - **Inputs:** `apps/daemon/` hook endpoint from T-060; host check record `specs/05-build-plan/gate-0-results/G0-11.md`.
@@ -887,6 +911,7 @@
   - `claude plugin validate --strict plugins/claude-code` passes.
   - In a Claude Code session, a `/skill` typed by the user and a `Skill` tool call both reach the daemon (`UserPromptExpansion` and `PreToolUse:Skill`).
   - With the daemon stopped, Claude Code is not slowed (hook timeout ≤ 2 s, fail-open) and events queue in `${CLAUDE_PLUGIN_DATA}/queue` up to `observer.queueMaxEvents`.
+- **Review fixes (2026-10-19):** Starts only after G0-17 recorded B3-10 (Cursor runs Claude Code hooks) as confirmed or changed.
 
 ### T-063 Hook intake: host detection, 02 §8 mappings, drop user_email, layer-1 redaction, ASI06 write gate, memory
 - **Milestone / group / who:** M5 / M5-c / agent. **Size:** L. **Deps:** T-062, T-008.
@@ -901,6 +926,7 @@
   - Fixture payloads from Claude Code, Codex and Cursor map to the exact `ActivityEvent` fields in §8; Cursor `user_email` never appears in storage (grep the DB).
   - A planted fake API key becomes `[[R:S:…]]`; tool output is stored with `trusted=false`; repeated identical events merge via `repeatCount`.
   - Every stored event validates against `activity-event.schema.json`.
+- **Review fixes (2026-10-19):** `bin/czar-hook` drops intake fields and applies layer 1 before queueing (RV-040; test `hook_daemonDown_queueHasNoSecretOrEmail`); intake screening is the local regex pre-screen only, never P-01 (RV-051).
 
 ### T-064 Bundled Presidio helper czar-redact packaged with uv inside the installer (D45), regex fallback with forced review
 - **Milestone / group / who:** M5 / M5-b / agent. **Size:** L. **Deps:** T-060.
@@ -927,6 +953,7 @@
   - Never store request bodies.
 - **Acceptance tests:**
   - Contract test passes; only `P-01`, `P-04`, `P-05`, `P-06` are accepted; the request body is never persisted (DB and log scan); per-user token caps (`models.userMonthlyTokens`) enforced.
+- **Review fixes (2026-10-19):** `completeModelCall` stores no response; a repeated key → 409 `replay-not-stored` (RV-043).
 
 ### T-066 Soul compiler CZ-04 with P-04, D58 rules-only fallback, submitSoulVersion, weekly diff
 - **Milestone / group / who:** M5 / M5-d / agent. **Size:** L. **Deps:** T-063, T-064, T-065.
@@ -944,6 +971,7 @@
   - A user-edited belief never changes text or confidence after a compile.
   - With the proxy down, a rules-only compile still produces a new version (D58).
   - `soulVersionHash` recomputes; `submitSoulVersion` returns `202`.
+- **Review fixes (2026-10-19):** No-model compile runs rules-only and writes `modelUsed = false` versions (D58, RV-052).
 
 ### T-067 Soul viewer CZ-05 on local-openapi.yaml routes
 - **Milestone / group / who:** M5 / M5-e / agent. **Size:** M. **Deps:** T-066.
@@ -1009,6 +1037,7 @@
   - Return `approval-required` with `elicitationUrl` when no envelope covers the step.
 - **Acceptance tests:**
   - Contract tests pass; `createPayRequest` with a reused `paymentId` and a different fingerprint → `409 payment-id-conflict`; no covering envelope → `approval-required` with `elicitationUrl`.
+- **Review fixes (2026-10-19):** `createPayRequest` per CZ-12 §6 as amended (D75, RV-019): approved plan step only, call budget, `inputKeys` check; `createQuote` refuses non-index URLs and derives category; `payRequestId` vs `paymentId` (RV-050). Named tests in CZ-12 §14.
 
 ### T-072 MCP server CZ-09: stdio, dual era, get_objectives/quote/pay/report_outcome, URL-mode elicitation
 - **Milestone / group / who:** M5 / M5-d / agent. **Size:** L. **Deps:** T-071, T-061.
@@ -1023,6 +1052,7 @@
   - A `2026-07-28` client (`server/discover`, `_meta` keys) and a legacy `initialize` client both list the tools and call `get_objectives`.
   - `pay` without a covering envelope returns `resultType: "input_required"` with a URL-mode request; never form mode.
   - The process holds no keys (grep and environment check).
+- **Review fixes (2026-10-19):** MCP `pay`/`quote` schemas equal `PayRequest`/`QuoteRequest` (D75, RV-020); layers 1–2 on `pay.input` before forwarding (RV-021); tests `mcp_payLoop_stopsAtExpectedCalls`, `mcp_payInput_secretAndPiiFixtures_neverSent`.
 
 ### T-073 Write-back adapter CZ-11 with getResult/ackResult and SessionStart pointer
 - **Milestone / group / who:** M5 / M5-d / agent. **Size:** M. **Deps:** T-062, T-061.
@@ -1036,6 +1066,7 @@
 - **Acceptance tests:**
   - A result is written atomically to `.czar/results/<objectiveId>-<slug>.md` with the `<!-- czar:result v=1 … -->` marker and provenance labels; an existing user file is never overwritten.
   - `ackResult` returns `204`; the next `SessionStart` prints the pointer line.
+- **Review fixes (2026-10-19):** Status filters use `ObjectiveStatusValue` only (RV-027).
 
 ---
 
@@ -1053,6 +1084,7 @@
 - **Acceptance tests:**
   - Formatter tests: `"880000"` → `$0.88`, `"1000"` → `$0.001`; no other currency path exists (grep for `fxSource` and currency codes other than `USD` is empty).
   - The app loads and routes correctly in desktop Safari and Chrome (Playwright WebKit and Chromium projects at a desktop viewport).
+- **Review fixes (2026-10-19):** App served by the local server at `http://localhost`, RP ID `localhost` (D78).
 
 ### T-081 createSession and app read routes: getMe, listEnvelopes, getEnvelope, listReceipts, getSoulPointer
 - **Milestone / group / who:** M6 / M6-a / agent. **Size:** M. **Deps:** T-041, T-034.
@@ -1081,6 +1113,7 @@
   - The "Network fee reserve" balance shows `getMe.balances.mscaBalance` (D52).
   - Zaryab completes the passkey ceremony once in desktop Safari and once in desktop Chrome on macOS (real Touch ID or iCloud Keychain); both sign-ins succeed (D69).
   - `grep -r` finds no test-keystore owner code path outside `tests/`; no testnet vault in the scenario is owned by the test keystore (D64).
+- **Review fixes (2026-10-19):** Passkey ceremony on RP ID `localhost`; `setPasskey(rpIdHash = sha256("localhost"))`; client normalises P-256 `s` to low-s before `executeOwnerAction` (RV-034).
 
 ### T-083 Notifications CZ-23 and createPushSubscription with Declarative Web Push — moved to stage 2 (D69)
 - **Status:** moved to stage 2 (D69). Not part of Phase 1; no Phase 1 task depends on it. Kept here for stage 2 (`S05/stage-2-backlog.md` §2, M-4). When scheduled it also needs the stage-2 checks G0-02 and G0-15.
@@ -1110,6 +1143,7 @@
   - The app re-encodes `openEnvelope(decoded)` and refuses to submit if it differs from `calldata`.
   - Playwright on testnet: approve → UserOp mines → `EnvelopeOpened` with the plan's `planHash` → objective moves to `executing`.
   - The screen shows payees as hosts, "new payee" warnings and the path labels from CZ-22 §12.
+- **Review fixes (2026-10-19):** The approval screen recomputes `payeeRoot` and `planHash` on the device from the displayed leaves and refuses on mismatch with the calldata (RV-044); test: a server fixture showing three payees while the calldata commits a fourth is refused.
 
 ### T-085 Freeze and unfreeze (createFreezeIntent) and D60 agent lowering of limits
 - **Layout:** desktop browser only (D69). Lowering is a follow-up agent step after `Frozen`, not atomic (D63).
@@ -1124,10 +1158,11 @@
 - **Acceptance tests:**
   - On testnet: freeze → `Frozen` → `AutoLimitLowered` for every used category with a non-zero limit → a new `reserve` reverts `FrozenVault`.
   - Unfreeze restores spending but not the old limits.
+- **Review fixes (2026-10-19):** Freeze wording per CZ-22 as amended (D72): payments cannot start; pockets pulled back.
 
 ### T-086 Ledger, receipts, monthly statement and shadow summary screens
 - **Layout:** desktop browser only (D69).
-- **Milestone / group / who:** M6 / M6-c / agent. **Size:** M. **Deps:** T-081, T-070.
+- **Milestone / group / who:** M6 / M6-c / agent. **Size:** M. **Deps:** T-081, T-070, T-095, M5 exit (RV-053).
 - **Spec refs:** `S04/app-and-notifications.md` CZ-22 §12 (every money state); `S04/server-planning-and-payment.md` CZ-15 §12; `S02/api/openapi.yaml` `listReceipts`, `getMonthlyStatement`; D35, D51.
 - **Inputs:** app read routes from T-081; shadow totals from T-070.
 - **Outputs:** ledger, receipts, monthly statement and shadow summary screens in `apps/web/`.
@@ -1233,6 +1268,7 @@
 - **Acceptance tests:**
   - Rebuilding the ledger from the indexer gives identical rows (idempotent rebuild).
   - Gateway receipts count at `received` and show `pending` until `completed`; statements show `$` only.
+- **Review fixes (2026-10-19):** Built before T-086, which now depends on it (RV-053).
 
 ---
 
@@ -1261,6 +1297,7 @@
   - Store the run report.
 - **Acceptance tests:**
   - CI job `e2e-fork` passes every check in Stages 1–8, including the injection test (7.1), freeze drill (8.4) and guardian drill (8.5).
+- **Review fixes (2026-10-19):** Runs the scenario as amended (D79, RV-029) including stages 7.1–7.1e (RV-054); no routing override exists.
 
 ### T-102 Acceptance scenario on live testnet, including Stage 0 in a desktop browser
 - **Milestone / group / who:** M8 / M8-c / Zaryab + agent, after Zaryab approves funds. **Size:** M. **Deps:** T-101.
@@ -1273,6 +1310,7 @@
   - Write `reports/phase-1-acceptance.md`.
 - **Acceptance tests:**
   - Every stage passes on testnet; Stage 0 is performed by Zaryab in desktop Safari on macOS; T-058 verifies the anchored proof (exit 0).
+- **Review fixes (2026-10-19):** Same numbers on live testnet (D79).
 
 ### T-103 Security gates and log scan for the release
 - **Milestone / group / who:** M8 / M8-b / agent. **Size:** M. **Deps:** T-101.
@@ -1367,3 +1405,4 @@
 | 2026-10-19 | D68 | T-046 reads model prices and files an SCR; budgets stay in tokens until then. |
 | 2026-10-19 | D70 | Phase 1 runs on Zaryab's Mac with a local software signer (encrypted keystore); Google Cloud (KMS, Cloud Run, e2-micro VM) moves to stage 2. |
 | 2026-10-19 | G0-01 review (Pass A) | M1 acceptance criteria for RV-001…RV-015, RV-030…RV-037, RV-049, RV-056, RV-061 (named tests in `S03/security-and-testing.md` §3.7); T-105 key creation before T-027 (RV-016); T-027 no version registration (D73). |
+| 2026-10-19 | G0-01 review (Pass B/C) | T-036, T-040 rewritten for local hosting (RV-028); review-fix acceptance criteria on T-003…T-102; deps: T-035←T-105, T-046←G0-16, T-062←G0-17, T-086←T-095 and M5 exit (RV-053). |

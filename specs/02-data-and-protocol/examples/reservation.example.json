@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "1.0",
+  "vault": "0x59c9A3E339C1b6d97c2BfEFaaFb75876C1be300d",
+  "reservationId": 0,
+  "envelopeId": 0,
+  "stepIndex": 0,
+  "payee": "0xb96B6bfadaC099659ccC57baeCdc373bbFD9Ed9f",
+  "unitAmount": "46",
+  "count": 1,
+  "validBefore": 0,
+  "mode": "envelope",
+  "settledMask": "0xf9a7ab900b2fbe387311b86febf11a85cd63f86584fd8a3e6dae72df0018756d",
+  "settledCount": 0,
+  "releasedCount": 0,
+  "state": "Active"
+}

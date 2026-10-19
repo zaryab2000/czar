@@ -110,7 +110,7 @@ stateDiagram-v2
 
 **Main path.** Claude Code fires a hook → handler posts the payload to `/v1/hooks` with K16 → daemon answers `202` → done.
 
-**Daemon unreachable.** Post fails → append to the queue file (one JSON per line, with a monotonic sequence) → exit 0. On the next successful post the daemon pulls the queue.
+**Daemon unreachable.** Post fails → `bin/czar-hook` first drops `user_email`, any `env` and `headers` maps and every other dropped-at-intake field (02 §3.1, §8.4), then runs redaction layer 1 (`@czar/redaction`, bundled in the hook binary) on every string field, then appends to the queue file (one JSON per line, with a monotonic sequence) → exit 0 (RV-040). Raw, unredacted payloads are never written to disk. On the next successful post the daemon pulls the queue.
 
 **Skill typed as `/name`.** `UserPromptExpansion` fires with `command_name`; the daemon records `skill-use` and de-duplicates against a `PreToolUse:Skill` within 5 s (02 §8.5).
 
@@ -128,8 +128,8 @@ None in the observer. The daemon's refusal classifier (P-06) runs on `Stop` and 
 
 | Data | Class | Handling |
 |---|---|---|
-| raw hook payload | `local-only` (transient) | forwarded to the daemon over loopback; never written except to the bounded queue, which is deleted on drain |
-| queue file | `local-only` | `${CLAUDE_PLUGIN_DATA}/queue/*.jsonl`, mode 0600, deleted after drain, capped |
+| raw hook payload | `local-only` (transient) | forwarded to the daemon over loopback; never written to disk raw (RV-040) |
+| queue file | `local-only` | `${CLAUDE_PLUGIN_DATA}/queue/*.jsonl`, mode 0600, deleted after drain, capped; holds only payloads with dropped-at-intake fields removed and layer 1 applied (RV-040). **Superseded:** "never written except to the bounded queue" (the queue held raw payloads) |
 | `transcript_path` | never read | B1-03, B1-30 |
 | `user_email` (Cursor) | dropped by the daemon at intake | B3-04 |
 
@@ -336,7 +336,7 @@ stateDiagram-v2
 
 ### 7. AI usage
 
-The daemon hosts P-04 (soul compiler), P-05 (drives helper) and P-06 (refusal classifier) calls through the Czar model proxy; specs in `ai-prompts.md`; inputs are always the redacted excerpt (`redacted-to-server` class) and never raw events. Fallback without a model: compile is skipped (previous soul stands), detectors run rule-only, refusals use regex only.
+The daemon hosts P-04 (soul compiler), P-05 (drives helper) and P-06 (refusal classifier) calls through the Czar model proxy; specs in `ai-prompts.md`; inputs are always the redacted excerpt (`redacted-to-server` class) and never raw events. Fallback without a model: compile falls back to rules-only (`modelUsed = false`, D58, CZ-04), detectors run rule-only, refusals use regex only. **Superseded by D58 / RV-052:** "compile is skipped (previous soul stands)". Intake screening of `ActivityEvent.summary` is the local regex pre-screen only, never the hosted P-01 (RV-051).
 
 ### 8. Privacy
 
@@ -597,3 +597,4 @@ gitleaks rules v8.30.1 (C2-06); Presidio 2.2.364 at `data-privacy-stack/presidio
 | 2026-10-18 | D46 | `command` fallback with `async: true` |
 | 2026-10-18 | D47 | review mode default cited |
 | 2026-10-19 | D67 | Phase 1 daemon is macOS only; Linux and Windows install paths tagged stage 2. |
+| 2026-10-19 | RV-040, RV-051, RV-052 | queue holds only intake-cleaned, layer-1-redacted payloads; intake screen is local regex only; no-model compile is rules-only (D58). Test `hook_daemonDown_queueHasNoSecretOrEmail`. |

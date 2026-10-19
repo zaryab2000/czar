@@ -1,0 +1,21 @@
+{
+  "schemaVersion": "1.0",
+  "stepIndex": 0,
+  "status": "delivered",
+  "source": {
+    "origin": "example",
+    "payTo": "0xdF30ed33A39cD78C90acd4fbe72012f25BE3CFf0",
+    "paymentRefHash": "0x60264e7276fbfbc6c7077ed2d810604209e53675d809816224bbbfc4fb2e7471"
+  },
+  "fields": [
+    {
+      "name": "example",
+      "value": "example",
+      "confidence": 0.5
+    }
+  ],
+  "flags": [
+    "injection-suspect"
+  ],
+  "bodyCommit": "0x0dadd21ba9a5ea96e1781cea81345e1db36520a13b4b87c41f9125327ab0beab"
+}

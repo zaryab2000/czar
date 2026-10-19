@@ -141,6 +141,26 @@ Each row is a Foundry test the builder writes first (builder rules: tests first 
 | `test_abi_matchesICzarVaultSol` | RV-060 | every event topic and error selector the vault emits equals `ICzarVault.sol`; the indexer decoders are generated from the `.sol` ABI | — | T-014, T-031 |
 | `test_vectors_reproducedOnChain` | RV-061, RV-013 | all seven 02 §6.4 entries reproduce; the `AutonomyRaise` vector executes on-chain at its `deadline` | INV-11 | T-023 |
 
+### 3.8 Named regression tests: off-chain fixes from the G0-01 review
+
+The off-chain fixes are proven by tests named in their component specs; this index lists them so every review finding maps to at least one test or invariant.
+
+| RV | Tests | Defined in |
+|---|---|---|
+| RV-004, RV-007, RV-013, RV-017, RV-028, RV-032, RV-055 | `signer_*` and `gasRefill_keepsK3K7K8WithinBounds` | `S04/server-autonomy-roi-keys.md` CZ-27 §14 |
+| RV-004, RV-007, RV-012, RV-022, RV-023, RV-025, RV-041, RV-042 | `payer_*`, `pullback_fullBalanceDrain_valuePlusFeeFitsBalance` | `S04/server-planning-and-payment.md` CZ-15 §14 |
+| RV-003, RV-018, RV-022 | `planner_*` | CZ-13 §14 |
+| RV-019, RV-020, RV-021, RV-027, RV-043, RV-050 | `pay_*`, `mcpPay_*`, `mcpQuote_*`, `objectiveStatus_onlyCanonicalValuesStored`, `modelProxy_sameKey_409NoReplay` | CZ-12 §14 |
+| RV-019, RV-021 | `mcp_payLoop_stopsAtExpectedCalls`, `mcp_payInput_secretAndPiiFixtures_neverSent` | `S04/local-agent-surfaces.md` CZ-09 §14 |
+| RV-022 | `safeFetch` SSRF corpus | `S04/cross-cutting.md` §2.1 |
+| RV-024 | deliverable mismatch → `reject` after re-fetches | CZ-16 §10, T-055 |
+| RV-026 | demand-proof v2 contains no pseudonym and no bare `soulVersionHash` (schema test) | `S02/schemas/demand-proof-leaf.v2.schema.json`, T-057 |
+| RV-029, RV-054 | the amended scenario stages | `S04/phase-1-acceptance-scenario.md` |
+| RV-040 | `hook_daemonDown_queueHasNoSecretOrEmail` | `S04/local-observers-and-daemon.md` |
+| RV-044 | approval screen refuses a fourth hidden payee | T-084 |
+| RV-052, RV-051, RV-043 | rules-only compile; no hosted screen at intake; no model replay | T-066, T-063, T-065 |
+| RV-057, RV-058, RV-061, RV-062 | fault-injecting RPC proxy; hardfork pin; vector executes; G0-16 record | T-010/T-030, T-003, T-023, G0-16 |
+
 ## 4. Deployment
 
 | Step | Detail |

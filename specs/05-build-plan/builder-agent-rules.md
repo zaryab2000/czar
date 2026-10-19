@@ -31,7 +31,7 @@ These rules apply to every coding agent (and every person) working on the Czar c
 ## Keys, secrets and networks
 
 - Never read, print, log or commit private keys, seed phrases, API keys, `*.key`, `*.key.json` or `.env*` files.
-- Keys live in the KMS (server) or the OS keychain (user machine). Code holds key references, never key material.
+- Keys live behind the signer service (Phase 1: an encrypted keystore outside the repository, `~/Library/Application Support/Czar/signer/keystore/`, whose passphrase is only in the macOS keychain; stage 2: Cloud KMS) or in the OS keychain (user machine). Code holds key references, never key material. Never pass a passphrase, key or secret on a command line or in an environment variable (D70, D78).
 - Arc testnet only (`eip155:5042002`, `https://rpc.testnet.arc.io`). Never deploy to, sign for, or send transactions on Arc mainnet. Never use `rpc.testnet.arc.network` (it does not resolve).
 - Any step that needs testnet funds, a sign-up, or a real device needs Zaryab's explicit approval first. Ask; do not proceed.
 
@@ -60,3 +60,9 @@ These rules apply to every coding agent (and every person) working on the Czar c
 - Tests run (commands) and results
 - Spec change requests filed, if any
 - Open issues and anything you could not verify
+
+## Change log
+
+| Date | ID | Change |
+|---|---|---|
+| 2026-10-19 | D78 / RV-028 | key location and passphrase rule for Phase 1. |

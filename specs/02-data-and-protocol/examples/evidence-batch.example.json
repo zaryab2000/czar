@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "1.1",
+  "batchId": "bat_VBJZGYPX92W8WPE2SMZNKRS268",
+  "publisher": "0x9Ca2333A10733dBFa41a1a30ca56aE8d2aA7D91d",
+  "kind": "EVIDENCE_BATCH",
+  "prevRoot": "0xdda322411a8ff0e1c915d101a613548d32d3d3ca3b059df106a8a72d998deb3c",
+  "root": "0x26d9f90deaa6462cef6942a2b153b528bf5ef7fb2de2bc71931d632038b22ce4",
+  "leaves": [
+    {
+      "leafType": "demand-proof",
+      "leafHash": "0x0bf275a29a2ab897d2b50c411048844ac586e32d9a886808b42cb2f68c136105"
+    }
+  ],
+  "uriHash": "0x99b8c54847ff74d948b1fb710633a8899a204b6d5094ce40db865f3180c15491",
+  "archiveUri": "czar-archive:0x4f39ace34988432ed2ab63c952c3d6abcbeb787a7fba2def90812f07eacaaeef"
+}

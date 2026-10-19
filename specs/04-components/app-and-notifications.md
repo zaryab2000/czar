@@ -27,9 +27,9 @@
 | Item | Value |
 |---|---|
 | Where | a desktop browser on macOS: Safari or Chrome, where passkeys work (D69, D1-04). Desktop layouts only. **Stage 2:** the phone browser installed to the Home Screen (iOS 16.4+ for push, D2-01; iOS 26 opens any added site as a web app, D1-10) and mobile layouts (`stage-2-backlog.md` §2 M-3, M-5) |
-| Hosting | static build on a CDN; API at `api.<env>.czar.dev`; app origin `app.<env>.czar.dev` (the WebAuthn RP ID; in stage 2 also the push `navigate` origin) |
+| Hosting | **Phase 1 (D70, D78):** static build served by the local server on Zaryab's Mac at origin `http://localhost`, the same origin as the API (`/v1/...`); WebAuthn RP ID `localhost` (browsers treat `http://localhost` as a secure context, so passkeys work there). **Stage 2:** a public origin with Google Cloud; passkeys are bound to their RP ID, so each testnet owner registers a new passkey on the new origin and points the vault's D30 fallback at it with `setPasskey` (through the smart account). **Superseded by D78 / RV-028:** "static build on a CDN; API at `api.<env>.czar.dev`; app origin `app.<env>.czar.dev`" for Phase 1 |
 | Process | single-page app; no service worker in Phase 1 (stage 2: Declarative Web Push needs none, D2-06) |
-| Update | CDN deploy; the browser picks up the new build on next load |
+| Update | Phase 1: the local server serves the new build; the browser picks it up on next load. Stage 2: CDN deploy |
 | Resource budget | first load ≤ 300 KB JS gzipped; approval screen interactive ≤ 1.5 s on a mid-range laptop |
 
 ### 4. Interfaces
@@ -101,7 +101,7 @@ sequenceDiagram
   A->>A: render goal, steps, payees, cap, fee, expiry
   U->>A: tap "Approve"
   A->>S: createApprovalIntent → ApprovalIntent
-  A->>A: re-encode decoded args with @czar/vault-client; compare to calldata; compare payeeRoot to the Plan's payeeRoot
+  A->>A: rebuild payeeRoot from the payee leaves it displays and planHash from the displayed plan (@czar/hashing); re-encode with @czar/vault-client; refuse unless both equal the calldata's (RV-044)
   A->>B: UserOp {to: vault, data: calldata, value: 0} signed by the passkey
   B->>M: handleOps
   M->>V: openEnvelope(p)
@@ -110,14 +110,14 @@ sequenceDiagram
   Note over S: CZ-19 sees EnvelopeOpened → approval leaves the pending list
 ```
 
-- Step 5–6: the app never trusts `calldata` blindly; it re-encodes `ApprovalIntent.decoded` and refuses on mismatch (`czarCode: validation` shown as "Something changed in this plan. Please reload."). It also checks `ApprovalIntent.expiresAt`.
+- Step 5–6 (RV-044): the app never trusts server data to check server data. It recomputes, on the device with `@czar/hashing`, `payeeRoot` from exactly the payee leaves it shows the user (payees, alternates, the pocket leaf if any, each with its step and cap) and `planHash` from the plan fields it shows, then re-encodes `openEnvelope` with `@czar/vault-client` and refuses unless the result equals `ApprovalIntent.calldata` byte for byte (`czarCode: validation` shown as "Something changed in this plan. Please reload."). So a compromised server cannot show three known merchants while the calldata commits an extra attacker leaf. It also checks `ApprovalIntent.expiresAt`. **Superseded:** "re-encode decoded args …; compare payeeRoot to the Plan's payeeRoot" (both came from the server).
 - Step 7: the passkey signs the UserOp hash; Czar never sees the private key (K1).
 - Step 10–11: until `EnvelopeOpened` is indexed, the approval shows "Approved, waiting for the network". If nothing is seen within `app.approvalConfirmTimeoutSeconds` (120), the app offers "Check again" and "Resubmit" (same calldata; the vault rejects a second open only by the envelope counter, so a resubmit after a silent success would open a second envelope: the app therefore first asks `getEnvelope` by the expected `envelopeRef` from `Me` counters before resubmitting).
 
 #### 5.4 Freeze flow
 
 - Tap "Freeze" → confirm sheet → `createFreezeIntent` (`{action: "freeze"}`) → UserOp with the returned `calldata` (ABI `freeze()`) → "Freezing…" → `Me.frozen` true → banner. Unfreeze is the same with `unfreeze()` (owner only, 03 `czar-vault.md` §5.1).
-- A frozen vault still lets pullbacks and refunds finish (03 `czar-vault.md` §7.3), so the banner says payments cannot *start*.
+- A frozen vault still lets pullbacks and refunds finish (03 `czar-vault.md` §8.1), so the banner says payments cannot *start*. On freeze, Czar also stops every pocket nanopayment and evaluator payout at the signer and pulls back every pocket at once (D72); payments signed just before the freeze can still settle, so the app never claims "nothing was spent" (RV-007).
 - Freeze is two steps, not atomic (D63): the `frozen` flag set by `freeze()` already blocks every spending path; then, after `Frozen` is indexed, the server (CZ-24) runs a follow-up agent step that calls `lowerAutoLimit(category, 0)` for each category (D60; 03 `czar-vault.md` §5.6). An atomic contract version is stage 2 (`stage-2-backlog.md` §3 P2-15). The `Me.limits[]` rows then show 0 and the wording "Limits reset after your freeze. They grow back as objectives succeed." Unfreezing does not restore them.
 
 #### 5.5 Storage (browser)
@@ -257,7 +257,7 @@ Idempotency: every creating call sends `Idempotency-Key`; `notifySubmitted` with
 
 - Approval screen: ≤ 2 API calls before render; UserOp build ≤ 200 ms on-device.
 - Pending list → approve → `EnvelopeOpened`: target ≤ 30 s median on testnet.
-- Infrastructure: CDN only.
+- Infrastructure: Phase 1 the local server only (D70); stage 2 a CDN.
 
 ### 14. Tests and definition of done
 
@@ -347,3 +347,6 @@ K17 VAPID private key in the secret store; a leak lets an attacker spam notifica
 | 2026-10-19 | D69 | CZ-22 Phase 1 is a desktop web app (Safari or Chrome on macOS); Home Screen, push and mobile states moved to stage 2; desktop passkey test replaces the iPhone gate; CZ-23 reduced to a stage-2 outline (sections 1–4, 9, 14 kept). |
 | 2026-10-19 | D63 | freeze lowering described as a follow-up agent step, not atomic; atomic version is stage 2. |
 | 2026-10-19 | D69 | Header marks the push payload reference as stage 2. |
+| 2026-10-19 | RV-028 / D78 | Phase 1 origin `http://localhost`, RP ID `localhost`, served by the local server; CDN and `czar.dev` hosts are stage 2. |
+| 2026-10-19 | RV-044 | approval integrity check recomputes `payeeRoot` and `planHash` on the device from the displayed leaves. |
+| 2026-10-19 | RV-007 / D72 | freeze wording: payments cannot start; pockets pulled back. |

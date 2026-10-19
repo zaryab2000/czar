@@ -1,0 +1,31 @@
+{
+  "schemaVersion": "1.0",
+  "obs_id": "obs_e43b85cc8aad35bb0a7ec18eba9ee55d",
+  "profile_id": "prof_2464e8be048863e055ae8264565893e7",
+  "method_version": "0xaa88bf6b49556ce1d1621f3a2792eeeeec4031093b7b3e35e170eae0e3f9a433",
+  "validator": {
+    "id": "example",
+    "address": "0x1Affa02E2fD0DCFEA95AD858Dc7dA7f946FFdDE4"
+  },
+  "assignment": {
+    "kind": "probe-pool"
+  },
+  "checks": [
+    {
+      "name": "example",
+      "result": "pass"
+    }
+  ],
+  "cost_usd": 0,
+  "created_at": "2026-10-19T12:00:00.000Z",
+  "limits": [
+    "example"
+  ],
+  "conflict_flags": [
+    "validator-is-prober"
+  ],
+  "envelopeRef": "eip155:145:0xf7272a888c5c0483b43a61cdeeaf0c9be0211109:1126",
+  "stepIndex": 0,
+  "decision": "pass",
+  "reportHash": "0x7f6ac6603cf2e8139214a87f16500613ecc6dfca956779baabedf77ff515ebbf"
+}
