@@ -302,6 +302,7 @@ Sources used below (all checked 2026-10-18):
 - There's no canonical mainnet instance (A4-13). For mainnet, Czar has to deploy its own anyway; pick one base and stick to it, because the EIP reference (Arc testnet ABI) and `erc-8183/base-contracts` differ in `fund`/`setProvider` signatures (A4-05, A4-11).
 - If Czar uses the EIP-reference shape, add the `expectedBudget` check the spec requires (A4-05); `base-contracts` already has it.
 - Never make `claimRefund` hookable; it is the guaranteed exit (A4-03).
+- **Note (2026-10-19, review RV-059):** A4-03's `data` encodings omit the caller. Both the EIP reference (`ethereum/ERCs` `4dec821` lines 581–674) and `erc-8183/base-contracts` `142e669` (lines 646–773) encode `abi.encode(actor, …)`. No Phase 1 impact (hooks are off); re-read before enabling hooks.
 
 ### A5. ERC-8004 (Trustless Agents)
 

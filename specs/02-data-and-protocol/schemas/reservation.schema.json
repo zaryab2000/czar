@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://czar.dev/schemas/reservation/1.0",
+  "$id": "https://czar.dev/schemas/reservation.schema.json",
   "title": "Reservation (mirror)",
   "description": "Server mirror of a vault reservation (spec 02 \u00a74.9).",
   "type": "object",

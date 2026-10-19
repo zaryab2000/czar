@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://czar.dev/schemas/receipt/1.0",
+  "$id": "https://czar.dev/schemas/receipt.schema.json",
   "title": "Receipt",
   "description": "Buyer receipt: SL \u00a75.4 ObservationCore with kind=receipt, signed as SL \u00a75.8 Receipt (spec 02 \u00a74.13).",
   "type": "object",
@@ -50,7 +50,7 @@
       ]
     },
     "payment": {
-      "$ref": "https://czar.dev/schemas/payment-ref/1.0",
+      "$ref": "payment-ref.schema.json",
       "description": "PaymentRef (SL \u00a75.2).",
       "x-privacyClass": "public"
     },

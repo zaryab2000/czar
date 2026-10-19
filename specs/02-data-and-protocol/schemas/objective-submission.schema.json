@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://czar.dev/schemas/objective-submission/1.0",
+  "$id": "https://czar.dev/schemas/objective-submission.schema.json",
   "title": "ObjectiveSubmission",
   "description": "The only object the daemon sends to the server for a new objective (spec 02 \u00a74.4; D25). Contains no local-only field.",
   "type": "object",

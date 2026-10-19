@@ -1,0 +1,27 @@
+{
+  "schemaVersion": "1.0",
+  "kind": "receipt",
+  "reporter": {
+    "kind": "buyer",
+    "id": "example",
+    "address": "0x3C5B7f81Abb12DBB35FFDF4Bd110E8A632eE00Ba"
+  },
+  "payment": {
+    "schemaVersion": "1.0",
+    "rail": "x402-exact",
+    "network": "eip155:030",
+    "asset": "0xDde8F5b2cc1E73d008F3Be6DFEF1fA06FDAC56ca",
+    "payer": "0xb8Add43573bdF09a55aD3399eeEBBc293a96c9E5",
+    "payTo": "0x78FA5b2A977AaAF5D810aFeDcB70Cb0b22EDF1A2",
+    "amount": "1750",
+    "nonce": "0x38d97ca0056dcc064037fa5d9385b111e99f55ae97593957b3280514a8be8273",
+    "validBefore": 0
+  },
+  "payment_ref_hash": "0x8fa9b829ac0f119d9fcdc5b174713e8c8789909bfcab9c967b1a4632ce43d69c",
+  "origin_asserted": "example",
+  "outcome": "delivered",
+  "disclosure": "public",
+  "created_at": "2026-10-19T12:00:00.000Z",
+  "obs_id": "obs_106d75a727b4dc01192b59126a0b68d8",
+  "sig": "0x"
+}

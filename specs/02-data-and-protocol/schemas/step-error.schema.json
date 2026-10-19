@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://czar.dev/schemas/step-error/1.0",
+  "$id": "https://czar.dev/schemas/step-error.schema.json",
   "title": "StepError",
   "description": "Error object returned by MCP tools and APIs (spec 02 \u00a74.16).",
   "type": "object",

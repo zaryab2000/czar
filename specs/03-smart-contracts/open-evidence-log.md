@@ -1,7 +1,7 @@
 # `OpenEvidenceLog` (spec 03)
 
 - **Date:** 2026-10-18
-- **Status:** draft. Adopted from `architecture/selection-layer-architecture.md` §7.1 **verbatim** (quoted in §1 below), plus Czar's additions in §2 onward.
+- **Status:** draft. Adopted from `architecture/selection-layer-architecture.md` §7.1 **verbatim** (quoted in §1 below, as of 2026-10-17), plus Czar's additions in §2 onward. **Amended 2026-10-19 (RV-014):** one rule and one error added; see §1.1. The architecture document carries the same amendment.
 - **Phase:** 1 (spec 01 §18).
 - **Shared types used:** `czar-merkle-v1` (spec 02 §5.3), `DemandProofLeaf` (spec 02 §4.17), `SoulVersionLeaf` (spec 02 §4.18), `EvidenceBatch` (spec 02 §4.20).
 
@@ -67,6 +67,13 @@ The block below is copied character for character from `architecture/selection-l
 > - **Arc notes.** No `PREVRANDAO`, no native value, `blockhash(n)` readable via EIP-2935 (F4). `uri` is event-only; readers get it from `Committed` logs, and `uriHash` from storage.
 > ---
 
+### 1.1 Amendment to the quoted rules (RV-014)
+
+- **Superseded by RV-014:** the quoted sentence "`commit` with `kind == PROBE_INTENT` sets `_intent[publisher][root] = 1`" (unconditional).
+- **Rule now:** `commit` with `kind == PROBE_INTENT` sets `_intent[publisher][root] = 1` only when it is `0`; when it is `1` or `2` the call reverts `AlreadyCommitted(bytes32 intentRoot)`.
+- **Why:** with the unconditional set, a publisher could commit intent R, reveal batch B1, commit R again (the `prev` check passes because R is the latest root), and reveal a different batch B2 after seeing results. Pre-commitment of probes, the basis of fair probing, would not hold. The contract is ownerless and immutable, so this must be right before deployment.
+- `IOpenEvidenceLog.sol` declares the new error; nothing else in the interface changes.
+
 ## 2. Purpose and phase (Czar view)
 
 - One ownerless, append-only commitment log on Arc. Czar's evidence publisher (CZ-17, key K8) commits evidence-batch roots, feature snapshots and policy releases under Czar's publisher address. Anyone else may publish under their own address.
@@ -104,7 +111,7 @@ The block below is copied character for character from `architecture/selection-l
 
 | Function | Caller | Preconditions (in order) | State changes | External calls | Events | Errors | Reentrancy | Gas (est., 20 Gwei) |
 |---|---|---|---|---|---|---|---|---|
-| `commit(Kind kind, bytes32 root, bytes32 prev, bytes32 uriHash, string uri) → uint256 seq` | anyone (publisher = `msg.sender`) | 1. `prev == latest(msg.sender, kind).root`, or `0` if none, else `PrevMismatch`. 2. no other checks; contents are never inspected. | push `Commitment{root, prev, uriHash, timestamp, blockNumber, kind}`; if `kind == PROBE_INTENT` set `_intent[msg.sender][root] = 1` | none | `Committed(publisher, kind, seq, root, prev, uriHash, uri)` | `PrevMismatch(expected, given)` | no external calls; none needed | 120–135k gas ≈ 0.0024–0.0027 USDC (SL §7.1 "Gas") |
+| `commit(Kind kind, bytes32 root, bytes32 prev, bytes32 uriHash, string uri) → uint256 seq` | anyone (publisher = `msg.sender`) | 1. `prev == latest(msg.sender, kind).root`, or `0` if none, else `PrevMismatch`. 2. if `kind == PROBE_INTENT`: `_intent[msg.sender][root] == 0`, else `AlreadyCommitted(root)` (RV-014). 3. no other checks; contents are never inspected. | push `Commitment{root, prev, uriHash, timestamp, blockNumber, kind}`; if `kind == PROBE_INTENT` set `_intent[msg.sender][root] = 1` | none | `Committed(publisher, kind, seq, root, prev, uriHash, uri)` | `PrevMismatch(expected, given)`, `AlreadyCommitted(intentRoot)` | no external calls; none needed | 120–135k gas ≈ 0.0024–0.0027 USDC (SL §7.1 "Gas") |
 | `reveal(bytes32 intentRoot, bytes32 batchRoot, bytes32 uriHash, string uri)` | anyone (same publisher as the intent) | 1. `_intent[msg.sender][intentRoot] == 1` else `UnknownIntent` (0) or `AlreadyRevealed` (2) | set status 2; `_batchOf[msg.sender][intentRoot] = batchRoot` | none | `Revealed(publisher, intentRoot, batchRoot, uriHash, uri)` | `UnknownIntent`, `AlreadyRevealed` | none | ≈ 50–60k gas ≈ 0.001 USDC |
 | `count(address publisher, Kind kind) → uint256` | anyone (view) | — | — | — | — | — | — | view |
 | `get(address publisher, Kind kind, uint256 seq) → Commitment` | anyone (view) | `seq < count` (reverts on out-of-range read) | — | — | — | — | — | view |
@@ -121,6 +128,8 @@ stateDiagram-v2
   Unknown --> Committed: commit(PROBE_INTENT, root) by publisher · Committed event
   Committed --> Revealed: reveal(root, batchRoot) by same publisher · Revealed event
   Revealed --> Revealed: reveal again → AlreadyRevealed (no change)
+  Committed --> Committed: commit(PROBE_INTENT, same root) → AlreadyCommitted (no change, RV-014)
+  Revealed --> Revealed: commit(PROBE_INTENT, same root) → AlreadyCommitted (no change, RV-014)
   Unknown --> Unknown: reveal → UnknownIntent (no change)
 ```
 
@@ -143,6 +152,7 @@ Other kinds have no state beyond the per-publisher hash chain (`prev` must equal
 | `PrevMismatch(bytes32 expected, bytes32 given)` | `prev` is not the publisher's latest root for that kind |
 | `UnknownIntent(bytes32 intentRoot)` | `reveal` for a root never committed as `PROBE_INTENT` by this publisher |
 | `AlreadyRevealed(bytes32 intentRoot)` | second `reveal` |
+| `AlreadyCommitted(bytes32 intentRoot)` | `commit` of a `PROBE_INTENT` root this publisher already committed (RV-014) |
 
 ## 9. External dependencies
 
@@ -153,7 +163,8 @@ None. The contract calls nothing and reads nothing outside its own storage. `blo
 | Id | Invariant |
 |---|---|
 | OEL-1 | For every publisher and kind, `get(p, k, i).prev == get(p, k, i-1).root` for all `i ≥ 1`, and `get(p, k, 0).prev == 0` (per-publisher hash chain). |
-| OEL-2 | `intentStatus(p, r).revealed` implies `intentStatus(p, r).committed`; status never decreases. |
+| OEL-2 | `intentStatus(p, r).revealed` implies `intentStatus(p, r).committed`; status never decreases; once `revealed`, `batchRoot` never changes. |
+| OEL-6 | A `PROBE_INTENT` root is committed at most once per publisher: a second `commit(PROBE_INTENT, r)` by the same publisher reverts `AlreadyCommitted`, before or after `reveal` (RV-014). |
 | OEL-3 | `count(p, k)` only increases; no commitment is ever modified or removed. |
 | OEL-4 | No function changes storage of a publisher other than `msg.sender`. |
 | OEL-5 | The contract's USDC balance is irrelevant: it has no payable function and no way to move value. |
@@ -165,16 +176,16 @@ None. The contract calls nothing and reads nothing outside its own storage. `blo
 
 | Leaf type | Object | Content | Who can verify |
 |---|---|---|---|
-| `demand-proof` | spec 02 §4.17 `DemandProofLeaf` | observation hashes → `objectiveHash` → `soulVersionHash` → `planHash` → `envelopeRef` + approval tx → `paymentRefHashes` → `outcomeHashes` | anyone can check the `EnvelopeOpened` event carries the same `objectiveHash` and `planHash`; only the user can open the observation preimages |
+| `demand-proof` (leaf version 2) | spec 02 §4.17 `DemandProofLeaf` v2 | observation hashes → `objectiveHash` → `soulVersionCommit` (salted, per envelope, RV-026) → `planHash` → `envelopeRef` + approval tx → `paymentRefHashes` → `outcomeHashes`; no pseudonym | anyone can check the `EnvelopeOpened` event carries the same `objectiveHash` and `planHash`; only the user can open the observation preimages and the soul link (by revealing `demandSalt`) |
 | `soul-version` | spec 02 §4.18 `SoulVersionLeaf` | `userPseudonym`, `soulVersion`, `soulVersionHash`, `previousHash`, `compiledAt` | the user can later reveal any belief against `sectionHashes` (spec 02 §5.2) |
 | SL rows | `observation`, `report`, `assessment`, `correction`, `exposure`, `submission-log` | SL §5 objects | per SL §11 disclosure |
 
 - Batch publication (spec 02 §4.20 `EvidenceBatch`): `root` = tree root of all leaves; `prev` = Czar's latest `EVIDENCE_BATCH` root.
-  - **Phase 1 (D54):** the archive (JSON Lines of the public leaf objects) is stored on Czar's server at a public HTTPS `archiveUri`; `uriHash = keccak256(utf8(archiveUri))`. The root binds the content, so anyone who fetches the archive can verify it against the on-chain root. No IPFS in Phase 1.
+  - **Phase 1 (D54, D78):** the archive (JSON Lines of the public leaf objects) is stored and served by Czar's local server (`http://localhost:<port>/v1/archives/<root>.jsonl`). The anchored `archiveUri` is **host-free**: `czar-archive:<root>` (the batch root in lowercase hex), with `uriHash = keccak256(utf8(archiveUri))`. A localhost URL is never anchored: anchors are permanent, and the stable public archive host arrives only with Google Cloud in stage 2 (D78, RV-028). Readers resolve `czar-archive:<root>` against the archive hosts listed in Czar's latest `POLICY_RELEASE` (Phase 1: the local server only; stage 2: the public host, which serves every Phase 1 archive by the same root). The root binds the content, so anyone who fetches the archive can verify it. No IPFS in Phase 1.
   - **Phase 2:** the archive is also pinned to IPFS with two independent pins; `uriHash = keccak256(utf8(cid))` (SL-C11 "content and availability are bound").
 - Cadence: Phase 1 hourly, or sooner when a batch holds ≥ 1,000 leaves; Phase 2 every 15 minutes (SL-C11).
-- The `uri` string in the event is the `archiveUri` in Phase 1 (`ipfs://<cid>` in Phase 2); readers get it from `Committed` logs, check `keccak256(utf8(uri)) == uriHash`, fetch the archive and rebuild the root.
-- Publisher key K8: KMS-held; signing policy allows only `commit` and `reveal` calldata to the pinned `OpenEvidenceLog` address.
+- The `uri` string in the event is the `archiveUri` in Phase 1 (`czar-archive:<root>`, D78; `ipfs://<cid>` in Phase 2); readers get it from `Committed` logs, check `keccak256(utf8(uri)) == uriHash`, fetch the archive and rebuild the root.
+- Publisher key K8: held by the signer service (local keystore in Phase 1, D70/D78; Cloud KMS in stage 2); signing policy allows only `commit` and `reveal` calldata to the pinned `OpenEvidenceLog` address.
 
 ## 12. Edge cases
 
@@ -218,3 +229,6 @@ Estimates; measured values go in `security-and-testing.md` gas snapshots.
 | Date | ID | Change |
 |---|---|---|
 | 2026-10-18 | D54 | Phase 1 archives stay on Czar's server; `uriHash = keccak256(utf8(archiveUri))`; IPFS pinning moved to Phase 2 (§11, §12, §13). The verbatim SL quote in §1 is unchanged; §11 states how Czar uses `uriHash`. |
+| 2026-10-19 | RV-014 | `commit` of an already-known `PROBE_INTENT` root reverts `AlreadyCommitted` (§1.1, §6, §7, §8); OEL-2 tightened, OEL-6 added (SCR-014). The architecture document's §7.1 carries the same amendment. |
+| 2026-10-19 | D78 | §11: Phase 1 `archiveUri` is the host-free `czar-archive:<root>`; archives served by the local server; the stage-2 public host serves the same roots. |
+| 2026-10-19 | RV-026 | §11: `demand-proof` leaf version 2 (no pseudonym; salted soul commitment). |

@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "2.0",
+  "leafType": "demand-proof",
+  "leafVersion": 2,
+  "observationHashes": [
+    "0xbb1ac0b62037f9a063f13a4f23d6f40d65eaba5eb08075b70fec898ad5afbbdb"
+  ],
+  "objectiveHash": "0x186f2b5870a171029bd3060ed8ffd3b8f4d2f67038bd58c7fa77550756c8e23c",
+  "soulVersionCommit": "0x96a85167c1d2e6987906e7b7077f66316c4f34e9ede6473ba6c9f1da956cf99c",
+  "planHash": "0x96eae3cd1bda028902d829a0845598d2e77ead2f1c6398b1e6ccb9e27db45c84",
+  "envelopeRef": "eip155:652:0xf3dfd2325be0d7006906647b30fcbe6350bff379:27",
+  "approval": {
+    "approver": "owner",
+    "txHash": "0x60934e9e0bab05c7e2503ad1e7474c456234ff198a91ec4cf1bd65cfdee56161",
+    "blockNumber": 0
+  },
+  "paymentRefHashes": [
+    "0xfdde5a9c31ffc2f77a4f3016b5bb0c32d720336ab9443a110992a6312c8ebb23"
+  ],
+  "outcomeHashes": [
+    "0x36d36b81d44539acc0123ec2effdaaad7d244584142b27d32fef52724a73458c"
+  ],
+  "closedAt": 0
+}

@@ -29,7 +29,7 @@
 - Every object has a schema file, a `schemaVersion`, and a privacy class on every field. Fields that leave the user's machine are explicit; Cursor's `user_email` and similar fields are dropped at intake.
 - Three hashes bind the proof-of-demand chain: `objectiveHash`, `planHash` and `soulVersionHash`, all RFC 8785 JCS + keccak256 over named field sets.
 - One Merkle rule serves evidence batches and `payeeRoot`: double-hashed leaves with a tag, sorted-pair (commutative) keccak256 nodes, odd nodes carried up, as OpenZeppelin's `MerkleProof` verifies.
-- EIP-712 types: the Selection Layer §5.8 set is adopted verbatim; Czar adds `AutonomyRaise` and `OwnerAction` under the `CzarVault` domain. Every type hash and five test digests were computed with viem 2.57.2 and are recorded in `vectors/eip712-vectors.json`.
+- EIP-712 types: the Selection Layer §5.8 set is adopted verbatim; Czar adds `AutonomyRaise`, `OwnerAction` and `ReceiptAttestation` (RV-013) under the `CzarVault` domain. Every type hash and five test digests were computed with viem 2.57.2 and are recorded in `vectors/eip712-vectors.json`.
 - The vault's ERC-1271 signature carries a kind tag (`USDC_3009`, `GATEWAY_BURN`, `SL_RECEIPT`) and the fields the vault needs to recompute the digest. A 65-byte fallback exists for the case where Circle's Facilitator rejects long signatures (AR-3).
 - Batch reservations: one reservation fixes `payee`, `unitAmount` and `count`; nonce `i` is derived from the reservation id, so the worst case the agent can sign is `count × unitAmount`.
 - Payment ids follow the x402 `payment-identifier` extension (16–128 chars of `[A-Za-z0-9_-]`) and are the retry key end to end.
@@ -59,7 +59,8 @@
 
 - Every object carries `schemaVersion` as `"<major>.<minor>"`, starting at `"1.0"`.
 - Minor bump: fields added, all optional. Readers ignore unknown fields.
-- Major bump: a field removed, renamed, retyped, or a hash rule changed. New `$id`. Hashes computed under an older major stay valid; the hash rule version is part of the canonical form (§5.1).
+- Major bump: a field removed, renamed, retyped, or a hash rule changed. New file `<name>.v<major>.schema.json` with its own `$id` (`https://czar.dev/schemas/<file name>`); the older file stays, marked superseded. Hashes computed under an older major stay valid; the hash rule version is part of the canonical form (§5.1).
+- `$id` and `$ref` convention (2026-10-19): `$id` is `https://czar.dev/schemas/<file name>` and cross-file `$ref`s are file-relative, so they resolve the same way by `$id` and by path (`schemas/README.md`).
 - Hook payloads from Claude Code, Codex and Cursor are not under Czar's control; the mapping in §8 names each source field so a host change is visible as a diff.
 
 ### 2.3 Error model
@@ -219,16 +220,17 @@ Each object: purpose, fields (name, type, required, privacy class, description, 
 | `cap` | `Amount6` | yes | HC | envelope cap = Σ step caps × (1 + slack) |
 | `slackBps` | `Bps` | yes | HC | default 2500 |
 | `maxStepAmount` | `Amount6` | yes | HC | max over step caps |
-| `pocketCapBps` | `Bps` | yes | HC | default 2500 (D22) |
+| `pocketCapBps` | `Bps` | yes | HC | `0` unless the plan has a `gateway-nano` step, then `2500` (D22, D71); the pocket steps' caps plus the gas grant must fit in `cap × pocketCapBps / BPS`, else the router moves steps to vault-direct |
+| `pocket` | `Address` | no | HC | the pocket EOA the plan will use; present if and only if the plan has a `gateway-nano` step; committed in `payeeLeaves` as a kind-4 leaf (D71) |
 | `expiresAt` | `Timestamp` | yes | HC | envelope expiry |
 | `steps` | array of `Step` ≤ 64 | yes | SO (hashes HC) | |
-| `payeeLeaves` | array of `PayeeLeaf` | yes | HC | §5.3; plan payees plus ≤ 2 alternates per step (D36) |
+| `payeeLeaves` | array of `PayeeLeaf` | yes | HC | §5.3; plan payees plus ≤ 2 alternates per step (D36), plus one kind-4 pocket leaf when `pocket` is set (D71) |
 | `payeeRoot` | `Hash32` | yes | PUB | Merkle root of `payeeLeaves` (§5.3) |
 | `rankingDecisionIds` | array of string | no | SO | SL `query_id`s used |
 | `shadow` | boolean | yes | SO | true for shadow-mode pricing (no envelope) |
 | `createdAt` | `Timestamp` | yes | SO | |
 
-- **Invariants:** `cap ≥ Σ steps[].stepCap`; every step's `payee` and `alternates[]` appear in `payeeLeaves` with that step's `stepIndex` and `stepCap`; `maxStepAmount = max(steps[].stepCap)`; `payeeRoot` recomputes.
+- **Invariants:** `cap ≥ Σ steps[].stepCap`; every step's `payee` and `alternates[]` appear in `payeeLeaves` with that step's `stepIndex` and `stepCap`; `maxStepAmount = max(steps[].stepCap)`; `payeeRoot` recomputes; `pocketCapBps = 0` and no kind-4 leaf when no step is `gateway-nano`, otherwise exactly one kind-4 leaf `{payee: pocket, kind: 4, stepIndex: 4294967295, stepCap: "0"}` (D71).
 
 ### 4.6 `Step`
 
@@ -247,7 +249,7 @@ Each object: purpose, fields (name, type, required, privacy class, description, 
 | `stepCap` | `Amount6` | yes | HC | ≥ `unitAmount × expectedCalls` |
 | `routingReason` | string | yes | SO | for example `below-pocket-threshold` |
 | `acceptanceProfileId` | SL `ProfileId` | yes | SO | |
-| `inputTemplate` | object | no | SO | structured input only, never user text (spec 01 §11.2 layer 3); optional `inputTemplate.expectedKeys: string[]` (≤ 50, each ≤ 64) names the output keys the `requirement` check (CZ-16) and the reader's `expectedFields` (P-02) look for (AM-09) |
+| `inputTemplate` | object | no | SO | structured input only, never user text (spec 01 §11.2 layer 3); optional `inputTemplate.expectedKeys: string[]` (≤ 50, each ≤ 64) names the output keys the `requirement` check (CZ-16) and the reader's `expectedFields` (P-02) look for (AM-09); `inputTemplate.inputKeys: [{name, type: string\|number\|boolean, maxLength?, enum?}]` (≤ 20) names the only input keys a `pay` call may send for this step (RV-021) |
 | `dependsOn` | array of `stepIndex` | no | SO | |
 
 ### 4.7 `PayeeLeaf`
@@ -255,9 +257,9 @@ Each object: purpose, fields (name, type, required, privacy class, description, 
 | Field | Type | R | PC | Description |
 |---|---|---|---|---|
 | `payee` | `Address` | yes | PUB (in proofs) | |
-| `kind` | integer: `1` x402 payTo, `2` ERC-8183 provider, `3` tip repo (P2, payee = `BuilderEscrow`) | yes | PUB | |
-| `stepIndex` | integer | yes | PUB | |
-| `stepCap` | `Amount6` | yes | PUB | the per-step cap shared by the payee and its alternates (D36) |
+| `kind` | integer: `1` x402 payTo, `2` ERC-8183 provider, `3` tip repo (P2, payee = `BuilderEscrow`), `4` pocket EOA (D71) | yes | PUB | |
+| `stepIndex` | integer | yes | PUB | 0–63 for kinds 1–3; always `4294967295` (`POCKET_STEP_INDEX`) for kind 4 |
+| `stepCap` | `Amount6` | yes | PUB | the per-step cap shared by the payee and its alternates (D36), enforced per step on-chain through `stepUsed` (RV-002); always `"0"` for kind 4 (the pocket's bound is `cap × pocketCapBps / BPS`) |
 
 Leaf hash: §5.3.
 
@@ -280,10 +282,12 @@ Leaf hash: §5.3.
 | `approver` | enum `owner` \| `agent` | yes | PUB | who opened it |
 | `approvalTx` | `Hash32` | yes | PUB | the UserOp's transaction hash or the agent tx |
 | `spent`, `reserved`, `pocketOutstanding`, `jobEscrowed` | `Amount6` | yes | PUB | live counters |
-| `state` | enum `Open` \| `Closing` \| `Closed` | yes | PUB | §state machine in spec 03 |
+| `state` | enum `Open` \| `Closing` \| `Closed` | yes | PUB | `Open`/`Closed` from events; `Closing` is derived by the indexer: on-chain `Open` and (`now ≥ expiresAt`, or the server has begun the close sequence: a pullback requested for the envelope's pocket or a `finalize` pending) (RV-048) |
+| `shortfall` | `Amount6` | yes | PUB | from `ShortfallRecorded` (RV-011) |
+| `pocket` | `Address` | no | PUB | the envelope's single pocket, from `PocketRegistered` |
 | `lastEventBlock` | integer | yes | SO | indexer cursor |
 
-- **Invariants (mirror of on-chain):** `spent + reserved + pocketOutstanding + jobEscrowed ≤ cap`.
+- **Invariants (mirror of on-chain):** `spent + reserved + pocketOutstanding + jobEscrowed + shortfall ≤ cap`.
 
 ### 4.9 `Reservation` (mirror)
 
@@ -297,7 +301,7 @@ Leaf hash: §5.3.
 | `validBefore` | `UnixSeconds` | yes | PUB | |
 | `mode` | enum `envelope` \| `digest` | yes | PUB | AR-3 primary or fallback (§6.3) |
 | `settledMask` | `Hash32` (128-bit mask, hex) | yes | PUB | which indices settled |
-| `settledCount`, `releasedCount` | integer | yes | PUB | |
+| `settledCount`, `releasedCount` | integer | yes | PUB | both stored on-chain; the reservation is `Final` exactly when `settledCount + releasedCount == count` (RV-001) |
 | `state` | enum `Active` \| `Finalizing` \| `Final` | yes | PUB | |
 | `paymentIds` | array of `paymentId` by index | no | SO | §7.4 |
 
@@ -308,7 +312,7 @@ Leaf hash: §5.3.
 | `vault`, `envelopeId` | | yes | PUB | |
 | `pocket` | `Address` | yes | PUB | the EOA |
 | `keyRef` | string | yes | SO | KMS key id, never the key |
-| `state` | enum `Registered` \| `DelegateReady` \| `Funded` \| `Draining` \| `Closed` | yes | PUB | |
+| `state` | enum `Registered` \| `DelegateReady` \| `Funded` \| `Draining` \| `Closed` | yes | PUB | on-chain `PocketState` except `DelegateReady`, which the indexer derives: on-chain `Registered` and GatewayWallet emitted `DelegateAdded(USDC, pocket, vault)` for this vault (RV-048) |
 | `funded` | `Amount6` | yes | PUB | Σ `fundPocket` |
 | `gasGranted` | `Amount6` | yes | PUB | native sent for gas, in 6-dec units |
 | `outstanding` | `Amount6` | yes | PUB | funded − confirmed pullbacks |
@@ -316,7 +320,7 @@ Leaf hash: §5.3.
 | `pullbacks` | array of `PullbackRecord` | yes | PUB | |
 | `gatewayTransferIds` | array of string | no | SO | nanopayment ids from the Gateway API (A2-29) |
 
-`PullbackRecord`: `{pullbackId (uint64), value: Amount6, salt: Hash32, maxFee: Amount6, maxBlockHeight: integer, transferSpecHash: Hash32, requestedAtBlock: integer, state: Pending|Confirmed|Cancelled, attestationTransferId?: string (SO), mintTx?: Hash32}`.
+`PullbackRecord`: `{pullbackId (uint64), value: Amount6, salt: Hash32, maxFee: Amount6, maxBlockHeight: integer, transferSpecHash: Hash32, requestedAtBlock: integer, state: Pending|Confirmed|Cancelled, recovery: boolean, creditedToEnvelope?: boolean, attestationTransferId?: string (SO), mintTx?: Hash32}`. `recovery` marks a pullback of a `Closed` pocket, credited to free balance (RV-004).
 
 ### 4.11 `JobRecord` (mirror + server)
 
@@ -333,7 +337,7 @@ Leaf hash: §5.3.
 | `deliverableHash` | `Hash32` | no | PUB | from `JobSubmitted` |
 | `deliverableUri` | string (https URI) | no | SO | where the evaluator fetches the work: `https://<provider-host>/.well-known/czar-deliverable/<deliverable-hex>`; the fetched bytes MUST keccak256 to `deliverableHash`, else the deliverable is treated as missing (D53, AM-08). ERC-8183 fixes only the `bytes32` (A4-03); this convention is Czar's and is stated in the job brief |
 | `reportHash` | `Hash32` | no | PUB | the `reason` passed to `complete`/`reject` |
-| `state` | enum `Opened` \| `Funded` \| `Submitted` \| `Completed` \| `Rejected` \| `Expired` \| `Refunded` | yes | PUB | |
+| `state` | enum `Opened` \| `Funded` \| `Submitted` \| `Completed` \| `Rejected` \| `Expired` \| `Refunded` \| `Released` | yes | PUB | `Released` = an unfunded job the vault released (`JobSynced(state = 6)`, RV-009) |
 | `expiredAt` | `UnixSeconds` | yes | PUB | |
 
 ### 4.12 `PaymentRef`
@@ -372,7 +376,7 @@ type PaymentRef =
 
 ### 4.15 `StepResult`
 
-- **Purpose:** the only form in which untrusted merchant output reaches the planner (spec 01 §13.1). Produced by the reader model under a fixed schema.
+- **Purpose:** the only form in which untrusted merchant output leaves the reader: it goes to the paying agent (code), acceptance and write-back, **never to the planner** (D74, RV-018; the planner's re-plan input is only `{stepIndex, errorCode, flags}`). Produced by the reader model under a fixed schema. **Superseded by D74:** "the only form in which untrusted merchant output reaches the planner".
 - **Schema:** `schemas/step-result.schema.json`
 
 | Field | Type | R | PC | Description |
@@ -385,25 +389,25 @@ type PaymentRef =
 | `bodyRef` | string | no | SO | object-store key of the raw body (never inlined) |
 | `bodyCommit` | `Hash32` | yes | HC | SL `responseCommit` |
 
-- **Invariant:** no free-text field other than `fields[].value`, and the planner prompt wraps the whole object in a labelled `tool_result` (C3-04).
+- **Invariant:** no free-text field other than `fields[].value`; no model with tools or payment authority ever receives it (D74).
 
 ### 4.16 `StepError`
 
 `{code: string, message: string (no user text), retryable: boolean, elicitationUrl?: string}`. Used by MCP tools and APIs.
 
-### 4.17 `DemandProofLeaf`
+### 4.17 `DemandProofLeaf` (version 2, RV-026)
 
 - **Purpose:** the proof-of-demand chain for one objective (product §6.22), anchored as a leaf in Czar's `EVIDENCE_BATCH`.
-- **Schema:** `schemas/demand-proof-leaf.schema.json`. All fields `PUB` (hashes and public refs only).
+- **Schema:** `schemas/demand-proof-leaf.v2.schema.json`. All fields `PUB` (hashes and public refs only).
+- **Superseded by RV-026:** version 1 (`schemas/demand-proof-leaf.schema.json`), which carried `userPseudonym` and the bare `soulVersionHash`. Both also appear in the public soul-version leaf (§4.18), so anyone reading the archive could join a user's soul-version history to their vault and every payment, and re-link them after each pseudonym rotation. Version-1 leaves are never produced.
 
 | Field | Type | R | Description |
 |---|---|---|---|
 | `leafType` | const `"demand-proof"` | yes | |
-| `leafVersion` | const `1` | yes | |
-| `userPseudonym` | `Hash32` | yes | per-user rotating pseudonym (spec 01 §11.3) |
+| `leafVersion` | const `2` | yes | |
 | `observationHashes` | array of `Hash32` | yes | |
 | `objectiveHash` | `Hash32` | yes | |
-| `soulVersionHash` | `Hash32` | yes | |
+| `soulVersionCommit` | `Hash32` | yes | `keccak256(abi.encode(soulVersionHash, demandSalt))`, where `demandSalt = keccak256(abi.encode(userDemandSecret, vault, envelopeId))` is per envelope, `SO`, and never used in any soul-version leaf. The user can fetch the salt for one envelope in the app (`getEnvelope`) and reveal it to prove which soul version the demand came from; no one else can link the leaf to a soul-version leaf |
 | `planHash` | `Hash32` | yes | |
 | `envelopeRef` | string | yes | |
 | `approval` | object `{approver: owner\|agent, txHash: Hash32, blockNumber: integer}` | yes | |
@@ -411,11 +415,36 @@ type PaymentRef =
 | `outcomeHashes` | array of `Hash32` | yes | `reportHash` per step |
 | `closedAt` | `UnixSeconds` | yes | |
 
-- **Invariant:** `envelopeRef`'s on-chain `EnvelopeOpened` event carries the same `objectiveHash` and `planHash`.
+- **Invariant:** `envelopeRef`'s on-chain `EnvelopeOpened` event carries the same `objectiveHash` and `planHash`. The leaf carries no pseudonym and no value that also appears in a `soul-version` leaf.
 
 ### 4.18 `SoulVersionLeaf`
 
-`{leafType: "soul-version", leafVersion: 1, userPseudonym: Hash32, soulVersion: integer, soulVersionHash: Hash32, previousHash?: Hash32, compiledAt: UnixSeconds}`. All `PUB`. Schema `schemas/soul-version-leaf.schema.json`.
+`{leafType: "soul-version", leafVersion: 1, userPseudonym: Hash32, soulVersion: integer, soulVersionHash: Hash32, previousHash?: Hash32, compiledAt: UnixSeconds}`. All `PUB`. Schema `schemas/soul-version-leaf.schema.json`. `userPseudonym` appears **only** in soul-version leaves; no leaf that names a vault, an envelope or a payment carries it or `soulVersionHash` (RV-026).
+
+### 4.21 `JobBrief` (RV-025)
+
+- **Purpose:** tells an ERC-8183 provider what the job is. The on-chain `description` carries only `"czar:" + descriptionHash` (p1-E7); the brief is the preimage the provider needs, served only to that provider.
+- **Schema:** `schemas/job-brief.schema.json`. Privacy class `server-only` (sent to the job's provider only; never public, never on-chain).
+- **Route:** `GET /v1/jobs/{jobKey}/brief` (`getJobBrief`, §9.2), authenticated by an EIP-712 `BriefRequest` signature from the job's `provider` address (§6.2), so only the provider named on-chain can read it.
+
+| Field | Type | R | PC | Description |
+|---|---|---|---|---|
+| `briefVersion` | const `1` | yes | SO | |
+| `network` | `Caip2` | yes | SO | |
+| `jobEscrow`, `jobId`, `jobKey` | `Address`, string, `Hash32` | yes | SO | which job this brief is for |
+| `planHash`, `stepIndex`, `acceptanceProfileId` | `Hash32`, integer, string | yes | SO | the `descriptionHash` preimage fields (§5.2) |
+| `capability` | string | yes | SO | taxonomy tag |
+| `inputs` | object | yes | SO | the structured step input, keys only from `inputTemplate.inputKeys` (RV-021); never free user text |
+| `inputSalt` | `Hash32` | yes | SO | random per job; stops anyone guessing low-entropy `inputs` from the public hash |
+| `inputCommit` | `Hash32` | yes | SO | `H({hashRule:"czar-hash-v1", kind:"job-input", inputs, inputSalt})` (§5.2) |
+| `deliverable` | object `{mimeType, expectedKeys?: string[], schema?: object (≤ 8 KiB), uriConvention}` | yes | SO | what to submit; `uriConvention` = `https://<provider-host>/.well-known/czar-deliverable/<deliverable-hex>` (D53); bytes must hash to the submitted `deliverable`, else the job is rejected (D77) |
+| `budgetCap` | `Amount6` | yes | SO | the job's `reservedCap`: `setBudget` above it is refused (`BudgetExceedsReserved`) |
+| `evaluator` | `Address` | yes | SO | K7 |
+| `expiredAt` | `UnixSeconds` | yes | SO | |
+| `issuedAt` | `Timestamp` | yes | SO | |
+
+- **Provider check:** recompute `inputCommit`, then `descriptionHash` (§5.2), and compare with the job's on-chain `description`.
+
 
 ### 4.19 `RankingDecision`
 
@@ -425,7 +454,7 @@ type PaymentRef =
 
 `{batchId: Id(bat), publisher: Address, kind: "EVIDENCE_BATCH", prevRoot: Hash32, root: Hash32, leaves: array of {leafType, leafHash: Hash32, contentUri?: string}, uriHash: Hash32, archiveUri: string, cid?: string, committedTx?: Hash32}`. All `PUB`.
 
-- **Phase 1 archive (D54):** the archive (JSON Lines of the leaf objects, public rows only per SL §11) is served from Czar's server at `archiveUri` (https). `uriHash = keccak256(utf8(archiveUri))`; the anchored `root` lets anyone check the archive's leaves, so availability depends on Czar's server but integrity does not.
+- **Phase 1 archive (D54, D78):** the archive (JSON Lines of the leaf objects, public rows only per SL §11) is served by Czar's local server. `archiveUri` is the host-free `czar-archive:<root>` (lowercase hex root), never a localhost URL, because the anchor is permanent and the public archive host arrives only in stage 2 (RV-028); `uriHash = keccak256(utf8(archiveUri))`. Readers resolve it against the archive hosts in Czar's latest `POLICY_RELEASE`; the anchored `root` lets anyone check the archive's leaves, so availability depends on Czar's hosts but integrity does not. `EvidenceBatch.archiveUri` uses this form.
 - **Phase 2:** archives are also pinned to IPFS; `cid` is set and `uriHash = keccak256(CID)` (SL §7.1). Pin providers are chosen in Phase 2.
 - Leaves are `demand-proof`, `soul-version`, or SL rows (`observation`, `report`, `assessment`, `correction`, `exposure`, `submission-log`). Schema `schemas/evidence-batch.schema.json`.
 
@@ -450,6 +479,8 @@ type PaymentRef =
 | `reportHash` | `jcs(AcceptanceReport minus reportHash)` | the ERC-8183 `reason` |
 | `paymentRefHash` | SL §5.2 (`PaymentRef` without ★ fields) | |
 | `descriptionHash` | `H({hashRule:"czar-hash-v1", kind:"job-description", planHash, stepIndex, acceptanceProfileId, inputCommit})` | the ERC-8183 `description` string is `"czar:" + descriptionHash` |
+| `inputCommit` | `H({hashRule:"czar-hash-v1", kind:"job-input", inputs, inputSalt})` with `inputs` and `inputSalt` from the `JobBrief` (§4.21) | RV-025: previously used but never defined |
+| `soulVersionCommit` | `keccak256(abi.encode(bytes32 soulVersionHash, bytes32 demandSalt))`, `demandSalt = keccak256(abi.encode(bytes32 userDemandSecret, address vault, uint64 envelopeId))` | RV-026: the only soul reference in a public demand-proof leaf |
 
 ### 5.3 Merkle rules (`czar-merkle-v1`)
 
@@ -473,7 +504,7 @@ One rule for every tree Czar builds: evidence batches, feature snapshots and `pa
 
 ## 6. EIP-712 types
 
-All type strings, type hashes and domain separators below were computed with viem 2.57.2 (`vectors/compute-eip712-vectors.mjs`, output `vectors/eip712-vectors.json`, run 2026-10-18). Values that also appear in vendor source were checked against it and match.
+All type strings, type hashes and domain separators below were computed with viem 2.57.2 (`vectors/compute-eip712-vectors.mjs`, output `vectors/eip712-vectors.json`, run 2026-10-18, rerun 2026-10-19 after RV-013 and RV-061; the script's output now reproduces the JSON file byte for byte). Values that also appear in vendor source were checked against it and match.
 
 ### 6.1 Domains
 
@@ -502,10 +533,12 @@ Digest = `keccak256("\x19\x01" ‖ domainSeparator ‖ structHash)` (EIP-712; Ga
 | `ServiceClaim` | SL §5.8 | `0xdac3f27f79f0e197bffa8d8002d877778392e96adeaf0e7d55e61f96c4a1039c` | merchant payTo | SL §5.8 |
 | `AutonomyRaise` | `AutonomyRaise(bytes32 category,uint256 newLimit,uint64 periodId,uint256 nonce,uint256 deadline)` | `0x6247988191abc5977b0b6f569e66d23eff38cc0f0fe30f8ed678b03c3f21b368` | `autonomySigner` (K5) | new |
 | `OwnerAction` | `OwnerAction(uint8 action,bytes32 payloadHash,uint256 nonce,uint256 deadline)` | `0x5a8b2f7d5d70ba2335e2ee47a9d897748d8694bdb44c148ad01f541eeb2f0248` | the owner's passkey (D30 fallback; WebAuthn challenge = this digest) | new |
+| `BriefRequest` | `BriefRequest(bytes32 jobKey,uint64 issuedAt)` under domain `{name: "CzarJobBrief", version: "1", chainId}` (no contract; separator on 5042002 `0x8c06faf59aae1fd812b66bab954eb62f8a9a8d5607d9e79e5e83d67e60fd1e54`) | `0xe012200f525ff4d3cacf52809316e0f39197c977a4498fb16c875c1defcfc215` | the job's provider (EOA or ERC-1271) | new (RV-025) |
+| `ReceiptAttestation` | `ReceiptAttestation(bytes32 receiptStructHash)` | `0x01b75f6051eb731488fad2e8de7925f8a64c89ef33c418e2a62e77ae02691eff` | `agentSigner` (K3), under the **CzarVault** domain of one vault; `receiptStructHash` = the SL `Receipt` struct hash | new (RV-013) |
 
 `AutonomyRaise` fields: `category` = `keccak256(utf8(category))`; `newLimit` = `Amount6` as `uint256`; `periodId = floor(block.timestamp / 604800)`; `nonce` = the vault's `autonomyNonce`; `deadline` = unix seconds.
 
-`OwnerAction` fields: `action` enum `1 OPEN_ENVELOPE`, `2 SET_LIMITS`, `3 FREEZE`, `4 UNFREEZE`, `5 WITHDRAW`, `6 ROTATE_SIGNERS`, `7 SET_PASSKEY`, `8 CLOSE_ENVELOPE`; `payloadHash = keccak256(abi.encode(...args of the matching vault function))` (spec 03 lists the encoding per action); `nonce` = the vault's `ownerActionNonce`; `deadline` unix seconds.
+`OwnerAction` fields: `action` enum `1 OPEN_ENVELOPE`, `2 SET_LIMITS`, `3 FREEZE`, `4 UNFREEZE`, `5 WITHDRAW`, `6 ROTATE_SIGNERS`, `7 SET_PASSKEY`, `8 CLOSE_ENVELOPE`, `9 FORCE_CLOSE_ENVELOPE`, `10 RECORD_MANUAL_RETURN`, `11 RAISE_AUTO_LIMIT`, `12 LOWER_AUTO_LIMIT`, `13 REQUEST_PULLBACK`, `14 CANCEL_PULLBACK`, `15 WRITE_OFF_POCKET`, `16 SET_MAX_PULLBACK_FEE` (9–16 added by RV-033 and D81; the type string is unchanged); `payloadHash = keccak256(abi.encode(...args of the matching vault function))` (spec 03 lists the encoding per action); `nonce` = the vault's `ownerActionNonce`; `deadline` unix seconds.
 
 ### 6.3 Vault signature envelopes (bytes passed to `isValidSignature`)
 
@@ -515,7 +548,7 @@ The vault's `isValidSignature(bytes32 digest, bytes signature)` reads the first 
 |---|---|---|
 | `USDC_3009` | `0x86b499474d9c0ea9b4a99b5ce22c4ae0f1ef4bf774214e3c1e4095c0371888cb` | `keccak256("czar.vault.sig.USDC_3009.v1")` |
 | `GATEWAY_BURN` | `0xf453aa3365355a8cf99e674b4443d5009b132245c53a3eb3b5a14953d97265f2` | `keccak256("czar.vault.sig.GATEWAY_BURN.v1")` |
-| `SL_RECEIPT` | `0x6caa53e9addf8fd5f6ef2283c076da956fffddb63f2677a5beeed71428d8601f` | `keccak256("czar.vault.sig.SL_RECEIPT.v1")` |
+| `SL_RECEIPT` | `0x01c314900cb74ef1a689e81bddd748cc950a7aceb730d7cb9b7660a5aa6a3eaa` | `keccak256("czar.vault.sig.SL_RECEIPT.v2")` (RV-013). The retired `.v1` tag `0x6caa53e9…8601f` (opaque struct hash) is refused by the vault |
 
 #### 6.3.1 `USDC_3009` (primary encoding, AR-3 true)
 
@@ -532,11 +565,14 @@ The vault's `isValidSignature(bytes32 digest, bytes signature)` reads the first 
 - The vault rebuilds the full `BurnIntent` struct hash from the stored `PullbackRecord` plus its immutables (spec 03 `czar-vault.md` §6), computes `digest' = toTypedDataHash(GATEWAY_DOMAIN_SEPARATOR, structHash)` with the chain-less GatewayWallet domain, and requires `digest' == digest`.
 - This path is exercised off-chain: Circle's TEE simulates `isValidSignature` through `eth_call` against a 2-of-3 RPC quorum (A2-08) and then signs the on-chain burn itself (`Burns.sol` lines 328–339, path 2 "TEE vouch"). The request to `POST /v1/transfer` sets `contractSigner: true` and `spec.sourceSigner = vault` (A2-19c; `withdraw.ts` lines 32–37).
 
-#### 6.3.3 `SL_RECEIPT`
+#### 6.3.3 `SL_RECEIPT` (v2, RV-013)
 
-`signature = abi.encode(bytes32 kind, bytes32 structHash, bytes agentSig)`
+`signature = abi.encode(bytes32 kind, SlReceipt receipt, bytes agentSig)` where `SlReceipt` is the tuple of the 13 SL `Receipt` fields in type-string order `(bytes32 paymentRefHash, bytes32 requestCommit, bytes32 responseCommit, uint16 statusCode, string originAsserted, bytes32 requirementsHashSeen, uint64 tRequest, uint64 tPaymentSigned, uint64 tComplete, uint8 outcome, bytes32 localChecksCommit, uint8 disclosure, uint64 createdAt)`.
 
-- The vault requires `digest == toTypedDataHash(SELECTION_LAYER_DOMAIN_SEPARATOR(chainId), structHash)` and that `agentSig` recovers to `agentSigner`. It does not decode receipt fields; the domain separator alone guarantees this digest can never be a USDC or Gateway digest. Not blocked by freeze (it moves no money). Used for vault-direct receipts and for `erc8183-job` receipts (the vault is the job client, AM-10).
+- The vault recomputes `structHash = hashStruct(Receipt, receipt)` (the SL §5.8 encoding, `originAsserted` hashed as `keccak256(bytes)`), requires `digest == toTypedDataHash(SELECTION_LAYER_DOMAIN_SEPARATOR(chainId), structHash)`, then requires `agentSig` to recover to `agentSigner` over `toTypedDataHash(CZAR_VAULT_DOMAIN_SEPARATOR(chainId, vault), hashStruct(ReceiptAttestation{receiptStructHash: structHash}))`.
+- Why both steps: recomputing from fields pins the type to `Receipt`, so the vault can never attest a `Correction`, `ServiceClaim` or other SL type; the `ReceiptAttestation` wrapper carries the vault address in its domain, so one agent signature validates for exactly one vault (all vaults share `agentSigner`, spec 03 factory defaults). This is the ERC-7739 nesting idea applied to one type.
+- What a verifier does: call `vault.isValidSignature(receiptDigest, signature)` with the SL `Receipt` digest it already computes; nothing else changes for SL readers.
+- Not blocked by freeze (it moves no money). Used for vault-direct receipts and for `erc8183-job` receipts (the vault is the job client, AM-10). The signer signs a `ReceiptAttestation` only after rebuilding the `Receipt` struct hash from fields and matching `paymentRefHash` to a payment of this vault that the indexer has seen settled (spec 04 CZ-27 `sl-receipt`).
 
 #### 6.3.4 Fallback encoding (AR-3 false: Facilitator rejects long signatures)
 
@@ -548,7 +584,8 @@ The vault's `isValidSignature(bytes32 digest, bytes signature)` reads the first 
 #### 6.3.5 Domain separation argument
 
 - `USDC_3009` digests carry the USDC domain separator (name `USDC`, chainId, USDC address); `GATEWAY_BURN` digests carry the GatewayWallet separator (name `GatewayWallet`, no chainId); `SL_RECEIPT` digests carry the SelectionLayer separator. Three different `\x19\x01`-prefixed preimages; a digest valid under one kind cannot equal a digest under another unless keccak256 collides.
-- The kind tag is only a dispatch hint. The vault always recomputes the digest for the claimed kind from fields it controls and compares. A wrong tag yields a mismatch and `INVALID`.
+- The kind tag is only a dispatch hint. The vault always recomputes the digest for the claimed kind from fields it controls and compares (for `SL_RECEIPT`, from the 13 `Receipt` fields, RV-013). A wrong tag yields a mismatch and `INVALID`.
+- The inner agent signatures are separated too: `USDC_3009` and `GATEWAY_BURN` sign the outer digest itself; `SL_RECEIPT` signs the `ReceiptAttestation` digest under the vault's own domain, which no other kind uses.
 - Any digest that does not match a kind's recomputation returns `0xffffffff`. The vault never returns `0x1626ba7e` for a bare `ecrecover` match.
 
 ### 6.4 Test vectors
@@ -559,12 +596,14 @@ Recorded in `vectors/eip712-vectors.json` (all message values invented):
 |---|---|
 | `usdcTransferWithAuthorization_5042002` (from example vault `0x…0c2a21`, to `0x…bEEF`, value 100000, validBefore 1760800000, nonce `0x11…11`) | `0x0b90a5995f31dd9e567d03c72be39bad175cf2bb4fc652767365a0b44bf366b0` |
 | `gatewayBurnIntent_sameChain` (domains 26/26, wallet `0x0077…19B9`, minter `0x0022…475B`, depositor `0x…b0c0`, recipient = signer = vault, value 199600, maxFee 10000, maxBlockHeight 68000000, salt `0x22…22`, empty hookData) | `0xbaa687f22d9719e8afd3f756b6c2c3991f4fcf2674f419c095132f7ec22d6ec8`; byte-encoded `TransferSpec` length 340, `transferSpecHash = 0xa2f49c1a7ff819bf27ffd2ff6d87a0ea51b77284f7b879ac42deb760376d3616` |
-| `slReceipt_5042002` | `0x8bef0825cbab5aff373a3651d22ee4169a09d1504ad6eb30c02277d37725d561` |
-| `autonomyRaise_5042002` (category `keccak256("research")`, newLimit 5000000, periodId 2963, nonce 7) | `0x044c127c25f997c56c8cff4f8cbfd12cf64cdef3fe0f7e6844f72bc90d03f91b` |
+| `slReceipt_5042002` | `0x8bef0825cbab5aff373a3651d22ee4169a09d1504ad6eb30c02277d37725d561`; struct hash `0xe79fd862d70a3af78fdf18fc3b4039605e1728e44110a659b1de9b4bd9c2f0df` |
+| `receiptAttestation_5042002` (example vault `0x…0c2a21`, `receiptStructHash` = the `slReceipt` struct hash) | `0xe4f941d6e918d974ccc3f435b16b3dc38eaa8027fb1955a87ea3763d250e65a0` (RV-013) |
+| `autonomyRaise_5042002` (category `keccak256("research")`, newLimit 5000000, periodId 2963, nonce 7, deadline 1792026000 = one hour into period 2963) | `0xb6d92f2ab8f255a7aa93ad87b86fb4e3c22ccc3f7b86c4b4988a8c1fdf2123a3` (RV-061: the earlier deadline 1760900000 preceded its period, so the vector could never execute) |
+| `briefRequest_5042002` (jobKey for Circle's escrow and job 42, issuedAt 1792026000) | `0x991363ddab9205ec2a375be2469430bd8d1b2b9cb767f0e8f21218038a9954fe` (RV-025) |
 | `ownerAction_5042002` (action 1, payloadHash `0x77…77`, nonce 3) | `0x69b896f95e60ed729ed2cfab1c7a025da52213188bb0fa2fcee14cda92c559f5` |
 | `derivedNonce_example` (vault `0x…0c2a21`, reservationId 12, index 3) | nonce `0x1f7eb762975d3148f76637d5498c320aa01d5daa71be09a5e6ca4947371fd59f` |
 
-Spec 03's Foundry tests MUST reproduce these digests from the same inputs.
+Spec 03's Foundry tests MUST reproduce the seven on-chain entries (all but `briefRequest`, which only the server verifies) from the same inputs (`security-and-testing.md` §3.1); `@czar/hashing` reproduces all eight.
 
 ---
 
@@ -590,10 +629,12 @@ Spec 03's Foundry tests MUST reproduce these digests from the same inputs.
 | `resultId` | `res_<Ulid>` | server | global | write-back download handle |
 | `userId` | `usr_<Ulid>` | server | global | |
 | `pushSubscriptionId` | `psh_<Ulid>` | server | per user | stage 2 (D69) |
-| `quoteId` | `qte_<Ulid>` | server | global | shadow-mode quotes |
+| `quoteId` | `qte_<Ulid>` | server | global | `createQuote` results (each names a `planId` and `stepIndex`) and shadow-mode quotes (RV-020) |
+| `payRequestId` | `prq_` + 32 lowercase hex | client (MCP `pay`) | per device | one id per `createPayRequest` call, reused on retry; maps to the per-index `paymentId`s the server mints (RV-050) |
 | `claimId` (P2) | `clm_<Ulid>` | claim server | global | |
 | `candidateId` | `cand_<Ulid>` | daemon | local only (belief candidate passed between the rules and P-04; never leaves the machine) | AM-15 |
-| `userPseudonym` | `keccak256(abi.encode(userSecret, epoch))` | server, rotating per 90-day epoch | public leaves | `userSecret` is `SO` |
+| `userPseudonym` | `keccak256(abi.encode(userSecret, epoch))` | server, rotating per 90-day epoch | soul-version leaves only (RV-026) | `userSecret` is `SO` |
+| `demandSalt` | `keccak256(abi.encode(userDemandSecret, vault, envelopeId))` | server | one per envelope; `SO`; revealed to the user on request | `userDemandSecret` is `SO` and separate from `userSecret` (RV-026) |
 
 ### 7.2 EIP-3009 nonce derivation (`czar-nonce-v1`)
 
@@ -610,7 +651,8 @@ Spec 03's Foundry tests MUST reproduce these digests from the same inputs.
 ### 7.4 Payment ids (`payment-identifier` extension)
 
 - Format: `pay_` + 32 lowercase hex (UUID v4 without dashes) = 36 characters, within the extension's 16–128 chars of `[A-Za-z0-9_-]` (`payment_identifier.md`, "id Format"; F1-06).
-- One `paymentId` per authorization index: `paymentId(reservationId, index)` is minted when the reservation is created and stored in `Reservation.paymentIds` (server). A retry of the same call reuses the same id and the same signed authorization. The server never signs a second authorization for an index that already has a payment id unless the first is proven unused (`authorizationState == false` after `validBefore`).
+- One `paymentId` per authorization index: `paymentId(reservationId, index)` is minted **by the server** when the reservation is created and stored in `Reservation.paymentIds`. It is the x402 `payment-identifier` value for that index only.
+- **Pay calls (RV-050):** a `createPayRequest` / MCP `pay` call carries a client-chosen `payRequestId` (`prq_` + 32 hex), not a `paymentId`. One call can use several indices; the response lists their `paymentIds`. `reportOutcome` takes the `payRequestId` and optionally one `paymentId`. **Superseded:** the MCP spec's "client-supplied `paymentId`". A retry of the same call reuses the same id and the same signed authorization. The server never signs a second authorization for an index that already has a payment id unless the first is proven unused (`authorizationState == false` after `validBefore`).
 - The client sends the extension only when the 402 advertises `extensions["payment-identifier"]`; otherwise idempotency rests on the nonce alone (a merchant cannot settle the same nonce twice).
 - `409 Conflict` from a merchant on a reused id with a different fingerprint is a hard stop for that step (no new authorization).
 
@@ -763,14 +805,21 @@ Full definition: `api/openapi.yaml` (OpenAPI 3.1; 28 paths, 29 operations; parse
 | GET | `/v1/objectives/{objectiveId}` | yes | → `ObjectiveStatus` (status, plan summary, `resultId`) | |
 | POST | `/v1/objectives/{objectiveId}/results/ack` | key required | `ResultAck` → `204` | write-back confirmation (CZ-11) |
 | GET | `/v1/results/{resultId}` | yes | → `Result` (labelled provenance per step) | |
+
+**Provider surface (EIP-712 `BriefRequest` signature, RV-025)**
+
+| Method | Path | Idempotent? | Request → Response | Notes |
+|---|---|---|---|---|
+| GET | `/v1/jobs/{jobKey}/brief` (`getJobBrief`) | yes | headers `X-Czar-Provider-Address`, `X-Czar-Brief-Issued-At`, `X-Czar-Brief-Signature` → `JobBrief` (§4.21) | the signature is the job's `provider` over `BriefRequest(jobKey, issuedAt)` (§6.2), EOA or ERC-1271; `issuedAt` within `api.briefSignatureMaxAgeSeconds` 300; any other caller gets 404 (no existence oracle) |
+
 | POST | `/v1/soul-versions` | key required | `SoulVersionSubmission` (§4.18 minus pseudonym) → `202` | queued for the next evidence batch |
 | POST | `/v1/shadow/quotes` | key required | `ShadowQuoteRequest` → `Plan` with `shadow: true` | no envelope, no payment (CZ-08) |
-| POST | `/v1/pay/requests` | key + `paymentId` | `PayRequest` → `PayResponse` (`executing` \| `approval-required` + `elicitationUrl` \| `rejected`) | used by the MCP `pay` tool; `409` on a reused `paymentId` with a different request (§7.4) |
+| POST | `/v1/pay/requests` | key + `payRequestId` | `PayRequest` `{payRequestId, objectiveId, planId, stepIndex, calls?, maxAmount?, input?}` → `PayResponse` (`executing` \| `approval-required` + `elicitationUrl` \| `accepted` \| `rejected` \| `failed`) | canonical shape; the MCP `pay` tool mirrors it (D75). Pays only a step of an approved plan with an open envelope, within the step's `expectedCalls` (RV-019); `409` on a reused `payRequestId` with a different request (§7.4) |
 | POST | `/v1/hooks/ingest-report` | key required | `IngestReport` (counts only, optional `shadowTotals`, AM-04) → `204` | no events, no text |
 | POST | `/v1/services/search` (`findService`) | key required | `FindServiceRequest` → `FindServiceResponse` | backs MCP `find_service` (AM-01) |
 | POST | `/v1/quotes` (`createQuote`) | key required | `QuoteRequest` → `QuoteResponse` | backs MCP `quote`; moves no money (AM-01) |
 | POST | `/v1/outcomes` (`reportOutcome`) | key required | `OutcomeReport` → `OutcomeRecorded` | backs MCP `report_outcome` (AM-01) |
-| POST | `/v1/models/complete` (`completeModelCall`) | key required | `ModelCallRequest` → `ModelCallResponse` | model proxy for P-01, P-04, P-05, P-06; stores only token counts (D31, AM-02) |
+| POST | `/v1/models/complete` (`completeModelCall`) | key required, **never replayed** | `ModelCallRequest` → `ModelCallResponse` | model proxy for P-01, P-04, P-05, P-06; stores only token counts (D31, AM-02); a repeated key gets `409 replay-not-stored` (RV-043) |
 
 **App surface (`AppSession`)**
 
@@ -814,13 +863,14 @@ Full definition: `api/openapi.yaml` (OpenAPI 3.1; 28 paths, 29 operations; parse
 ### 9.3 Idempotency
 
 - Every creating `POST` requires `Idempotency-Key` (UUID). The server stores the key with a fingerprint of the body for 24 h. Same key and same body → the stored response is replayed with the original status code. Same key and different body → `409` with `czarCode: idempotency-conflict`.
-- `POST /v1/pay/requests` is additionally keyed by `paymentId` (§7.4); a different request under the same `paymentId` is `409`.
+- **Exception (RV-043):** `POST /v1/models/complete` never stores or replays a response, because D31 lets the proxy keep only token counts. It stores the key and fingerprint only; any second request with the same key gets `409 replay-not-stored`, and the daemon retries with a new key if it still needs the output.
+- `POST /v1/pay/requests` is additionally keyed by `payRequestId` (§7.4, RV-050); a different request under the same `payRequestId` is `409`.
 - `GET` and `DELETE` are naturally idempotent.
 
 ### 9.4 Error model
 
 - `application/problem+json` (RFC 9457): `type` under `https://czar.dev/problems/`, `title`, `status`, `detail` (no user text), `instance`, `czarCode`, `retryable` (§2.3).
-- Stable `czarCode` values used in Phase 1: `validation`, `idempotency-conflict`, `device-revoked`, `session-expired`, `hash-mismatch`, `plan-expired`, `envelope-not-open`, `approval-required`, `payment-id-conflict`, `rate-limited`, `upstream-unavailable` (retryable), `frozen`, `paused`.
+- Stable `czarCode` values used in Phase 1: `validation`, `idempotency-conflict`, `replay-not-stored` (RV-043), `device-revoked`, `session-expired`, `hash-mismatch`, `plan-expired`, `envelope-not-open`, `approval-required`, `payment-id-conflict` (now about `payRequestId`), `plan-not-approved`, `step-not-in-plan`, `step-calls-exhausted`, `step-cap-exhausted`, `input-not-in-template`, `input-redaction-hit` (RV-019, RV-021), `resource-not-indexed` (RV-019), `fetch-blocked` (RV-022), `rate-limited`, `upstream-unavailable` (retryable), `frozen`, `paused`.
 
 ### 9.5 Pagination and rate limits
 
@@ -854,11 +904,11 @@ Full definition: `mcp/czar-mcp-tools.md`. The local Czar MCP server (CZ-09) runs
 | `get_objectives` | lists objectives and their status | true | false | true | false | none |
 | `find_service` | ranked candidates from the Selection Layer through `findService` (`POST /v1/services/search`, AM-01); structured fields only, no merchant text (spec 01 §15.5) | true | false | true | true | none |
 | `quote` | prices and routes a step through `createQuote` (`POST /v1/quotes`, AM-01) (live 402, D37 routing); moves no money | true | false | false | true | URL mode to the approval page when a new envelope would be needed (D3-11) |
-| `pay` | forwards `POST /v1/pay/requests`; the server reserves, signs, settles, accepts and returns a `StepResult` (§4.15) | false | true | false | true | URL mode when the server answers `approval-required` (D3-04, D3-11); retry with the same `paymentId` after approval |
+| `pay` | forwards `POST /v1/pay/requests` with exactly its shape (D75): one `(planId, stepIndex)` of an approved plan; the server reserves, signs, settles, screens, accepts and returns a `StepResult` (§4.15) | false | true | false | true | URL mode when the server answers `approval-required` (D3-04, D3-11); retry with the same `payRequestId` after approval |
 | `report_outcome` | records useful / not useful / wrong / unused for a payment through `reportOutcome` (`POST /v1/outcomes`, AM-01); feeds receipts and earned autonomy | false | false | true | false | none |
 
-- Every `pay` call carries a client-supplied `paymentId` (`pay_` + 32 hex, §7.4) and an `idempotencyKey`; retries reuse both.
-- Form-mode elicitation is never used for spending or credentials (D3-11). URL mode points at `https://app.czar.dev/approve/<planId>`; the client must show the server name and target host before navigating.
+- Every `pay` call carries a client-chosen `payRequestId` (`prq_` + 32 hex, §7.4, RV-050) and an `idempotencyKey`; retries reuse both.
+- Form-mode elicitation is never used for spending or credentials (D3-11). URL mode points at `http://localhost/approve/<planId>` in Phase 1 (D78); the client must show the server name and target host before navigating.
 - Errors are `isError: true` with a `StepError` (§4.16) in `structuredContent`.
 - Dual era: `server/discover` plus the `_meta` protocol-version and client-capabilities keys for `2026-07-28`; `initialize` answered for `2025-11-25` and older. Which revision each host negotiates today is a GAP (part 2, D3), so both paths ship.
 - Configuration snippets for the Claude Code plugin `.mcp.json` (B1-36; tool names become `mcp__plugin_czar_czar__<tool>`, B1-25), Codex `[mcp_servers.czar]` (B2-22) and Cursor `mcp.json` (B3-13) are in `mcp/czar-mcp-tools.md` §5.
@@ -1158,3 +1208,14 @@ Agent-directed text met this session (not followed): the Circle and Arc doc head
 | 2026-10-18 | — | No EIP-712 type string, type hash or test vector changed. |
 | 2026-10-19 | D69 | Push routes, push payloads (§9.6) and the push link in §9.7 tagged stage 2; soul-pointer wording no longer says phone. |
 | 2026-10-19 | D69 | `psh_` id tagged stage 2. |
+| 2026-10-19 | RV-002, RV-003 / D71 | §4.5 `pocket`, `pocketCapBps` rule; §4.7 kind-4 pocket leaf and per-step enforcement; `plan.schema.json` 1.1. |
+| 2026-10-19 | RV-001, RV-004, RV-009, RV-011, RV-048 | §4.8 `shortfall`, `pocket`, derived `Closing`; §4.9 `releasedCount` rule; §4.10 derived `DelegateReady`, `recovery`; §4.11 `Released`; schemas `envelope`, `pocket-record`, `job-record` 1.1. |
+| 2026-10-19 | RV-013 | §6.2 `ReceiptAttestation`; §6.3 `SL_RECEIPT` v2 tag and encoding; §6.3.3 rewritten; §6.3.5; §6.4 new vector; vectors regenerated (byte-for-byte reproducible). |
+| 2026-10-19 | RV-033, D81 | §6.2 `OwnerAction` kinds 9–16 (type string unchanged). |
+| 2026-10-19 | RV-061 | §6.4 `autonomyRaise` vector deadline inside its period; digest changed. |
+| 2026-10-19 | D78 / RV-028 | §4.20 host-free `archiveUri` (`czar-archive:<root>`); `evidence-batch.schema.json` 1.1. |
+| 2026-10-19 | — | Schema `$ref`s resolve against `https://czar.dev/schemas/common/1.0` (ajv now compiles all 19). |
+| 2026-10-19 | RV-025 | §4.21 `JobBrief`; `inputCommit` defined; `getJobBrief` route; `BriefRequest` EIP-712 type and vector. |
+| 2026-10-19 | RV-026 | §4.17 `DemandProofLeaf` v2 (no pseudonym, salted `soulVersionCommit`); `demandSalt`; v1 superseded. |
+| 2026-10-19 | RV-019, RV-020, RV-021, RV-027, RV-043, RV-050 / D75 | §4.6 `inputKeys`; §7.1 `quoteId`, `payRequestId`; §7.4; §9.2–§9.4; §10. |
+| 2026-10-19 | RV-018 / D74 | §4.15 `StepResult` never reaches the planner. |

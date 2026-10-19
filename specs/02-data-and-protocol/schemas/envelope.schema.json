@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://czar.dev/schemas/envelope/1.0",
+  "$id": "https://czar.dev/schemas/envelope.schema.json",
   "title": "Envelope (mirror)",
   "description": "Server mirror of CzarVault envelope state, rebuilt from events (spec 02 \u00a74.8). The contract is the source of truth.",
   "type": "object",
@@ -9,9 +9,9 @@
   "properties": {
     "schemaVersion": {
       "type": "string",
-      "description": "Schema version, major.minor; this file is 1.0.",
+      "description": "Schema version, major.minor; this file is 1.1. 1.1 (2026-10-19) adds shortfall and pocket; Closing is derived (RV-011, RV-048).",
       "x-privacyClass": "public",
-      "const": "1.0"
+      "const": "1.1"
     },
     "envelopeRef": {
       "$ref": "common.schema.json#/$defs/EnvelopeRef",
@@ -107,6 +107,16 @@
       "description": "In ERC-8183 escrow.",
       "x-privacyClass": "public"
     },
+    "shortfall": {
+      "$ref": "common.schema.json#/$defs/Amount6",
+      "description": "Credits owed back to the envelope that the owner had already withdrawn; from ShortfallRecorded (RV-011). Absent means 0.",
+      "x-privacyClass": "public"
+    },
+    "pocket": {
+      "$ref": "common.schema.json#/$defs/Address",
+      "description": "The envelope's single pocket, from PocketRegistered (D48, D71).",
+      "x-privacyClass": "public"
+    },
     "state": {
       "type": "string",
       "enum": [
@@ -114,7 +124,7 @@
         "Closing",
         "Closed"
       ],
-      "description": "Envelope state (spec 03 state machine).",
+      "description": "Open and Closed come from events; Closing is derived by the indexer: on-chain Open and (now >= expiresAt or the close sequence has started) (RV-048).",
       "x-privacyClass": "public"
     },
     "lastEventBlock": {

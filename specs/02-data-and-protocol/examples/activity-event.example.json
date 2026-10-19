@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "1.0",
+  "eventId": "evt_67S3XSMPHEVJV8NDC6J7WTANW3",
+  "host": "claude-code",
+  "sessionRef": "0xe0260be23fb21a0c9c25bf89cbb910939439ad3e0b6cac1e8d6dcbed3b22ff01",
+  "projectRef": "0xfdf430782573001a7cb8b69fcfb9c21ba6867111553a200dd0c56ec0f3a602cc",
+  "eventType": "tool-call",
+  "occurredAt": "2026-10-19T12:00:00.000Z",
+  "summary": "example",
+  "provenance": {
+    "hookEvent": "example",
+    "trusted": false
+  },
+  "redaction": {
+    "layer1": {
+      "hits": 0,
+      "rules": [
+        "example"
+      ]
+    }
+  }
+}

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://czar.dev/schemas/acceptance-report/1.0",
+  "$id": "https://czar.dev/schemas/acceptance-report.schema.json",
   "title": "AcceptanceReport",
   "description": "SL §5.5 ValidationReportCore with assignment buyer-local in Phases 1–2, plus Czar fields (spec 02 §4.14). reportHash is the ERC-8183 reason.",
   "type": "object",

@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://czar.dev/schemas/demand-proof-leaf/1.0",
+  "$id": "https://czar.dev/schemas/demand-proof-leaf.schema.json",
   "title": "DemandProofLeaf",
-  "description": "Proof-of-demand chain for one objective, anchored as an EVIDENCE_BATCH leaf (spec 02 \u00a74.17; product \u00a76.22).",
+  "description": "SUPERSEDED by demand-proof-leaf.v2.schema.json (RV-026): version 1 carried userPseudonym and the bare soulVersionHash, which let anyone join a user's soul-version leaves to their vault and payments. Version-1 leaves are never produced. Proof-of-demand chain for one objective, anchored as an EVIDENCE_BATCH leaf (spec 02 \u00a74.17; product \u00a76.22).",
   "type": "object",
   "x-privacyClass": "public",
   "additionalProperties": false,

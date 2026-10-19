@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://czar.dev/schemas/soul-version-leaf/1.0",
+  "$id": "https://czar.dev/schemas/soul-version-leaf.schema.json",
   "title": "SoulVersionLeaf",
   "description": "Soul version commitment anchored as an EVIDENCE_BATCH leaf (spec 02 \u00a74.18).",
   "type": "object",

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://czar.dev/schemas/job-record/1.0",
+  "$id": "https://czar.dev/schemas/job-record.schema.json",
   "title": "JobRecord",
   "description": "An ERC-8183 job opened by the vault as client (spec 02 §4.11).",
   "type": "object",
@@ -9,9 +9,9 @@
   "properties": {
     "schemaVersion": {
       "type": "string",
-      "description": "Schema version, major.minor; this file is 1.0.",
+      "description": "Schema version, major.minor; this file is 1.1. 1.1 (2026-10-19) adds state Released (RV-009).",
       "x-privacyClass": "public",
-      "const": "1.0"
+      "const": "1.1"
     },
     "vault": {
       "$ref": "common.schema.json#/$defs/Address",
@@ -89,9 +89,10 @@
         "Completed",
         "Rejected",
         "Expired",
-        "Refunded"
+        "Refunded",
+        "Released"
       ],
-      "description": "Job state.",
+      "description": "Job state. Released: an unfunded job the vault released (JobSynced state 6, RV-009).",
       "x-privacyClass": "public"
     },
     "expiredAt": {

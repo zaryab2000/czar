@@ -39,10 +39,29 @@ One `pnpm` workspace (Node 22 LTS, ESM only, TypeScript strict; spec 01 §17). C
 | `@czar/schemas` | a value that passes `validate<Name>()` is exactly the 02 object; `privacyClassOf(name, field)` reads the `x-privacyClass` annotation so senders can assert nothing `local-only` crosses a link | property tests: every schema example in 02 §4 validates; every `local-only` field is rejected by the `ObjectiveSubmission` sender guard |
 | `@czar/hashing` | reproduces the six digests and the derived nonce in `02/vectors/eip712-vectors.json` byte for byte; Merkle roots verify with OpenZeppelin `MerkleProof` | the vectors file is the fixture; a Foundry test consumes the same fixture (03 `security-and-testing.md` §3.1) |
 | `@czar/redaction` | layer 1 replaces every match of the pinned gitleaks rule set with a `[[R:S:<rule>]]` marker; markers are never reversible; idempotent | the gitleaks test corpus at the pinned tag; mutation tests |
-| `@czar/x402` | parses v2 headers and the v1 fallback per 02 §11.2; refuses `upto`, `batch-settlement`, cross-chain offers; sanitizes extensions per 02 §11.3 | fixtures from `x402-flow.mjs` (A1-17) and the A2 seller logs |
+| `@czar/x402` | parses v2 headers and the v1 fallback per 02 §11.2; refuses `upto`, `batch-settlement`, cross-chain offers; sanitizes extensions per 02 §11.3; owns `safeFetch`, the only way any Czar server process fetches an outside URL (§2.1, RV-022) | fixtures from `x402-flow.mjs` (A1-17) and the A2 seller logs; the §2.1 SSRF corpus |
 | `@czar/vault-client` | every encoder output matches 03 `czar-vault.md` §6 and reverts are decoded to the custom-error names | `arc-anvil` fork tests against the compiled interfaces |
 | `@czar/config` | every parameter in this folder exists in the registry with its default; unknown keys fail at startup | snapshot test of the dump |
 | `@czar/logging` | a log line cannot contain a field outside the allowlist (§4); a redaction marker may appear, raw text may not | unit test with a corpus of forbidden strings |
+
+### 2.1 `safeFetch`: the shared SSRF-safe fetcher (RV-022)
+
+Every outbound fetch of a URL that came from outside Czar's own code goes through `safeFetch` in `@czar/x402`. Under D70 the server, signer, Postgres and indexer share one Mac, so an unguarded fetch could reach them.
+
+| Rule | Value |
+|---|---|
+| Scheme and port | `https` on port 443 only. The one exception is `fetch.localMerchantOrigins` (below) |
+| DNS | resolved once per request; every resolved address checked; the connection goes to the checked address (pinned), with the original host in SNI and `Host`; no second lookup (no DNS rebinding) |
+| Blocked addresses | loopback (127.0.0.0/8, ::1), RFC 1918, link-local (169.254.0.0/16 including 169.254.169.254, fe80::/10), ULA (fc00::/7), CGNAT (100.64.0.0/10), multicast, broadcast, 0.0.0.0/8, ::, IPv4-mapped and IPv4-compatible forms of any of these, and any address of the machine's own interfaces |
+| Redirects | at most `fetch.maxRedirects` 3; each target is re-checked by every rule above before connecting |
+| Limits | response ≤ the caller's byte cap (default `fetch.maxBytes` 2 MiB; deliverables `acceptance.deliverableMaxBytes`); timeout ≤ the caller's (default `fetch.timeoutMs` 8,000) |
+| Request hygiene | no cookies, no credentials, no `Authorization` header unless the caller passes one for that exact origin; fixed `User-Agent: Czar/<version>` |
+| Local merchants (Phase 1) | `fetch.localMerchantOrigins` lists the exact `http://127.0.0.1:<port>` origins of Czar's own merchants (CZ-20) running on the Mac (D70). Only those origins bypass the loopback rule; the list comes from `@czar/config`, never from a catalog entry, a 402 body, an MCP input or a user. The signer has no TCP port (CZ-27 §3) and Postgres's port is never in the list |
+| Failure | `StepError` / `czarCode` `fetch-blocked` (not retryable) with the rule name; logged without the URL query string |
+
+**Callers (all must use it):** CZ-13 planner probes; CZ-14/CZ-15 pre-pay probes and merchant calls; `createQuote` probes (including an optional `resourceUrl`); CZ-16 deliverable fetches; CZ-18 catalog crawls and live Circle catalog reads; CZ-20 `czar-extract` (which adds its domain allowlist on top). **Superseded by RV-022:** the private-range block living only in `czar-extract`.
+
+**Tests (`@czar/x402`):** a corpus of URLs and DNS answers that must be refused: `http://` scheme, port 8443, `localhost`, `127.1`, `0x7f000001`, `[::ffff:127.0.0.1]`, a public name resolving to 10.0.0.5, a redirect from a public host to 169.254.169.254, a name whose second resolution would change (pinning test); and the configured local merchant origin, which must pass.
 
 ## 3. Configuration and environments
 
@@ -58,15 +77,16 @@ One `pnpm` workspace (Node 22 LTS, ESM only, TypeScript strict; spec 01 §17). C
 
 - Every threshold, timeout, retry count and limit named in this folder is a key in one registry, with a default, a unit and a one-line reason. Components reference keys by name (for example `routing.maxFeeRatioBps`).
 - Overlay order: built-in defaults → environment file (`local`, `testnet`) → process environment variables (`CZAR_<SECTION>_<KEY>`) → nothing else. There is no remote config in Phase 1.
+- **No secrets in config (D78, RV-028):** the loader refuses to start if any configuration key or `CZAR_*` environment variable name contains `passphrase`, `secret`, `private`, `mnemonic` or `seed`, and no command accepts such a value as an argument. Secrets reach a process only from the OS keychain (§3.3).
 - The registry dump (`czar config dump`) is attached to every incident report.
 - Naming: `<component>.<name>`; units in the name when ambiguous (`...Ms`, `...Blocks`, `...Bps`, `...Atomic`).
 - Contract constants (03 `czar-vault.md` §3) are **not** configurable; the registry only mirrors them read-only (`vault.maxAuthorizationsPerReservation = 128`, D39) so routing math uses the deployed values.
 
 ### 3.3 Secrets
 
-- Server keys sit behind the signer service (D61, D62). **Phase 1 (D70):** backend `local-keystore` on Zaryab's Mac, an encrypted keystore whose passphrase lives in the macOS keychain; keystore files are gitignored and testnet-only. **Stage 2:** backend `gcp-kms` (Google Cloud KMS). The HSM question is settled at the pre-mainnet audit.
+- Server keys sit behind the signer service (D61, D62). **Phase 1 (D70, D78):** backend `local-keystore` on Zaryab's Mac: an encrypted keystore at `signer.keystorePath` (`~/Library/Application Support/Czar/signer/keystore/`), always **outside the repository**, whose passphrase lives only in the macOS keychain item `signer.keychainService` and is read by the signer process itself, never passed through argv, environment variables or files (CZ-27 §3). Testnet keys only. **Superseded by D78:** "keystore files are gitignored" (inside the repository). **Stage 2:** backend `gcp-kms` (Google Cloud KMS). The HSM question is settled at the pre-mainnet audit.
 
-- Server secrets (K3–K13, K17–K20) live in the KMS or the secret store (spec 01 §7.2); process environment holds only references (`CZAR_KMS_KEY_ID_AGENT`), never key material.
+- Server secrets (K3–K13, K17–K20) live in the signer backend or the secret store (spec 01 §7.2); process environment holds only references (`CZAR_KMS_KEY_ID_AGENT`), never key material. In Phase 1 the secret store for K11, K12, K18, K19 is the macOS keychain (D70).
 - Machine secrets (K14 DB key, K15 device token, K16 hook token) live in the OS keychain through `@napi-rs/keyring` 2.1.1, Linux pinned to Secret Service (B6-17); never on a command line (B6-19).
 - `.env` files are for `local` only and are gitignored.
 
@@ -83,7 +103,7 @@ One `pnpm` workspace (Node 22 LTS, ESM only, TypeScript strict; spec 01 §17). C
 
 ### 5.1 API `czarCode` (02 §9.4)
 
-`validation`, `idempotency-conflict`, `device-revoked`, `session-expired`, `hash-mismatch`, `plan-expired`, `envelope-not-open`, `approval-required`, `payment-id-conflict`, `rate-limited`, `upstream-unavailable` (retryable), `frozen`, `paused`.
+`validation`, `idempotency-conflict`, `replay-not-stored` (RV-043), `device-revoked`, `session-expired`, `hash-mismatch`, `plan-expired`, `envelope-not-open`, `approval-required`, `payment-id-conflict`, `plan-not-approved`, `step-not-in-plan`, `step-calls-exhausted`, `step-cap-exhausted`, `input-not-in-template`, `input-redaction-hit`, `resource-not-indexed` (RV-019, RV-021), `fetch-blocked` (RV-022), `rate-limited`, `upstream-unavailable` (retryable), `frozen`, `paused`.
 
 ### 5.2 `StepError.code` (02 §4.16; used by MCP tools and the paying agent)
 
@@ -98,7 +118,9 @@ One `pnpm` workspace (Node 22 LTS, ESM only, TypeScript strict; spec 01 §17). C
 | `unpaid` | settlement failed; nothing moved | re-plan |
 | `delivery-failed` | 2xx missing or body over limit (acceptance `delivery` fail) | re-plan |
 | `structural-failed` | acceptance `structural` fail | re-plan |
-| `injection-quarantined` | screen flagged the body; shown to the user | no |
+| `injection-quarantined` | screen flagged the body, or the screen was unavailable (D76); shown to the user; recorded `inconclusive` (RV-042) | no |
+| `fetch-blocked` | `safeFetch` refused the URL (§2.1, RV-022) | no |
+| `step-calls-exhausted` / `step-cap-exhausted` | the step's approved call budget or cap is used (RV-019) | after a new approval |
 | `pocket-funding-failed` | `DelegateNotSet`, `PocketCapExceeded`, Gateway API error | depends |
 | `pullback-pending` | pullback requested, not yet minted | automatic |
 | `job-budget-too-high` | `BudgetExceedsReserved` | re-plan or renegotiate |
@@ -194,4 +216,7 @@ Supply-chain rules (CLAUDE.md): `pnpm audit --audit-level=moderate`, `minimumRel
 | 2026-10-18 | D51, D54 | USD display and server-side archives in the mainnet table |
 | 2026-10-19 | D69 | `apps/web` runs in a desktop browser; push tagged stage 2. |
 | 2026-10-19 | D68 | model prices read in T-046; budgets stay in tokens and request counts until then. |
-- 2026-10-19 · D70: Phase 1 runs on Zaryab's Mac with a local software signer (encrypted keystore); Google Cloud (KMS, Cloud Run, e2-micro VM) moves to stage 2.
+| 2026-10-19 | D70 | Phase 1 runs on Zaryab's Mac with a local software signer (encrypted keystore); Google Cloud (KMS, Cloud Run, e2-micro VM) moves to stage 2. |
+| 2026-10-19 | RV-022 | §2.1 shared `safeFetch` in `@czar/x402`; all outbound fetches use it. |
+| 2026-10-19 | D78, RV-028 | keystore outside the repository; no secret-like config keys or env vars. |
+| 2026-10-19 | RV-019, RV-021, RV-043, D76 | new `czarCode` and `StepError` codes. |

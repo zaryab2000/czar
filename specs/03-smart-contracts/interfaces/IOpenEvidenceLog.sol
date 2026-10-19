@@ -3,7 +3,8 @@ pragma solidity 0.8.30;
 
 /// @title IOpenEvidenceLog
 /// @notice Ownerless, append-only commitment log on Arc. Adopted unchanged from
-///         `architecture/selection-layer-architecture.md` §7.1 (Selection Layer, 2026-10-17).
+///         `architecture/selection-layer-architecture.md` §7.1 (Selection Layer, 2026-10-17), plus the
+///         AlreadyCommitted rule added 2026-10-19 (RV-014).
 ///         Anyone publishes under their own address; readers choose which publishers to trust.
 /// @dev No owner, no pause, no upgrade. A new version is a new deployment announced by a
 ///      `POLICY_RELEASE` on the old one. The contract never inspects contents.
@@ -54,10 +55,13 @@ interface IOpenEvidenceLog {
     error UnknownIntent(bytes32 intentRoot);
     /// @notice `reveal` called twice for the same intent root.
     error AlreadyRevealed(bytes32 intentRoot);
+    /// @notice `commit` of a PROBE_INTENT root the publisher already committed (amended 2026-10-19, RV-014).
+    error AlreadyCommitted(bytes32 intentRoot);
 
     /// @notice Append a commitment under `msg.sender`.
     /// @dev `prev` MUST equal the publisher's latest root for this kind, or 0 if none.
-    ///      When `kind == PROBE_INTENT` the intent status becomes "committed".
+    ///      When `kind == PROBE_INTENT` the intent status becomes "committed"; reverts AlreadyCommitted if the
+    ///      publisher already committed that root (RV-014).
     /// @param kind The commitment kind.
     /// @param root Merkle root or content hash.
     /// @param prev The publisher's previous root of this kind, or 0.

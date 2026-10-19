@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://czar.dev/schemas/activity-event/1.0",
+  "$id": "https://czar.dev/schemas/activity-event.schema.json",
   "title": "ActivityEvent",
   "description": "One normalized observation from a work tool (spec 02 §4.1). Written by the daemon after redaction layer 1; never leaves the machine.",
   "type": "object",

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://czar.dev/schemas/step-result/1.0",
+  "$id": "https://czar.dev/schemas/step-result.schema.json",
   "title": "StepResult",
   "description": "The only form in which untrusted merchant output reaches the planner (spec 02 \u00a74.15; spec 01 \u00a713.1).",
   "type": "object",

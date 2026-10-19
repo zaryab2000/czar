@@ -1,0 +1,25 @@
+{
+  "schemaVersion": "1.0",
+  "leafType": "demand-proof",
+  "leafVersion": 1,
+  "userPseudonym": "0xdd5744eda7dddcfb4b5d2dad7cd03309caddd38768c8673bc4498f9599a92315",
+  "observationHashes": [
+    "0xda656220761a671d44136399cc7da19be9f4f014deb838c2ca9f40b89ba0bfda"
+  ],
+  "objectiveHash": "0x3a970daf4bf99337609cd149654156a8869ef7dfa6a040d13a342c49c0decf12",
+  "soulVersionHash": "0xf748dbc019b146caa2ef9b2e25b67f78a122d5f827808d631a62d0ebeaad4a70",
+  "planHash": "0x108135a33bcad2486968ed65fbe3feb9ae277cbb904c808e0fa8dee0c5b16145",
+  "envelopeRef": "eip155:30:0x6cd079a21604a2fe826b46463039a0f11baa9f03:3",
+  "approval": {
+    "approver": "owner",
+    "txHash": "0x3028f28a2eabfb267426caadd805fabd6c58080876272810c8cdabd6e5501109",
+    "blockNumber": 0
+  },
+  "paymentRefHashes": [
+    "0x300bfedfb89157889a8b5d00af30307a96d0dd753a14a19e0e390e949586fdfe"
+  ],
+  "outcomeHashes": [
+    "0x48829369d51230ebad19d275caf02dd9187ba4116eadedb5acb8ab92eb352d35"
+  ],
+  "closedAt": 0
+}

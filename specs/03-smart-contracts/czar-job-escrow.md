@@ -12,7 +12,7 @@
 | Role | Holder | Can |
 |---|---|---|
 | `DEFAULT_ADMIN_ROLE` (upgrade admin, `_authorizeUpgrade` line 334) | Czar upgrade multisig behind a 7-day timelock, separate from operations (CLAUDE.md "separate upgrade admin from operational roles") | upgrade; grant roles |
-| `ADMIN_ROLE` | Czar ops key (timelocked 48 h for fee and allowlist changes) | `pause`/`unpause` (lines 339–344), `emergencyWithdraw` only while paused (line 353), `setPlatformFee` (367), `setEvaluatorFee` (380), `setHookWhitelist` (396), `setPaymentTokenAllowed` (412), `batchDetachHook` (425) |
+| `ADMIN_ROLE` | Czar ops key (timelocked 48 h for fee and allowlist changes). **Must change before Czar's instance ships (RV-038):** base-contracts grants one `ADMIN_ROLE` both pause and `emergencyWithdraw`, and `claimRefund` is `whenNotPaused` (line 863). Czar deploys a thin subclass that (1) removes `whenNotPaused` from `claimRefund`, so pause never blocks the refund exit; (2) limits `emergencyWithdraw` to the surplus above the sum of open job budgets; (3) splits a `PAUSER_ROLE` (ops, immediate) from the withdraw and fee roles (behind the 48 h timelock) | `pause`/`unpause` (lines 339–344), `emergencyWithdraw` only while paused (line 353), `setPlatformFee` (367), `setEvaluatorFee` (380), `setHookWhitelist` (396), `setPaymentTokenAllowed` (412), `batchDetachHook` (425) |
 | client | any `CzarVault` | `createJob`, `fund`, `claimRefund`, `reject` while `Open` |
 | provider | specialist agent | `setBudget`, `submit`, claims |
 | evaluator | Czar K7 | `complete`, `reject` |
@@ -43,6 +43,8 @@ As `ERC8183.sol` lines 56–105 (`Job` struct packed into 10 slots; `jobCounter`
 | `claimRefund(jobId)` (863) | anyone | `Open`/`Funded`/`Submitted` after expiry (+ grace if `Submitted`) | refund to client (vault) |
 | `getJob(jobId)` (1081) | anyone | — | |
 
+- **Hook `data` encoding (RV-059):** both the EIP reference (`ERCs` `4dec821` lines 581–674) and base-contracts (lines 646–773) prepend the caller: `abi.encode(actor, …)`. Ground truth A4-03's table omits it; any hook written before hooks are enabled must decode `actor` first.
+
 Claims (`submitClaim`, `settleClaim`, `rejectClaim`, lines 921–1048) are available to providers for partial settlements; the vault treats a settled claim like `Completed` for the settled amount (`settledAmount` field) in a later adapter version; Phase "before mainnet" uses whole-job completion only.
 
 ## 6. State machine
@@ -63,7 +65,7 @@ OpenZeppelin upgradeable v5.x (`AccessControlUpgradeable`, `UUPSUpgradeable`, `P
 |---|---|
 | CJE-1 | A job's escrowed USDC leaves the contract only to `provider`/`payoutReceiver` on `complete`/claims, to treasury/evaluator as fees, or back to `client` on `reject`/`claimRefund`. |
 | CJE-2 | `platformFeeBP + evaluatorFeeBP ≤ 500` after any Czar admin action (policy enforced by the timelock proposal checker, and by vaults refusing to fund otherwise). |
-| CJE-3 | `emergencyWithdraw` is only possible while paused and is always preceded by a public `Paused` event and the 48 h timelock on the pause-then-withdraw sequence. |
+| CJE-3 | `emergencyWithdraw` can never move escrowed job budgets: it is limited to `balance − Σ open budgets`, needs the timelocked withdraw role, and `claimRefund` works while paused (RV-038). **Superseded:** the earlier CJE-3 wording, which assumed one timelocked role could both pause at once and withdraw. |
 
 ## 10. Edge cases
 
@@ -78,3 +80,9 @@ Base contract costs (to measure): `createJob` ≈ 200k, `fund` ≈ 120k, `comple
 ## 12. Mainnet differences
 
 This contract exists only for mainnet (and a testnet twin for rehearsal). Deployed through CREATE2 at the same address on both networks (A9-15). Not ABI-compatible with Circle's testnet instance (A4-11), hence the adapter.
+
+## Change log
+
+| Date | ID | Change |
+|---|---|---|
+| 2026-10-19 | RV-038 | pre-mainnet subclass: refunds unpausable, `emergencyWithdraw` limited to surplus, pause and withdraw roles split; CJE-3 restated. A4-03 hook `data` note (RV-059). |

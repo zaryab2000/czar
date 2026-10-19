@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://czar.dev/schemas/objective/1.0",
+  "$id": "https://czar.dev/schemas/objective.schema.json",
   "title": "Objective",
   "description": "A candidate objective produced by the drives engine before publication (spec 02 §4.3). Holds local evidence links.",
   "type": "object",

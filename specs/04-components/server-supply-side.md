@@ -131,7 +131,7 @@ stateDiagram-v2
 | Rule | Detail |
 |---|---|
 | Input is data | parsed strictly against the declared `bazaar` schema; unknown keys rejected (400); never interpolated into shell, SQL or prompts |
-| `czar-extract` URL allowlist | scheme `https` only; hostname must match `merchants.extractAllowlist` (a short list of public documentation and news domains chosen in the build plan) or be a Czar-owned test page; DNS resolved and checked against private ranges (RFC 1918, link-local, loopback, ULA) before connecting; redirects re-checked, max `merchants.extractMaxRedirects` 3; response ≤ `merchants.extractMaxBytes` 2 MiB; timeout `merchants.extractTimeoutMs` 8,000 |
+| `czar-extract` URL allowlist | every fetch goes through the shared `safeFetch` in `@czar/x402` (`cross-cutting.md` §2.1, RV-022: https only, pinned DNS, private/loopback/link-local/ULA/CGNAT blocked, redirects re-checked); on top of that the hostname must match `merchants.extractAllowlist` (a short list of public documentation and news domains chosen in the build plan) or be a Czar-owned test page; max `merchants.extractMaxRedirects` 3; response ≤ `merchants.extractMaxBytes` 2 MiB; timeout `merchants.extractTimeoutMs` 8,000. **Superseded by RV-022:** the guard living only here |
 | Returned text | plain text (tags stripped), truncated; it is **untrusted** to the buyer and is labelled so in the response (`"untrusted": true`) |
 | Agent-directed text in fetched pages | returned verbatim as data (for example Circle and Arc doc headers, FL-1, FL-2); the seller never acts on page content |
 | Rate limits | per `payer` address: `merchants.perPayerPerMin` 60; global per route `merchants.perRoutePerMin` 600 |
@@ -195,7 +195,7 @@ No user text ever reaches a merchant: CZ-13 sends only the structured `inputTemp
 |---|---|
 | Keys | K10 (`payTo` per service, KMS: seller-proof and sweep-intent signing only), K11 (Console API key after the trial) |
 | Permissions | the merchant container has no access to K3/K5/K7/K8 and cannot call the vault |
-| Threats (spec 01 §13) | **Malicious merchant** row applies to Czar itself: the same evidence rules rank it (SL §10 operator row). **Poisoned text:** fetched pages are returned as data, labelled untrusted. **Server compromised:** a compromised merchant can at most settle valid authorizations it received (bounded by each buyer's reservation) and drain its own `payTo` balances; it cannot touch vaults. **Reentrancy / replay:** USDC nonces are single-use; the idempotency store prevents double service. **SSRF** through `czar-extract`: allowlist, private-range block, redirect re-check. |
+| Threats (spec 01 §13) | **Malicious merchant** row applies to Czar itself: the same evidence rules rank it (SL §10 operator row). **Poisoned text:** fetched pages are returned as data, labelled untrusted. **Server compromised:** a compromised merchant can at most settle valid authorizations it received (bounded by each buyer's reservation) and drain its own `payTo` balances; it cannot touch vaults. **Reentrancy / replay:** USDC nonces are single-use; the idempotency store prevents double service. **SSRF** through `czar-extract`: allowlist on top of the shared `safeFetch` (RV-022). |
 | Agent-directed text | FL-1, FL-2 style headers in fetched pages are data (§5.7) |
 
 ### 10. Failure handling
@@ -291,3 +291,4 @@ Mocked GitHub API fixtures for admin / non-admin / renamed repo; `arc-anvil` tes
 |---|---|---|
 | 2026-10-18 | D49 | `czar-spot` source rule cited |
 | 2026-10-18 | D50 | automatic refunds of Czar's own sales with a daily cap |
+| 2026-10-19 | RV-022 | `czar-extract` uses the shared `safeFetch`; the guard is no longer local to this merchant. |

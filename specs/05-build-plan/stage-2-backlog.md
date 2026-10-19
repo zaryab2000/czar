@@ -99,6 +99,8 @@
 | GC-5 | Indexer on an always-free e2-micro VM (us-west1, us-central1 or us-east1) | Public IPv4 ≈ $3.65/month; IPv6 free |
 | GC-6 | Postgres: free external provider or on the VM | Google has no free managed Postgres; check provider limits at the time |
 | GC-7 | Uptime alerts, backups, secret store for API keys (K11, K12, K17–K19) | |
+| GC-8 | **Dual control for K6 (guardian) and K20 (factory admin)** (D80, RV-045): move both off the Mac into Cloud KMS (or a hardware wallet each) with two approver identities and `kms.dualControlWindowMinutes` 30; run the pause drill. Until then single-Mac custody is an accepted testnet exception | confirms D80 |
+| GC-9 | Stable public origin for the app and the archive host (D78): the public host serves every Phase 1 archive by its root; testnet owners register a new passkey on the new RP ID and call `setPasskey` | RV-028 |
 
 ---
 
@@ -118,3 +120,4 @@
 |---|---|---|
 | 2026-10-19 | D69 | §0 status set to applied; §1 marked Applied; D-numbers added to P2-13, P2-15, MN-7. |
 | 2026-10-19 | D70 | Added §6 Google Cloud hosting (GC-1 to GC-7). |
+| 2026-10-19 | D80, D78 | GC-8 dual control for K6/K20; GC-9 public origin and archive host. |

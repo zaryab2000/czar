@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://czar.dev/schemas/plan/1.0",
+  "$id": "https://czar.dev/schemas/plan.schema.json",
   "title": "Plan",
   "description": "The priced plan for one objective (spec 02 §4.5). What the user approves; planHash is written into the envelope.",
   "type": "object",
@@ -9,9 +9,9 @@
   "properties": {
     "schemaVersion": {
       "type": "string",
-      "description": "Schema version, major.minor; this file is 1.0.",
+      "description": "Schema version, major.minor; this file is 1.1. 1.1 (2026-10-19) adds pocket, pocket leaves (kind 4) and the pocketCapBps rule (D71), and Step.inputTemplate.inputKeys (RV-021).",
       "x-privacyClass": "server-only",
-      "const": "1.0"
+      "const": "1.1"
     },
     "planId": {
       "$ref": "common.schema.json#/$defs/PlanId",
@@ -60,7 +60,12 @@
     },
     "pocketCapBps": {
       "$ref": "common.schema.json#/$defs/Bps",
-      "description": "Pocket cap in bps of cap; default 2500 (D22).",
+      "description": "Pocket cap in bps of cap: 0 unless the plan has a gateway-nano step, then 2500 (D22, D71).",
+      "x-privacyClass": "hash-on-chain"
+    },
+    "pocket": {
+      "$ref": "common.schema.json#/$defs/Address",
+      "description": "Pocket EOA for the plan's gateway-nano steps; present if and only if such a step exists; committed in payeeLeaves as a kind-4 leaf (D71).",
       "x-privacyClass": "hash-on-chain"
     },
     "expiresAt": {
@@ -246,7 +251,7 @@
         },
         "inputTemplate": {
           "type": "object",
-          "description": "Structured input only; never user text (spec 01 §11.2 layer 3). Optional expectedKeys names the output keys the requirement check needs (AM-09).",
+          "description": "Structured input only; never user text (spec 01 §11.2 layer 3). Optional expectedKeys names the output keys the requirement check needs (AM-09). inputKeys names the only keys a pay call may send for this step (RV-021).",
           "x-privacyClass": "server-only",
           "properties": {
             "expectedKeys": {
@@ -260,6 +265,57 @@
               },
               "description": "Keys the requirement check (CZ-16) and the reader (P-02 expectedFields) look for in the output.",
               "x-privacyClass": "server-only"
+            },
+            "inputKeys": {
+              "type": "array",
+              "maxItems": 20,
+              "description": "The only input keys a pay call may send for this step, with their types and limits (RV-021).",
+              "x-privacyClass": "server-only",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "name",
+                  "type"
+                ],
+                "description": "One allowed input key.",
+                "x-privacyClass": "server-only",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z][A-Za-z0-9_]{0,63}$",
+                    "description": "Key name.",
+                    "x-privacyClass": "server-only"
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ],
+                    "description": "Value type.",
+                    "x-privacyClass": "server-only"
+                  },
+                  "maxLength": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 1000,
+                    "description": "Maximum string length (strings only).",
+                    "x-privacyClass": "server-only"
+                  },
+                  "enum": {
+                    "type": "array",
+                    "maxItems": 50,
+                    "items": {
+                      "type": "string",
+                      "maxLength": 128
+                    },
+                    "description": "Allowed values, when the key is an enum.",
+                    "x-privacyClass": "server-only"
+                  }
+                }
+              }
             }
           }
         },
@@ -301,24 +357,25 @@
         },
         "kind": {
           "type": "integer",
-          "description": "1 x402 payTo, 2 ERC-8183 provider, 3 tip repo (Phase 2).",
+          "description": "1 x402 payTo, 2 ERC-8183 provider, 3 tip repo (Phase 2), 4 pocket EOA (D71).",
           "x-privacyClass": "public",
           "enum": [
             1,
             2,
-            3
+            3,
+            4
           ]
         },
         "stepIndex": {
           "type": "integer",
-          "description": "Step index.",
+          "description": "Step index 0-63 for kinds 1-3; 4294967295 (POCKET_STEP_INDEX) for kind 4.",
           "x-privacyClass": "public",
           "minimum": 0,
-          "maximum": 63
+          "maximum": 4294967295
         },
         "stepCap": {
           "$ref": "common.schema.json#/$defs/Amount6",
-          "description": "Per-step cap shared by the payee and its alternates (D36).",
+          "description": "Per-step cap shared by the payee and its alternates (D36), enforced per step on-chain (RV-002); \"0\" for kind 4.",
           "x-privacyClass": "public"
         }
       },
@@ -328,6 +385,34 @@
         "kind",
         "stepIndex",
         "stepCap"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": 4
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "stepIndex": {
+                "const": 4294967295
+              },
+              "stepCap": {
+                "const": "0"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "stepIndex": {
+                "maximum": 63
+              }
+            }
+          }
+        }
       ]
     }
   },

@@ -3,6 +3,9 @@ info:
   title: Czar API
   version: "1.0"
   summary: Daemon, app and claim-server surfaces for Czar.
+  license:
+    name: Proprietary (Czar specification; not for redistribution)
+    identifier: LicenseRef-Czar-Proprietary
   description: |
     Three surfaces on one server. Amounts are USDC 6-decimal atomic-unit integer strings (spec 02 §2.1).
     Errors are RFC 9457 problem+json with `czarCode` and `retryable` (spec 02 §2.3).
@@ -12,9 +15,12 @@ info:
     Rate limits are returned in `RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset` headers.
     Defaults: daemon 600/min per device, app 120/min per session, claim 30/min per account.
     Privacy: nothing marked `local-only` in spec 02 §3 is accepted by any route; raw observations never cross.
+    Change log 2026-10-19 (G0-01 review): pay and quote shapes rewritten and the MCP tools mirror them (D75, RV-019,
+    RV-020, RV-021, RV-050); one objective status enum (RV-027); completeModelCall never replays (RV-043); job brief
+    route (RV-025); Phase 1 origin http://localhost (D78, RV-028); lint fixes (quoted descriptions, 4XX responses).
 servers:
-  - url: https://api.czar.dev
-    description: Czar server (Arc testnet environment)
+  - url: http://localhost
+    description: "Phase 1: the local server on Zaryab's Mac serves this API and the web app from one origin, http://localhost (D70, D78). The stable public origin arrives with Google Cloud in stage 2."
 tags:
   - name: daemon
     description: Daemon ↔ server (device token, K15). Objectives, results, shadow quotes, pay requests.
@@ -22,6 +28,8 @@ tags:
     description: Czar web app ↔ server (passkey-backed session). Phase 1 runs in a desktop browser (D69). Approvals, envelopes, ledger; push routes are stage 2.
   - name: public
     description: Public, unauthenticated, rate-limited reads (Czar discovery index, AM-07).
+  - name: provider
+    description: "ERC-8183 specialist providers (signature-authenticated reads of their own job brief, RV-025)."
   - name: claim
     description: Claim server (Phase 2, D23, D29). Builder GitHub sign-in or FUNDING.json claims.
 
@@ -39,6 +47,11 @@ components:
       scheme: bearer
       bearerFormat: opaque
       description: Short-lived session created from a passkey assertion (D26). 24 h, refreshed on use.
+    ProviderBriefSignature:
+      type: apiKey
+      in: header
+      name: X-Czar-Brief-Signature
+      description: "EIP-712 BriefRequest(jobKey, issuedAt) signature by the job's provider address (EOA or ERC-1271), sent with X-Czar-Provider-Address and X-Czar-Brief-Issued-At (spec 02 §6.2, §9.2; RV-025). issuedAt must be within api.briefSignatureMaxAgeSeconds (300)."
     GitHubOAuth:
       type: oauth2
       description: Builder sign-in (D23). Phase 2. Scope read-only on repository administration.
@@ -99,7 +112,7 @@ components:
         type: { type: string, format: uri, description: "URI under https://czar.dev/problems/" }
         title: { type: string, maxLength: 120 }
         status: { type: integer, minimum: 400, maximum: 599 }
-        detail: { type: string, maxLength: 1000, description: Human-readable, no user text. }
+        detail: { type: string, maxLength: 1000, description: "Human-readable; never contains user text." }
         instance: { type: string, format: uri-reference }
         czarCode: { type: string, maxLength: 64, description: "Stable machine code, e.g. idempotency-conflict." }
         retryable: { type: boolean }
@@ -127,9 +140,28 @@ components:
     Timestamp:
       type: string
       format: date-time
-    Ulid:
+    ObjectiveStatusValue:
       type: string
-      pattern: "^[0-9A-HJKMNP-TV-Z]{26}$"
+      description: "The one objective status enum (RV-027). CZ-12's state machine, MCP get_objectives and the daemon use exactly these values. Superseded values: approved (now opening), accepted (now executing), closed (now delivered), cancelled (now dismissed)."
+      enum: [received, planning, no-supplier, awaiting-approval, opening, executing, replanning, delivered, failed, expired, dismissed]
+    PayRequestId:
+      type: string
+      pattern: "^prq_[0-9a-f]{32}$"
+      description: "Client-chosen id of one pay call (prq_ + 32 hex), reused on retry (RV-050). One pay call can cover several authorization indices; each index gets its own server-minted paymentId (spec 02 §7.4)."
+    PaymentId:
+      type: string
+      pattern: "^pay_[0-9a-f]{32}$"
+      description: "Server-minted id of one authorization index (spec 02 §7.4); the x402 payment-identifier value."
+    StepInput:
+      type: object
+      description: "Structured merchant input only (layer 3). Keys must be among the step's inputTemplate.inputKeys and match their declared types and lengths; the MCP server runs redaction layers 1 and 2 on every string value before forwarding, and the server rejects keys outside the template and values with redaction hits (RV-021). Never free user text."
+      maxProperties: 20
+      propertyNames: { pattern: "^[A-Za-z][A-Za-z0-9_]{0,63}$" }
+      additionalProperties:
+        oneOf:
+          - { type: string, maxLength: 1000 }
+          - { type: number }
+          - { type: boolean }
 
     PairRequest:
       type: object
@@ -137,8 +169,8 @@ components:
       additionalProperties: false
       required: [pairingCode, deviceName, platform]
       properties:
-        pairingCode: { type: string, pattern: "^[0-9]{8}$", description: 8-digit code shown in the app, valid 5 minutes. }
-        deviceName: { type: string, maxLength: 64, description: User-chosen label, no hostnames. }
+        pairingCode: { type: string, pattern: "^[0-9]{8}$", description: "8-digit code shown in the app; valid 5 minutes." }
+        deviceName: { type: string, maxLength: 64, description: "User-chosen label; never a hostname." }
         platform: { type: string, enum: [macos, linux, windows] }
     PairResponse:
       type: object
@@ -158,9 +190,7 @@ components:
       required: [objectiveId, status, updatedAt]
       properties:
         objectiveId: { type: string, pattern: "^obj_[0-9A-HJKMNP-TV-Z]{26}$" }
-        status:
-          type: string
-          enum: [received, planning, no-supplier, awaiting-approval, approved, executing, accepted, delivered, failed, closed, cancelled]
+        status: { $ref: "#/components/schemas/ObjectiveStatusValue" }
         planSummary:
           type: object
           description: Display-only summary of the plan (no URLs, no input templates).
@@ -236,36 +266,39 @@ components:
 
     PayRequest:
       type: object
-      description: Sent by the local Czar MCP `pay` tool through the daemon. The server decides; the daemon holds no keys.
+      description: "Canonical pay request (D75). The MCP pay tool's input is exactly this object. It names one step of a plan; the server pays only if that plan is approved and its envelope is open (RV-019). The daemon holds no keys."
       x-privacyClass: redacted-to-server
       additionalProperties: false
-      required: [paymentId, idempotencyKey, stepRequest]
+      required: [payRequestId, idempotencyKey, objectiveId, planId, stepIndex]
       properties:
-        objectiveId: { type: string, pattern: "^obj_[0-9A-HJKMNP-TV-Z]{26}$", description: Optional; a standalone pay creates a one-step objective. }
-        paymentId: { type: string, pattern: "^pay_[0-9a-f]{32}$", description: spec 02 §7.4 }
+        payRequestId: { $ref: "#/components/schemas/PayRequestId" }
         idempotencyKey: { type: string, format: uuid }
-        stepRequest:
-          type: object
-          additionalProperties: false
-          required: [capability, maxAmount]
-          properties:
-            capability: { type: string, maxLength: 64 }
-            serviceId: { type: string, maxLength: 40, description: SL ServiceId if the agent already chose one. }
-            resourceUrl: { type: string, format: uri, maxLength: 2048 }
-            maxAmount: { $ref: "#/components/schemas/Amount6" }
-            input: { type: object, description: Structured input only; never free user text (layer 3). }
-            category: { type: string, maxLength: 32 }
+        objectiveId: { type: string, pattern: "^obj_[0-9A-HJKMNP-TV-Z]{26}$" }
+        planId: { type: string, pattern: "^pln_[0-9A-HJKMNP-TV-Z]{26}$", description: "The plan returned by createQuote or the planner. If it is not approved yet, the answer is approval-required." }
+        stepIndex: { type: integer, minimum: 0, maximum: 63 }
+        calls: { type: integer, minimum: 1, maximum: 128, default: 1, description: "Calls to make in this request; at most the step's expectedCalls not yet used (RV-019)." }
+        maxAmount: { $ref: "#/components/schemas/Amount6", description: "Optional ceiling for this request; never above the step's remaining cap." }
+        input: { $ref: "#/components/schemas/StepInput" }
     PayResponse:
       type: object
+      description: "Canonical pay response (D75). The MCP pay tool's structuredContent is exactly this object."
       x-privacyClass: server-only
       additionalProperties: false
-      required: [status]
+      required: [payRequestId, status]
       properties:
-        status: { type: string, enum: [executing, approval-required, rejected] }
-        elicitationUrl: { type: string, format: uri, description: Present when status is approval-required (URL-mode elicitation, D3-11). }
+        payRequestId: { $ref: "#/components/schemas/PayRequestId" }
+        status: { type: string, enum: [executing, approval-required, accepted, rejected, failed], description: "executing = paid, acceptance running; accepted = passed acceptance; rejected = refused before paying (see reason); failed = paid but not delivered, quarantined or failed acceptance." }
+        elicitationUrl: { type: string, format: uri, description: "Present when status is approval-required (URL-mode elicitation, D3-11). Phase 1 form http://localhost/approve/<planId> (D78)." }
+        planId: { type: string, pattern: "^pln_[0-9A-HJKMNP-TV-Z]{26}$" }
         envelopeRef: { type: string }
-        stepIndex: { type: integer }
-        reason: { type: string, maxLength: 200, description: Present when rejected; stable code, no user text. }
+        stepIndex: { type: integer, minimum: 0, maximum: 63 }
+        paymentIds: { type: array, maxItems: 128, items: { $ref: "#/components/schemas/PaymentId" }, description: "One per authorization index this request used (RV-050)." }
+        amount: { $ref: "#/components/schemas/Amount6", description: "Total paid by this request." }
+        paymentRefHashes: { type: array, maxItems: 128, items: { $ref: "#/components/schemas/Hash32" } }
+        settlement: { type: string, enum: [reserved, settled, received, completed], description: "Gateway payments show received, then completed 0 to 16 min later (A2-26)." }
+        result: { $ref: "../schemas/step-result.schema.json" }
+        callsRemaining: { type: integer, minimum: 0, description: "Calls left on this step before a new approval is needed (RV-019)." }
+        reason: { type: string, maxLength: 64, description: "Stable code when rejected or failed, never user text, e.g. plan-not-approved, step-not-in-plan, step-calls-exhausted, step-cap-exhausted, envelope-not-open, frozen, paused, input-not-in-template, input-redaction-hit, result-quarantined." }
 
     IngestReport:
       type: object
@@ -623,7 +656,7 @@ components:
         snapshotId: { type: string }
     QuoteRequest:
       type: object
-      description: "Same as the MCP `quote` input (§2.3, AM-01)."
+      description: "Same as the MCP quote input (§2.3, AM-01). The server derives the category from the capability; the earlier caller-supplied category field is superseded (RV-019)."
       x-privacyClass: redacted-to-server
       additionalProperties: false
       required: [capability]
@@ -631,18 +664,19 @@ components:
         objectiveId: { type: string, pattern: "^obj_[0-9A-HJKMNP-TV-Z]{26}$" }
         capability: { type: string, maxLength: 64 }
         serviceId: { type: string, maxLength: 40 }
-        resourceUrl: { type: string, format: uri, maxLength: 2048 }
+        resourceUrl: { type: string, format: uri, maxLength: 2048, description: "Optional. Must be an https URL of a service in Czar's index; any other URL is refused with resource-not-indexed. Every probe goes through the shared SSRF-safe fetcher (RV-019, RV-022)." }
         expectedCalls: { type: integer, minimum: 1, maximum: 128, default: 1 }
         maxAmount: { $ref: "#/components/schemas/Amount6" }
-        category: { type: string, maxLength: 32 }
     QuoteResponse:
       type: object
-      description: "Same as the MCP `quote` output (§2.3). When approvalNeeded is true the MCP server turns it into a URL-mode elicitation (§4)."
+      description: "Same as the MCP quote output (§2.3). Every quote is a step of a plan (planId, stepIndex) that pay can name; when approvalNeeded is true the MCP server turns it into a URL-mode elicitation (§4)."
       x-privacyClass: server-only
       additionalProperties: false
-      required: [quoteId, kind, unitAmount, expectedCalls, stepCap, routingReason, approvalNeeded, expiresAt]
+      required: [quoteId, planId, stepIndex, kind, unitAmount, expectedCalls, stepCap, routingReason, approvalNeeded, expiresAt]
       properties:
         quoteId: { type: string, pattern: "^qte_[0-9A-HJKMNP-TV-Z]{26}$" }
+        planId: { type: string, pattern: "^pln_[0-9A-HJKMNP-TV-Z]{26}$" }
+        stepIndex: { type: integer, minimum: 0, maximum: 63 }
         kind: { type: string, enum: [x402-exact, gateway-nano, erc8183-job] }
         serviceId: { type: string }
         payee: { $ref: "#/components/schemas/Address" }
@@ -651,7 +685,7 @@ components:
         stepCap: { $ref: "#/components/schemas/Amount6" }
         routingReason: { type: string }
         approvalNeeded: { type: boolean }
-        elicitationUrl: { type: string, format: uri, description: Approval page when approvalNeeded is true. }
+        elicitationUrl: { type: string, format: uri, description: "Approval page when approvalNeeded is true." }
         envelopeRef: { type: string, description: "Open envelope that already covers this step, if any." }
         expiresAt: { $ref: "#/components/schemas/Timestamp" }
     OutcomeReport:
@@ -659,9 +693,10 @@ components:
       description: "Same as the MCP `report_outcome` input (§2.5, AM-01)."
       x-privacyClass: redacted-to-server
       additionalProperties: false
-      required: [paymentId, outcome]
+      required: [payRequestId, outcome]
       properties:
-        paymentId: { type: string, pattern: "^pay_[0-9a-f]{32}$" }
+        payRequestId: { $ref: "#/components/schemas/PayRequestId" }
+        paymentId: { $ref: "#/components/schemas/PaymentId", description: "Optional; narrows the outcome to one authorization index (RV-050)." }
         outcome: { type: string, enum: [useful, not-useful, wrong, unused] }
         reasonCode: { type: string, enum: [missing-field, stale, incorrect, slow, format, other] }
         minutesSavedActual: { type: integer, minimum: 0 }
@@ -675,14 +710,14 @@ components:
         receiptObsId: { type: string }
     ModelCallRequest:
       type: object
-      description: "Model proxy call from the daemon (AM-02). The proxy forwards to the hosted model and stores only token counts (D31)."
+      description: "Model proxy call from the daemon (AM-02). The proxy forwards to the hosted model and stores only token counts (D31), so it never replays a stored response (RV-043)."
       x-privacyClass: redacted-to-server
       additionalProperties: false
       required: [prompt, promptHash, input, schema]
       properties:
         prompt: { type: string, enum: [P-01, P-04, P-05, P-06] }
         promptHash: { $ref: "#/components/schemas/Hash32", description: Hash of the prompt file the daemon used. }
-        input: { type: object, description: Redacted, screened input as defined for that prompt in spec 04 ai-prompts.md. }
+        input: { type: object, description: "Redacted and screened input as defined for that prompt in spec 04 ai-prompts.md." }
         schema: { type: object, description: Output JSON Schema the model must follow. }
     ModelCallResponse:
       type: object
@@ -885,7 +920,7 @@ paths:
   /v1/pay/requests:
     post:
       tags: [daemon]
-      summary: Pay request from the local MCP `pay` tool. Czar enforces approval, never the client (D3-09).
+      summary: Pay for one step of an approved plan; the MCP pay tool mirrors this route (D75). Czar enforces approval, never the client (D3-09).
       operationId: createPayRequest
       security: [ { DeviceToken: [] } ]
       parameters: [ { $ref: "#/components/parameters/IdempotencyKey" } ]
@@ -894,7 +929,8 @@ paths:
         content: { application/json: { schema: { $ref: "#/components/schemas/PayRequest" } } }
       responses:
         "200": { description: Decision, content: { application/json: { schema: { $ref: "#/components/schemas/PayResponse" } } } }
-        "409": { description: paymentId reused with a different request (spec 02 §7.4), content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "409": { description: "payRequestId reused with a different request (spec 02 §7.4, RV-050)", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "429": { $ref: "#/components/responses/RateLimited" }
 
   /v1/hooks/ingest-report:
@@ -908,6 +944,7 @@ paths:
         required: true
         content: { application/json: { schema: { $ref: "#/components/schemas/IngestReport" } } }
       responses:
+        "4XX": { $ref: "#/components/responses/Problem" }
         "204": { description: Recorded }
 
   /v1/services/search:
@@ -960,6 +997,7 @@ paths:
     post:
       tags: [daemon]
       summary: Model proxy for P-01, P-04, P-05, P-06. Stores only token counts (D31, AM-02).
+      description: "Exempt from idempotent response replay (RV-043). The proxy keeps the Idempotency-Key, a body fingerprint and token counts only, so a second request with the same key gets 409 replay-not-stored whatever its body. The daemon then decides whether to call again with a new key."
       operationId: completeModelCall
       security: [ { DeviceToken: [] } ]
       parameters: [ { $ref: "#/components/parameters/IdempotencyKey" } ]
@@ -969,8 +1007,26 @@ paths:
       responses:
         "200": { description: Model output, content: { application/json: { schema: { $ref: "#/components/schemas/ModelCallResponse" } } } }
         "400": { $ref: "#/components/responses/Problem" }
+        "409": { description: "replay-not-stored (RV-043)", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "429": { $ref: "#/components/responses/RateLimited" }
         "503": { description: Model unavailable or over budget; the daemon falls back (D58), content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+
+  # ---------------- provider ----------------
+  /v1/jobs/{jobKey}/brief:
+    get:
+      tags: [provider]
+      summary: The ERC-8183 job brief, for the job's provider only (RV-025).
+      description: "Returns the JobBrief whose fields are the preimage of the job's on-chain descriptionHash. Only the provider named in the job can read it; any other caller gets 404, so the route is no existence oracle."
+      operationId: getJobBrief
+      security: [ { ProviderBriefSignature: [] } ]
+      parameters:
+        - { name: jobKey, in: path, required: true, schema: { $ref: "#/components/schemas/Hash32" } }
+        - { name: X-Czar-Provider-Address, in: header, required: true, schema: { $ref: "#/components/schemas/Address" } }
+        - { name: X-Czar-Brief-Issued-At, in: header, required: true, schema: { type: integer, minimum: 0, description: "Unix seconds signed in BriefRequest.issuedAt." } }
+      responses:
+        "200": { description: The brief, content: { application/json: { schema: { $ref: "../schemas/job-brief.schema.json" } } } }
+        "404": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
 
   # ---------------- public ----------------
   /v2/x402/discovery/resources:
@@ -1012,6 +1068,7 @@ paths:
       x-phase: 2
       security: []
       responses:
+        "4XX": { $ref: "#/components/responses/Problem" }
         "200": { description: Snapshot list, content: { application/json: { schema: { $ref: "#/components/schemas/Page" } } } }
 
   /v1/snapshots/{id}:
@@ -1049,6 +1106,7 @@ paths:
       operationId: getMe
       security: [ { AppSession: [] } ]
       responses:
+        "4XX": { $ref: "#/components/responses/Problem" }
         "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Me" } } } }
 
   /v1/approvals:
@@ -1064,6 +1122,7 @@ paths:
         - { $ref: "#/components/parameters/Cursor" }
         - { $ref: "#/components/parameters/Limit" }
       responses:
+        "4XX": { $ref: "#/components/responses/Problem" }
         "200":
           description: Page of ApprovalSummary
           content:
@@ -1122,6 +1181,7 @@ paths:
         required: true
         content: { application/json: { schema: { $ref: "#/components/schemas/SubmittedNotice" } } }
       responses:
+        "4XX": { $ref: "#/components/responses/Problem" }
         "202": { description: Watching }
 
   /v1/envelopes:
@@ -1137,6 +1197,7 @@ paths:
         - { $ref: "#/components/parameters/Cursor" }
         - { $ref: "#/components/parameters/Limit" }
       responses:
+        "4XX": { $ref: "#/components/responses/Problem" }
         "200":
           description: Page of Envelope
           content:
@@ -1182,6 +1243,7 @@ paths:
               properties:
                 action: { type: string, enum: [freeze, unfreeze] }
       responses:
+        "4XX": { $ref: "#/components/responses/Problem" }
         "200": { description: Intent, content: { application/json: { schema: { $ref: "#/components/schemas/FreezeIntent" } } } }
 
   /v1/ledger/receipts:
@@ -1194,6 +1256,7 @@ paths:
         - { $ref: "#/components/parameters/Cursor" }
         - { $ref: "#/components/parameters/Limit" }
       responses:
+        "4XX": { $ref: "#/components/responses/Problem" }
         "200":
           description: Page of LedgerReceipt
           content:
@@ -1217,6 +1280,7 @@ paths:
           required: true
           schema: { type: string, pattern: "^[0-9]{4}-[0-9]{2}$" }
       responses:
+        "4XX": { $ref: "#/components/responses/Problem" }
         "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/MonthlyStatement" } } } }
 
   /v1/push/subscriptions:
@@ -1231,6 +1295,7 @@ paths:
         required: true
         content: { application/json: { schema: { $ref: "#/components/schemas/PushSubscription" } } }
       responses:
+        "4XX": { $ref: "#/components/responses/Problem" }
         "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/PushSubscriptionCreated" } } } }
 
   /v1/push/subscriptions/{id}:
@@ -1246,6 +1311,7 @@ paths:
           required: true
           schema: { type: string, pattern: "^psh_[0-9A-HJKMNP-TV-Z]{26}$" }
       responses:
+        "4XX": { $ref: "#/components/responses/Problem" }
         "204": { description: Deleted }
 
   /v1/soul/pointer:
@@ -1255,6 +1321,7 @@ paths:
       operationId: getSoulPointer
       security: [ { AppSession: [] } ]
       responses:
+        "4XX": { $ref: "#/components/responses/Problem" }
         "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/SoulPointer" } } } }
 
   # ---------------- claim (Phase 2) ----------------
@@ -1295,6 +1362,7 @@ paths:
         required: true
         content: { application/json: { schema: { $ref: "#/components/schemas/ClaimStart" } } }
       responses:
+        "4XX": { $ref: "#/components/responses/Problem" }
         "201": { description: Code issued, content: { application/json: { schema: { $ref: "#/components/schemas/ClaimFileStartResponse" } } } }
 
   /v1/claims/file/verify:
@@ -1309,7 +1377,7 @@ paths:
       responses:
         "200": { description: Claim status, content: { application/json: { schema: { $ref: "#/components/schemas/ClaimStatus" } } } }
         "422": { $ref: "#/components/responses/Problem" }
-        "429": { description: GitHub rate limit (E1-09, E1-10), content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "429": { description: "GitHub rate limit (E1-09, E1-10)", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
 
   /v1/claims/{repoId}:
     get:

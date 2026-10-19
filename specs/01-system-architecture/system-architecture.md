@@ -407,7 +407,7 @@ flowchart TB
     CC <-->|stdio| MCP
     MCP -->|device token, HTTPS| SRVAPI
   end
-  subgraph CS["Czar server (cloud, one region to start)"]
+  subgraph CS["Czar server (Phase 1: local processes on Zaryab's Mac, D70; stage 2: Google Cloud)"]
     SRVAPI["API (HTTPS)"]
     PLAN["Planner / router"]
     PAY["Paying agent"]
@@ -416,7 +416,7 @@ flowchart TB
     SLS["Selection Layer services"]
     IDX["Indexer (Ponder)"]
     PG[("Postgres + object store")]
-    KMS[["KMS / HSM<br/>agent · evaluator · autonomy · publisher · pocket · relayer · guardian"]]
+    KMS[["Signer service (Phase 1: local encrypted keystore, D70/D78; stage 2: Cloud KMS)<br/>agent · evaluator · autonomy · publisher · pocket · relayer · guardian"]]
     MERCH["Czar x402 merchants"]
     PUSH["Push sender (stage 2)"]
   end
@@ -434,7 +434,7 @@ flowchart TB
     DSC["Discovery API"]
   end
   DAE -->|HTTPS| SRVAPI
-  PWA -->|HTTPS| SRVAPI
+  PWA -->|"http://localhost (Phase 1, D78)"| SRVAPI
   PWA -->|UserOps| MWS --> RPC
   PUSH -.->|Web Push (APNs), stage 2| PWA
   PAY --> KMS
@@ -452,9 +452,9 @@ flowchart TB
 | Place | Runs | Hosting assumption | Links out (protocol) |
 |---|---|---|---|
 | User's machine | CZ-01 observers, CZ-02 `czard`, CZ-03 memory, CZ-04 soul compiler, CZ-05 soul store and viewer, CZ-06 drives, CZ-07 publisher, CZ-08 shadow, CZ-09 MCP server, CZ-11 write-back, CZ-26 redaction | macOS login agent via `SMAppService` or `launchctl bootstrap` (B6-03, B6-04); `KeepAlive`, `ProcessType=Background` (B6-02). Node 22. | hooks → daemon: localhost HTTP or async command (B1-08). Daemon → server: HTTPS with a per-device token. MCP: stdio (D3-07). Chrome (P2): `connectNative` with messages under 1 MB (B4-23, B4-24). |
-| Czar server | CZ-12 API, CZ-13 planner, CZ-14 router, CZ-15 paying agent, CZ-16 acceptance and evaluator, CZ-17 evidence, CZ-18 SL services, CZ-19 indexer, CZ-20 merchants, CZ-21 claim server (P2), CZ-23 push, CZ-24 autonomy, CZ-25 ROI, CZ-27 KMS | Single cloud region; containers; Postgres; S3-compatible object store; a managed KMS or HSM for every signing key. (Assumption AR-1: a cloud KMS that can hold secp256k1 keys and enforce signing policies is available; if not, an HSM appliance or a signing microservice behind strict network policy.) | Arc: JSON-RPC over HTTPS to `rpc.testnet.arc.io` (A9-08) plus a keyed provider (A9-07); never `rpc.testnet.arc.network`. Circle: HTTPS to Facilitator (A1-15), Gateway API (A2-30), Discovery (p1-D1). Merchants: HTTPS x402 v2 (A3-02). |
-| Desktop browser | CZ-22 web app | Static Next.js build on a CDN plus the API; opened in Safari or Chrome on macOS (D69). Stage 2: installed to the iPhone Home Screen (D2-01). | HTTPS to API; UserOps to Circle Modular Wallets client URL `…/arcTestnet` (A6-06, A6-19); Web Push through Apple (D2-03) in stage 2 only. |
-| Arc | `CzarVaultFactory`, `CzarVault`s, `OpenEvidenceLog`, later `BuilderEscrow`, `RecipeSplits`, `CzarJobEscrow`; existing USDC, GatewayWallet, ERC-8183, 0xSplits, Permit2 | Deployed with Foundry (`arc-forge`) through the Arachnid CREATE2 factory so addresses match on both networks (A9-15). | n/a |
+| Czar server | CZ-12 API, CZ-13 planner, CZ-14 router, CZ-15 paying agent, CZ-16 acceptance and evaluator, CZ-17 evidence, CZ-18 SL services, CZ-19 indexer, CZ-20 merchants, CZ-21 claim server (P2), CZ-23 push (stage 2), CZ-24 autonomy, CZ-25 ROI, CZ-27 signer | **Phase 1 (D70, D78):** local processes on Zaryab's Mac; Postgres in Docker; object store on local disk; the signer service with an encrypted keystore outside the repository whose passphrase lives only in the macOS keychain (CZ-27 §3); the API and the web app served from one origin, `http://localhost`. Runs only while the Mac is awake (D70 trade-off). **Stage 2:** Google Cloud: Cloud Run, an e2-micro VM for the indexer, Cloud KMS (AR-1: secp256k1 keys with signing policies; if not, the AR-1 fallback). **Superseded by D70 for Phase 1:** "single cloud region; containers; a managed KMS or HSM". | Arc: JSON-RPC over HTTPS to `rpc.testnet.arc.io` (A9-08) plus a keyed provider (A9-07); never `rpc.testnet.arc.network`. Circle: HTTPS to Facilitator (A1-15), Gateway API (A2-30), Discovery (p1-D1). Merchants: HTTPS x402 v2 (A3-02). |
+| Desktop browser | CZ-22 web app | **Phase 1 (D78):** static Next.js build served by the local server at `http://localhost` (one origin with the API); WebAuthn RP ID `localhost`; opened in Safari or Chrome on macOS (D69). Stage 2: a public origin, and an installed iPhone Home Screen app (D2-01); passkeys are bound to their RP ID, so testnet owners register a new passkey then. | `http://localhost` to the API (Phase 1); UserOps to Circle Modular Wallets client URL `…/arcTestnet` (A6-06, A6-19); Web Push through Apple (D2-03) in stage 2 only. |
+| Arc | `CzarVaultFactory`, `CzarVault`s, `OpenEvidenceLog`, later `BuilderEscrow`, `RecipeSplits`, `CzarJobEscrow`; existing USDC, GatewayWallet, ERC-8183, 0xSplits, Permit2 | Deployed with Foundry (`arc-forge`) through the Arachnid CREATE2 factory (A9-15). `OpenEvidenceLog` has the same address on both networks; the factory and therefore every vault differ per network, because the factory's constructor carries the network's addresses (RV-015). | n/a |
 | External | Circle Facilitator, Gateway API and contracts, Discovery, Modular Wallets, GitHub API (P2), LLM API, embedding API | Out of Czar's control; each has a fallback in §14. | n/a |
 
 ### 5.3 Network rules
@@ -512,13 +512,13 @@ flowchart LR
   PK["Passkey (Face ID / Touch ID)<br/>iCloud Keychain or Google Password Manager"]
   MSCA["Circle Modular Wallet smart account (MSCA)<br/>on Arc"]
   V["CzarVault<br/>owner = MSCA"]
-  AK["agentSigner (Czar KMS)"]
-  AU["autonomySigner (Czar KMS)"]
-  GD["guardian (Czar KMS, offline-capable)"]
+  AK["agentSigner (Czar signer service)"]
+  AU["autonomySigner (Czar signer service; signs, never sends)"]
+  GD["guardian (Czar signer service; interactive confirmation in Phase 1, D80)"]
   PK -->|signs UserOps| MSCA
-  MSCA -->|msg.sender calls: deposit · withdraw · openEnvelope · setLimits · freeze · unfreeze · rotateAgent| V
-  AK -->|reserve · settle · release · fundPocket · openJob · fundJob · closeEnvelope · lowerLimit · agent-signed digests| V
-  AU -->|raiseAutoLimit (bounded)| V
+  MSCA -->|msg.sender calls: deposit · withdraw · openEnvelope · setCategoryLimits · freeze · unfreeze · rotateSigners · forceCloseEnvelope · recordManualReturn| V
+  AK -->|reserve · settle · finalize · registerPocket · fundPocket · openJob · fundJob · closeEnvelope · lowerAutoLimit · agent-signed digests| V
+  AU -->|AutonomyRaise signature, relayed by anyone (bounded)| V
   GD -->|pause (stop only)| V
 ```
 
@@ -528,13 +528,13 @@ flowchart LR
   - The vault must exist before its first payment (A1-13, A1-19); the factory deploys it at signup.
 - **How the vault tells an owner approval from a server signature:**
   - Owner actions are external calls where `msg.sender == owner`. The passkey signed the UserOp that produced the call. The vault stores the `objectiveHash` and `planHash` passed with `openEnvelope`, and emits them; the UserOp hash plus this event is the on-chain proof that a passkey holder approved that objective (product §6.22 step 3).
-  - Server actions are either external calls where `msg.sender == agentSigner` (reserve, settle, release, fund pocket, open and fund jobs, close) or ERC-1271 digests whose embedded fields are checked against a reservation and whose inner signature recovers to `agentSigner`.
-  - A direct passkey path (P-256 at `0x100`, A6-01) is kept as a later option for off-chain approvals relayed by Czar, which would remove the bundler dependency from approvals. Not Phase 1.
+  - Server actions are either external calls where `msg.sender == agentSigner` (reserve, finalize, register and fund pockets, open and fund jobs, close) or ERC-1271 digests whose embedded fields are checked against a reservation and whose inner signature recovers to `agentSigner`. The full function list is spec 03 `czar-vault.md` §5; `ICzarVault.sol` is the canonical ABI (RV-060).
+  - A direct passkey path (`executeOwnerAction`, P-256 at `0x100`, A6-01) **ships in the Phase 1 vault** as the D30 fallback, because an immutable vault cannot add it later; the app uses it only if AR-2 fails (G0-03). It reaches every owner and owner-recovery function (spec 03 §7, actions 1–16). **Superseded by RV-033:** "kept as a later option … Not Phase 1".
 - **What each party can do (enforced by the vault):**
 
 | Action | Owner (MSCA) | agentSigner | autonomySigner | guardian | anyone |
 |---|---|---|---|---|---|
-| deposit USDC | yes | no (anyone can send, only owner's deposits count toward free balance; see 03) | no | no | send only |
+| deposit USDC | yes | no (anyone can send; any sender's transfer counts as free balance, 03 §5.1; RV-060) | no | no | send only |
 | withdraw to any address | yes | no | no | no | no |
 | open envelope above auto-limit | yes | no | no | no | no |
 | open envelope within auto-limit allowance | yes | yes | no | no | no |
@@ -542,12 +542,12 @@ flowchart LR
 | raise `autoLimit[category]` (bounded, ≤ `userMax`, ≤ weekly step) | yes | no | yes | no | no |
 | lower `autoLimit` | yes | yes | yes | no | no |
 | freeze / unfreeze | yes / yes | freeze only | no | pause only | no |
-| rotate agentSigner, autonomySigner | yes | no | no | no | no |
+| rotate agentSigner, autonomySigner, evaluator (`rotateSigners`) | yes | no | no | no | no |
 | reserve / settle / fund pocket / open job / fund job | no (owner may also, for recovery) | yes | no | no | no |
 | release expired reservation / close expired envelope | yes | yes | no | no | yes |
 | claim ERC-8183 refund to vault | yes | yes | no | no | yes |
 
-- **Gas:** owner UserOps pay gas in native USDC from the MSCA. Whether Circle sponsors gas for MSCA UserOps on Arc is **GAP** (A6-08 lists no Arc paymaster; A6-19 says the client URL acts as bundler and paymaster). Design: the MSCA keeps a small USDC reserve; the app shows "network fee" as a line item (about $0.001 per transaction, p1-A6). Server calls to the vault pay gas from Czar's relayer in USDC. Facilitator settlement gas is paid by Circle (A1-18).
+- **Gas:** owner UserOps pay gas in native USDC from the MSCA. Whether Circle sponsors gas for MSCA UserOps on Arc is **GAP** (A6-08 lists no Arc paymaster; A6-19 says the client URL acts as bundler and paymaster). Design: the MSCA keeps a small USDC reserve; the app shows "network fee" as a line item (about $0.001 per transaction, p1-A6). **Server calls (RV-017):** the vault requires `msg.sender == agentSigner` for agent-only calls, the escrow requires the evaluator, and the evidence log records `msg.sender` as publisher, so K3, K7 and K8 each pay their own gas in native USDC from capped balances that a refill job tops up from the relayer key, with low-balance alerts (CZ-27 §5.5). K5 sends no transactions. The relayer key sends only permissionless calls (`raiseAutoLimit` with a K5 signature, `settle`, `finalize`, `confirmPullback`, `syncJob`, `claimJobRefund`, `gatewayMint`, `executeOwnerAction`). **Superseded by RV-017:** "Server calls to the vault pay gas from Czar's relayer in USDC." Facilitator settlement gas is paid by Circle (A1-18).
 
 ### 7.2 Key and credential inventory
 
@@ -555,10 +555,10 @@ flowchart LR
 |---|---|---|---|---|---|---|
 | K1 | User passkey | User | Platform authenticator, synced (D1-01, D1-02) | Sign UserOps for the MSCA: deposits, withdrawals, envelope approvals, limits, freeze, key rotation | Full control of the user's vault and MSCA. Synced passkeys give no hardware proof (D1-12). | Circle MSCA owner change (needs the SDK's flow; detail in 04). Czar guardian can pause spending while the user recovers. |
 | K2 | Circle Modular Wallets `clientKey` | Czar | App config (public-facing API credential) | Access the bundler/transport for Czar's app (A6-06) | Abuse of Czar's Circle quota; cannot sign for users | Rotate in Circle Console |
-| K3 | `agentSigner` | Czar server | KMS, signing policy: only vault calls and vault-domain digests | Reserve and settle inside open envelopes; fund pockets ≤ 25%; open jobs within reservations; sign pullbacks to the vault; open envelopes within auto-limit allowances; freeze | Spend of all users' open envelopes to allowlisted payees, plus auto-limit allowances until frozen. No withdrawals. | Owner calls `rotateAgent` (per vault). Guardian pause across all vaults. Czar can also set the vault's `agentSigner` to a fresh key only through each owner; design a batched "re-register" UserOp prompt in the app. |
-| K4 | Pocket wallet keys (one per objective) | Czar server | KMS, per-objective, deleted after pullback | Sign nanopayments from that pocket; same-chain transfers of that pocket's balance (A2-16) | That pocket's balance, ≤ 25% of one envelope | Natural: funded per objective, drained at end; key destroyed. Compromise → immediate pullback by the vault (A2-19c); if the attacker calls `removeDelegate` first, loss = pocket balance. |
+| K3 | `agentSigner` | Czar server | Signer service (Phase 1 local keystore, D70/D78; stage 2 Cloud KMS), signing policy: only vault calls checked against stored plans and vault-domain digests (CZ-27 §5.2) | Reserve and settle inside open envelopes; fund pockets ≤ 25%; open jobs within reservations; sign pullbacks to the vault; open envelopes within auto-limit allowances; freeze | Spend of all users' open envelopes to allowlisted payees, plus auto-limit allowances until frozen. No withdrawals. | Owner calls `rotateSigners` (per vault). Guardian pause across all vaults. Czar can also set the vault's `agentSigner` to a fresh key only through each owner; design a batched "re-register" UserOp prompt in the app. |
+| K4 | Pocket wallet keys (one per pocket; the address is a leaf of the approved plan, D71) | Czar server | Signer service; retired only when every balance of the pocket reads zero (CZ-27 §5.3, RV-004) | Sign nanopayments from that pocket; a raw K4 can also sign a same-chain burn of that pocket's whole balance to any recipient (A2-16, RV-063) | That pocket's balance, ≤ 25% of one envelope | Natural: funded per objective, drained at end; key destroyed. Compromise → immediate pullback by the vault (A2-19c); if the attacker calls `removeDelegate` first, loss = pocket balance. |
 | K5 | `autonomySigner` | Czar server | KMS | Raise auto-limits within `userMax` and the weekly step | Users' auto-limits rise to their own maxima; spending still needs the agent key and envelopes | Owner rotates; guardian pause |
-| K6 | `guardian` | Czar ops (separate from server runtime) | KMS with human approval policy | Pause all vaults (stop spending); unpause | Denial of service only; no fund movement | Rotate via factory admin; vaults read the guardian from the factory |
+| K6 | `guardian` | Czar ops. Phase 1: on the same Mac as the server, with an interactive confirmation per use (accepted testnet exception, D80); stage 2: Cloud KMS with dual control | Signer service | Pause all vaults (stop spending); unpause | Denial of service only; no fund movement | Rotate via factory admin; vaults read the guardian from the factory |
 | K7 | Evaluator key (ERC-8183) | Czar server | KMS, separate from K3 | `complete` or `reject` submitted jobs where Czar is evaluator | Release escrowed job budgets to providers, or wrongly reject; bounded by reserved job budgets | Jobs name the evaluator at creation; new jobs use the new key; old open jobs stay with the old key until they close |
 | K8 | `OpenEvidenceLog` publisher key | Czar server | KMS | Commit roots under Czar's publisher address | Fake evidence anchors under Czar's name; detectable by recompute; no funds | Announce a new publisher with a `POLICY_RELEASE`; readers choose publishers (SL §7.1) |
 | K9 | Claim-server relayer key | Czar server (P2) | KMS | Approve releases from `BuilderEscrow` after a timelock | Misdirect unclaimed tips to attacker wallets, bounded by escrow balance and caught in the delay window | Czar admin cancels pending releases and rotates the role |
@@ -572,15 +572,16 @@ flowchart LR
 | K17 | Web Push VAPID key (stage 2, D69) | Czar server | secret store | Send pushes to subscribed phones | Spam notifications | Rotate; resubscribe |
 | K18 | LLM and embedding API keys | Czar server (and the daemon only through a proxy, OD-3) | secret store | Model calls | Cost; data sent to the model provider | Provider console |
 | K19 | RPC provider keys | Czar server | secret store | Keyed RPC access | Quota | Provider console |
-| K20 | Factory admin (Ownable2Step) | Czar ops | KMS, human approval | Register new vault implementation for new vaults; set guardian | New users could get a malicious vault code → mitigated by publishing bytecode hashes and a timelock | Two-step transfer |
+| K20 | Factory admin (Ownable2Step) | Czar ops. Phase 1: same Mac, interactive confirmation (D80); stage 2: dual control | Signer service | Queue default signers for new vaults and a new guardian, both behind a 48 h timelock (RV-015). There is no version register: a new vault version is a new factory (D73) | New users could get attacker default signers after 48 h of public warning (`DefaultsQueued` alert); existing vaults unaffected | Two-step transfer |
 
+- **Phase 1 custody (D80):** every server key above lives on Zaryab's Mac. A compromise of the Mac yields K3, K5, K6, K7, K8, K20 and the relayer together; this is an accepted, documented testnet exception bounded by testnet funds. Dual control for K6 and K20 arrives with Cloud KMS (`stage-2-backlog.md` §6).
 - **Principle:** no single server key can withdraw user funds. The worst a total server compromise does is spend open envelopes to approved payees and drain outstanding pockets, until a guardian pause or user freeze (§13).
 
 ### 7.3 Envelope and limit model (what the vault enforces)
 
-- **Envelope** (`envelopeId`): `cap` (USDC, 6 decimals), `category`, `expiresAt`, `objectiveHash`, `planHash`, `payeeRoot` (Merkle root of allowed `payTo` addresses and job providers, including alternates), `maxStepAmount`, `pocketCapBps` (default 2500 = 25%, D22), `spent`, `reserved`, `pocketOutstanding`, `state`.
+- **Envelope** (`envelopeId`): `cap` (USDC, 6 decimals), `category`, `expiresAt`, `objectiveHash`, `planHash`, `payeeRoot` (Merkle root of allowed `payTo` addresses and job providers, including alternates), `maxStepAmount`, `pocketCapBps` (0 unless the plan has a Gateway step, then 2500 = 25%; D22, D71), the per-step usage `stepUsed` (RV-002), `spent`, `reserved`, `pocketOutstanding`, `state`.
 - **Free balance** = vault USDC balance − Σ open envelopes' (cap − spent − reserved …) accounting; detail in 03.
-- **Earned autonomy:** `autoLimit[category]` and a rolling weekly `autoAllowance[category]`; the agent may open envelopes with `cap ≤ autoAllowance remaining`; the vault enforces `autoLimit ≤ userMax[category]`; raises by `autonomySigner` are capped per week; every change is an event (product §6.6).
+- **Earned autonomy:** `autoLimit[category]` is a weekly allowance that resets on the calendar period (`now / 604800`); the agent may open envelopes with `cap ≤ autoLimit − usedInPeriod` (saturating at 0); the vault enforces `autoLimit ≤ userMax[category]`; raises by `autonomySigner` are spaced at least one period apart from the last raise and capped at 20% of `userMax`; every change is an event (product §6.6). **Worst case (RV-031):** because the allowance resets on the boundary, a compromised agent key can open `autoLimit` just before it and again just after it, so up to `2 × autoLimit` (never more than `2 × userMax`) in seconds. **Superseded by RV-031:** "a rolling weekly `autoAllowance`".
 - **Freeze:** owner or agent sets `frozen = true` → `isValidSignature` returns failure, no reservations, no pocket funding, no job funding; pullbacks and refunds still allowed. Guardian `paused` behaves the same across all vaults. Lowering every category's `autoLimit` to 0 (D60) is a follow-up agent step, `lowerAutoLimit(category, 0)` per category after `frozen` is set, not atomic (D63).
 
 ---
@@ -644,7 +645,7 @@ sequenceDiagram
 
 - "Fund on approval" is internal: the vault moves `cap` from free balance into the envelope's accounting. No USDC leaves the vault until a step settles.
 - "Refund" at close is internal too: unspent cap returns to free balance in the same transaction. Nothing to transfer, nothing to fail.
-- `closeEnvelope` requires no open reservations, no outstanding pocket funds beyond a dust threshold, and no open jobs; otherwise it waits (or the owner force-closes after expiry and writes off the dust).
+- `closeEnvelope` requires no open reservations, no open pocket and no open jobs; otherwise it waits (or the owner force-closes after expiry: the pocket is written off and closed, unfunded jobs are released; spec 03 §5.2). There is no dust threshold. **Superseded by RV-046:** "no outstanding pocket funds beyond a dust threshold".
 
 ### 8.3 Vault-direct x402 payment (`exact`)
 
@@ -696,11 +697,12 @@ sequenceDiagram
   participant GAPI as Gateway API
   participant M as Gateway-only merchant
   participant GM as GatewayMinter
-  S->>K: create pocket key for objective → pocket EOA address
-  S->>V: fundPocketGas(envelopeId, pocket, 0.01) [tiny native USDC for one tx]
+  Note over S,K: at planning: pocket key created; its address is a kind-4 leaf of the plan's payeeRoot (D71)
+  S->>V: registerPocket(envelopeId, pocket, proof) [agentSigner]
+  S->>V: grantPocketGas(pocket, units) [native USDC for the pocket's own txs]
   S->>GW: pocket EOA tx: addDelegate(USDC, vault)
   GW-->>S: DelegateAdded
-  S->>V: fundPocket(envelopeId, pocket, amount ≤ 25% cap) [agentSigner]
+  S->>V: fundPocket(pocket, amount ≤ cap × pocketCapBps / 10000) [agentSigner]
   V->>GW: require isAuthorizedForBalance(USDC, pocket, vault) == true; approve; depositFor(USDC, pocket, amount)
   V-->>S: PocketFunded; envelope.pocketOutstanding += amount
   loop per call
@@ -711,21 +713,21 @@ sequenceDiagram
     M-->>S: 200 + body
   end
   Note over GAPI: batches every ~16 min; completed 0–16 min later (A2-26)
-  S->>V: at objective end: agentSigner signs BurnIntent as vault (delegate), recipient = vault
+  S->>V: at objective end, or at once on freeze (D72): requestPullback(pocket, value, maxFee, maxBlockHeight); agentSigner signs the BurnIntent as vault (delegate), recipient = vault
   S->>GAPI: POST /v1/transfer {contractSigner: true, same chain}
   GAPI-->>S: attestation (201, ~0.5 s)
   S->>GM: gatewayMint(attestation, signature) → USDC to vault (~2 s)
-  S->>V: recordPullback(envelopeId, amount) → pocketOutstanding −= amount (bounded by vault balance delta)
-  S->>K: destroy pocket key
+  S->>V: confirmPullback(pullbackId) [anyone; requires GatewayMinter.isTransferSpecHashUsed] → pocketOutstanding −= value
+  S->>V: writeOffPocket(pocket); pocket returns its gas to the vault; key retired once every balance is zero (CZ-27 §5.3)
 ```
 
 - Steps 2–4: the delegate link is created **before** any real money, and the vault checks it on-chain before depositing (A2-04). If `addDelegate` was skipped, `fundPocket` reverts.
 - Step 5: the 25% cap is enforced by the vault: Σ pocket fundings for an envelope ≤ `cap × pocketCapBps / 10000` (D22). Phase 1 treats this as a total per objective; top-ups after a confirmed pullback need an on-chain read of the pocket's available Gateway balance, which is **GAP** (no fact lists an `availableBalance` view), so they are Phase 2.
 - Steps 11–12: `received` is the receipt; `completed` arrives 0–16 min later (A2-24 to A2-26). The UI shows "pending" until then (FD-5).
 - Steps 13–16: pullback uses the TEE-vouched ERC-1271 path, proven with a contract delegate on testnet (A2-19c, A2-08). The vault's `isValidSignature` accepts a `BurnIntent` digest only if `recipient == vault` and `sourceDepositor` is a registered pocket of an envelope, and the inner signature is the agent's.
-- Step 17: the vault credits the pullback by comparing its USDC balance before and after the mint in the same transaction window; detail in 03. If the mint never lands, the balance is re-credited to the pocket after `expirationBlock` (A2-18) and the pullback is retried.
+- Pullback credit: `confirmPullback` credits the pullback only when `GatewayMinter.isTransferSpecHashUsed(transferSpecHash)` is true (spec 03 §5.4). **Superseded by RV-046:** "`recordPullback` … comparing its USDC balance before and after the mint" and `fundPocketGas`; the current names are in spec 03 §5.4 and spec 02 §6.3.2. If the mint never lands, the balance is re-credited to the pocket after `expirationBlock` (A2-18) and the pullback is retried.
 - Accounting: pocket funding counts as spent from the envelope at funding time; pullback un-spends. This is conservative and simple.
-- **Circle API down:** no instant pullback (A2-06). Fallback: the pocket key calls `initiateWithdrawal` then `withdraw` after 1,209,600 blocks (≈ 7.1 days, A2-13, A2-14) to the pocket EOA, then transfers to the vault. Envelope close waits or the owner writes off.
+- **Circle API down:** no instant pullback (A2-06). Fallback: the pocket key calls `initiateWithdrawal` then `withdraw` after 1,209,600 blocks (≈ 7.1 days, A2-13, A2-14) to the pocket EOA, then transfers to the vault with its `pocket-return` kind; the owner credits it with `recordManualReturn` (D41). Funds that reach a pocket after it closed are recovered with a recovery pullback (RV-004).
 - **Worst-case loss:** the pocket balance plus gas dust, at most 25% of one envelope. Keeping pockets per objective and draining at the end keeps it small (FD-4).
 - **Key rotation:** a pocket key is single-use per objective. Mid-objective rotation = drain to vault, new pocket, re-fund.
 - **Batching (D10):** many sub-cent calls ride one deposit; the on-chain cost is one `depositFor` and one mint per objective.
@@ -816,11 +818,11 @@ sequenceDiagram
   participant USDC as USDC
   participant GAPI as Gateway API + Minter
   participant J as ERC-8183
-  A->>V: releaseExpired(nonce)
-  V->>USDC: authorizationState(vault, nonce) == false ∧ now > validBefore
-  V-->>A: Released; envelope.reserved −= amount
+  A->>V: finalize(reservationId, from, to) [anyone, after validBefore]
+  V->>USDC: authorizationState(vault, nonce_i) per index
+  V-->>A: Released per unused index; envelope.reserved −= unitAmount
   A->>GAPI: pullback burn intent (vault as delegate) → gatewayMint to vault
-  A->>V: recordPullback(envelopeId, amount); pocketOutstanding −= amount
+  A->>V: confirmPullback(pullbackId); pocketOutstanding −= value
   A->>V: claimJobRefund(jobId)
   V->>J: claimRefund(jobId) after expiry, or Refunded on reject
   J-->>V: USDC back to vault; job un-spent
@@ -888,12 +890,13 @@ sequenceDiagram
 
 ### 10.1 The chosen design: reserve, sign, settle, release
 
-- **Reserve (on-chain, agent key):** `reserve(envelopeId, payTo, amount, validBefore, nonce, merkleProof)` checks: not frozen or paused; envelope open and not expired; `payTo` proven against `payeeRoot`; `amount ≤ maxStepAmount`; `spent + reserved + pocketOutstanding + amount ≤ cap`; category limits. Stores `Reservation{payTo, amount, validBefore, nonce, state = Reserved}` keyed by `nonce`. Emits `Reserved`.
-- **Sign (off-chain, agent key):** the agent signs the USDC `TransferWithAuthorization` digest with `from = vault`, `to = payTo`, `value = amount`, `validAfter = 0`, `validBefore`, `nonce`. The signature bytes passed to USDC are `abi.encode(kind = USDC_3009, to, value, validAfter, validBefore, nonce, agentSig)`.
-- **Verify (on-chain view, called by USDC at verify and settle):** `isValidSignature(digest, sig)` decodes `sig`, recomputes the USDC digest from the hard-coded domain (A1-03) and the fields, requires equality, loads the reservation by `nonce`, checks state and `validBefore`, checks `frozen`/`paused`, recovers `agentSig` to the current `agentSigner`, and returns `0x1626ba7e`. Any other digest kind not registered (USDC authorization, Gateway burn intent, Selection Layer receipt) returns failure. So "the key signed" is never enough (A1-09 implication).
-- **Settle (on-chain, agent or anyone):** `settle(nonce)` requires `USDC.authorizationState(vault, nonce) == true` (A1-11, A1-12 confirm the view flips) then moves `amount` from `reserved` to `spent` and emits `Settled`. Idempotent.
-- **Release (on-chain, anyone):** `releaseExpired(nonce)` requires `block.timestamp > validBefore` and `authorizationState == false`; USDC can never use that nonce after `validBefore`, so releasing is safe. Emits `Released`.
-- **Reservation TTL:** `validBefore = now + min(maxTimeoutSeconds from the 402, 10 minutes)` (A3-06). Short TTLs keep reserved money from piling up.
+- **Superseded by RV-046:** the earlier API in this section (`reserve(envelopeId, payTo, amount, validBefore, nonce, merkleProof)` keyed by nonce, `settle(nonce)`, `releaseExpired(nonce)`, and a signature blob without reservation id and index). The normative definitions are spec 03 `czar-vault.md` §5.3 (functions), §6.1 (checks) and spec 02 §6.3 (signature encodings), §7.2 (nonces). Summary:
+- **Reserve (on-chain, agent key):** `reserve(envelopeId, stepIndex, payee, stepCap, proof, unitAmount, count, validBefore)` proves the payee leaf under `payeeRoot`, checks `stepCap ≤ maxStepAmount`, the per-step usage `stepUsed + unitAmount × count ≤ stepCap` (RV-002), `validBefore ≤ expiresAt` and the envelope cap, and creates one reservation of `count ≤ 128` authorizations.
+- **Sign (off-chain, agent key):** for index `i`, the agent signs the USDC `TransferWithAuthorization` digest with `from = vault`, `to = payee`, `value = unitAmount` (exactly, RV-035), `validAfter = 0`, `validBefore`, `nonce_i = derivedNonce(reservationId, i)`. The bytes passed to USDC are the `USDC_3009` envelope `abi.encode(kind, reservationId, index, to, value, validAfter, validBefore, nonce, agentSig)` (02 §6.3.1).
+- **Verify (on-chain view):** `isValidSignature` recomputes the digest from the fields, checks the reservation, the index, the derived nonce, freeze and pause, and the agent signature; every other digest kind returns failure (A1-09).
+- **Settle (anyone):** `settle(reservationId, indices)` books indices whose nonce USDC consumed; the call that marks the last index makes the reservation `Final` (RV-001).
+- **Finalize (anyone, after `validBefore`):** `finalize(reservationId, from, to)` settles used indices and releases the rest, in chunks of 32.
+- **Reservation TTL:** `validBefore = min(now + min(maxTimeoutSeconds from the 402, 10 minutes), expiresAt)` (A3-06, RV-056).
 - **Optional fast release:** USDC exposes `cancelAuthorization(address,bytes32,bytes)` (A1-08). A vault function could cancel an unused nonce early by presenting a vault-signed cancel digest. Untested; marked for 03 as optional.
 
 ### 10.2 Why this and not the alternatives
@@ -914,8 +917,8 @@ sequenceDiagram
 
 ### 10.4 Pocket and job accounting
 
-- Pocket: `fundPocket` adds to `pocketOutstanding` (counted as committed); `recordPullback` reduces it; at close, `spent += pocketOutstanding` remaining (treated as spent, written off or recovered later).
-- Jobs: `openJob` reserves `maxStepAmount`; `fundJob` moves the actual budget to `spent` and releases the rest; `Refunded` and `claimRefund` return funds to the vault and un-spend.
+- Pocket: `fundPocket` adds to `pocketOutstanding`; `confirmPullback` reduces it; `writeOffPocket` books the remainder as spent; a later recovery pullback is free balance (RV-004, RV-046).
+- Jobs: `openJob` reserves the step's `stepCap`; `fundJob` moves the actual budget into escrow and releases the rest; `syncJob` books completion as spent and refunds (`budget − settledAmount`) back; an unfunded job is released after expiry (RV-009).
 
 ---
 
@@ -965,10 +968,10 @@ flowchart LR
 
 ### 11.3 What goes on-chain
 
-- `EnvelopeOpened(envelopeId, cap, category, objectiveHash, planHash, approver)` and all spending events.
-- `OpenEvidenceLog` leaves (inside batch roots, with content in Czar's published archives): `demand-proof` leaf = `{observationHashes[], objectiveHash, approvalRef (envelopeId + tx), paymentRefs[], outcomeHashes[]}`; `soul-version` leaf = `{userPseudonym, soulVersionHash, timestamp}`; receipts as in SL §5.
+- `EnvelopeOpened(envelopeId, categoryId, objectiveHash, cap, planHash, payeeRoot, maxStepAmount, pocketCapBps, expiresAt, approverIsOwner)` (exact ABI in `ICzarVault.sol`, RV-060) and all spending events.
+- `OpenEvidenceLog` leaves (inside batch roots, with content in Czar's published archives): `demand-proof` leaf (version 2, RV-026) = `{observationHashes[], objectiveHash, soulVersionCommit (salted per envelope), planHash, envelopeRef, approval, paymentRefHashes[], outcomeHashes[], closedAt}` with **no pseudonym**; `soul-version` leaf = `{userPseudonym, soulVersion, soulVersionHash, previousHash?, compiledAt}`; receipts as in SL §5. No leaf carries both a pseudonym and anything that names a vault or a payment.
 - Never: soul contents, observation text, objective text, merchant bodies, emails.
-- Address hygiene (p1-FD-5): a user's vault address is visible with all its payments. Czar documents this plainly. Pocket wallets rotate per objective. The soul-version leaf uses a per-user pseudonym that the user can rotate.
+- Address hygiene (p1-FD-5): a user's vault address is visible with all its payments. Czar documents this plainly. Pocket wallets rotate per objective. The soul-version leaf uses a per-user pseudonym that the user can rotate; demand-proof leaves carry no pseudonym and only a salted soul commitment, so the public archive cannot join a user's soul history to their vault (RV-026).
 
 ### 11.4 Personal data from observers
 
@@ -990,12 +993,12 @@ Scenario: Priya, a product manager, works in Claude Code on a pricing doc for tw
 5. **Publish.** Layer 2 finds no PII. `objectiveHash = keccak(canonical objective)` = `0x9c…`. Sent with the device token. Handoff: CZ-07 → CZ-12.
 6. **Price.** CZ-13 asks CZ-18 for `web-search` and `page-extract` services. CZ-18 queries Circle Discovery live (cached ≤ 1 h) and Czar's index, probes the top candidates' 402s, and returns a `RankingDecision`. Plan: step 1 search ($0.05, vault-direct, Czar merchant A), steps 2–6 five page extracts ($0.10 each, Gateway-only merchant B → pocket), step 7 table build (local, free). Cap $0.70 with 25% slack = $0.88. `planHash = 0x3e…`, `payeeRoot` over {A's payTo, B's payTo}. Category `research`.
 7. **Approve.** Priya's `autoAllowance[research]` is $0.50 this week, so approval is needed. She opens the Czar web app in her desktop browser and sees the objective in the pending-approvals list; she clicks "Approve $0.88". The app builds a UserOp `openEnvelope(880000, research, expiry, 0x9c…, 0x3e…, payeeRoot, maxStep 150000)`; her passkey signs it; Circle's bundler submits it; her MSCA calls the vault. Signature 1: passkey over the UserOp. Event `EnvelopeOpened(#4411, …, approver = MSCA)`.
-8. **Execute, step 1 (vault-direct).** CZ-15 gets A's 402 (`exact`, `payTo` A, 50000). It calls `reserve(#4411, A, 50000, now+600, nonce n1, proof)` (Signature 2: agent key on the tx). It signs the USDC digest (Signature 3: agent key, inside the ERC-1271 bytes). A calls `/verify` → USDC calls the vault's `isValidSignature` → magic value. A serves JSON. A calls `/settle` → relayer tx → `AuthorizationUsed(vault, n1)`. CZ-15 calls `settle(n1)`. CZ-16 runs delivery and structural checks: pass.
-9. **Execute, steps 2–6 (pocket).** CZ-15 creates pocket key P (KMS), funds gas dust, P calls `addDelegate(USDC, vault)`, then `fundPocket(#4411, P, 220000)` (= 25% of cap) → `depositFor`. Five nanopayments signed by P (Signatures 4–8), each `received` in about 1.2 s. Acceptance: four pass, one returns an empty page → fail. Plan rule: retry that page with alternate merchant C? C is not in `payeeRoot`, so no; the step is marked failed and the table gets four rows plus a note.
-10. **Pull back.** Agent signs a `BurnIntent` as the vault (Signature 9) for the unspent 0.1996 USDC; `/v1/transfer` → `gatewayMint` → vault balance up; `recordPullback`. Pocket key destroyed.
+8. **Execute, step 1 (vault-direct).** CZ-15 gets A's 402 (`exact`, `payTo` A, 50000). It calls `reserve(#4411, step 0, A, stepCap, proof, 50000, count 1, now+600)` (Signature 2: agent key on the tx); index 0's nonce `n1 = derivedNonce(reservationId, 0)`. It signs the USDC digest (Signature 3: agent key, inside the ERC-1271 bytes). A calls `/verify` → USDC calls the vault's `isValidSignature` → magic value. A serves JSON. A calls `/settle` → relayer tx → `AuthorizationUsed(vault, n1)`. CZ-15 calls `settle(reservationId, [0])`, which makes the reservation `Final`. CZ-16 runs delivery and structural checks: pass.
+9. **Execute, steps 2–6 (pocket).** CZ-15 registers pocket P (its address was a leaf of the approved `payeeRoot`, D71), grants it gas, P calls `addDelegate(USDC, vault)`, then `fundPocket(P, 220000)` (= 25% of cap) → `depositFor`. Five nanopayments signed by P (Signatures 4–8), each `received` in about 1.2 s. Acceptance: four pass, one returns an empty page → fail. Plan rule: retry that page with alternate merchant C? C is not in `payeeRoot`, so no; the step is marked failed and the table gets four rows plus a note.
+10. **Pull back.** Agent signs a `BurnIntent` as the vault (Signature 9) for the unspent 0.1996 USDC; `/v1/transfer` → `gatewayMint` → vault balance up; `confirmPullback`; `writeOffPocket`; P returns its unused gas; P's key is retired once every balance reads zero.
 11. **Accept and deliver.** CZ-16 report hash `0x5d…`. CZ-11 writes `.czar/results/competitor-prices.md` into the project; the next Claude Code session's `SessionStart` hook prints "Czar delivered: competitor-prices.md (4/5 rows, $0.45)".
 12. **Close.** `closeEnvelope(#4411)`: spent 0.45, released 0.43 to free balance. ROI ledger: 95 min saved, $0.45.
-13. **Prove and learn.** CZ-17 signs two receipts (Signature 10: agent key under the vault's ERC-1271 for step 1; Signature 11: P's key for pocket steps, signed before P was destroyed) and one `demand-proof` leaf `{[0x11…, 0x12…], 0x9c…, #4411/tx, [n1, transfer ids], [0x5d…]}`; the hourly batch root goes to `OpenEvidenceLog` (Signature 12: publisher key). Merchant B's `delivery` posterior drops slightly; A's rises. Priya's `research` auto-limit is nudged up by CZ-24 next week (Signature 13: autonomy key), within her `userMax`.
+13. **Prove and learn.** CZ-17 signs two receipts (Signature 10: agent key under the vault's ERC-1271 for step 1; Signature 11: P's key for pocket steps, signed while P's key still existed) and one `demand-proof` leaf (version 2) `{[0x11…, 0x12…], 0x9c…, soulVersionCommit, 0x3e…, #4411/tx, [paymentRefHashes], [0x5d…]}`; the hourly batch root goes to `OpenEvidenceLog` (Signature 12: publisher key). Merchant B's `delivery` posterior drops slightly; A's rises. Priya's `research` auto-limit is nudged up by CZ-24 next week (Signature 13: autonomy key), within her `userMax`.
 
 ---
 
@@ -1003,16 +1006,16 @@ Scenario: Priya, a product manager, works in Claude Code on a pricing doc for tw
 
 | Threat | What the attacker can do | Maximum loss | Mitigation |
 |---|---|---|---|
-| **Model hijacked** (planner or paying agent follows injected instructions) | Try to pay unapproved merchants, inflate amounts, open envelopes, exfiltrate data | **Vault-direct:** only reservations inside open envelopes, to payees in `payeeRoot`, ≤ `maxStepAmount` each, ≤ cap total. **Pocket:** outstanding pocket balances, ≤ 25% of each envelope. **ERC-8183:** budgets ≤ reservation, providers in `payeeRoot`. **Self-opened envelopes:** ≤ weekly `autoAllowance` per category. Data: whatever the planner already holds (redacted objectives). | On-chain rules (§7.3); planner never sees raw seller text (§13.1); structured outputs; human approval for new payees or over-cap spend (C3-01, C3-03); drift alerts (§16). |
-| **Czar server compromised** | Everything above for all users, plus evaluator decisions, evidence forgery under Czar's publisher, misuse of Circle API keys, reading objectives and merchant bodies | Sum over users of open-envelope remaining caps + outstanding pockets + weekly auto-allowances, until guardian pause or user freezes. No withdrawals to attacker addresses (no key can do that). Builder escrow: releases are delayed and cancellable. | KMS signing policies (K3 can only produce vault-shaped calls and registered digest kinds), guardian pause held outside the runtime (K6), alerting on abnormal reservation rates, short envelope expiries, small default caps, pocket caps, timelocked escrow. |
+| **Model hijacked** (planner or paying agent follows injected instructions) | Try to pay unapproved merchants, inflate amounts, open envelopes, exfiltrate data | **Vault-direct:** only reservations inside open envelopes, to payees in `payeeRoot`, ≤ each step's `stepCap` in total across the payee and its alternates (enforced on-chain by `stepUsed`, RV-002), ≤ cap total. **Pocket:** outstanding balances of pockets the owner approved (kind-4 leaves, D71), ≤ 25% of each envelope that has a Gateway step and 0 otherwise. **ERC-8183:** budgets ≤ reservation, providers in `payeeRoot`. **Self-opened envelopes:** ≤ `autoLimit` per category per period, so up to `2 × autoLimit` around a period boundary (RV-031). Data: whatever the planner already holds (redacted objectives). | On-chain rules (§7.3); planner never sees seller text (§13.1, D74); structured outputs; human approval for new payees or over-cap spend (C3-01, C3-03), enforced off-chain by the planner and by the signer, which checks K3's `openEnvelope`/`reserve`/`openJob` arguments against a stored, approvable plan (CZ-27 §5.2, RV-032); MCP `pay` only for approved plan steps within their call budget (D75); drift alerts (§16). |
+| **Czar server compromised** | Everything above for all users, plus evaluator decisions, evidence forgery under Czar's publisher, misuse of Circle API keys, reading objectives and merchant bodies | Sum over users of open-envelope remaining caps + outstanding pockets + weekly auto-allowances, until guardian pause or user freezes. No withdrawals to attacker addresses (no key can do that). Builder escrow: releases are delayed and cancellable. | Signer policies (K3 can only produce vault-shaped calls checked against stored plans and registered digest kinds; pocket nanopayments and evaluator payouts refused while frozen or paused, D72), guardian pause (K6; in Phase 1 on the same Mac as the runtime with an interactive confirmation, an accepted testnet exception, D80; separated in stage 2), alerting on abnormal reservation rates, short envelope expiries, small default caps, pocket caps, timelocked escrow. |
 | **Agent key leaks (K3)** | Same as the hijacked model but from outside; also freeze users (nuisance) | Same bound as above | Owner-driven rotation prompt in the app; guardian pause; the vault accepts only the current signer. |
-| **Pocket key leaks (K4)** | Spend that pocket on any Gateway seller; instant-transfer the balance out; `removeDelegate` to block pullback | That pocket's balance plus gas dust | Per-objective keys; drain at end; vault pulls back immediately on alert; cap 25%. Already-signed burn intents by a revoked delegate still burn (A2-05), which here only affects pullbacks to the vault, a safe direction. |
+| **Pocket key leaks (K4)** | Spend that pocket on any Gateway seller; sign a burn intent that sends the whole balance to any address; `removeDelegate` to block pullback | That pocket's balance plus gas dust | Per-pocket keys; drain at end; vault pulls back immediately on alert; cap 25%. On-chain, a revoked delegate's intents still pass, even ones signed after revocation; only Circle's API refuses them (A2-05, RV-063). |
 | **Malicious merchant or agent** | Take payment and deliver nothing or garbage; serve injection text; settle `upfront` flows early; for jobs, submit junk | One step per bad call (x402), bounded by `maxStepAmount`; zero for ERC-8183 (reject → refund) | Probe before paying (p1-D7); step caps; stop-on-fail; evidence and rank; refuse `upfront` from untrusted merchants; evaluator rejects jobs. |
 | **Poisoned catalog or seller text** (descriptions, bazaar schemas, `Agent Instructions` pages, FL-1, FL-2) | Steer the planner toward itself, embed instructions in `description`, oversize schemas | Same bound as "model hijacked" | Text affects retrieval only, never score (SL-C3); schemas validated and sanitized, no external `$ref` (A3-36); reader/planner split (§13.1); small-model screen (C3-04). |
 | **Malicious observer input** (memory poisoning, OWASP ASI06, C3-02) | A tool output or page plants fake "TODOs" or fake deadlines that become objectives | Spend within whatever the user approves, or within auto-allowance for the category | Every belief carries provenance and receipts; detectors weight repeated, multi-source signals; objectives show their evidence; the user edits or deletes any line; auto-approved objectives need positive history in that category; injection screen on observed text before it becomes a drive. |
 | **Circle or a dependency contract upgraded against Czar** (USDC, GatewayWallet, ERC-8183, ERC-8004; A1-02, A2-23, A4-08, A5-12) | Change signature checking, fees, delegate rules, or take funds in Gateway balances | Pocket balances (Gateway); job budgets (ERC-8183); vault-direct payments only if USDC's ERC-1271 check changed | Pin implementations and alert on `Upgraded` (FD-18); halt the affected path; keep pockets small; migrate jobs to `CzarJobEscrow`. The vault's own USDC balance is native USDC, so a USDC upgrade is a chain-level risk shared by everyone on Arc. |
 | **The claim server lies** (D17) | Approve a false builder claim | Unclaimed tips for that repo | Timelocked, public releases; admin cancel; small escrow by design (D24); GitHub admin check plus `FUNDING.json` fallback leaves an audit trail. |
-| **Phished user approval** | Trick the user into approving a bad plan or a large cap | That envelope's cap | Plain-language plan summary with payees and amounts in USD (D51, D65); new-payee and over-threshold warnings; per-category `userMax`; freeze in one tap; history visible. Passkeys stop credential phishing, not consent phishing (D1-08). |
+| **Phished user approval** | Trick the user into approving a bad plan or a large cap | That envelope's cap | Plain-language plan summary with payees and amounts in USD (D51, D65); the app rebuilds `payeeRoot` and `planHash` from the leaves it displays with `@czar/hashing` and refuses to sign on any mismatch with the calldata, so a compromised server cannot show benign payees and approve others (CZ-22, RV-044); new-payee and over-threshold warnings; per-category `userMax`; freeze in one tap; history visible. Passkeys stop credential phishing, not consent phishing (D1-08). |
 | **Selection Layer operator misconduct** (Czar itself) | Rank Czar's own merchants first | n/a (reputation) | Policy and snapshots anchored; recompute kit; Czar merchants carry the same evidence rules (SL §10). |
 
 ### 13.1 The prompt-injection boundary
@@ -1029,9 +1032,9 @@ Where untrusted text enters:
 
 How the planner is kept from reading it raw (C3-04, C3-06, C3-09, FD-28):
 
-- **Reader/planner split.** A reader model with no tools and no money turns untrusted text into a fixed schema (`StepResult{status, fields[], confidence, flags[]}`). The planner receives only schema-valid JSON, labelled with its source, inside `tool_result` blocks, JSON-encoded. The planner never receives free text from a merchant.
-- **Small-model screen.** Before the reader runs, a small classifier flags injection patterns; flagged inputs are quarantined and shown to the user with the flag.
-- **Structured tool interface.** The paying agent's tools are narrow (`reserve`, `pay_step(stepId)`, `fund_pocket(stepId)`, `open_job(stepId)`); none takes a free-form payee or amount. Payees and amounts come from the approved plan, which the vault enforces.
+- **Reader/planner split (D74).** A reader model with no tools and no money turns untrusted text into a fixed schema (`StepResult{status, fields[], confidence, flags[]}`). The planner never receives a `StepResult` or any merchant-derived text; on re-planning it receives only `{stepIndex, errorCode, flags}` per failed step. **Superseded by D74:** "The planner receives only schema-valid JSON … inside `tool_result` blocks".
+- **Small-model screen.** Before the reader runs, a small classifier screens every character the reader will read; flagged inputs, and any input the screen could not check, are quarantined and shown to the user (D76, RV-041).
+- **No model holds a payment tool.** The paying agent is code (CZ-15 §7); the planner has no tools; payees and amounts come only from the approved plan, which the vault enforces. **Superseded by D74 / RV-018:** "The paying agent's tools are narrow (`reserve`, `pay_step(stepId)`, …)".
 - **Catalog text never scores.** Descriptions feed retrieval only (SL-C3). Ranking uses behaviour.
 - **Sandboxed checks.** Acceptance profiles run in a sandbox without network (SL-C7 reuse).
 - **Write-back labels.** Delivered results are marked "from merchant X, unverified text" so the user's own agent (Claude Code) does not treat them as instructions either.
@@ -1273,7 +1276,7 @@ How the planner is kept from reading it raw (C3-04, C3-06, C3-09, FD-28):
 | AR-5 | Gateway's TEE-vouched ERC-1271 burn-intent path works with the vault's multi-kind `isValidSignature` | pullback (§8.4) | repeat the A2-19c experiment with the real vault code on testnet | keep pockets tiny and rely on the 7-day on-chain withdrawal; or make the pocket pull back by itself on a timer while its key lives |
 | AR-6 | The testnet faucet or a transfer can fund an MSCA address | onboarding | try the Arc docs faucet with an MSCA address | fund through Zaryab's Circle wallet during testing |
 | AR-7 | A pocket EOA can hold native USDC for gas and call `addDelegate` | §8.4 | one testnet run | let the vault call a helper that is pre-authorized; or accept pocket wallets without pullback and smaller caps |
-| AR-8 | Hosted LLM calls from the daemon over redacted excerpts are acceptable to users and to Czar's privacy promise (OD-3) | soul compiler | user research; provider zero-retention terms | local model only |
+| AR-8 | Hosted LLM calls from the daemon over redacted excerpts are acceptable to users and to Czar's privacy promise (OD-3) | soul compiler | user research; a read-only check of the chosen provider's published retention and training terms, recorded before T-046 (Gate 0 check G0-16, RV-062); the D31 disclosure wording follows the recorded terms | local model only |
 | AR-9 | **Stage 2 (D69).** Passkeys work inside an installed iPhone web app (D1-11) | D28 | real-device test at the start of stage 2 | native app (D28) |
 | AR-10 | Circle's ERC-8183 testnet instance keeps `platformFeeBP = evaluatorFeeBP = 0` and no upgrade during Phase 1 | jobs | fee check at fund time; `Upgraded` alert | halt jobs; deploy `CzarJobEscrow` earlier |
 | AR-11 | Circle's Discovery terms allow live querying with ≤ 1 h cache and URL submission to Czar's own index (SL A7, D15) | planner | legal read of §15 | drop live catalog use; Czar index only |
@@ -1432,5 +1435,5 @@ No new agent-directed text was encountered in this session beyond what the groun
 | 2026-10-19 | D65 | Local-currency wording replaced with USD (§4.3, §8.2, §13). |
 | 2026-10-19 | D63 | §7.3 states that freeze lowers limits in a follow-up agent step, not atomically. |
 | 2026-10-19 | D69 | Context diagram subgraph id renamed from `Phone` to `Web` (label already said desktop browser). |
-- 2026-10-19 · D70: Phase 1 runs on Zaryab's Mac with a local software signer (encrypted keystore); Google Cloud (KMS, Cloud Run, e2-micro VM) moves to stage 2.
+| 2026-10-19 | D70 | Phase 1 runs on Zaryab's Mac with a local software signer (encrypted keystore); Google Cloud (KMS, Cloud Run, e2-micro VM) moves to stage 2. |
 - 2026-10-19 · D31 wording: §1 no longer says raw work data never leaves the machine.

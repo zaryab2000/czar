@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://czar.dev/schemas/soul/1.0",
+  "$id": "https://czar.dev/schemas/soul.schema.json",
   "title": "soul.json",
   "description": "The machine-readable Work Soul (spec 02 §4.2): eight sections of beliefs with receipts. Local only.",
   "type": "object",
@@ -9,9 +9,9 @@
   "properties": {
     "schemaVersion": {
       "type": "string",
-      "description": "Schema version, major.minor; this file is 1.0.",
+      "description": "Schema version, major.minor; this file is 1.1 (2026-10-19: hourlyValue.currency is const USD, D51, RV-047).",
       "x-privacyClass": "local-only",
-      "const": "1.0"
+      "const": "1.1"
     },
     "version": {
       "type": "integer",
@@ -123,9 +123,9 @@
         },
         "currency": {
           "type": "string",
-          "description": "Display currency code (ISO 4217).",
+          "description": "Always USD in Phase 1 (D51; RV-047). Kept for forward compatibility.",
           "x-privacyClass": "local-only",
-          "maxLength": 3
+          "const": "USD"
         },
         "setByUser": {
           "type": "boolean",

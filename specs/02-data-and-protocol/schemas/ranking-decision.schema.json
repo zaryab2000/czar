@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://czar.dev/schemas/ranking-decision/1.0",
+  "$id": "https://czar.dev/schemas/ranking-decision.schema.json",
   "title": "RankingDecision",
   "description": "Selection Layer RankingDecision, adopted verbatim from SL \u00a75.6 (spec 02 \u00a74.19).",
   "type": "object",
