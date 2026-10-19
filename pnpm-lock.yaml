@@ -85,6 +85,12 @@ importers:
 
   packages/config: {}
 
+  packages/hashing:
+    dependencies:
+      viem:
+        specifier: 2.57.7
+        version: 2.57.7(typescript@6.0.3)
+
   packages/logging: {}
 
   packages/redaction:
