@@ -1,0 +1,24 @@
+{
+  "name": "czar",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "lint": "oxlint --deny-warnings && oxfmt --check",
+    "format": "oxfmt",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "oxlint": "oxlint --deny-warnings"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "oxfmt": "0.73.0",
+    "oxlint": "1.88.0",
+    "typescript": "6.0.3",
+    "vitest": "5.0.5"
+  },
+  "engines": {
+    "node": ">=22.18.0 <23",
+    "pnpm": "10.28.0"
+  },
+  "packageManager": "pnpm@10.28.0"
+}

@@ -22,3 +22,18 @@ __pycache__/
 
 # Tool output
 graphify-out/
+
+# Keys (T-001; the signer keystore lives outside the repository, D78)
+keystore/
+*.keystore
+*.p12
+
+# Build output (T-001)
+.next/
+.ponder/
+contracts/out/
+contracts/cache/
+coverage/
+playwright-report/
+test-results/
+*.tsbuildinfo
