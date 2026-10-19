@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://czar.dev/schemas/evidence-batch/1.0",
+  "title": "EvidenceBatch",
+  "description": "A batch of leaves anchored to OpenEvidenceLog as EVIDENCE_BATCH (spec 02 §4.20).",
+  "type": "object",
+  "x-privacyClass": "public",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "description": "Schema version, major.minor; this file is 1.0.",
+      "x-privacyClass": "public",
+      "const": "1.0"
+    },
+    "batchId": {
+      "$ref": "common.schema.json#/$defs/BatchId",
+      "description": "Batch id.",
+      "x-privacyClass": "public"
+    },
+    "publisher": {
+      "$ref": "common.schema.json#/$defs/Address",
+      "description": "Publisher address.",
+      "x-privacyClass": "public"
+    },
+    "kind": {
+      "type": "string",
+      "description": "OpenEvidenceLog kind.",
+      "x-privacyClass": "public",
+      "const": "EVIDENCE_BATCH"
+    },
+    "prevRoot": {
+      "$ref": "common.schema.json#/$defs/Hash32",
+      "description": "Previous root of this publisher and kind; zero for the first.",
+      "x-privacyClass": "public"
+    },
+    "root": {
+      "$ref": "common.schema.json#/$defs/Hash32",
+      "description": "Merkle root (spec 02 §5.3).",
+      "x-privacyClass": "public"
+    },
+    "leaves": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "description": "Leaf.",
+        "x-privacyClass": "public",
+        "properties": {
+          "leafType": {
+            "type": "string",
+            "enum": [
+              "demand-proof",
+              "soul-version",
+              "observation",
+              "report",
+              "assessment",
+              "correction",
+              "exposure",
+              "submission-log"
+            ],
+            "description": "Leaf type.",
+            "x-privacyClass": "public"
+          },
+          "leafHash": {
+            "$ref": "common.schema.json#/$defs/Hash32",
+            "description": "Leaf hash.",
+            "x-privacyClass": "public"
+          },
+          "contentUri": {
+            "type": "string",
+            "description": "Content location.",
+            "x-privacyClass": "public",
+            "format": "uri",
+            "maxLength": 2048
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "leafType",
+          "leafHash"
+        ]
+      },
+      "description": "Leaves.",
+      "x-privacyClass": "public",
+      "minItems": 1
+    },
+    "uriHash": {
+      "$ref": "common.schema.json#/$defs/Hash32",
+      "description": "Phase 1: keccak256(utf8(archiveUri)). Phase 2: keccak256 of the archive's IPFS CID (D54).",
+      "x-privacyClass": "public"
+    },
+    "cid": {
+      "type": "string",
+      "description": "IPFS CID of the archive. Phase 2 only (D54); absent in Phase 1.",
+      "x-privacyClass": "public",
+      "maxLength": 128,
+      "x-phase": 2
+    },
+    "committedTx": {
+      "$ref": "common.schema.json#/$defs/Hash32",
+      "description": "commit transaction.",
+      "x-privacyClass": "public"
+    },
+    "archiveUri": {
+      "type": "string",
+      "format": "uri",
+      "maxLength": 2048,
+      "description": "HTTPS URL of the archive on Czar's server (Phase 1, D54). Content is JSON Lines of the leaf objects; its leaves rebuild the anchored root.",
+      "x-privacyClass": "public"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "batchId",
+    "publisher",
+    "kind",
+    "prevRoot",
+    "root",
+    "leaves",
+    "uriHash",
+    "archiveUri"
+  ],
+  "$comment": "Change log: 2026-10-18 D54 archive on Czar server: added archiveUri, cid optional and Phase 2, uriHash rule per phase."
+}

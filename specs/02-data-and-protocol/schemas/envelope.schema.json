@@ -1,0 +1,149 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://czar.dev/schemas/envelope/1.0",
+  "title": "Envelope (mirror)",
+  "description": "Server mirror of CzarVault envelope state, rebuilt from events (spec 02 \u00a74.8). The contract is the source of truth.",
+  "type": "object",
+  "x-privacyClass": "public",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "description": "Schema version, major.minor; this file is 1.0.",
+      "x-privacyClass": "public",
+      "const": "1.0"
+    },
+    "envelopeRef": {
+      "$ref": "common.schema.json#/$defs/EnvelopeRef",
+      "description": "Global reference.",
+      "x-privacyClass": "public"
+    },
+    "vault": {
+      "$ref": "common.schema.json#/$defs/Address",
+      "description": "Vault address.",
+      "x-privacyClass": "public"
+    },
+    "envelopeId": {
+      "$ref": "common.schema.json#/$defs/Uint64",
+      "description": "Per-vault counter.",
+      "x-privacyClass": "public"
+    },
+    "planId": {
+      "$ref": "common.schema.json#/$defs/PlanId",
+      "description": "Plan id.",
+      "x-privacyClass": "server-only"
+    },
+    "objectiveHash": {
+      "$ref": "common.schema.json#/$defs/Hash32",
+      "description": "From EnvelopeOpened.",
+      "x-privacyClass": "public"
+    },
+    "planHash": {
+      "$ref": "common.schema.json#/$defs/Hash32",
+      "description": "From EnvelopeOpened.",
+      "x-privacyClass": "public"
+    },
+    "payeeRoot": {
+      "$ref": "common.schema.json#/$defs/Hash32",
+      "description": "From EnvelopeOpened.",
+      "x-privacyClass": "public"
+    },
+    "categoryId": {
+      "$ref": "common.schema.json#/$defs/Hash32",
+      "description": "keccak256 of the category string.",
+      "x-privacyClass": "public"
+    },
+    "cap": {
+      "$ref": "common.schema.json#/$defs/Amount6",
+      "description": "Envelope cap.",
+      "x-privacyClass": "public"
+    },
+    "maxStepAmount": {
+      "$ref": "common.schema.json#/$defs/Amount6",
+      "description": "Per-step cap.",
+      "x-privacyClass": "public"
+    },
+    "pocketCapBps": {
+      "$ref": "common.schema.json#/$defs/Bps",
+      "description": "Pocket cap in bps.",
+      "x-privacyClass": "public"
+    },
+    "expiresAt": {
+      "$ref": "common.schema.json#/$defs/UnixSeconds",
+      "description": "Expiry.",
+      "x-privacyClass": "public"
+    },
+    "approver": {
+      "type": "string",
+      "enum": [
+        "owner",
+        "agent"
+      ],
+      "description": "Who opened it.",
+      "x-privacyClass": "public"
+    },
+    "approvalTx": {
+      "$ref": "common.schema.json#/$defs/Hash32",
+      "description": "Transaction hash of the opening call.",
+      "x-privacyClass": "public"
+    },
+    "spent": {
+      "$ref": "common.schema.json#/$defs/Amount6",
+      "description": "Funds that left the vault permanently.",
+      "x-privacyClass": "public"
+    },
+    "reserved": {
+      "$ref": "common.schema.json#/$defs/Amount6",
+      "description": "Open reservations.",
+      "x-privacyClass": "public"
+    },
+    "pocketOutstanding": {
+      "$ref": "common.schema.json#/$defs/Amount6",
+      "description": "Deposited to Gateway, not yet pulled back.",
+      "x-privacyClass": "public"
+    },
+    "jobEscrowed": {
+      "$ref": "common.schema.json#/$defs/Amount6",
+      "description": "In ERC-8183 escrow.",
+      "x-privacyClass": "public"
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "Open",
+        "Closing",
+        "Closed"
+      ],
+      "description": "Envelope state (spec 03 state machine).",
+      "x-privacyClass": "public"
+    },
+    "lastEventBlock": {
+      "type": "integer",
+      "description": "Indexer cursor.",
+      "x-privacyClass": "server-only",
+      "minimum": 0
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "envelopeRef",
+    "vault",
+    "envelopeId",
+    "objectiveHash",
+    "planHash",
+    "payeeRoot",
+    "categoryId",
+    "cap",
+    "maxStepAmount",
+    "pocketCapBps",
+    "expiresAt",
+    "approver",
+    "approvalTx",
+    "spent",
+    "reserved",
+    "pocketOutstanding",
+    "jobEscrowed",
+    "state",
+    "lastEventBlock"
+  ]
+}

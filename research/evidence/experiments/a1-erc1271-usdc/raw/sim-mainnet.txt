@@ -1,0 +1,28 @@
+rpc=https://rpc.mainnet.arc.io chain=5042 block=26616147 date=2026-10-18T14:21:28Z
+wallet=0x00000000000000000000000000000000000A1A11 owner=0x4015D942267415f057D2A4735A82DD38Eb55D264 payee=0x00000000000000000000000000000000000A1A13 value=1000000 nonce=0xa8ecb52e2c564eae47eba8ffa50d3b145cfc2ed3eca60875f4cc05a076107ffe
+good_sig_len_bytes=65
+### T0 isValidSignature on simulated wallet (expect 0x1626ba7e)
+    0x1626ba7e
+### T1 bytes overload, contract payer, owner signature (expect success, balances move)
+    10000000 [1e7]
+    9000000 [9e6]
+    0
+    1000000 [1e6]
+    true
+### T2 bytes overload, contract payer, wrong key (expect revert invalid signature)
+    Error: execution reverted: FiatTokenV2: invalid signature
+    
+    Context:
+    - server returned an error response: error code 3: execution reverted: FiatTokenV2: invalid signature, data: "0x08c379a00000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000001e46696174546f6b656e56323a20696e76616c6964207369676e61747572650000"
+### T3 v,r,s overload, contract payer, owner signature (expect success, empty return)
+    0x
+### T4 same owner signature but payer has no code (EOA path; expect revert invalid signature)
+    Error: execution reverted: FiatTokenV2: invalid signature
+    
+    Context:
+    - server returned an error response: error code 3: execution reverted: FiatTokenV2: invalid signature, data: "0x08c379a00000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000001e46696174546f6b656e56323a20696e76616c6964207369676e61747572650000"
+### T5 contract payer with zero balance (expect revert on balance)
+    Error: execution reverted: ERC20: transfer amount exceeds balance
+    
+    Context:
+    - server returned an error response: error code 3: execution reverted: ERC20: transfer amount exceeds balance, data: "0x08c379a00000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000002645524332303a207472616e7366657220616d6f756e7420657863656564732062616c616e63650000000000000000000000000000000000000000000000000041"

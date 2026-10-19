@@ -1,0 +1,8 @@
+### testnet chainid=5042002 block=67854834 date=2026-10-18T14:34:20Z sender=0x0646f156a04AbD5d9e214f443a4139F1dB585961 balance=0
+raw tx first byte: 0x04 (0x04 = EIP-7702 set-code tx), length 424
+publish: Error: server returned an error response: error code -32003: insufficient funds for gas * price + value: have 0 want 4000000000000000 
+control (type-2 tx, same unfunded key): Error: server returned an error response: error code -32003: insufficient funds for gas * price + value: have 0 want 840000000000000 
+### mainnet chainid=5042 block=26617677 date=2026-10-18T14:34:23Z sender=0x0646f156a04AbD5d9e214f443a4139F1dB585961 balance=0
+raw tx first byte: 0x04 (0x04 = EIP-7702 set-code tx), length 420
+publish: Error: server returned an error response: error code -32003: insufficient funds for gas * price + value: have 0 want 4000000000000000 
+control (type-2 tx, same unfunded key): Error: server returned an error response: error code -32003: insufficient funds for gas * price + value: have 0 want 840000000000000 

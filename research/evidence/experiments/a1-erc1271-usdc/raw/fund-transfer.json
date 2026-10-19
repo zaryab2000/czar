@@ -1,0 +1,31 @@
+{
+  "data": {
+    "idempotencyKey": "612e46a2-7b1b-466d-a4a3-c391923df460",
+    "id": "c0c85064-be5f-5b55-bcbb-7501de3dec4e",
+    "state": "COMPLETE",
+    "blockchain": "ARC-TESTNET",
+    "txHash": "0xf57309d49e8cc1c82f97c70ae3761d8ca492ccd105538781941e8a0418de1e0b",
+    "sourceAddress": "0xc7984a08521f22cf3d2e0972d529258ca5d75a45",
+    "destinationAddress": "0x4015d942267415f057d2a4735a82dd38eb55d264",
+    "amounts": [
+      "2"
+    ],
+    "networkFee": "0.010344712069565622",
+    "operation": "TRANSFER",
+    "transactionType": "OUTBOUND",
+    "abiParameters": null,
+    "blockHash": "0xb96ce7ca53157f653b1ec753b75674365ed10dbc13ee02456b3a8b73db919451",
+    "blockHeight": 67854237,
+    "estimatedFee": {
+      "gasLimit": "347004",
+      "networkFee": "0.023467880519305992",
+      "baseFee": "20",
+      "priorityFee": "27.629999998",
+      "maxFee": "67.629999998"
+    },
+    "firstConfirmDate": "2026-10-18T14:29:17Z",
+    "nfts": null,
+    "createDate": "2026-10-18T14:29:15Z",
+    "updateDate": "2026-10-18T14:29:17Z"
+  }
+}

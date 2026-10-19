@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://czar.dev/schemas/reservation/1.0",
+  "title": "Reservation (mirror)",
+  "description": "Server mirror of a vault reservation (spec 02 \u00a74.9).",
+  "type": "object",
+  "x-privacyClass": "public",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "description": "Schema version, major.minor; this file is 1.0.",
+      "x-privacyClass": "public",
+      "const": "1.0"
+    },
+    "vault": {
+      "$ref": "common.schema.json#/$defs/Address",
+      "description": "Vault address.",
+      "x-privacyClass": "public"
+    },
+    "reservationId": {
+      "$ref": "common.schema.json#/$defs/Uint64",
+      "description": "Per-vault counter.",
+      "x-privacyClass": "public"
+    },
+    "envelopeId": {
+      "$ref": "common.schema.json#/$defs/Uint64",
+      "description": "Envelope.",
+      "x-privacyClass": "public"
+    },
+    "stepIndex": {
+      "type": "integer",
+      "description": "Step index.",
+      "x-privacyClass": "public",
+      "minimum": 0,
+      "maximum": 63
+    },
+    "payee": {
+      "$ref": "common.schema.json#/$defs/Address",
+      "description": "Payee.",
+      "x-privacyClass": "public"
+    },
+    "unitAmount": {
+      "$ref": "common.schema.json#/$defs/Amount6",
+      "description": "Amount per authorization.",
+      "x-privacyClass": "public"
+    },
+    "count": {
+      "type": "integer",
+      "description": "Number of authorizations N.",
+      "x-privacyClass": "public",
+      "minimum": 1,
+      "maximum": 128
+    },
+    "validBefore": {
+      "$ref": "common.schema.json#/$defs/UnixSeconds",
+      "description": "Authorization expiry.",
+      "x-privacyClass": "public"
+    },
+    "mode": {
+      "type": "string",
+      "enum": [
+        "envelope",
+        "digest"
+      ],
+      "description": "Signature encoding mode (spec 02 \u00a76.3, AR-3).",
+      "x-privacyClass": "public"
+    },
+    "settledMask": {
+      "$ref": "common.schema.json#/$defs/Hash32",
+      "description": "128-bit mask of settled indices, hex (upper bits zero).",
+      "x-privacyClass": "public"
+    },
+    "settledCount": {
+      "type": "integer",
+      "description": "Settled indices.",
+      "x-privacyClass": "public",
+      "minimum": 0,
+      "maximum": 128
+    },
+    "releasedCount": {
+      "type": "integer",
+      "description": "Released indices.",
+      "x-privacyClass": "public",
+      "minimum": 0,
+      "maximum": 128
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "Active",
+        "Finalizing",
+        "Final"
+      ],
+      "description": "Reservation state.",
+      "x-privacyClass": "public"
+    },
+    "paymentIds": {
+      "type": "array",
+      "items": {
+        "$ref": "common.schema.json#/$defs/PaymentId",
+        "description": "Payment id for the index at this position.",
+        "x-privacyClass": "server-only"
+      },
+      "description": "Payment ids by index (spec 02 \u00a77.4).",
+      "x-privacyClass": "server-only",
+      "maxItems": 128
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "vault",
+    "reservationId",
+    "envelopeId",
+    "stepIndex",
+    "payee",
+    "unitAmount",
+    "count",
+    "validBefore",
+    "mode",
+    "settledMask",
+    "settledCount",
+    "releasedCount",
+    "state"
+  ]
+}

@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://czar.dev/schemas/soul-version-leaf/1.0",
+  "title": "SoulVersionLeaf",
+  "description": "Soul version commitment anchored as an EVIDENCE_BATCH leaf (spec 02 \u00a74.18).",
+  "type": "object",
+  "x-privacyClass": "public",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "description": "Schema version, major.minor; this file is 1.0.",
+      "x-privacyClass": "public",
+      "const": "1.0"
+    },
+    "leafType": {
+      "type": "string",
+      "description": "Leaf type.",
+      "x-privacyClass": "public",
+      "const": "soul-version"
+    },
+    "leafVersion": {
+      "type": "integer",
+      "description": "Leaf version.",
+      "x-privacyClass": "public",
+      "const": 1
+    },
+    "userPseudonym": {
+      "$ref": "common.schema.json#/$defs/Hash32",
+      "description": "Rotating per-user pseudonym.",
+      "x-privacyClass": "public"
+    },
+    "soulVersion": {
+      "type": "integer",
+      "description": "Soul version number.",
+      "x-privacyClass": "public",
+      "minimum": 1
+    },
+    "soulVersionHash": {
+      "$ref": "common.schema.json#/$defs/Hash32",
+      "description": "Soul version hash.",
+      "x-privacyClass": "public"
+    },
+    "previousHash": {
+      "$ref": "common.schema.json#/$defs/Hash32",
+      "description": "Previous soul version hash.",
+      "x-privacyClass": "public"
+    },
+    "compiledAt": {
+      "$ref": "common.schema.json#/$defs/UnixSeconds",
+      "description": "Compile time.",
+      "x-privacyClass": "public"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "leafType",
+    "leafVersion",
+    "userPseudonym",
+    "soulVersion",
+    "soulVersionHash",
+    "compiledAt"
+  ]
+}

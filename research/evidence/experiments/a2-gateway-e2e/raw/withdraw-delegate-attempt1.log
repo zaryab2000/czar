@@ -1,0 +1,4 @@
+{"at":"2026-10-18T14:24:12.041Z","event":"withdraw.before","SIGNER":"delegate","DEPOSITOR":"buyer","CONTRACT_SIGNER":false,"balances":{"wallet":{"balance":"2964297","formatted":"2.964297"},"gateway":{"total":"992000","available":"992000","withdrawing":"0","withdrawable":"0","formattedTotal":"0.992","formattedAvailable":"0.992","formattedWithdrawing":"0","formattedWithdrawable":"0"}}}
+{"at":"2026-10-18T14:24:12.459Z","event":"withdraw.attestation","httpStatus":201,"ms":410,"transferId":"55d11326-0333-4614-9144-b86ee9e80e85","fees":{"token":"USDC","total":"0.0035","perIntent":[{"transferSpecHash":"0xe15f6f8ac2598c018e4c54625a1109d590011f4c0dc529b862e827dbb694bf52","domain":26,"baseFee":"0.0035"}]},"expirationBlock":"67854835","hasAttestation":true}
+Details: insufficient funds for gas * price + value: have 0 want 4123110000000000
+  Details: insufficient funds for gas * price + value: have 0 want 4123110000000000

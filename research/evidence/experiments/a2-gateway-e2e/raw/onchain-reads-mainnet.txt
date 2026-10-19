@@ -1,0 +1,18 @@
+rpc=https://rpc.mainnet.arc.io chainId=5042 block=26615746 date=2026-10-18T14:18:05Z
+impl(EIP-1967)=0xd15002e19d75f6abe69e46b2a94cc7c0cc5857de
+admin(EIP-1967)=0x0000000000000000000000000000000000000000
+withdrawalDelay()(uint256) = 1209600 [1.209e6]
+owner()(address) = 0x6b8850c498Dfca92B54f9e0147040e5C8d83d4e2
+contractSignersAllowlister()(address) = 0x5173c2Ca2755A4Fc8189b1900AAb6aBb7268b969
+contractSignersDisallowlister()(address) = 0x4893a8ca540e7CdD78f4Fe2ACA15297136966bAC
+feeRecipient()(address) = 0xc2c291a46F999432F019ba1c33cBF5845582DA46
+paused()(bool) = false
+pauser()(address) = 0xf1e32bd59911aF66C25bcf21323f08Eade6a7FC0
+domain()(uint32) = 26
+isTokenSupported(USDC) = true
+isAuthorizedForBalance(USDC,0x..01,0x..01) = true
+isContractSignatureSigner(0x..01) = false
+isAllowlistedContractSigner(0x..01) = false
+isBatchSigner(0x..01) = false
+impl codesize=22818
+impl code keccak=0xfe96d3378c8c71e384d1690c8c5637820a2074b48335c6c9f0b52d2d62eb305f

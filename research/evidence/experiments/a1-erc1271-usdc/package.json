@@ -1,0 +1,10 @@
+{
+  "name": "a1-erc1271-usdc",
+  "private": true,
+  "type": "module",
+  "description": "Czar ground-truth A1: ERC-1271 contract payer for USDC EIP-3009 and Circle Facilitator on Arc testnet (2026-10-18)",
+  "engines": { "node": ">=22.18" },
+  "dependencies": {
+    "viem": "2.57.2"
+  }
+}

@@ -1,0 +1,5 @@
+unauth list stargazers 401
+unauth stargazers/count 200
+unauth stargazers/history 200
+auth list stargazers (non-owner) exit=1
+auth list subscribers (non-owner) exit=1

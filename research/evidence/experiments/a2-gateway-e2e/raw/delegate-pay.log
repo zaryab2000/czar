@@ -1,0 +1,3 @@
+{"at":"2026-10-18T14:22:28.472Z","event":"delegate.added","hash":"0x3493436425393658d24af3df77e1a62c850aeae762c6b980fcaab4fb9f553445","block":"67853429","status":"success"}
+{"at":"2026-10-18T14:22:28.678Z","event":"delegate.isAuthorizedForBalance","value":true,"buyer":"0xE5b81Fb66503ab5DF7ea62dC4FB2096570b90b55","delegate":"0x6E6B154C946662a78E891DE3490E176894AD3800"}
+{"at":"2026-10-18T14:22:29.412Z","event":"delegate.pay.result","ok":false,"ms":729,"error":"Error: Payment failed: Payment verification failed"}

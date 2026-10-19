@@ -1,0 +1,247 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://czar.dev/schemas/acceptance-report/1.0",
+  "title": "AcceptanceReport",
+  "description": "SL §5.5 ValidationReportCore with assignment buyer-local in Phases 1–2, plus Czar fields (spec 02 §4.14). reportHash is the ERC-8183 reason.",
+  "type": "object",
+  "x-privacyClass": "server-only",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "description": "Schema version, major.minor; this file is 1.0.",
+      "x-privacyClass": "server-only",
+      "const": "1.0"
+    },
+    "obs_id": {
+      "$ref": "common.schema.json#/$defs/SlObsId",
+      "description": "Observation checked.",
+      "x-privacyClass": "server-only"
+    },
+    "profile_id": {
+      "$ref": "common.schema.json#/$defs/SlProfileId",
+      "description": "Acceptance profile.",
+      "x-privacyClass": "server-only"
+    },
+    "method_version": {
+      "$ref": "common.schema.json#/$defs/Hash32",
+      "description": "Must equal profile.code_hash.",
+      "x-privacyClass": "server-only"
+    },
+    "validator": {
+      "type": "object",
+      "description": "Validator.",
+      "x-privacyClass": "server-only",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Validator id.",
+          "x-privacyClass": "server-only",
+          "maxLength": 128
+        },
+        "address": {
+          "$ref": "common.schema.json#/$defs/Address",
+          "description": "Evaluator key K7 address.",
+          "x-privacyClass": "server-only"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "address"
+      ]
+    },
+    "assignment": {
+      "type": "object",
+      "description": "Assignment.",
+      "x-privacyClass": "server-only",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "probe-pool",
+            "sl-assigned",
+            "buyer-local"
+          ],
+          "description": "Assignment kind; buyer-local in Phases 1–2.",
+          "x-privacyClass": "server-only"
+        },
+        "salt_commit": {
+          "$ref": "common.schema.json#/$defs/Hash32",
+          "description": "Salt commitment (Phase 3).",
+          "x-privacyClass": "server-only"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind"
+      ]
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "description": "One check.",
+        "x-privacyClass": "server-only",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Check name.",
+            "x-privacyClass": "server-only",
+            "maxLength": 64
+          },
+          "result": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "fail",
+              "inconclusive",
+              "not_checked"
+            ],
+            "description": "Result (SL §5.5).",
+            "x-privacyClass": "server-only"
+          },
+          "evidence_ref": {
+            "type": "string",
+            "description": "Evidence reference.",
+            "x-privacyClass": "server-only",
+            "maxLength": 256
+          },
+          "detail": {
+            "type": "object",
+            "description": "Check detail.",
+            "x-privacyClass": "server-only"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "result"
+        ]
+      },
+      "description": "Checks.",
+      "x-privacyClass": "server-only"
+    },
+    "consensus_group": {
+      "type": "string",
+      "description": "Consensus group id.",
+      "x-privacyClass": "server-only",
+      "maxLength": 128
+    },
+    "cost_usd": {
+      "type": "number",
+      "description": "Cost in USD.",
+      "x-privacyClass": "server-only",
+      "minimum": 0
+    },
+    "created_at": {
+      "$ref": "common.schema.json#/$defs/Timestamp",
+      "description": "Creation time.",
+      "x-privacyClass": "server-only"
+    },
+    "limits": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "description": "What the method cannot establish.",
+        "x-privacyClass": "server-only",
+        "maxLength": 256,
+        "examples": [
+          "no-correctness-check",
+          "screen-unavailable",
+          "sandbox-timeout"
+        ]
+      },
+      "description": "Limits. Documented values include no-correctness-check, screen-unavailable, sandbox-timeout (AM-11).",
+      "x-privacyClass": "server-only"
+    },
+    "conflict_flags": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "validator-is-prober",
+          "validator-affiliated",
+          "self-reported-checks"
+        ],
+        "description": "Conflict flag.",
+        "x-privacyClass": "server-only"
+      },
+      "description": "Conflict flags; self-reported-checks in Phases 1–2.",
+      "x-privacyClass": "server-only"
+    },
+    "envelopeRef": {
+      "$ref": "common.schema.json#/$defs/EnvelopeRef",
+      "description": "Czar envelope.",
+      "x-privacyClass": "server-only"
+    },
+    "stepIndex": {
+      "type": "integer",
+      "description": "Czar step index.",
+      "x-privacyClass": "server-only",
+      "minimum": 0,
+      "maximum": 63
+    },
+    "jobKey": {
+      "$ref": "common.schema.json#/$defs/Hash32",
+      "description": "Job key when the step is an ERC-8183 job.",
+      "x-privacyClass": "server-only"
+    },
+    "decision": {
+      "type": "string",
+      "enum": [
+        "pass",
+        "fail",
+        "inconclusive"
+      ],
+      "description": "Overall decision.",
+      "x-privacyClass": "server-only"
+    },
+    "reportHash": {
+      "$ref": "common.schema.json#/$defs/Hash32",
+      "description": "keccak256(jcs(report minus reportHash)); used as the ERC-8183 reason.",
+      "x-privacyClass": "hash-on-chain"
+    },
+    "report_id": {
+      "$ref": "common.schema.json#/$defs/SlReportId",
+      "description": "rep_ id (SL §5.1).",
+      "x-privacyClass": "server-only"
+    },
+    "sig": {
+      "$ref": "common.schema.json#/$defs/Hex",
+      "description": "EIP-712 ValidationReport signature by K7.",
+      "x-privacyClass": "server-only"
+    },
+    "flags": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "injection-quarantined"
+        ],
+        "description": "Acceptance-level flag.",
+        "x-privacyClass": "server-only"
+      },
+      "description": "Acceptance flags; injection-quarantined when the P-01 screen held the body back (AM-11).",
+      "x-privacyClass": "server-only"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "obs_id",
+    "profile_id",
+    "method_version",
+    "validator",
+    "assignment",
+    "checks",
+    "cost_usd",
+    "created_at",
+    "limits",
+    "conflict_flags",
+    "envelopeRef",
+    "stepIndex",
+    "decision",
+    "reportHash"
+  ],
+  "$comment": "Change log: 2026-10-18 AM-11 documented limits vocabulary and added flags (injection-quarantined)."
+}

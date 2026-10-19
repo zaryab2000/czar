@@ -1,0 +1,61 @@
+[2026-10-18T14:29:51.512Z] config {
+  "mode": "settle",
+  "payer": "0xd80fe1aD38eC902df4Db294795D7CD18163A23EE",
+  "owner": "0x4015D942267415f057D2A4735A82DD38Eb55D264",
+  "seller": "0xF201E44a8cE66C57175014e120ce73568724dB27",
+  "price": "100000"
+}
+[2026-10-18T14:29:51.532Z] buyer got HTTP 402 PAYMENT-REQUIRED {
+  "x402Version": 2,
+  "error": "payment required",
+  "resource": {
+    "url": "http://127.0.0.1:4021/premium",
+    "description": "Czar A1 ERC-1271 probe",
+    "mimeType": "application/json"
+  },
+  "accepts": [
+    {
+      "scheme": "exact",
+      "network": "eip155:5042002",
+      "amount": "100000",
+      "asset": "0x3600000000000000000000000000000000000000",
+      "payTo": "0xF201E44a8cE66C57175014e120ce73568724dB27",
+      "maxTimeoutSeconds": 60,
+      "extra": {
+        "name": "USDC",
+        "version": "2",
+        "assetTransferMethod": "eip3009"
+      }
+    }
+  ]
+}
+[2026-10-18T14:29:52.035Z] facilitator /verify HTTP 200 in 500 ms {
+  "isValid": true,
+  "payer": "0xd80fe1ad38ec902df4db294795d7cd18163a23ee"
+}
+[2026-10-18T14:29:54.657Z] facilitator /settle HTTP 200 in 2621 ms {
+  "success": true,
+  "payer": "0xd80fe1ad38ec902df4db294795d7cd18163a23ee",
+  "transaction": "0x78d909c8f9b9ac6827b616d25a1a1070078390492677dc8672597db41c06e66d",
+  "network": "eip155:5042002",
+  "amount": "100000"
+}
+[2026-10-18T14:29:54.658Z] buyer got HTTP 200 {
+  "body": {
+    "data": "premium",
+    "settled": {
+      "success": true,
+      "payer": "0xd80fe1ad38ec902df4db294795d7cd18163a23ee",
+      "transaction": "0x78d909c8f9b9ac6827b616d25a1a1070078390492677dc8672597db41c06e66d",
+      "network": "eip155:5042002",
+      "amount": "100000"
+    }
+  },
+  "paymentResponse": {
+    "success": true,
+    "payer": "0xd80fe1ad38ec902df4db294795d7cd18163a23ee",
+    "transaction": "0x78d909c8f9b9ac6827b616d25a1a1070078390492677dc8672597db41c06e66d",
+    "network": "eip155:5042002",
+    "amount": "100000"
+  }
+}

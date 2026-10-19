@@ -1,0 +1,268 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://czar.dev/schemas/payment-ref/1.0",
+  "title": "PaymentRef",
+  "description": "Payment reference, adopted from SL \u00a75.2 with two server-only vault bookkeeping fields (spec 02 \u00a74.12). paymentRefHash excludes reservationId and index. additionalProperties is enforced per rail branch under oneOf.",
+  "type": "object",
+  "x-privacyClass": "public",
+  "additionalProperties": true,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "description": "Schema version, major.minor; this file is 1.0.",
+      "x-privacyClass": "public",
+      "const": "1.0"
+    }
+  },
+  "required": [
+    "schemaVersion"
+  ],
+  "oneOf": [
+    {
+      "type": "object",
+      "description": "PaymentRef for rail x402-exact (SL \u00a75.2).",
+      "x-privacyClass": "public",
+      "properties": {
+        "rail": {
+          "type": "string",
+          "description": "Payment rail.",
+          "x-privacyClass": "public",
+          "const": "x402-exact"
+        },
+        "network": {
+          "$ref": "common.schema.json#/$defs/Caip2",
+          "description": "Chain.",
+          "x-privacyClass": "public"
+        },
+        "asset": {
+          "$ref": "common.schema.json#/$defs/Address",
+          "description": "Token (USDC).",
+          "x-privacyClass": "public"
+        },
+        "payer": {
+          "$ref": "common.schema.json#/$defs/Address",
+          "description": "Payer (the vault).",
+          "x-privacyClass": "public"
+        },
+        "payTo": {
+          "$ref": "common.schema.json#/$defs/Address",
+          "description": "Payee.",
+          "x-privacyClass": "public"
+        },
+        "amount": {
+          "$ref": "common.schema.json#/$defs/Amount6",
+          "description": "Amount.",
+          "x-privacyClass": "public"
+        },
+        "nonce": {
+          "$ref": "common.schema.json#/$defs/Hash32",
+          "description": "EIP-3009 nonce.",
+          "x-privacyClass": "public"
+        },
+        "validBefore": {
+          "$ref": "common.schema.json#/$defs/UnixSeconds",
+          "description": "Authorization expiry.",
+          "x-privacyClass": "public"
+        },
+        "settlementTx": {
+          "$ref": "common.schema.json#/$defs/Hash32",
+          "description": "Settlement transaction.",
+          "x-privacyClass": "public"
+        },
+        "reservationId": {
+          "$ref": "common.schema.json#/$defs/Uint64",
+          "description": "Vault reservation (server-only; excluded from paymentRefHash).",
+          "x-privacyClass": "server-only"
+        },
+        "index": {
+          "type": "integer",
+          "description": "Authorization index (server-only; excluded from paymentRefHash).",
+          "x-privacyClass": "server-only",
+          "minimum": 0,
+          "maximum": 127
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "rail",
+        "network",
+        "asset",
+        "payer",
+        "payTo",
+        "amount",
+        "nonce",
+        "validBefore"
+      ]
+    },
+    {
+      "type": "object",
+      "description": "PaymentRef for rail gateway-batched (SL \u00a75.2).",
+      "x-privacyClass": "public",
+      "properties": {
+        "rail": {
+          "type": "string",
+          "description": "Payment rail.",
+          "x-privacyClass": "public",
+          "const": "gateway-batched"
+        },
+        "network": {
+          "$ref": "common.schema.json#/$defs/Caip2",
+          "description": "Chain.",
+          "x-privacyClass": "public"
+        },
+        "payer": {
+          "$ref": "common.schema.json#/$defs/Address",
+          "description": "Pocket EOA.",
+          "x-privacyClass": "public"
+        },
+        "payTo": {
+          "$ref": "common.schema.json#/$defs/Address",
+          "description": "Payee.",
+          "x-privacyClass": "public"
+        },
+        "amount": {
+          "$ref": "common.schema.json#/$defs/Amount6",
+          "description": "Amount.",
+          "x-privacyClass": "public"
+        },
+        "nonce": {
+          "$ref": "common.schema.json#/$defs/Hash32",
+          "description": "Authorization nonce.",
+          "x-privacyClass": "public"
+        },
+        "transferId": {
+          "type": "string",
+          "description": "Gateway API transfer id.",
+          "x-privacyClass": "public",
+          "maxLength": 128
+        },
+        "batchTx": {
+          "$ref": "common.schema.json#/$defs/Hash32",
+          "description": "submitBatch transaction.",
+          "x-privacyClass": "public"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "rail",
+        "network",
+        "payer",
+        "payTo",
+        "amount",
+        "nonce"
+      ]
+    },
+    {
+      "type": "object",
+      "description": "PaymentRef for rail erc8183-job (SL \u00a75.2).",
+      "x-privacyClass": "public",
+      "properties": {
+        "rail": {
+          "type": "string",
+          "description": "Payment rail.",
+          "x-privacyClass": "public",
+          "const": "erc8183-job"
+        },
+        "network": {
+          "$ref": "common.schema.json#/$defs/Caip2",
+          "description": "Chain.",
+          "x-privacyClass": "public"
+        },
+        "contract": {
+          "$ref": "common.schema.json#/$defs/Address",
+          "description": "Escrow contract.",
+          "x-privacyClass": "public"
+        },
+        "jobId": {
+          "$ref": "common.schema.json#/$defs/Uint256String",
+          "description": "Job id.",
+          "x-privacyClass": "public"
+        },
+        "client": {
+          "$ref": "common.schema.json#/$defs/Address",
+          "description": "Client (the vault).",
+          "x-privacyClass": "public"
+        },
+        "provider": {
+          "$ref": "common.schema.json#/$defs/Address",
+          "description": "Provider.",
+          "x-privacyClass": "public"
+        },
+        "evaluator": {
+          "$ref": "common.schema.json#/$defs/Address",
+          "description": "Evaluator.",
+          "x-privacyClass": "public"
+        },
+        "budget": {
+          "$ref": "common.schema.json#/$defs/Amount6",
+          "description": "Budget.",
+          "x-privacyClass": "public"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "rail",
+        "network",
+        "contract",
+        "jobId",
+        "client",
+        "provider",
+        "evaluator",
+        "budget"
+      ]
+    },
+    {
+      "type": "object",
+      "description": "PaymentRef for rail mpp (SL \u00a75.2).",
+      "x-privacyClass": "public",
+      "properties": {
+        "rail": {
+          "type": "string",
+          "description": "Payment rail.",
+          "x-privacyClass": "public",
+          "const": "mpp"
+        },
+        "network": {
+          "$ref": "common.schema.json#/$defs/Caip2",
+          "description": "Chain.",
+          "x-privacyClass": "public"
+        },
+        "chargeId": {
+          "type": "string",
+          "description": "MPP charge id (SL-F27 GAP; unused).",
+          "x-privacyClass": "public",
+          "maxLength": 128
+        },
+        "payer": {
+          "$ref": "common.schema.json#/$defs/Address",
+          "description": "Payer.",
+          "x-privacyClass": "public"
+        },
+        "payTo": {
+          "$ref": "common.schema.json#/$defs/Address",
+          "description": "Payee.",
+          "x-privacyClass": "public"
+        },
+        "amount": {
+          "$ref": "common.schema.json#/$defs/Amount6",
+          "description": "Amount.",
+          "x-privacyClass": "public"
+        },
+        "settlementTx": {
+          "$ref": "common.schema.json#/$defs/Hash32",
+          "description": "Settlement transaction.",
+          "x-privacyClass": "public"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "rail",
+        "network",
+        "chargeId",
+        "payer",
+        "payTo",
+        "amount"
+      ]
+    }
+  ]
+}

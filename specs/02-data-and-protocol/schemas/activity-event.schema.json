@@ -1,0 +1,248 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://czar.dev/schemas/activity-event/1.0",
+  "title": "ActivityEvent",
+  "description": "One normalized observation from a work tool (spec 02 §4.1). Written by the daemon after redaction layer 1; never leaves the machine.",
+  "type": "object",
+  "x-privacyClass": "local-only",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "description": "Schema version, major.minor; this file is 1.0.",
+      "x-privacyClass": "local-only",
+      "const": "1.0"
+    },
+    "eventId": {
+      "$ref": "common.schema.json#/$defs/EventId",
+      "description": "ULID assigned at intake.",
+      "x-privacyClass": "local-only"
+    },
+    "host": {
+      "type": "string",
+      "enum": [
+        "claude-code",
+        "codex",
+        "cursor",
+        "chrome"
+      ],
+      "description": "Detected host (spec 02 §8.1).",
+      "x-privacyClass": "local-only"
+    },
+    "hostVersion": {
+      "type": "string",
+      "description": "Host version string (cursor_version, Codex cli_version, Claude Code SessionStart version) if present.",
+      "x-privacyClass": "local-only",
+      "maxLength": 64
+    },
+    "sessionRef": {
+      "$ref": "common.schema.json#/$defs/Hash32",
+      "description": "keccak256 of the host session id; never the raw id.",
+      "x-privacyClass": "local-only"
+    },
+    "projectRef": {
+      "$ref": "common.schema.json#/$defs/Hash32",
+      "description": "keccak256 of the absolute project root path.",
+      "x-privacyClass": "local-only"
+    },
+    "eventType": {
+      "type": "string",
+      "enum": [
+        "tool-call",
+        "tool-result",
+        "tool-failure",
+        "file-read",
+        "file-write",
+        "command",
+        "search",
+        "prompt",
+        "skill-use",
+        "mcp-call",
+        "agent-refusal",
+        "subagent",
+        "session-start",
+        "session-end",
+        "page-visit",
+        "error"
+      ],
+      "description": "Normalized event type.",
+      "x-privacyClass": "local-only"
+    },
+    "occurredAt": {
+      "$ref": "common.schema.json#/$defs/Timestamp",
+      "description": "Host time if present, else intake time.",
+      "x-privacyClass": "local-only"
+    },
+    "toolName": {
+      "type": "string",
+      "description": "Host tool name; MCP tool names parsed per spec 02 §8.5.",
+      "x-privacyClass": "local-only",
+      "maxLength": 128
+    },
+    "mcp": {
+      "type": "object",
+      "description": "Parsed MCP tool reference.",
+      "x-privacyClass": "local-only",
+      "properties": {
+        "server": {
+          "type": "string",
+          "description": "MCP server name parsed from the tool name.",
+          "x-privacyClass": "local-only",
+          "maxLength": 128
+        },
+        "tool": {
+          "type": "string",
+          "description": "MCP tool name.",
+          "x-privacyClass": "local-only",
+          "maxLength": 128
+        },
+        "plugin": {
+          "type": "string",
+          "description": "Plugin name for mcp__plugin_ tools (B1-25).",
+          "x-privacyClass": "local-only",
+          "maxLength": 128
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "server",
+        "tool"
+      ]
+    },
+    "summary": {
+      "type": "string",
+      "description": "Short redacted summary of inputs and outputs; redaction markers per spec 02 §3.1.",
+      "x-privacyClass": "local-only",
+      "maxLength": 2000
+    },
+    "fileRefs": {
+      "type": "array",
+      "items": {
+        "$ref": "common.schema.json#/$defs/Hash32",
+        "description": "keccak256 of an absolute file path.",
+        "x-privacyClass": "local-only"
+      },
+      "description": "Hashed file paths touched.",
+      "x-privacyClass": "local-only",
+      "maxItems": 20
+    },
+    "errorClass": {
+      "type": "string",
+      "description": "Normalized error class for the repeated-error detector.",
+      "x-privacyClass": "local-only",
+      "maxLength": 128
+    },
+    "durationMs": {
+      "type": "integer",
+      "description": "Duration from duration_ms (Claude Code) or duration (Cursor).",
+      "x-privacyClass": "local-only",
+      "minimum": 0
+    },
+    "agentRef": {
+      "$ref": "common.schema.json#/$defs/Hash32",
+      "description": "keccak256 of agent_id when inside a subagent (B1-26).",
+      "x-privacyClass": "local-only"
+    },
+    "provenance": {
+      "type": "object",
+      "description": "Where the event came from.",
+      "x-privacyClass": "local-only",
+      "properties": {
+        "hookEvent": {
+          "type": "string",
+          "description": "Host hook event name.",
+          "x-privacyClass": "local-only",
+          "maxLength": 64
+        },
+        "hookSource": {
+          "type": "string",
+          "description": "Source hint such as command_source for skill expansions.",
+          "x-privacyClass": "local-only",
+          "maxLength": 64
+        },
+        "trusted": {
+          "type": "boolean",
+          "description": "False when the text came from tool output, pages or last_assistant_message (ASI06 gate).",
+          "x-privacyClass": "local-only"
+        },
+        "flags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "injection-suspect"
+            ],
+            "description": "Flag set by the screen at intake.",
+            "x-privacyClass": "local-only"
+          },
+          "description": "Screen flags on the event text (ASI06 gate).",
+          "x-privacyClass": "local-only"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "hookEvent",
+        "trusted"
+      ]
+    },
+    "redaction": {
+      "type": "object",
+      "description": "What redaction removed; counts and rule ids only.",
+      "x-privacyClass": "local-only",
+      "properties": {
+        "layer1": {
+          "type": "object",
+          "description": "Layer-1 (secrets) redaction stats.",
+          "x-privacyClass": "local-only",
+          "properties": {
+            "hits": {
+              "type": "integer",
+              "description": "Number of layer-1 replacements.",
+              "x-privacyClass": "local-only",
+              "minimum": 0
+            },
+            "rules": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "description": "gitleaks rule id.",
+                "x-privacyClass": "local-only",
+                "maxLength": 64
+              },
+              "description": "Rule ids that fired.",
+              "x-privacyClass": "local-only"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "hits",
+            "rules"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "layer1"
+      ]
+    },
+    "repeatCount": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "How many identical events this record merges (memory dedupe rule, CZ-03).",
+      "x-privacyClass": "local-only"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "eventId",
+    "host",
+    "sessionRef",
+    "projectRef",
+    "eventType",
+    "occurredAt",
+    "summary",
+    "provenance",
+    "redaction"
+  ],
+  "$comment": "Change log: 2026-10-18 AM-12 added repeatCount and provenance.flags (local-only)."
+}

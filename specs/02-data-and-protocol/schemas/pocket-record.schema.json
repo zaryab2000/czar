@@ -1,0 +1,180 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://czar.dev/schemas/pocket-record/1.0",
+  "title": "PocketRecord",
+  "description": "A pocket wallet for one envelope: mirror plus server fields (spec 02 \u00a74.10).",
+  "type": "object",
+  "x-privacyClass": "public",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "description": "Schema version, major.minor; this file is 1.0.",
+      "x-privacyClass": "public",
+      "const": "1.0"
+    },
+    "vault": {
+      "$ref": "common.schema.json#/$defs/Address",
+      "description": "Vault.",
+      "x-privacyClass": "public"
+    },
+    "envelopeId": {
+      "$ref": "common.schema.json#/$defs/Uint64",
+      "description": "Envelope.",
+      "x-privacyClass": "public"
+    },
+    "pocket": {
+      "$ref": "common.schema.json#/$defs/Address",
+      "description": "The pocket EOA.",
+      "x-privacyClass": "public"
+    },
+    "keyRef": {
+      "type": "string",
+      "description": "KMS key id; never the key.",
+      "x-privacyClass": "server-only",
+      "maxLength": 256
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "Registered",
+        "DelegateReady",
+        "Funded",
+        "Draining",
+        "Closed"
+      ],
+      "description": "Pocket state.",
+      "x-privacyClass": "public"
+    },
+    "funded": {
+      "$ref": "common.schema.json#/$defs/Amount6",
+      "description": "Sum of fundPocket.",
+      "x-privacyClass": "public"
+    },
+    "gasGranted": {
+      "$ref": "common.schema.json#/$defs/Amount6",
+      "description": "Native sent for gas, in 6-decimal units.",
+      "x-privacyClass": "public"
+    },
+    "outstanding": {
+      "$ref": "common.schema.json#/$defs/Amount6",
+      "description": "Funded minus confirmed pullbacks.",
+      "x-privacyClass": "public"
+    },
+    "pendingPullback": {
+      "$ref": "common.schema.json#/$defs/Amount6",
+      "description": "Sum of pending pullback values.",
+      "x-privacyClass": "public"
+    },
+    "pullbacks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/PullbackRecord"
+      },
+      "description": "Pullbacks.",
+      "x-privacyClass": "public"
+    },
+    "gatewayTransferIds": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "description": "Nanopayment transfer id from the Gateway API (A2-29).",
+        "x-privacyClass": "server-only",
+        "maxLength": 128
+      },
+      "description": "Nanopayment ids.",
+      "x-privacyClass": "server-only"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "vault",
+    "envelopeId",
+    "pocket",
+    "keyRef",
+    "state",
+    "funded",
+    "gasGranted",
+    "outstanding",
+    "pendingPullback",
+    "pullbacks"
+  ],
+  "$defs": {
+    "PullbackRecord": {
+      "type": "object",
+      "description": "One pullback from a pocket (spec 02 \u00a74.10).",
+      "x-privacyClass": "public",
+      "properties": {
+        "pullbackId": {
+          "$ref": "common.schema.json#/$defs/Uint64",
+          "description": "Per-vault counter.",
+          "x-privacyClass": "public"
+        },
+        "value": {
+          "$ref": "common.schema.json#/$defs/Amount6",
+          "description": "Value to mint back to the vault.",
+          "x-privacyClass": "public"
+        },
+        "salt": {
+          "$ref": "common.schema.json#/$defs/Hash32",
+          "description": "Burn-intent salt (spec 02 \u00a77.3).",
+          "x-privacyClass": "public"
+        },
+        "maxFee": {
+          "$ref": "common.schema.json#/$defs/Amount6",
+          "description": "Maximum Gateway fee allowed.",
+          "x-privacyClass": "public"
+        },
+        "maxBlockHeight": {
+          "type": "integer",
+          "description": "Burn-intent maxBlockHeight.",
+          "x-privacyClass": "public",
+          "minimum": 0
+        },
+        "transferSpecHash": {
+          "$ref": "common.schema.json#/$defs/Hash32",
+          "description": "keccak256 of the byte-encoded TransferSpec (Gateway replay id).",
+          "x-privacyClass": "public"
+        },
+        "requestedAtBlock": {
+          "type": "integer",
+          "description": "Block of requestPullback.",
+          "x-privacyClass": "public",
+          "minimum": 0
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "Pending",
+            "Confirmed",
+            "Cancelled"
+          ],
+          "description": "Pullback state.",
+          "x-privacyClass": "public"
+        },
+        "attestationTransferId": {
+          "type": "string",
+          "description": "Gateway API transferId.",
+          "x-privacyClass": "server-only",
+          "maxLength": 128
+        },
+        "mintTx": {
+          "$ref": "common.schema.json#/$defs/Hash32",
+          "description": "gatewayMint transaction hash.",
+          "x-privacyClass": "public"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "pullbackId",
+        "value",
+        "salt",
+        "maxFee",
+        "maxBlockHeight",
+        "transferSpecHash",
+        "requestedAtBlock",
+        "state"
+      ]
+    }
+  }
+}
