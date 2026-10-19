@@ -22,6 +22,13 @@ interface IJobEscrowAdapter {
 
     /// @notice platformFeeBP and evaluatorFeeBP as reported by the instance.
     function readFees(JobEscrowKind kind, address escrow) external view returns (uint256 platformBp, uint256 evaluatorBp);
+
+    /// @notice Status, budget and the amount already paid out through claims, as syncJob reads them (RV-009).
+    ///         `settledAmount` is always 0 on Circle's instance (no partial claims).
+    function readOutcome(JobEscrowKind kind, address escrow, uint256 jobId)
+        external
+        view
+        returns (EscrowStatus status, uint256 budget, uint256 settledAmount, uint64 expiredAt);
 }
 
 /// @title ICircleTestnetAgenticCommerce
@@ -60,6 +67,23 @@ interface ICircleTestnetAgenticCommerce {
 /// @title ICzarJobEscrowClient
 /// @notice Exact subset of erc-8183/base-contracts ERC8183.sol @ 142e669 used by the vault (lines 512, 661, 863, 1081).
 interface ICzarJobEscrowClient {
+    /// @notice Job record as returned by getJob (ERC8183.sol lines 56–70, 1081). Field order follows the base struct.
+    struct Job {
+        address client;
+        uint8 status;
+        address provider;
+        uint48 expiredAt;
+        address evaluator;
+        uint48 submittedAt;
+        uint256 budget;
+        address hook;
+        address paymentToken;
+        uint256 providerAgentId;
+        string description;
+        uint256 settledAmount;
+        address payoutReceiver;
+    }
+
     function createJob(
         address provider,
         address evaluator,
@@ -72,4 +96,6 @@ interface ICzarJobEscrowClient {
     function claimRefund(uint256 jobId) external;
     function platformFeeBP() external view returns (uint256);
     function evaluatorFeeBP() external view returns (uint256);
+    /// @notice Read by the adapter for the Czar kind (budget, status, paymentToken, settledAmount; RV-009).
+    function getJob(uint256 jobId) external view returns (Job memory);
 }

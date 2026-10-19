@@ -1,6 +1,6 @@
 # `IJobEscrow` adapter (spec 03)
 
-- **Date:** 2026-10-18. **Status:** draft. Interface: `interfaces/IJobEscrowAdapter.sol` (the vault-internal adapter surface) plus the two external ABIs it targets.
+- **Date:** 2026-10-18; amended 2026-10-19 (RV-009, RV-024, D77). **Status:** draft. Interface: `interfaces/IJobEscrowAdapter.sol` (the vault-internal adapter surface) plus the two external ABIs it targets.
 - **Decision:** D27 (Phase 1 on Circle's testnet instance, Czar as evaluator), D32 (`CzarJobEscrow` from `erc-8183/base-contracts`, behind the adapter).
 
 ## 1. Purpose and phase
@@ -33,6 +33,7 @@
 | `readFees(kind, escrow) → (platformBp, evaluatorBp)` | both: `platformFeeBP()`, `evaluatorFeeBP()` | Circle: both must be `0` (A4-07) else `UnexpectedFees`; Czar: sum ≤ `MAX_JOB_FEE_BPS` (500) |
 | `fund(kind, escrow, jobId, budget)` | Circle: `USDC.forceApprove(escrow, budget)` then `fund(jobId, "")` (contract pulls `job.budget`, p1-E7). Czar: `forceApprove` then `fund(jobId, USDC, budget, "")`. | the vault re-reads the budget in the same transaction right before `fund`, so a provider cannot raise it between read and fund (same-tx atomicity replaces the missing `expectedBudget`, A4-05); approval reset to 0 after |
 | `status(kind, escrow, jobId) → uint8` | as `readBudget` | maps both enums to the vault's `JobState` |
+| `readOutcome(kind, escrow, jobId) → (status, budget, settledAmount, expiredAt)` | Circle: `jobs(jobId)` (`settledAmount = 0`, the instance has no partial claims). Czar: `getJob(jobId)` (`ICzarJobEscrowClient.getJob`, base line 1081) | `syncJob` decides only from this read, never from balances or events (RV-009) |
 | `claimRefund(kind, escrow, jobId)` | both: `claimRefund(jobId)` | after `expiredAt` (Circle) or `expiredAt + 1 h` when `Submitted` (Czar) |
 
 - `optParams` is always empty (`""`); nothing private is ever passed (p1-E7, A4-03).
@@ -48,8 +49,8 @@
 
 ## 6. Refunds and un-spending
 
-- `Rejected` while `Open` (client reject, p1-E8): no funds moved; `syncJob` releases `reservedCap`.
-- `Rejected`/`Expired` after funding: escrow transfers `budget` back to the client (vault) and emits `Refunded`; `syncJob` observes status and `jobEscrowed −= budget`; `committedTotal += budget` if the envelope is open, else free balance (`czar-vault.md` §5.5).
+- `Rejected` while `Open` (client reject, p1-E8), or still `Open` after `expiredAt`: no funds moved; `syncJob` sets the vault job to `Released` and releases `reservedCap` and its `stepUsed` (RV-009).
+- `Rejected`/`Expired` after funding: the escrow transfers the refund back to the client (vault) in the same transaction that sets the status, so the status alone proves the refund. Refund = `budget − settledAmount` on the Czar instance (`approveClaim` may already have paid part, `ERC8183.sol` lines 840, 876) and `budget` on Circle's; `syncJob` books `jobEscrowed −= budget`, `spent += budget − refund`, and credits `refund` to `committedTotal` if the envelope is open (bounded by what is still in the vault, RV-011), else to free balance (`czar-vault.md` §5.5).
 - `Completed`: `jobEscrowed −= budget; spent += budget`.
 
 ## 7. Events and errors (adapter-level, emitted by the vault)
@@ -68,7 +69,8 @@ See `czar-vault.md` §9: `JobOpened`, `JobFunded`, `JobSynced`, `JobRefunded`; e
 ## 9. Edge cases
 
 - Circle's instance upgraded (`Upgraded` event): the server halts `openJob`; open jobs continue if the ABI is unchanged; the vault's `claimRefund` path is unhookable (A4-03).
-- Provider never calls `setBudget`: the job stays `Opened` until expiry; `syncJob` after `expiredAt` releases `reservedCap` (status still `Open`, no funds moved).
+- Provider never calls `setBudget`: the job stays `Opened` until expiry; `syncJob` after `expiredAt` sets `Released` and releases `reservedCap` (status still `Open`, no funds moved). The same applies to a duplicate job left by a crashed `openJob` retry (RV-009).
+- Deliverable hash mismatch: the evaluator **rejects** (D77, RV-024); the escrow refunds and `syncJob` books it.
 - Provider sets a budget above `reservedCap`: `fundJob` reverts `BudgetExceedsReserved`; the server asks the provider for a lower budget or re-plans.
 - Czar instance `payoutReceiver` or disburser features (lines 465–510): unused by the vault; providers may use them.
 
@@ -79,3 +81,10 @@ See `czar-vault.md` §13 (`openJob` ≈ 230k, `fundJob` ≈ 150k, `syncJob` ≈ 
 ## 11. Mainnet differences
 
 Kind switches from `CIRCLE_TESTNET` to `CZAR_BASE` (no official mainnet instance, A4-13). Fee rule switches from "must be 0" to "≤ `MAX_JOB_FEE_BPS`". The Czar instance's `fund` carries `expectedBudget` natively.
+
+## Change log
+
+| Date | ID | Change |
+|---|---|---|
+| 2026-10-19 | RV-009 | `readOutcome` (adds `settledAmount`, `expiredAt`); `ICzarJobEscrowClient.getJob`; `Opened` jobs released by `syncJob`; refunds decided from escrow status only (SCR-009). |
+| 2026-10-19 | D77 | Deliverable hash mismatch is a reject (RV-024). |
