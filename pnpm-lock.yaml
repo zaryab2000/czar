@@ -61,6 +61,24 @@ importers:
         specifier: 4.13.13
         version: 4.13.13
 
+  apps/merchants:
+    dependencies:
+      '@czar/config':
+        specifier: workspace:*
+        version: link:../../packages/config
+      '@czar/hashing':
+        specifier: workspace:*
+        version: link:../../packages/hashing
+      '@czar/x402':
+        specifier: workspace:*
+        version: link:../../packages/x402
+      '@x402/extensions':
+        specifier: 2.28.0
+        version: 2.28.0(typescript@6.0.3)
+      viem:
+        specifier: 2.57.7
+        version: 2.57.7(typescript@6.0.3)(zod@3.25.76)
+
   apps/signer:
     dependencies:
       '@czar/config':
