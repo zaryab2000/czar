@@ -9,9 +9,9 @@
   "properties": {
     "schemaVersion": {
       "type": "string",
-      "description": "Schema version, major.minor; this file is 1.0.",
+      "description": "Schema version, major.minor; this file is 1.1. 1.1 (2026-10-19) adds PullbackRecord.recovery and creditedToEnvelope (RV-004, RV-011).",
       "x-privacyClass": "public",
-      "const": "1.0"
+      "const": "1.1"
     },
     "vault": {
       "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Address",
@@ -43,7 +43,7 @@
         "Draining",
         "Closed"
       ],
-      "description": "Pocket state.",
+      "description": "Pocket state. DelegateReady is derived: on-chain Registered and GatewayWallet DelegateAdded(USDC, pocket, vault) seen (RV-048).",
       "x-privacyClass": "public"
     },
     "funded": {
@@ -161,6 +161,16 @@
         "mintTx": {
           "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
           "description": "gatewayMint transaction hash.",
+          "x-privacyClass": "public"
+        },
+        "recovery": {
+          "type": "boolean",
+          "description": "True for a pullback of a Closed pocket; its mint is free balance (RV-004). Absent means false.",
+          "x-privacyClass": "public"
+        },
+        "creditedToEnvelope": {
+          "type": "boolean",
+          "description": "From PullbackConfirmed: true if the mint was credited back to the envelope (RV-011).",
           "x-privacyClass": "public"
         }
       },

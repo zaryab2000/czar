@@ -9,9 +9,9 @@
   "properties": {
     "schemaVersion": {
       "type": "string",
-      "description": "Schema version, major.minor; this file is 1.0.",
+      "description": "Schema version, major.minor; this file is 1.1 (2026-10-19: archiveUri is the host-free czar-archive form, D78).",
       "x-privacyClass": "public",
-      "const": "1.0"
+      "const": "1.1"
     },
     "batchId": {
       "$ref": "https://czar.dev/schemas/common/1.0#/$defs/BatchId",
@@ -86,7 +86,7 @@
     },
     "uriHash": {
       "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
-      "description": "Phase 1: keccak256(utf8(archiveUri)). Phase 2: keccak256 of the archive's IPFS CID (D54).",
+      "description": "Phase 1: keccak256(utf8(archiveUri)) with archiveUri = czar-archive:<root> (D78). Phase 2: keccak256 of the archive's IPFS CID (D54).",
       "x-privacyClass": "public"
     },
     "cid": {
@@ -103,10 +103,10 @@
     },
     "archiveUri": {
       "type": "string",
-      "format": "uri",
       "maxLength": 2048,
-      "description": "HTTPS URL of the archive on Czar's server (Phase 1, D54). Content is JSON Lines of the leaf objects; its leaves rebuild the anchored root.",
-      "x-privacyClass": "public"
+      "description": "Host-free archive reference czar-archive:<root> (D78). Never a localhost URL: the anchor is permanent. Resolved against the archive hosts in Czar's latest POLICY_RELEASE (Phase 1: the local server; stage 2: the public host). Content is JSON Lines of the leaf objects; its leaves rebuild the anchored root.",
+      "x-privacyClass": "public",
+      "pattern": "^czar-archive:0x[0-9a-f]{64}$"
     }
   },
   "required": [
@@ -120,5 +120,5 @@
     "uriHash",
     "archiveUri"
   ],
-  "$comment": "Change log: 2026-10-18 D54 archive on Czar server: added archiveUri, cid optional and Phase 2, uriHash rule per phase."
+  "$comment": "Change log: 2026-10-18 D54 archive on Czar server: added archiveUri, cid optional and Phase 2, uriHash rule per phase. 2026-10-19 D78/RV-028: archiveUri is czar-archive:<root>, never a localhost URL."
 }

@@ -9,9 +9,9 @@
   "properties": {
     "schemaVersion": {
       "type": "string",
-      "description": "Schema version, major.minor; this file is 1.0.",
+      "description": "Schema version, major.minor; this file is 1.1. 1.1 (2026-10-19) adds pocket, pocket leaves (kind 4) and the pocketCapBps rule (D71).",
       "x-privacyClass": "server-only",
-      "const": "1.0"
+      "const": "1.1"
     },
     "planId": {
       "$ref": "https://czar.dev/schemas/common/1.0#/$defs/PlanId",
@@ -60,7 +60,12 @@
     },
     "pocketCapBps": {
       "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Bps",
-      "description": "Pocket cap in bps of cap; default 2500 (D22).",
+      "description": "Pocket cap in bps of cap: 0 unless the plan has a gateway-nano step, then 2500 (D22, D71).",
+      "x-privacyClass": "hash-on-chain"
+    },
+    "pocket": {
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Address",
+      "description": "Pocket EOA for the plan's gateway-nano steps; present if and only if such a step exists; committed in payeeLeaves as a kind-4 leaf (D71).",
       "x-privacyClass": "hash-on-chain"
     },
     "expiresAt": {
@@ -301,24 +306,25 @@
         },
         "kind": {
           "type": "integer",
-          "description": "1 x402 payTo, 2 ERC-8183 provider, 3 tip repo (Phase 2).",
+          "description": "1 x402 payTo, 2 ERC-8183 provider, 3 tip repo (Phase 2), 4 pocket EOA (D71).",
           "x-privacyClass": "public",
           "enum": [
             1,
             2,
-            3
+            3,
+            4
           ]
         },
         "stepIndex": {
           "type": "integer",
-          "description": "Step index.",
+          "description": "Step index 0-63 for kinds 1-3; 4294967295 (POCKET_STEP_INDEX) for kind 4.",
           "x-privacyClass": "public",
           "minimum": 0,
-          "maximum": 63
+          "maximum": 4294967295
         },
         "stepCap": {
           "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Amount6",
-          "description": "Per-step cap shared by the payee and its alternates (D36).",
+          "description": "Per-step cap shared by the payee and its alternates (D36), enforced per step on-chain (RV-002); \"0\" for kind 4.",
           "x-privacyClass": "public"
         }
       },
@@ -328,6 +334,34 @@
         "kind",
         "stepIndex",
         "stepCap"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": 4
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "stepIndex": {
+                "const": 4294967295
+              },
+              "stepCap": {
+                "const": "0"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "stepIndex": {
+                "maximum": 63
+              }
+            }
+          }
+        }
       ]
     }
   },
