@@ -1,0 +1,23 @@
+# Czar contracts (T-003). Build and test with Arc Foundry only: FOUNDRY_PROFILE=arc arc-forge build.
+# solc 0.8.30, evm_version prague, optimizer on (03 czar-vault.md header). OpenZeppelin v5.7.0 (03).
+[profile.default]
+src = "src"
+test = "test"
+out = "out"
+libs = ["lib"]
+solc_version = "0.8.30"
+evm_version = "prague"
+optimizer = true
+auto_detect_solc = false
+deny_warnings = true
+remappings = [
+  "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+  "forge-std/=lib/forge-std/src/",
+]
+
+[profile.arc]
+network = "arc"
+# Hardfork pin (RV-058): not set until the hardfork Arc testnet runs is recorded (SCR-101).
+
+[fmt]
+line_length = 120
