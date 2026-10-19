@@ -1,0 +1,27 @@
+{
+  "name": "@czar/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./money-format": "./packages/money-format/src/index.ts"
+  },
+  "scripts": {
+    "dev": "NEXT_TELEMETRY_DISABLED=1 next dev --hostname localhost",
+    "build": "NEXT_TELEMETRY_DISABLED=1 next build",
+    "start": "NEXT_TELEMETRY_DISABLED=1 next start --hostname localhost",
+    "typecheck": "NEXT_TELEMETRY_DISABLED=1 next typegen && tsc -p tsconfig.json",
+    "test": "vitest run",
+    "e2e": "playwright test"
+  },
+  "dependencies": {
+    "next": "16.4.2",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0"
+  }
+}

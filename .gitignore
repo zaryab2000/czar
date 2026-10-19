@@ -38,3 +38,4 @@ playwright-report/
 test-results/
 *.tsbuildinfo
 apps/indexer/test/fixtures/resume/.ponder/
+apps/web/next-env.d.ts
