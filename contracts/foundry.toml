@@ -21,6 +21,12 @@ network = "arc"
 
 # forge-lint runs on production sources. Test mocks copy upstream code (block.timestamp checks,
 # string-to-bytes32 casts) on purpose and are excluded; compiler warnings still fail the build.
+# M1 exit gate: invariant suites run with runs >= 256 and depth >= 64 (build-plan §5 M1).
+[invariant]
+runs = 256
+depth = 64
+fail_on_revert = false
+
 [lint]
 ignore = ["test/**/*.sol"]
 
