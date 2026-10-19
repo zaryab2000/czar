@@ -249,20 +249,21 @@ Ponder 0.18.x (A9-05), viem 2.57.x (A9-05), Postgres 16; hosted fallbacks Goldsk
 
 ```mermaid
 stateDiagram-v2
-  [*] --> Screened: P-01 returned allow
-  [*] --> Quarantined: P-01 flagged injection-suspect
+  [*] --> Screened: P-01 returned none or pii-suspect only (every chunk, RV-041)
+  [*] --> Quarantined: P-01 flagged injection-suspect, or P-01 unavailable (D76)
   Screened --> Checked: delivery, structural, requirement run in sandbox
   Checked --> Pass: delivery pass ∧ structural ∉ {fail} ∧ requirement ∉ {fail}
   Checked --> Fail: any check fail
   Checked --> Inconclusive: delivery inconclusive (no response) or sandbox timeout
-  Quarantined --> Fail: report with flags [injection-quarantined]
+  Quarantined --> Inconclusive: report with flags [injection-quarantined] or limits [screen-unavailable] (RV-042)
   Pass --> [*]: continue plan · report row to CZ-17
   Fail --> [*]: stop plan step · report row · StepError
   Inconclusive --> [*]: retry policy (CZ-15) · report row
 ```
 
 - `Pass` lets CZ-15 run the next step; `Fail` stops the step (alternate payee only via a new reservation, 02 §7.5); `Inconclusive` lets CZ-15 retry per its policy with the same `paymentId`.
-- Quarantine: the body is kept in the object store (`bodyRef`), shown to the user as "This result looked unsafe and was set aside", never delivered into the workflow.
+- Quarantine (D76, RV-042): the body is kept in the object store (`bodyRef`), shown to the user as "This result looked unsafe and was set aside" (or "This result could not be checked for safety and was set aside" when the screen was unavailable), never delivered into the workflow. It is recorded as `inconclusive`, never `fail`: it does not enter posteriors (SL-C7), and for a job it does not call `reject` (the job waits until `expiredAt`, then `claimJobRefund`). **Superseded by RV-042:** "Quarantined --> Fail".
+- Labels follow P-01's enum exactly (`none`, `injection-suspect`, `pii-suspect`); the earlier `allow` / `flag` wording is superseded.
 
 #### 5.4 Report and hash
 
@@ -274,8 +275,8 @@ stateDiagram-v2
 | Step | Action | Reference |
 |---|---|---|
 | 1 | CZ-19 reports `JobSubmitted(jobId, provider, deliverable)` for a vault-client job | 03 `job-escrow-adapter.md` §2 |
-| 2 | CZ-15's fetcher resolves the deliverable: `deliverable` is a `bytes32`; the provider publishes the content at the URI agreed in the job's off-chain brief (convention `https://<provider-host>/.well-known/czar-deliverable/<deliverable-hex>`, D53; stored as `JobRecord.deliverableUri`, 02 §4.11, AM-08; the EIP fixes only the `bytes32`, A4-03); the fetched bytes must hash (keccak256) to `deliverable`, else `inconclusive` with `detail.hashMismatch` | A4-03 |
-| 3 | P-01 screen on the bytes; CZ-16 runs the job's profile in the sandbox | §5.2 |
+| 2 | CZ-15's fetcher resolves the deliverable: `deliverable` is a `bytes32`; the provider publishes the content at the URI agreed in the job's off-chain brief (convention `https://<provider-host>/.well-known/czar-deliverable/<deliverable-hex>`, D53; stored as `JobRecord.deliverableUri`, 02 §4.11, AM-08; the EIP fixes only the `bytes32`, A4-03); the fetch goes through the shared SSRF-safe fetcher in `@czar/x402` (`server-supply-side.md` CZ-20 §5, RV-022); the fetched bytes must hash (keccak256) to `deliverable`, **else the decision is `fail` with `detail.hashMismatch` and the evaluator calls `reject`** (D77, RV-024). A fetch that fails (network, timeout, size) is not a mismatch: it stays `inconclusive` and is retried until `expiredAt` (the CDN-stale-copy case: Czar re-fetches `acceptance.deliverableRefetchTries` 3 times, `acceptance.deliverableRefetchDelayMs` 60,000 apart, before deciding a mismatch) | A4-03, D77 |
+| 3 | P-01 screen on the bytes (chunked over everything P-02 reads, RV-041; quarantine → `inconclusive`, never `reject`, RV-042); CZ-16 runs the job's profile in the sandbox | §5.2 |
 | 4 | `Pass` → `complete(jobId, reportHash, "")`; `Fail` → `reject(jobId, reportHash, "")`; both signed by K7 through the KMS policy that allows only these two selectors on the pinned escrow address | K7 (spec 01 §7.2); 03 `job-escrow-adapter.md` §5 |
 | 5 | `Inconclusive` → wait and retry every `acceptance.evaluatorPollSeconds` until `expiredAt`; after expiry CZ-15 calls the vault's `claimJobRefund(jobKey)` (anyone may call it, 03 `czar-vault.md` §5.5; Circle's instance has no caller check, EIP reference line 690; the Czar instance adds a 1 h grace when `Submitted`) | 03 `job-escrow-adapter.md` §2 |
 | 6 | After the tx: CZ-15 `syncJob(jobKey)` mirrors the state into the vault; CZ-17 gets the `report` row | 03 `czar-vault.md` §5.5 |
@@ -310,17 +311,19 @@ Czar judges work it planned and paid for. Mitigations in Phase 1, all visible:
 | `acceptance.evaluatorPollSeconds` | 15 | jobs are minutes-scale; no need for sub-second |
 | `acceptance.deliverableMaxBytes` | 20,971,520 | job deliverables are larger than API bodies; bounded for the sandbox |
 | `acceptance.deliverableFetchTimeoutMs` | 30,000 | matches delivery |
+| `acceptance.deliverableRefetchTries` | 3 | a stale CDN copy should not cost an honest provider the job (D77 reject only after re-fetches) |
+| `acceptance.deliverableRefetchDelayMs` | 60,000 | spaced re-fetches |
 
 ### 6. Behaviour
 
 - Main path (x402 step): receive `(body, headers, step, schema)` → screen result → run checks → report → return `decision` and `flags` to CZ-15.
 - Main path (job): §5.5.
-- Alternate: P-01 unavailable (model cap or outage) → the body is treated as `injection-suspect` only if the regex pre-screen in P-01's fallback matches; otherwise checks run and the report carries `limits += ["screen-unavailable"]`; the result is still delivered with the warning label (the vault bound, not the screen, protects money).
+- Alternate: P-01 unavailable (model cap or outage) → the result is **quarantined, not delivered** (D76, RV-023); the report records `inconclusive` with `limits += ["screen-unavailable"]`. **Superseded by D76:** "otherwise checks run … the result is still delivered with the warning label".
 - Alternate: schema invalid after sanitizing → `structural: inconclusive`, `detail.schemaDropped = true`.
 
 ### 7. AI usage
 
-None in Phase 1. The checker consumes P-01's output (`allow` / `flag`) produced by CZ-15. Fallback with no model: regex pre-screen (ai-prompts.md P-01 fallback list) plus deterministic checks.
+None in Phase 1. The checker consumes P-01's output (`none` / `injection-suspect` / `pii-suspect`) produced by CZ-15. With no model the result is quarantined (D76); the regex pre-screen still runs first and its hits are never overridden.
 
 ### 8. Privacy
 
@@ -337,7 +340,7 @@ None in Phase 1. The checker consumes P-01's output (`allow` / `flag`) produced 
 |---|---|---|---|
 | sandbox timeout | `inconclusive`, `limits += ["sandbox-timeout"]` | "Result could not be checked" | CZ-15 retries the check once (`acceptance.checkRetries` 1) |
 | deliverable unreachable | `inconclusive`; poll until `expiredAt`; then `claimJobRefund` | "Waiting for the specialist's work (until <time>)" | automatic |
-| deliverable hash mismatch | `fail` → `reject` | "Work did not match what was submitted; money back" | none |
+| deliverable hash mismatch (after `acceptance.deliverableRefetchTries` re-fetches) | `fail` → `reject` (D77) | "Work did not match what was submitted; money back" | none |
 | K7 tx reverts `WrongStatus` | reconcile from events | none | none |
 | K7 unavailable (KMS down) | decision stored `Pending`; retry; alert after `acceptance.kmsRetryMax` 10 | "Finalizing" | automatic |
 | profile missing for task class | `not_checked` for structural/requirement; delivery still runs | "Delivered (not checked)" | none |
@@ -425,11 +428,12 @@ Ajv 8 (2020-12), Node `vm` sandbox (or a Wasm runtime, SL-C7), viem 2.57.x, KMS 
 |---|---|---|---|
 | `observation` (SL `Observation`, `kind = receipt`) | CZ-15 confirms settlement (`settle` on-chain for vault-direct; Gateway row `received` for pocket; `JobCompleted`/`Refunded` for jobs) | `ObservationCore` (SL §5.4) with `payment = PaymentRef`, `payment_ref_hash`, commits of request and response (`sl-req-v1`, SL-C5), timings, `outcome`, `disclosure = "hash-only"`, plus Czar `SO` fields `envelopeRef`, `stepIndex` (02 §4.13) | vault (`SL_RECEIPT`) or pocket key |
 | `report` | CZ-16 produces an `AcceptanceReport` | `ValidationReportCore` fields (02 §4.14) | K7 as `ValidationReport` EIP-712 (02 §6.2) |
-| `demand-proof` | envelope reaches `Closed` with all steps resolved (settled, released, refunded or written off) | `DemandProofLeaf` (02 §4.17): `userPseudonym`, `observationHashes[]`, `objectiveHash`, `soulVersionHash`, `planHash`, `envelopeRef`, `approval{approver, txHash, blockNumber}` from the `EnvelopeOpened` tx, `paymentRefHashes[]` (one per settled step), `outcomeHashes[]` (one `reportHash` per step), `closedAt` | none (content-addressed) |
+| `demand-proof` | envelope reaches `Closed` with all steps resolved (settled, released, refunded or written off) | `DemandProofLeaf` **version 2** (02 §4.17, RV-026): `observationHashes[]`, `objectiveHash`, `soulVersionCommit = keccak256(abi.encode(soulVersionHash, demandSalt))` with the envelope's `demandSalt`, `planHash`, `envelopeRef`, `approval{approver, txHash, blockNumber}` from the `EnvelopeOpened` tx, `paymentRefHashes[]` (one per settled step), `outcomeHashes[]` (one `reportHash` per step), `closedAt` | none (content-addressed) |
 | `soul-version` | `submitSoulVersion` accepted | `SoulVersionLeaf` (02 §4.18) with the server's `userPseudonym` for the current epoch | none |
 | `assessment`, `correction`, `exposure`, `submission-log` | Phase 2 (SL-C8, SL-C10, SL-C11) | SL §5 | — |
 
-- `userPseudonym = keccak256(abi.encode(userSecret, epoch))` rotating every `evidence.pseudonymEpochDays` 90 (02 §7.1).
+- `userPseudonym = keccak256(abi.encode(userSecret, epoch))` rotating every `evidence.pseudonymEpochDays` 90 (02 §7.1). It appears **only** in `soul-version` leaves (RV-026).
+- `demandSalt = keccak256(abi.encode(userDemandSecret, vault, envelopeId))`; `userDemandSecret` is separate from `userSecret`; the salt is shown to the user in the envelope detail so they can prove the soul link; it never appears in any leaf. **Superseded by RV-026:** `userPseudonym` and the bare `soulVersionHash` in demand-proof leaves (they let anyone join a user's soul history to their vault and payments).
 - A leaf is never created from an envelope that only has `local` steps (no payment, nothing to prove).
 
 #### 5.2 Batch lifecycle
@@ -458,7 +462,7 @@ observationHashes[] ──(inside)──> objectiveHash ──(inside)──> pl
       │                                │                          │
       │  (user holds preimages)        │ EnvelopeOpened(objectiveHash, planHash, approverIsOwner) on-chain
       ▼                                ▼                          ▼
-soulVersionHash (soul-version leaf) ── demand-proof leaf ── paymentRefHashes[] ── outcomeHashes[]
+soulVersionCommit (salted; only the user can open it against a soul-version leaf, RV-026) ── demand-proof leaf ── paymentRefHashes[] ── outcomeHashes[]
                                               │
                                        EVIDENCE_BATCH root on OpenEvidenceLog
 ```
@@ -477,7 +481,7 @@ soulVersionHash (soul-version leaf) ── demand-proof leaf ── paymentRefHa
 | 6 | For each `outcomeHash`: find the `report` row with that `reportHash` in the same or an earlier batch; read `checks[]` | what was checked and what passed |
 | 7 | Optionally recompute a ranking from the published snapshots with the recompute kit (SL §8.5) | Czar's ranking follows from the anchored evidence |
 
-- **They cannot verify:** the observation preimages (only the user holds the `ActivityEvent`s, D25) and the soul beliefs (only the user can reveal a belief against `sectionHashes`, 02 §5.2). What is proven is: a specific passkey-owned vault approved a specific objective hash before paying, and the objective hash commits to specific observation hashes that existed before the approval. That is the "stranger test" evidence the roadmap describes (roadmap 2.13), stated without overclaiming.
+- **They cannot verify:** the observation preimages (only the user holds the `ActivityEvent`s, D25), the soul beliefs (only the user can reveal a belief against `sectionHashes`, 02 §5.2), or which soul version the demand came from (only the user can reveal `demandSalt` and `soulVersionHash` to open `soulVersionCommit`, RV-026). What is proven is: a specific passkey-owned vault approved a specific objective hash before paying, and the objective hash commits to specific observation hashes that existed before the approval. That is the "stranger test" evidence the roadmap describes (roadmap 2.13), stated without overclaiming.
 - A one-page "Verify a Czar purchase" guide with the step list above and the policy tarball link ships with Phase 1 (`evidence.verifyGuideUrl`).
 
 #### 5.5 Storage
@@ -740,3 +744,8 @@ Postgres 16 (pgvector only in Phase 2, C1-13), `@czar/x402` for probes, `@x402/e
 | 2026-10-18 | AM-10 | job receipts signed under the vault's `SL_RECEIPT` kind |
 | 2026-10-18 | D61 | KMS reference |
 | 2026-10-18 | D54 | Threat row in CZ-17 §9 now binds archives by root and `archiveUri` (CID only in Phase 2). |
+| 2026-10-19 | RV-023 / D76 | screen unavailable → quarantined, recorded `inconclusive`. |
+| 2026-10-19 | RV-024 / D77 | deliverable hash mismatch → `fail` → `reject`, after re-fetches; fetch failures stay `inconclusive`. |
+| 2026-10-19 | RV-042 | quarantine → `inconclusive` (not `fail`); labels follow P-01's enum. |
+| 2026-10-19 | RV-022 | deliverable fetches use the shared SSRF-safe fetcher. |
+| 2026-10-19 | RV-026 | demand-proof leaves are version 2: no pseudonym, salted `soulVersionCommit`; pseudonym only in soul-version leaves. |
