@@ -1,7 +1,7 @@
 export * from "./abi.ts";
 export type { BackendName, SignerBackend } from "./backend.ts";
 export * from "./kinds.ts";
-export * from "./keystore.ts";
+export * from "./local-backend.ts";
 export * from "./passphrase.ts";
 export { decide, Denied, SELLER_PROOF_LIFETIME_SEC } from "./policy.ts";
 export type { Decision, PolicyContext, PurposeIds, SignerNetwork } from "./policy.ts";
