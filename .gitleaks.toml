@@ -1,0 +1,12 @@
+# Repository gitleaks config (T-002, T-008): the default v8.30.1 rules plus one path allowlist.
+# packages/redaction/vendor/ holds gitleaks's own fake test secrets (the layer-1 test corpus), and
+# src/generated/gitleaks-rules.ts holds the compiled rule patterns, whose literals look like key prefixes.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Vendored gitleaks v8.30.1 test corpus and the rules compiled from it"
+paths = [
+  '''^packages/redaction/vendor/gitleaks-v8\.30\.1/''',
+  '''^packages/redaction/src/generated/gitleaks-rules\.ts$''',
+]
