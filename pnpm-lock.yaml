@@ -61,6 +61,24 @@ importers:
         specifier: 4.13.13
         version: 4.13.13
 
+  apps/signer:
+    dependencies:
+      '@czar/config':
+        specifier: workspace:*
+        version: link:../../packages/config
+      '@czar/hashing':
+        specifier: workspace:*
+        version: link:../../packages/hashing
+      '@czar/logging':
+        specifier: workspace:*
+        version: link:../../packages/logging
+      '@napi-rs/keyring':
+        specifier: 2.1.1
+        version: 2.1.1
+      viem:
+        specifier: 2.57.7
+        version: 2.57.7(typescript@6.0.3)(zod@3.25.76)
+
   apps/web:
     dependencies:
       next:
