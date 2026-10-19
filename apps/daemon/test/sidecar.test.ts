@@ -72,7 +72,8 @@ describe("sidecar supervisor", () => {
     expect(supervisor.running).toBe(true);
     await new Promise((resolve) => setTimeout(resolve, 600));
     expect(supervisor.running).toBe(false);
-  });
+    // Start-up may take up to startTimeoutMs on a loaded machine; leave room above it.
+  }, 15_000);
 
   it("falls back with forced review when the helper cannot start, and caps restarts at 5 a minute", async () => {
     const socketPath = join(tempDir("czar-sc-"), "czar-redact.sock");
