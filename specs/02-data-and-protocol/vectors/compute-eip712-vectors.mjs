@@ -1,8 +1,9 @@
 // Computes EIP-712 type hashes, domain separators and test digests for Czar specs 02/03.
-// Run: NODE_PATH=<dir with viem 2.57.x> node compute-eip712-vectors.mjs > eip712-vectors.json
+// Run: ES modules resolve packages next to the script, so copy it into a scratch directory that has
+// `npm install viem@2.57.2`, then: node <scratch>/compute-eip712-vectors.mjs > eip712-vectors.json
 // Check: node compute-eip712-vectors.mjs | diff - eip712-vectors.json  (must print nothing)
 // Changed 2026-10-19: ReceiptAttestation type and vector, SL_RECEIPT kind tag v2 (RV-013); autonomyRaise deadline
-// moved inside its period (RV-061). Output is deterministic apart from `generatedAt`.
+// moved inside its period (RV-061). Output is fully deterministic (`generatedAt` is the spec date).
 import { keccak256, toHex, hashTypedData, hashDomain, hashStruct, encodeAbiParameters, parseAbiParameters, pad } from "viem";
 const th = (s) => keccak256(toHex(s));
 // generatedAt is the spec date, not the wall clock, so a rerun reproduces the file byte for byte

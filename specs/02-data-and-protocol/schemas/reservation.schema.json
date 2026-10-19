@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://czar.dev/schemas/reservation/1.0",
+  "$id": "https://czar.dev/schemas/reservation.schema.json",
   "title": "Reservation (mirror)",
   "description": "Server mirror of a vault reservation (spec 02 \u00a74.9).",
   "type": "object",
@@ -14,17 +14,17 @@
       "const": "1.0"
     },
     "vault": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Address",
+      "$ref": "common.schema.json#/$defs/Address",
       "description": "Vault address.",
       "x-privacyClass": "public"
     },
     "reservationId": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Uint64",
+      "$ref": "common.schema.json#/$defs/Uint64",
       "description": "Per-vault counter.",
       "x-privacyClass": "public"
     },
     "envelopeId": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Uint64",
+      "$ref": "common.schema.json#/$defs/Uint64",
       "description": "Envelope.",
       "x-privacyClass": "public"
     },
@@ -36,12 +36,12 @@
       "maximum": 63
     },
     "payee": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Address",
+      "$ref": "common.schema.json#/$defs/Address",
       "description": "Payee.",
       "x-privacyClass": "public"
     },
     "unitAmount": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Amount6",
+      "$ref": "common.schema.json#/$defs/Amount6",
       "description": "Amount per authorization.",
       "x-privacyClass": "public"
     },
@@ -53,7 +53,7 @@
       "maximum": 128
     },
     "validBefore": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/UnixSeconds",
+      "$ref": "common.schema.json#/$defs/UnixSeconds",
       "description": "Authorization expiry.",
       "x-privacyClass": "public"
     },
@@ -67,7 +67,7 @@
       "x-privacyClass": "public"
     },
     "settledMask": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
+      "$ref": "common.schema.json#/$defs/Hash32",
       "description": "128-bit mask of settled indices, hex (upper bits zero).",
       "x-privacyClass": "public"
     },
@@ -98,7 +98,7 @@
     "paymentIds": {
       "type": "array",
       "items": {
-        "$ref": "https://czar.dev/schemas/common/1.0#/$defs/PaymentId",
+        "$ref": "common.schema.json#/$defs/PaymentId",
         "description": "Payment id for the index at this position.",
         "x-privacyClass": "server-only"
       },

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://czar.dev/schemas/plan/1.0",
+  "$id": "https://czar.dev/schemas/plan.schema.json",
   "title": "Plan",
   "description": "The priced plan for one objective (spec 02 §4.5). What the user approves; planHash is written into the envelope.",
   "type": "object",
@@ -9,67 +9,67 @@
   "properties": {
     "schemaVersion": {
       "type": "string",
-      "description": "Schema version, major.minor; this file is 1.1. 1.1 (2026-10-19) adds pocket, pocket leaves (kind 4) and the pocketCapBps rule (D71).",
+      "description": "Schema version, major.minor; this file is 1.1. 1.1 (2026-10-19) adds pocket, pocket leaves (kind 4) and the pocketCapBps rule (D71), and Step.inputTemplate.inputKeys (RV-021).",
       "x-privacyClass": "server-only",
       "const": "1.1"
     },
     "planId": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/PlanId",
+      "$ref": "common.schema.json#/$defs/PlanId",
       "description": "Plan id.",
       "x-privacyClass": "server-only"
     },
     "objectiveId": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/ObjectiveId",
+      "$ref": "common.schema.json#/$defs/ObjectiveId",
       "description": "Objective id.",
       "x-privacyClass": "server-only"
     },
     "objectiveHash": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
+      "$ref": "common.schema.json#/$defs/Hash32",
       "description": "objectiveHash.",
       "x-privacyClass": "hash-on-chain"
     },
     "planHash": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
+      "$ref": "common.schema.json#/$defs/Hash32",
       "description": "planHash per spec 02 §5.2.",
       "x-privacyClass": "hash-on-chain"
     },
     "network": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Caip2",
+      "$ref": "common.schema.json#/$defs/Caip2",
       "description": "Chain.",
       "x-privacyClass": "hash-on-chain"
     },
     "category": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Category",
+      "$ref": "common.schema.json#/$defs/Category",
       "description": "Spending category; categoryId = keccak256(utf8(category)) on-chain.",
       "x-privacyClass": "hash-on-chain"
     },
     "cap": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Amount6",
+      "$ref": "common.schema.json#/$defs/Amount6",
       "description": "Envelope cap = sum of step caps × (1 + slack).",
       "x-privacyClass": "hash-on-chain"
     },
     "slackBps": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Bps",
+      "$ref": "common.schema.json#/$defs/Bps",
       "description": "Slack over the step caps; default 2500.",
       "x-privacyClass": "hash-on-chain"
     },
     "maxStepAmount": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Amount6",
+      "$ref": "common.schema.json#/$defs/Amount6",
       "description": "Maximum over step caps.",
       "x-privacyClass": "hash-on-chain"
     },
     "pocketCapBps": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Bps",
+      "$ref": "common.schema.json#/$defs/Bps",
       "description": "Pocket cap in bps of cap: 0 unless the plan has a gateway-nano step, then 2500 (D22, D71).",
       "x-privacyClass": "hash-on-chain"
     },
     "pocket": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Address",
+      "$ref": "common.schema.json#/$defs/Address",
       "description": "Pocket EOA for the plan's gateway-nano steps; present if and only if such a step exists; committed in payeeLeaves as a kind-4 leaf (D71).",
       "x-privacyClass": "hash-on-chain"
     },
     "expiresAt": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Timestamp",
+      "$ref": "common.schema.json#/$defs/Timestamp",
       "description": "Envelope expiry.",
       "x-privacyClass": "hash-on-chain"
     },
@@ -91,7 +91,7 @@
       "x-privacyClass": "hash-on-chain"
     },
     "payeeRoot": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
+      "$ref": "common.schema.json#/$defs/Hash32",
       "description": "Merkle root of payeeLeaves (spec 02 §5.3).",
       "x-privacyClass": "public"
     },
@@ -112,7 +112,7 @@
       "x-privacyClass": "server-only"
     },
     "createdAt": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Timestamp",
+      "$ref": "common.schema.json#/$defs/Timestamp",
       "description": "Creation time.",
       "x-privacyClass": "server-only"
     }
@@ -150,7 +150,7 @@
           "maximum": 63
         },
         "stepId": {
-          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/StepId",
+          "$ref": "common.schema.json#/$defs/StepId",
           "description": "Step id.",
           "x-privacyClass": "server-only"
         },
@@ -167,12 +167,12 @@
           "x-privacyClass": "server-only"
         },
         "capability": {
-          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/CapabilityTag",
+          "$ref": "common.schema.json#/$defs/CapabilityTag",
           "description": "Capability this step provides.",
           "x-privacyClass": "server-only"
         },
         "serviceId": {
-          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/SlServiceId",
+          "$ref": "common.schema.json#/$defs/SlServiceId",
           "description": "Selection Layer service id.",
           "x-privacyClass": "server-only"
         },
@@ -207,14 +207,14 @@
           ]
         },
         "payee": {
-          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Address",
+          "$ref": "common.schema.json#/$defs/Address",
           "description": "payTo or job provider; absent for local steps.",
           "x-privacyClass": "hash-on-chain"
         },
         "alternates": {
           "type": "array",
           "items": {
-            "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Address",
+            "$ref": "common.schema.json#/$defs/Address",
             "description": "Alternate payee.",
             "x-privacyClass": "hash-on-chain"
           },
@@ -223,7 +223,7 @@
           "maxItems": 2
         },
         "unitAmount": {
-          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Amount6",
+          "$ref": "common.schema.json#/$defs/Amount6",
           "description": "Expected price per call from the live 402 (p1-D7).",
           "x-privacyClass": "hash-on-chain"
         },
@@ -234,7 +234,7 @@
           "minimum": 1
         },
         "stepCap": {
-          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Amount6",
+          "$ref": "common.schema.json#/$defs/Amount6",
           "description": "Per-step cap, at least unitAmount × expectedCalls.",
           "x-privacyClass": "hash-on-chain"
         },
@@ -245,13 +245,13 @@
           "maxLength": 128
         },
         "acceptanceProfileId": {
-          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/SlProfileId",
+          "$ref": "common.schema.json#/$defs/SlProfileId",
           "description": "Acceptance profile (SL §5.5).",
           "x-privacyClass": "server-only"
         },
         "inputTemplate": {
           "type": "object",
-          "description": "Structured input only; never user text (spec 01 §11.2 layer 3). Optional expectedKeys names the output keys the requirement check needs (AM-09).",
+          "description": "Structured input only; never user text (spec 01 §11.2 layer 3). Optional expectedKeys names the output keys the requirement check needs (AM-09). inputKeys names the only keys a pay call may send for this step (RV-021).",
           "x-privacyClass": "server-only",
           "properties": {
             "expectedKeys": {
@@ -265,6 +265,57 @@
               },
               "description": "Keys the requirement check (CZ-16) and the reader (P-02 expectedFields) look for in the output.",
               "x-privacyClass": "server-only"
+            },
+            "inputKeys": {
+              "type": "array",
+              "maxItems": 20,
+              "description": "The only input keys a pay call may send for this step, with their types and limits (RV-021).",
+              "x-privacyClass": "server-only",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "name",
+                  "type"
+                ],
+                "description": "One allowed input key.",
+                "x-privacyClass": "server-only",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z][A-Za-z0-9_]{0,63}$",
+                    "description": "Key name.",
+                    "x-privacyClass": "server-only"
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "string",
+                      "number",
+                      "boolean"
+                    ],
+                    "description": "Value type.",
+                    "x-privacyClass": "server-only"
+                  },
+                  "maxLength": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 1000,
+                    "description": "Maximum string length (strings only).",
+                    "x-privacyClass": "server-only"
+                  },
+                  "enum": {
+                    "type": "array",
+                    "maxItems": 50,
+                    "items": {
+                      "type": "string",
+                      "maxLength": 128
+                    },
+                    "description": "Allowed values, when the key is an enum.",
+                    "x-privacyClass": "server-only"
+                  }
+                }
+              }
             }
           }
         },
@@ -300,7 +351,7 @@
       "x-privacyClass": "public",
       "properties": {
         "payee": {
-          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Address",
+          "$ref": "common.schema.json#/$defs/Address",
           "description": "Payee address.",
           "x-privacyClass": "public"
         },
@@ -323,7 +374,7 @@
           "maximum": 4294967295
         },
         "stepCap": {
-          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Amount6",
+          "$ref": "common.schema.json#/$defs/Amount6",
           "description": "Per-step cap shared by the payee and its alternates (D36), enforced per step on-chain (RV-002); \"0\" for kind 4.",
           "x-privacyClass": "public"
         }

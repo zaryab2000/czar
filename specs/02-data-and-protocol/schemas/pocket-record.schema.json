@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://czar.dev/schemas/pocket-record/1.0",
+  "$id": "https://czar.dev/schemas/pocket-record.schema.json",
   "title": "PocketRecord",
   "description": "A pocket wallet for one envelope: mirror plus server fields (spec 02 \u00a74.10).",
   "type": "object",
@@ -14,17 +14,17 @@
       "const": "1.1"
     },
     "vault": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Address",
+      "$ref": "common.schema.json#/$defs/Address",
       "description": "Vault.",
       "x-privacyClass": "public"
     },
     "envelopeId": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Uint64",
+      "$ref": "common.schema.json#/$defs/Uint64",
       "description": "Envelope.",
       "x-privacyClass": "public"
     },
     "pocket": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Address",
+      "$ref": "common.schema.json#/$defs/Address",
       "description": "The pocket EOA.",
       "x-privacyClass": "public"
     },
@@ -47,22 +47,22 @@
       "x-privacyClass": "public"
     },
     "funded": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Amount6",
+      "$ref": "common.schema.json#/$defs/Amount6",
       "description": "Sum of fundPocket.",
       "x-privacyClass": "public"
     },
     "gasGranted": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Amount6",
+      "$ref": "common.schema.json#/$defs/Amount6",
       "description": "Native sent for gas, in 6-decimal units.",
       "x-privacyClass": "public"
     },
     "outstanding": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Amount6",
+      "$ref": "common.schema.json#/$defs/Amount6",
       "description": "Funded minus confirmed pullbacks.",
       "x-privacyClass": "public"
     },
     "pendingPullback": {
-      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Amount6",
+      "$ref": "common.schema.json#/$defs/Amount6",
       "description": "Sum of pending pullback values.",
       "x-privacyClass": "public"
     },
@@ -106,22 +106,22 @@
       "x-privacyClass": "public",
       "properties": {
         "pullbackId": {
-          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Uint64",
+          "$ref": "common.schema.json#/$defs/Uint64",
           "description": "Per-vault counter.",
           "x-privacyClass": "public"
         },
         "value": {
-          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Amount6",
+          "$ref": "common.schema.json#/$defs/Amount6",
           "description": "Value to mint back to the vault.",
           "x-privacyClass": "public"
         },
         "salt": {
-          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
+          "$ref": "common.schema.json#/$defs/Hash32",
           "description": "Burn-intent salt (spec 02 \u00a77.3).",
           "x-privacyClass": "public"
         },
         "maxFee": {
-          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Amount6",
+          "$ref": "common.schema.json#/$defs/Amount6",
           "description": "Maximum Gateway fee allowed.",
           "x-privacyClass": "public"
         },
@@ -132,7 +132,7 @@
           "minimum": 0
         },
         "transferSpecHash": {
-          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
+          "$ref": "common.schema.json#/$defs/Hash32",
           "description": "keccak256 of the byte-encoded TransferSpec (Gateway replay id).",
           "x-privacyClass": "public"
         },
@@ -159,7 +159,7 @@
           "maxLength": 128
         },
         "mintTx": {
-          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
+          "$ref": "common.schema.json#/$defs/Hash32",
           "description": "gatewayMint transaction hash.",
           "x-privacyClass": "public"
         },
