@@ -1,8 +1,12 @@
 // Computes EIP-712 type hashes, domain separators and test digests for Czar specs 02/03.
 // Run: NODE_PATH=<dir with viem 2.57.x> node compute-eip712-vectors.mjs > eip712-vectors.json
-import { keccak256, toHex, hashTypedData, hashDomain, encodeAbiParameters, parseAbiParameters, pad } from "viem";
+// Check: node compute-eip712-vectors.mjs | diff - eip712-vectors.json  (must print nothing)
+// Changed 2026-10-19: ReceiptAttestation type and vector, SL_RECEIPT kind tag v2 (RV-013); autonomyRaise deadline
+// moved inside its period (RV-061). Output is deterministic apart from `generatedAt`.
+import { keccak256, toHex, hashTypedData, hashDomain, hashStruct, encodeAbiParameters, parseAbiParameters, pad } from "viem";
 const th = (s) => keccak256(toHex(s));
-const out = { generatedAt: new Date().toISOString(), tool: "viem (hashTypedData/keccak256)", typeHashes: {}, domains: {}, vectors: {} };
+// generatedAt is the spec date, not the wall clock, so a rerun reproduces the file byte for byte
+const out = { generatedAt: "2026-10-19", tool: "viem (hashTypedData/keccak256)", typeHashes: {}, domains: {}, vectors: {} };
 const TYPES = {
   // USDC EIP-3009 (circlefin/stablecoin-evm release-2026-08-12T202509, contracts/v2/EIP3009.sol)
   TransferWithAuthorization: "TransferWithAuthorization(address from,address to,uint256 value,uint256 validAfter,uint256 validBefore,bytes32 nonce)",
@@ -23,6 +27,8 @@ const TYPES = {
   // Czar vault types (spec 02 §6)
   AutonomyRaise: "AutonomyRaise(bytes32 category,uint256 newLimit,uint64 periodId,uint256 nonce,uint256 deadline)",
   OwnerAction: "OwnerAction(uint8 action,bytes32 payloadHash,uint256 nonce,uint256 deadline)",
+  // Czar vault-bound wrapper for SL_RECEIPT signatures (RV-013): the agent signs this under the CzarVault domain
+  ReceiptAttestation: "ReceiptAttestation(bytes32 receiptStructHash)",
 };
 for (const [k, s] of Object.entries(TYPES)) out.typeHashes[k] = { typeString: s, typeHash: th(s) };
 // Domains
@@ -47,13 +53,22 @@ out.vectors.gatewayBurnIntent_sameChain.transferSpecBytesLength = (specBytes.len
 out.vectors.gatewayBurnIntent_sameChain.transferSpecHash = keccak256(specBytes);
 const rec = { paymentRefHash: "0x3333333333333333333333333333333333333333333333333333333333333333", requestCommit: "0x4444444444444444444444444444444444444444444444444444444444444444", responseCommit: "0x5555555555555555555555555555555555555555555555555555555555555555", statusCode: 200, originAsserted: "https://merchant.example", requirementsHashSeen: "0x6666666666666666666666666666666666666666666666666666666666666666", tRequest: 1760790000n, tPaymentSigned: 1760790001n, tComplete: 1760790003n, outcome: 0, localChecksCommit: "0x0000000000000000000000000000000000000000000000000000000000000000", disclosure: 2, createdAt: 1760790004n };
 out.vectors.slReceipt_5042002 = { message: rec, digest: hashTypedData({ domain: { name: "SelectionLayer", version: "1", chainId: 5042002 }, types: { Receipt: [["paymentRefHash","bytes32"],["requestCommit","bytes32"],["responseCommit","bytes32"],["statusCode","uint16"],["originAsserted","string"],["requirementsHashSeen","bytes32"],["tRequest","uint64"],["tPaymentSigned","uint64"],["tComplete","uint64"],["outcome","uint8"],["localChecksCommit","bytes32"],["disclosure","uint8"],["createdAt","uint64"]].map(([name,type])=>({name,type})) }, primaryType: "Receipt", message: rec }) };
-const ar = { category: keccak256(toHex("research")), newLimit: 5000000n, periodId: 2963n, nonce: 7n, deadline: 1760900000n };
+// periodId 2963 starts at 2963 * 604800 = 1792022400; the deadline is one hour into that period (RV-061)
+const ar = { category: keccak256(toHex("research")), newLimit: 5000000n, periodId: 2963n, nonce: 7n, deadline: 1792026000n };
 out.vectors.autonomyRaise_5042002 = { message: ar, digest: hashTypedData({ domain: { name: "CzarVault", version: "1", chainId: 5042002, verifyingContract: VAULT }, types: { AutonomyRaise: [["category","bytes32"],["newLimit","uint256"],["periodId","uint64"],["nonce","uint256"],["deadline","uint256"]].map(([name,type])=>({name,type})) }, primaryType: "AutonomyRaise", message: ar }) };
+// ReceiptAttestation over the slReceipt vector's struct hash, bound to the example vault (RV-013)
+const receiptStructHash = keccak256(encodeAbiParameters(parseAbiParameters("bytes32,bytes32,bytes32,bytes32,uint16,bytes32,bytes32,uint64,uint64,uint64,uint8,bytes32,uint8,uint64"), [th(TYPES.Receipt), rec.paymentRefHash, rec.requestCommit, rec.responseCommit, rec.statusCode, keccak256(toHex(rec.originAsserted)), rec.requirementsHashSeen, rec.tRequest, rec.tPaymentSigned, rec.tComplete, rec.outcome, rec.localChecksCommit, rec.disclosure, rec.createdAt]));
+// Cross-check the hand-encoded struct hash against viem's EIP-712 encoder
+const viemStructHash = hashStruct({ data: rec, primaryType: "Receipt", types: { Receipt: [["paymentRefHash","bytes32"],["requestCommit","bytes32"],["responseCommit","bytes32"],["statusCode","uint16"],["originAsserted","string"],["requirementsHashSeen","bytes32"],["tRequest","uint64"],["tPaymentSigned","uint64"],["tComplete","uint64"],["outcome","uint8"],["localChecksCommit","bytes32"],["disclosure","uint8"],["createdAt","uint64"]].map(([name,type])=>({name,type})) } });
+if (viemStructHash !== receiptStructHash) throw new Error("Receipt struct hash mismatch");
+out.vectors.slReceipt_5042002.structHash = receiptStructHash;
+const ra = { receiptStructHash };
+out.vectors.receiptAttestation_5042002 = { message: ra, vault: VAULT, digest: hashTypedData({ domain: { name: "CzarVault", version: "1", chainId: 5042002, verifyingContract: VAULT }, types: { ReceiptAttestation: [{ name: "receiptStructHash", type: "bytes32" }] }, primaryType: "ReceiptAttestation", message: ra }) };
 const oa = { action: 1, payloadHash: "0x7777777777777777777777777777777777777777777777777777777777777777", nonce: 3n, deadline: 1760900000n };
 out.vectors.ownerAction_5042002 = { message: oa, digest: hashTypedData({ domain: { name: "CzarVault", version: "1", chainId: 5042002, verifyingContract: VAULT }, types: { OwnerAction: [["action","uint8"],["payloadHash","bytes32"],["nonce","uint256"],["deadline","uint256"]].map(([name,type])=>({name,type})) }, primaryType: "OwnerAction", message: oa }) };
 // Derived nonce example (spec 02 §7): keccak256(abi.encode(NONCE_TAG, vault, reservationId, index))
 const NONCE_TAG = keccak256(toHex("czar.vault.nonce.v1"));
 out.vectors.derivedNonce_example = { nonceTag: NONCE_TAG, vault: VAULT, reservationId: 12n, index: 3, nonce: keccak256(encodeAbiParameters(parseAbiParameters("bytes32,address,uint64,uint32"), [NONCE_TAG, VAULT, 12n, 3])) };
 // Vault signature-envelope kind tags
-out.vectors.kindTags = { USDC_3009: keccak256(toHex("czar.vault.sig.USDC_3009.v1")), GATEWAY_BURN: keccak256(toHex("czar.vault.sig.GATEWAY_BURN.v1")), SL_RECEIPT: keccak256(toHex("czar.vault.sig.SL_RECEIPT.v1")), PAYEE_LEAF: keccak256(toHex("czar.payee-leaf.v1")), EVIDENCE_LEAF: keccak256(toHex("czar.evidence-leaf.v1")) };
+out.vectors.kindTags = { USDC_3009: keccak256(toHex("czar.vault.sig.USDC_3009.v1")), GATEWAY_BURN: keccak256(toHex("czar.vault.sig.GATEWAY_BURN.v1")), SL_RECEIPT: keccak256(toHex("czar.vault.sig.SL_RECEIPT.v2")), SL_RECEIPT_v1_retired: keccak256(toHex("czar.vault.sig.SL_RECEIPT.v1")), PAYEE_LEAF: keccak256(toHex("czar.payee-leaf.v1")), EVIDENCE_LEAF: keccak256(toHex("czar.evidence-leaf.v1")) };
 console.log(JSON.stringify(out, (k,v)=> typeof v === "bigint" ? v.toString() : v, 2));

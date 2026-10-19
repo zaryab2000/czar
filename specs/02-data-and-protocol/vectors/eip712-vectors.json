@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-18T16:12:50.531Z",
+  "generatedAt": "2026-10-19",
   "tool": "viem (hashTypedData/keccak256)",
   "typeHashes": {
     "TransferWithAuthorization": {
@@ -61,6 +61,10 @@
     "OwnerAction": {
       "typeString": "OwnerAction(uint8 action,bytes32 payloadHash,uint256 nonce,uint256 deadline)",
       "typeHash": "0x5a8b2f7d5d70ba2335e2ee47a9d897748d8694bdb44c148ad01f541eeb2f0248"
+    },
+    "ReceiptAttestation": {
+      "typeString": "ReceiptAttestation(bytes32 receiptStructHash)",
+      "typeHash": "0x01b75f6051eb731488fad2e8de7925f8a64c89ef33c418e2a62e77ae02691eff"
     }
   },
   "domains": {
@@ -125,7 +129,8 @@
         "disclosure": 2,
         "createdAt": "1760790004"
       },
-      "digest": "0x8bef0825cbab5aff373a3651d22ee4169a09d1504ad6eb30c02277d37725d561"
+      "digest": "0x8bef0825cbab5aff373a3651d22ee4169a09d1504ad6eb30c02277d37725d561",
+      "structHash": "0xe79fd862d70a3af78fdf18fc3b4039605e1728e44110a659b1de9b4bd9c2f0df"
     },
     "autonomyRaise_5042002": {
       "message": {
@@ -133,9 +138,16 @@
         "newLimit": "5000000",
         "periodId": "2963",
         "nonce": "7",
-        "deadline": "1760900000"
+        "deadline": "1792026000"
       },
-      "digest": "0x044c127c25f997c56c8cff4f8cbfd12cf64cdef3fe0f7e6844f72bc90d03f91b"
+      "digest": "0xb6d92f2ab8f255a7aa93ad87b86fb4e3c22ccc3f7b86c4b4988a8c1fdf2123a3"
+    },
+    "receiptAttestation_5042002": {
+      "message": {
+        "receiptStructHash": "0xe79fd862d70a3af78fdf18fc3b4039605e1728e44110a659b1de9b4bd9c2f0df"
+      },
+      "vault": "0x00000000000000000000000000000000000c2a21",
+      "digest": "0xe4f941d6e918d974ccc3f435b16b3dc38eaa8027fb1955a87ea3763d250e65a0"
     },
     "ownerAction_5042002": {
       "message": {
@@ -156,7 +168,8 @@
     "kindTags": {
       "USDC_3009": "0x86b499474d9c0ea9b4a99b5ce22c4ae0f1ef4bf774214e3c1e4095c0371888cb",
       "GATEWAY_BURN": "0xf453aa3365355a8cf99e674b4443d5009b132245c53a3eb3b5a14953d97265f2",
-      "SL_RECEIPT": "0x6caa53e9addf8fd5f6ef2283c076da956fffddb63f2677a5beeed71428d8601f",
+      "SL_RECEIPT": "0x01c314900cb74ef1a689e81bddd748cc950a7aceb730d7cb9b7660a5aa6a3eaa",
+      "SL_RECEIPT_v1_retired": "0x6caa53e9addf8fd5f6ef2283c076da956fffddb63f2677a5beeed71428d8601f",
       "PAYEE_LEAF": "0xabf82537a2dce15f109dca3554542a6a546f104bd1343c99de6c06fdd41462fe",
       "EVIDENCE_LEAF": "0x001eebeec2e768ec1a3711bc88cdd151a64d6e886b4ea663df8111ec36edda56"
     }
