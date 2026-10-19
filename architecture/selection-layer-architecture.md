@@ -842,6 +842,7 @@ Each component follows the same template: responsibility, interface, data model,
       error PrevMismatch(bytes32 expected, bytes32 given);
       error UnknownIntent(bytes32 intentRoot);
       error AlreadyRevealed(bytes32 intentRoot);
+      error AlreadyCommitted(bytes32 intentRoot); // added 2026-10-19 (Czar review RV-014)
 
       /// Append a commitment. `prev` MUST equal the publisher's latest root for this kind, or 0 if none.
       function commit(Kind kind, bytes32 root, bytes32 prev, bytes32 uriHash, string calldata uri) external returns (uint256 seq);
@@ -862,7 +863,7 @@ Each component follows the same template: responsibility, interface, data model,
   - `mapping(address => mapping(bytes32 => uint8)) private _intent;` — 0 unknown, 1 committed, 2 revealed
   - `mapping(address => mapping(bytes32 => bytes32)) private _batchOf;` — intentRoot → batchRoot
 
-- **Rules.** `commit` reverts on `prev` mismatch (per-publisher hash chain). `commit` with `kind == PROBE_INTENT` sets `_intent[publisher][root] = 1`. `reveal` reverts unless `_intent == 1`, then sets 2 and stores the batch root. The contract does not inspect contents; the timing rule (`t_request ≥ timestamp + 3600`) is enforced off-chain by C8 using the stored `timestamp`.
+- **Rules.** `commit` reverts on `prev` mismatch (per-publisher hash chain). `commit` with `kind == PROBE_INTENT` sets `_intent[publisher][root] = 1` only when it is `0`, and otherwise reverts `AlreadyCommitted(root)`, so an intent can be committed and revealed exactly once (amended 2026-10-19, Czar review RV-014: an unconditional set let a publisher re-commit a revealed root and reveal a second batch after seeing results). `reveal` reverts unless `_intent == 1`, then sets 2 and stores the batch root. The contract does not inspect contents; the timing rule (`t_request ≥ timestamp + 3600`) is enforced off-chain by C8 using the stored `timestamp`.
 
 - **Access control.** None. No owner, no pause, no upgrade. A new version is a new deployment announced by a `POLICY_RELEASE` on the old one.
 
