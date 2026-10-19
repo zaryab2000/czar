@@ -37,7 +37,7 @@
 | In | `report_outcome` results (`useful`, `not-useful`, `wrong`, `unused`, `reasonCode`, `minutesSavedActual`) | 02 `mcp/czar-mcp-tools.md` §2.5 |
 | In | `AcceptanceReport.decision` per step | 02 §4.14 (CZ-16) |
 | In | vault events `AutoLimitRaised`, `AutoLimitLowered`, `LimitsSet`, `Frozen`, `JobRefunded` | 03 `czar-vault.md` §9.1 via CZ-19 |
-| In | current `limits[categoryId]` (`userMax`, `autoLimit`, `periodId`, `usedInPeriod`, `lastRaisePeriod`) | 03 `czar-vault.md` §4 via CZ-19 projection |
+| In | current `limits[categoryId]` (`userMax`, `autoLimit`, `periodId`, `usedInPeriod`, `lastRaiseAt`) | 03 `czar-vault.md` §4 (RV-031) via CZ-19 projection |
 | Out | `raiseAutoLimit(categoryId, newLimit, periodId, deadline, sig)` relayed by the relayer service | 03 `czar-vault.md` §5.6 |
 | Out | `lowerAutoLimit(categoryId, newLimit)` called with K3 (agent) or K5 | 03 `czar-vault.md` §5.6 |
 | Out | per-category limit summary for the app | OpenAPI `getMe` (`Me` limits fields) |
@@ -59,7 +59,7 @@ For one `(vault, categoryId)` over the window `autonomy.windowDays`:
 Run once per period per category:
 
 1. `periodId = floor(now / PERIOD_LENGTH)` (`PERIOD_LENGTH` = 604,800 s, 03 `czar-vault.md` §3).
-2. Skip if `lastRaisePeriod == periodId` (one raise per period, D40) or `autoLimit == userMax`.
+2. Skip if `now < lastRaiseAt + PERIOD_LENGTH` (raises at least one period apart, D40, RV-031) or `autoLimit == userMax`, or the vault is frozen or paused (the vault refuses raises then, RV-030).
 3. Skip if any negative purchase, any `JobRefunded`, any `Frozen` event, or any guardian pause occurred within `autonomy.windowDays`. Skip if `S < autonomy.minScore`.
 4. `stepMax = userMax × MAX_RAISE_STEP_BPS / BPS` (= 20% of `userMax`, D40; contract constant `MAX_RAISE_STEP_BPS = 2000`, 03 `czar-vault.md` §3).
 5. `f(S) = autonomy.baseAtomic × S` (floored to an integer).
@@ -68,16 +68,17 @@ Run once per period per category:
 
 #### 5.3 Lower rule
 
-Immediately (event-driven), with K3 or K5 as `msg.sender` (03 `czar-vault.md` §5.6 `lowerAutoLimit` accepts owner, agent or autonomy):
+Immediately (event-driven), with **K3** as `msg.sender` (03 `czar-vault.md` §5.6 `lowerAutoLimit` accepts owner, agent or autonomy; K5 sends no transactions and has no gas, CZ-27 §5.1, RV-017). Every lowering also bumps `autonomyNonce`, so any raise signed earlier can no longer land (RV-030):
 
 | Trigger | New limit |
 |---|---|
 | `report_outcome.outcome = wrong` for a purchase in the category | `autoLimit × autonomy.lowerFactorBps / BPS` |
 | `JobRefunded` after evaluator `reject`, or acceptance `fail` on a settled x402 step | same |
-| `Frozen` event (user freeze) | `0` for every category (D60), as a follow-up agent step and not atomically (D63): the `frozen` flag already blocks spending, then K3 calls `lowerAutoLimit(categoryId, 0)` per category once CZ-19 indexes `Frozen` (atomic contract version is stage 2, `stage-2-backlog.md` §3 P2-15); skipped for categories already at 0 (the vault requires `newLimit < autoLimit`); limits stay at 0 after unfreeze until earned back |
+| `Frozen` event (user freeze) | `0` for every category (D60), as a follow-up agent step and not atomically (D63): the `frozen` flag already blocks spending, then K3 calls `lowerAutoLimit(categoryId, 0)` per category once CZ-19 indexes `Frozen` (atomic contract version is stage 2, `stage-2-backlog.md` §3 P2-15); the vault accepts `newLimit == autoLimit` (RV-008), so no category needs special-casing; `freeze()` itself already bumped `autonomyNonce`; CZ-15 opens no envelope by itself until every lowering for the latest `Frozen` event is mined (RV-030); limits stay at 0 after unfreeze until earned back |
 | guardian pause | no on-chain change (the vault reads `guardianPaused()`); evaluation paused |
 
-- Lowering never waits for the period roll and is never blocked by `lastRaisePeriod`.
+- Lowering never waits for the period roll and is never blocked by `lastRaiseAt`.
+- Worst case per category (RV-031): raises are spaced a full period apart, but the allowance resets on the calendar boundary, so a compromised K3 can open up to `2 × autoLimit` within seconds around a boundary (never more than `2 × userMax`); spec 01 §7.3 and §13 state this bound.
 
 #### 5.4 Phase 1 categories
 
@@ -325,7 +326,7 @@ CZ-19 projections, CZ-12 outcome intake, OpenAPI schemas. Open question: FX sour
 
 ## CZ-27 Key management
 
-> **Phase 1 hosting (D70):** the signer runs on Zaryab's Mac with backend `signer.backend = local-keystore` (encrypted keystore; passphrase in the macOS keychain via `@napi-rs/keyring`). Every "KMS" reference below means "the configured signer backend". Policies, rate limits, audit rows and the denied-selector list apply unchanged. `gcp-kms` is the stage-2 backend.
+> **Phase 1 hosting (D70, D78, D80):** the signer runs on Zaryab's Mac with backend `signer.backend = local-keystore` (§3). Every "KMS" reference below means "the configured signer backend"; parameter names keep the `kms.` prefix for continuity. Policies, rate limits, audit rows and the denied-selector list apply unchanged. `gcp-kms` is the stage-2 backend (`stage-2-backlog.md` §6). Keeping every server key on one Mac is an accepted, documented testnet exception (D80, §5.2 "Dual control").
 
 ### 1. Identity
 
@@ -334,103 +335,139 @@ CZ-19 projections, CZ-12 outcome intake, OpenAPI schemas. Open question: FX sour
 | CZ ID, name | CZ-27, key management and signer service |
 | Phase | 1 |
 | Product | §10 trust and safety |
-| Decisions | D25 (server signs only inside envelopes), D26 (passkeys for users), D30 (owner UserOps), D41 (owner-only manual pocket credit, so no server key can credit funds) |
+| Decisions | D25 (server signs only inside envelopes), D26 (passkeys for users), D30 (owner UserOps), D41 (owner-only manual pocket credit, so no server key can credit funds), D70, D71 (pocket leaves), D72 (freeze enforced off-vault), D78 (keystore location and passphrase), D80 (single-Mac custody) |
 | Spec 01 | §7.2 key inventory K1–K20, assumption AR-1 (a KMS with secp256k1 and signing policies) |
 
 ### 2. Responsibilities and non-responsibilities
 
-- **Does:** hold every server key in a cloud KMS behind the signer service (D61; vendor chosen at build time; whether an HSM is required is decided at the pre-mainnet audit, AR-1), including the relayer gas key (D62); enforce per-key signing policies in a signer service that checks the request shape before any KMS call; create and destroy pocket keys; run rotation and compromise runbooks; log every signature.
+- **Does:** hold every server key behind the signer service: in Phase 1 an encrypted local keystore on Zaryab's Mac (D70, D78); in stage 2 Google Cloud KMS (D61 as amended; whether an HSM is required is decided at the pre-mainnet audit, AR-1), including the relayer gas key (D62); enforce per-key signing policies in the signer service, which checks the request shape before any key is used; keep K3, K7, K8 and the relayer funded with native gas within caps (§5.5, RV-017); create pocket keys and retire them only when every balance is zero (§5.3, RV-004); run rotation and compromise runbooks; log every signature.
+- **Superseded by D70/D78 (RV-028):** "hold every server key in a cloud KMS" for Phase 1.
 - **Does not:** hold user keys (K1 passkeys stay in the platform authenticator, D1-02); decide what to pay (CZ-15 does, inside the vault's rules); hold K14–K16 (device-side).
 
 ### 3. Runtime
 
-- `signer`: a small service in `@czar/server`'s network segment, the only process with KMS credentials. Other services call it over mTLS with a service identity. One replica per region; stateless except its audit table and rate counters.
-- KMS: a cloud KMS with secp256k1 ECDSA keys and key policies (AR-1). If secp256k1 is unavailable, the AR-1 fallback in §6.
+- **Phase 1 (D70, D78):** `signer` is a local process on Zaryab's Mac, the only process that opens the keystore. Other local services call it over a Unix domain socket (`signer.socketPath`, mode 0600, owned by the user) with a per-service token from the macOS keychain; no TCP port. Stateless except its audit table (local Postgres) and rate counters.
+  - **Keystore location (D78):** `signer.keystorePath` = `~/Library/Application Support/Czar/signer/keystore/` (directory 0700, files 0600), always **outside the repository**. The signer refuses to start if the resolved path is inside any git working tree (`git rev-parse --show-toplevel` succeeds from it) or is world- or group-readable.
+  - **Passphrase (D78):** stored in the macOS keychain item `signer.keychainService` = `dev.czar.signer.keystore`, read by the signer process itself through `@napi-rs/keyring`. It is never passed on the command line, never in an environment variable, never in a file, and never logged. The config loader rejects any configuration key or `CZAR_*` environment variable whose name contains `passphrase`, `secret`, `private` or `mnemonic` (cross-cutting §3), so the env overlay cannot carry it.
+  - **Keychain access (D80 hardening, unverified):** the keychain item's access list should name the signer's own executable rather than the generic `node` binary, so other Node processes run by the same user cannot read it. Whether `@napi-rs/keyring` sets a per-application ACL on macOS was not verified (review RV-045); T-035 checks it and records the result.
+- **Stage 2:** the same service on Cloud Run with `signer.backend = gcp-kms` (secp256k1 keys with key policies, AR-1), reached over mTLS. If secp256k1 is unavailable, the AR-1 fallback in §6.
+- **Superseded by D70/D78 (RV-028):** "a small service in `@czar/server`'s network segment … over mTLS … one replica per region" for Phase 1.
 
 ### 4. Interfaces
 
 | Call (internal) | Caller | Returns |
 |---|---|---|
-| `sign(keyId, kind, payload)` where `kind ∈ {vault-call, usdc-3009, gateway-burn, sl-receipt, autonomy-raise, evaluator-call, oel-commit, merchant-seller-proof, relayer-tx}` | the owning service identity only (§5.2) | 65-byte ECDSA signature or a signed transaction |
-| `createPocketKey(envelopeRef)` / `destroyPocketKey(pocket)` | CZ-15 | pocket address |
+| `sign(keyId, kind, payload)` where `kind ∈ {vault-call, usdc-3009, gateway-burn, sl-receipt, autonomy-raise, evaluator-call, sl-validation-report, oel-commit, merchant-seller-proof, relayer-tx, gas-refill, gateway-nano, pocket-delegate, pocket-return, pocket-slow-withdraw}` | the owning service identity only (§5.2) | 65-byte ECDSA signature or a signed transaction |
+| `createPocketKey(planId)` / `retirePocketKey(pocket)` | CZ-13 (at planning, D71: the pocket address goes into the plan's `payeeRoot`) / CZ-15 | pocket address; `retirePocketKey` refuses unless §5.3's zero-balance rule holds |
 | `getSecret(name)` for K11–K13, K17–K19 | the owning service | secret value in memory only |
 | audit rows | CZ-16 of operations | — |
 
 ### 5. Internal design
 
-#### 5.1 Key inventory and KMS types
+#### 5.1 Key inventory and key types
 
-| Key | Type in KMS | Owner service | Allowed signing kinds |
+| Key | Type | Owner service | Allowed signing kinds | Sends transactions (needs gas, §5.5) |
+|---|---|---|---|---|
+| K3 `agentSigner` | secp256k1 ECDSA | CZ-15 paying agent | `vault-call` (only `ICzarVault` selectors in the allowlist, to the caller's vault address, plan-checked, §5.2), `usdc-3009`, `gateway-burn`, `sl-receipt` (vault-bound `ReceiptAttestation`, RV-013) | yes: every agent-only vault call has K3 as `msg.sender` |
+| K4 pocket keys (one per pocket, so one per envelope with a `gateway-nano` step) | secp256k1 ECDSA, created at planning (D71), retired only under §5.3 | CZ-15 | `gateway-nano`, `pocket-delegate`, `pocket-return`, `pocket-slow-withdraw` (§5.2); nothing else, in particular no `approve`, `permit` or `transfer` of USDC except the vault-return transfer (RV-055) | yes, from its own `grantPocketGas` grant |
+| K5 `autonomySigner` | secp256k1 ECDSA | CZ-24 | `autonomy-raise` (02 §6.2 digest only). K5 **never sends transactions**: raises are relayed by the relayer key; the D60/D63 lowering and every automatic lowering are sent by K3 (RV-017) | no |
+| K6 guardian | secp256k1 ECDSA, interactive confirmation (dual control in stage 2, D80) | ops | `pause`/`unpause` on `CzarVaultFactory` only | yes, rarely (funded once by hand) |
+| K7 evaluator | secp256k1 ECDSA | CZ-16 evaluator | `evaluator-call`: `complete`/`reject` on the configured job escrow only; `sl-validation-report`: the SL `ValidationReport` digest signed as K7 itself (not through a vault) | yes |
+| K8 publisher | secp256k1 ECDSA | CZ-17 | `oel-commit`: `commit`/`reveal` on `OpenEvidenceLog` only | yes |
+| K9 claim relayer (P2) | secp256k1 ECDSA | CZ-21 | `scheduleRelease`/`executeRelease` on `BuilderEscrow` only | P2 |
+| K10 merchant payout keys | secp256k1 ECDSA, one per service | CZ-20 | `merchant-seller-proof` (Facilitator `SellerRequest`, p1-F4), Gateway sweep burn intents with `destinationRecipient` = the treasury address | no |
+| K11 Facilitator Console key | secret | CZ-20 | HTTPS header only | — |
+| K12 Gateway API key (mainnet slot) | secret | CZ-15, CZ-20 | HTTPS header only | — |
+| K13 GitHub OAuth secret (P2) | secret | CZ-21 | OAuth exchange only | — |
+| K17 VAPID key | secret | CZ-23 (stage 2, D69) | push signing only; not created in Phase 1 | — |
+| K18 model API keys | secret | CZ-13, CZ-16, Czar proxy for the daemon | model HTTPS only | — |
+| K19 RPC provider keys | secret | CZ-19, relayer | RPC HTTPS only | — |
+| K20 factory admin | secp256k1 ECDSA, interactive confirmation (dual control in stage 2, D80), timelocked on-chain | ops | `queueGuardian`, `queueDefaults`, ownership transfer on the factory only (`setDefaults`, `queueVersion` superseded by RV-015/D73) | yes, rarely (funded once by hand) |
+| relayer gas key | secp256k1 ECDSA | relayer | `relayer-tx`: plain transactions that anyone may send — `raiseAutoLimit` with a K5 signature, `settle`, `finalize`, `confirmPullback`, `syncJob`, `claimJobRefund`, `closeEnvelope` after expiry, `GatewayMinter.gatewayMint`, `executeOwnerAction` (D30 fallback); `gas-refill` (§5.5). Never an agent-only, owner-only or guardian selector (they would revert `NotAgent`/`NotOwner` anyway; spec 01 §7.2 as amended by RV-017) | yes; balance capped at `kms.relayerMaxBalanceAtomic` |
+| K1, K2, K14, K15, K16 | not in the signer | user device / app | K1 passkey (platform authenticator, D1-02); K2 Circle client key (app config, public-facing); K14 DB key, K15 device token, K16 hook token in the OS keychain (B6-17, B6-19) | — |
+
+- All Phase 1 keys are created by task T-105 (M1, before the testnet deployment, RV-016), except K4 (per plan) and K10 (by the merchants task).
+
+#### 5.2 Signer policy (what a key store cannot check)
+
+A key store signs any 32-byte digest it is asked to sign; it cannot see that a digest is a USDC authorization to the wrong payee. So the policy lives in the `signer` service, which rebuilds every digest from structured fields and refuses anything else. **Freeze state (D72):** every kind marked "spends" below first reads the vault's `frozen` flag and the factory's `guardianPaused` from the CZ-19 projection; if either is set, or the projection's view of them is older than `signer.freezeStateMaxAgeSec` (30 s), the request is denied (`kms_denied: frozen`). Fail closed.
+
+| Kind | Spends? | Request shape the signer requires | Checks before signing |
 |---|---|---|---|
-| K3 `agentSigner` | secp256k1 ECDSA | CZ-15 paying agent | `vault-call` (only `ICzarVault` selectors in the allowlist, to the caller's vault address), `usdc-3009`, `gateway-burn`, `sl-receipt` |
-| K4 pocket keys (one per objective) | secp256k1 ECDSA, created on demand, destroyed after `PocketClosed` | CZ-15 | `gateway-nano` (GatewayWalletBatched authorizations with `from = pocket`, p1-G2), `addDelegate` tx to GatewayWallet only, `initiateWithdrawal`/`withdraw` tx only on the owner-approved slow path (D41) |
-| K5 `autonomySigner` | secp256k1 ECDSA | CZ-24 | `autonomy-raise` (02 §6.2 digest only) |
-| K6 guardian | secp256k1 ECDSA, dual control | ops, two approvers | `pause`/`unpause` on `CzarVaultFactory` only |
-| K7 evaluator | secp256k1 ECDSA | CZ-16 evaluator | `evaluator-call`: `complete`/`reject` selectors on the configured job escrow only; `sl-receipt` kind for `ValidationReport` |
-| K8 publisher | secp256k1 ECDSA | CZ-17 | `oel-commit`: `commit`/`reveal` on `OpenEvidenceLog` only |
-| K9 claim relayer (P2) | secp256k1 ECDSA | CZ-21 | `scheduleRelease`/`executeRelease` on `BuilderEscrow` only |
-| K10 merchant payout keys | secp256k1 ECDSA, one per service | CZ-20 | `merchant-seller-proof` (Facilitator `SellerRequest`, p1-F4), Gateway sweep burn intents with `destinationRecipient` = the treasury address |
-| K11 Facilitator Console key | secret | CZ-20 | HTTPS header only |
-| K12 Gateway API key (mainnet slot) | secret | CZ-15, CZ-20 | HTTPS header only |
-| K13 GitHub OAuth secret (P2) | secret | CZ-21 | OAuth exchange only |
-| K17 VAPID key | secret | CZ-23 (stage 2, D69) | push signing only; not created in Phase 1 |
-| K18 model API keys | secret | CZ-13, CZ-16, Czar proxy for the daemon | model HTTPS only |
-| K19 RPC provider keys | secret | CZ-19, relayer | RPC HTTPS only |
-| K20 factory admin | secp256k1 ECDSA, dual control, timelocked on-chain | ops | `queueVersion`, `queueGuardian`, `setDefaults`, ownership transfer on the factory only |
-| relayer gas key | secp256k1 ECDSA | relayer | plain transactions to the vault selectors, `OpenEvidenceLog`, `GatewayMinter.gatewayMint` only; balance capped at `kms.relayerMaxBalanceAtomic` |
-| K1, K2, K14, K15, K16 | not in the KMS | user device / app | K1 passkey (platform authenticator, D1-02); K2 Circle client key (app config, public-facing); K14 DB key, K15 device token, K16 hook token in the OS keychain (B6-17, B6-19) |
+| `vault-call` (K3) | for the spending selectors | `{vault, selector, args}` | `vault ∈ vaults from the factory projection`; `selector` in the K3 allowlist: `openEnvelope`, `reserve`, `reserveWithDigests`, `settle`, `finalize`, `registerPocket`, `grantPocketGas`, `fundPocket`, `requestPullback`, `confirmPullback`, `cancelPullback`, `writeOffPocket`, `openJob`, `fundJob`, `syncJob`, `claimJobRefund`, `closeEnvelope`, `lowerAutoLimit`, `freeze`. **Never signable for K3:** `withdraw`, `unfreeze`, `rotateSigners`, `setCategoryLimits`, `setPasskey`, `recordManualReturn`, `forceCloseEnvelope`, `setMaxPullbackFee`, `raiseAutoLimit`, `executeOwnerAction`, any factory selector, any selector not in the allowlist (RV-055). Args are ABI-encoded by the signer, not by the caller. **Plan checks (RV-032):** `openEnvelope` args must equal a stored `Plan` (`planHash`, `payeeRoot`, `cap`, `maxStepAmount`, `pocketCapBps`, `expiresAt`, `category`) whose approval state is `auto-approvable` (no payee outside the user's previously approved payees, `planner.newPayeeNeedsApproval`) and whose `pocketCapBps` follows D71; `reserve`/`openJob`/`registerPocket` args must be a leaf of the envelope's stored plan with that step's `expectedCalls` not used up; `writeOffPocket` is denied while the pocket has an open slow withdrawal (§5.3, RV-004). The spending selectors (`reserve*`, `registerPocket`, `grantPocketGas`, `fundPocket`, `openJob`, `fundJob`, `openEnvelope`) apply the freeze check |
+| `usdc-3009` (K3) | yes | `{vault, reservationId, index, to, value, validBefore}` | the signer reads the reservation from the CZ-19 projection: `to == payee`, `value == unitAmount` (RV-035), `index < count`, `validBefore` equal; recomputes `nonce` (02 §7.2) and the digest with `USDC_DOMAIN_SEPARATOR` (02 §6.1); only then signs; returns the 02 §6.3.1 envelope (or 65 bytes in `digest` mode) |
+| `gateway-burn` (K3) | no (money returns to the vault) | `{vault, pullbackId}` | reads `PullbackRecord` from the projection (`Pending`, `block.number ≤ maxBlockHeight`); rebuilds the `BurnIntent` digest exactly as 03 `czar-vault.md` §6.2 (recipient = vault); signs; returns the 02 §6.3.2 envelope. Allowed while frozen (D72 pullbacks) |
+| `sl-receipt` (K3) | no | `{vault, receipt: SlReceipt}` (the 13 SL `Receipt` fields) | rebuilds the `Receipt` struct hash from the fields; requires `receipt.paymentRefHash` to equal the `paymentRefHash` of a payment of **this vault** that the indexer has seen settled (`Settled` event, Gateway `completed`, or job `Completed`); signs the vault-bound `ReceiptAttestation` digest under that vault's `CzarVault` domain (02 §6.3.3, RV-013). An opaque `structHash` is refused |
+| `autonomy-raise` (K5) | no | `{vault, categoryId, newLimit, periodId, deadline}` | vault not frozen; `newLimit > autoLimit`, `newLimit ≤ userMax` and the D40 step from the projection; at least `PERIOD_LENGTH` since `lastRaiseAt`; nonce from the vault; digest per 02 §6.2 |
+| `evaluator-call` (K7) | `complete`: yes; `reject`: no | `{escrow, jobId, decision, reportHash}` | `escrow` is the configured instance; `jobKey` exists in the projection with `evaluator == K7 address`; `reportHash` exists in CZ-16's table; for `complete`, the client vault must not be frozen or paused (D72) — a `reject` (which refunds the vault) is always allowed |
+| `sl-validation-report` (K7) | no | `{report fields}` | rebuilds the SL `ValidationReport` digest; `checksCommit` exists in CZ-16's table |
+| `oel-commit` (K8) | no | `{kind, root, prev, uriHash, uri}` | `prev` equals the publisher's latest root in the projection; `root` exists in `EvidenceBatch` rows; `uri` matches `czar-archive:<root>` (D78) |
+| `merchant-seller-proof` (K10) | no | `{service, purpose, method, bodyHash, network, nonce, expiry}` | 5-minute expiry; `network` is the configured chain (p1-F4) |
+| `gateway-nano` (K4) | yes | `{pocket, payTo, amount, validBefore, nonce}` | `pocket` is `Funded`/`Draining` for an `Open` envelope; vault not frozen or paused (D72); `payTo` is a kind-1 leaf payee of a `gateway-nano` step of that envelope's plan; cumulative per step ≤ that step's `stepCap`; cumulative per pocket ≤ `funded` |
+| `pocket-delegate` (K4) | no | `{pocket, vault}` | one `GatewayWallet.addDelegate(USDC, vault)` transaction, where `vault` is the pocket's owning vault |
+| `pocket-return` (K4, RV-004) | no | `{pocket, kind: usdc \| native, amount}` | either `USDC.transfer(owningVault, amount)` with `amount ≤` the pocket EOA's ERC-20 balance, or a plain native send of `amount` to `owningVault` (which has `receive()`); the destination is always the pocket's own vault, never caller-supplied |
+| `pocket-slow-withdraw` (K4) | no | `{pocket, step: initiate \| withdraw, value?}` | `GatewayWallet.initiateWithdrawal(USDC, value)` or `withdraw(USDC)` only, and only after the Gateway API has been unreachable for `payer.pullbackApiDownHours` (CZ-15) or the owner asked for it in the app; `withdraw` pays the pocket EOA, so a `pocket-return` transfer follows at once |
+| `relayer-tx` (relayer) | no | `{to, selector, args}` | `(to, selector)` in the relayer allowlist (§5.1 row); value 0 |
+| `gas-refill` (relayer) | no | `{target, amount}` | `target ∈ {K3, K7, K8}` addresses; `amount ≤ signer.gas.<key>.maxAtomic − balance(target)` (§5.5) |
 
-#### 5.2 Signer policy (what a KMS cannot check)
-
-A KMS signs any 32-byte digest it is asked to sign; it cannot see that a digest is a USDC authorization to the wrong payee. So the policy lives in the `signer` service, which rebuilds every digest from structured fields and refuses anything else:
-
-| Kind | Request shape the signer requires | Checks before the KMS call |
-|---|---|---|
-| `vault-call` | `{vault, selector, args}` | `vault ∈ vaults from the factory projection`; `selector` in the K3 allowlist (`openEnvelope`, `reserve`, `reserveWithDigests`, `settle`, `finalize`, `registerPocket`, `grantPocketGas`, `fundPocket`, `requestPullback`, `confirmPullback`, `cancelPullback`, `writeOffPocket`, `openJob`, `fundJob`, `syncJob`, `claimJobRefund`, `closeEnvelope`, `lowerAutoLimit`, `freeze`; never `withdraw`, `unfreeze`, `rotateSigners`, `setCategoryLimits`, `setPasskey`, `recordManualReturn`); args ABI-encoded by the signer, not by the caller |
-| `usdc-3009` | `{vault, reservationId, index, to, value, validBefore}` | the signer reads the reservation from the CZ-19 projection: `to == payee`, `value ≤ unitAmount`, `index < count`, `validBefore` equal; recomputes `nonce` (02 §7.2) and the digest with `USDC_DOMAIN_SEPARATOR` (02 §6.1); only then signs; returns the 02 §6.3.1 envelope (or 65 bytes in `digest` mode) |
-| `gateway-burn` | `{vault, pullbackId}` | reads `PullbackRecord` from the projection; rebuilds the `BurnIntent` digest exactly as 03 `czar-vault.md` §6.2 (recipient = vault); signs; returns the 02 §6.3.2 envelope |
-| `sl-receipt` | `{structHash}` plus the receipt object for logging by hash | digest under the SelectionLayer domain only (02 §6.3.3) |
-| `autonomy-raise` | `{vault, categoryId, newLimit, periodId, deadline}` | `newLimit ≤ userMax` and the D40 step from the projection; nonce from the vault; digest per 02 §6.2 |
-| `evaluator-call` | `{escrow, jobId, decision, reportHash}` | `escrow` is the configured instance; `jobKey` exists in the projection with `evaluator == K7 address`; `reportHash` exists in CZ-16's table |
-| `oel-commit` | `{kind, root, prev, uriHash, uri}` | `prev` equals the publisher's latest root in the projection; `root` exists in `EvidenceBatch` rows |
-| `merchant-seller-proof` | `{service, purpose, method, bodyHash, network, nonce, expiry}` | 5-minute expiry; `network` is the configured chain (p1-F4) |
-| `gateway-nano` (K4) | `{pocket, payTo, amount, validBefore, nonce}` | `pocket` is `Funded`/`Draining` for an open envelope; `payTo` is a leaf payee of that envelope's plan (kind 1); `amount ≤ stepCap`; cumulative per pocket ≤ `funded` |
-
-- Per-key rate limits: `kms.maxSignaturesPerMin` per key (K3 600, K4 120 per pocket, K5 10, K7 60, K8 10, K10 300); excess is denied and alerted.
-- Dual control: K6 and K20 requests need two approver identities within `kms.dualControlWindowMinutes` (30).
+- Per-key rate limits: `kms.maxSignaturesPerMin` per key (K3 600, K4 120 per pocket, K5 10, K7 60, K8 10, K10 300, relayer 120); excess is denied and alerted.
+- **Dual control (D80):** in stage 2, K6 and K20 requests need two approver identities within `kms.dualControlWindowMinutes` (30). In Phase 1 there is one person and one Mac, so dual control cannot be met; instead every K6/K20 request needs an interactive confirmation in the signer CLI (Zaryab types the action and the target address; the macOS keychain prompts for the login password) and raises an alert. A compromise of the Mac yields every server key at once; this is the accepted testnet exception (D80), bounded by testnet-only funds and listed in `stage-2-backlog.md` §6.
 - Every signature writes an audit row: key id, kind, digest, purpose ids (`envelopeRef`, `reservationId`, `pullbackId`, `jobKey`, `batchId`), caller identity, outcome. No raw text, no payloads.
-- The signer holds no key material; the KMS does. The signer's own identity is the only principal in the KMS key policies.
+- The signer holds keys only in memory after unlocking the keystore; no other process can read the keystore passphrase (§3).
 
 #### 5.3 Pocket-key lifecycle (K4)
 
 ```mermaid
 stateDiagram-v2
-  [*] --> Created: createPocketKey(envelopeRef) in KMS
-  Created --> Registered: CZ-15 calls registerPocket(envelopeId, pocket) with K3
+  [*] --> Created: createPocketKey(planId) at planning; address goes into the plan's payeeRoot as a kind-4 leaf (D71)
+  Created --> Discarded: plan never approved (key held no funds) · retirePocketKey
+  Created --> Registered: CZ-15 calls registerPocket(envelopeId, pocket, proof) with K3
   Registered --> GasGranted: grantPocketGas (K3)
-  GasGranted --> DelegateSet: pocket signs addDelegate(USDC, vault) tx (K4) · DelegateAdded
+  GasGranted --> DelegateSet: pocket-delegate tx (K4) · DelegateAdded
   DelegateSet --> Funded: fundPocket (K3) after isAuthorizedForBalance check
-  Funded --> Paying: nanopayment authorizations signed by K4
+  Funded --> Paying: gateway-nano authorizations signed by K4 (refused while frozen, D72)
   Paying --> Draining: requestPullback (K3); burn intent signed by K3 as the vault (never K4)
-  Draining --> Closed: confirmPullback | writeOffPocket · PocketClosed
-  Closed --> Destroyed: destroyPocketKey after PocketClosed and kms.pocketKeyGraceHours
-  Destroyed --> [*]
+  Draining --> Closed: writeOffPocket (K3, no pending pullback) or forceCloseEnvelope (owner) · PocketClosed
+  Closed --> Sweeping: recovery pullbacks for any Gateway balance; pocket-return for EOA USDC and native gas
+  Sweeping --> Retired: every balance zero for signer.pocketKeyRetainHours · retirePocketKey
+  Retired --> [*]
 ```
 
-- The pocket never signs a burn intent to anywhere: pullbacks are signed by K3 under the vault's `GATEWAY_BURN` kind (03 `czar-vault.md` §6.2), so a leaked K4 can spend only nanopayments and the slow withdrawal, bounded by the pocket balance (spec 01 §13).
-- The slow path (`initiateWithdrawal`/`withdraw` by the pocket after 1,209,600 blocks, A2-13 to A2-15) is allowed only when ops opens an incident and the owner later credits it with `recordManualReturn` (D41). `kms.pocketKeyGraceHours` (48) keeps the key for that case before destruction, unless the pocket closed with `outstanding = 0`.
+- `confirmPullback` never closes a pocket; only `writeOffPocket` and `forceCloseEnvelope` do (RV-049; the earlier diagram edge "confirmPullback → Closed" is superseded).
+- **Retirement rule (RV-004):** `retirePocketKey` destroys K4 only when all of these read zero: the Gateway API balance for the pocket (`/v1/balances`), on-chain `GatewayWallet.availableBalance(USDC, pocket)` and `withdrawingBalance(USDC, pocket)` (`Balances.sol` lines 60, 69 at `c21d2d2`), the pocket EOA's USDC balance; no `Pending` pullback; no slow withdrawal open; and native balance below `signer.pocketDustAtomic` (the cost of one more sweep). Then the key is kept a further `signer.pocketKeyRetainHours` (24) and destroyed. A slow withdrawal keeps the key for at least `withdrawalDelay` (1,209,600 blocks ≈ 7 days) plus `signer.slowWithdrawMarginHours` (24). **Superseded by RV-004:** "destroyed after `PocketClosed` and `kms.pocketKeyGraceHours` (48), unless the pocket closed with `outstanding = 0`".
+- **Threat note (RV-063):** a leaked K4 can sign a Gateway burn intent from the pocket to **any** recipient (`Burns.sol` lines 332–333), and on-chain a revoked delegate's intents still pass `_wasEverAuthorizedForBalance`, including intents signed after revocation (`Delegation.sol` lines 100–128, 153–164); only Circle's API refuses them. So a leaked K4 can move the pocket's whole Gateway balance, not only nanopayments. The bound is the pocket balance (≤ 25% of one envelope, D22), which is why pockets stay small and short-lived. **Superseded:** "a leaked K4 can spend only nanopayments and the slow withdrawal".
+- The slow path (`pocket-slow-withdraw`, A2-13 to A2-15) runs when Circle's API has been down for `payer.pullbackApiDownHours` or the owner asks; the withdrawn USDC lands in the pocket EOA and K4 at once returns it with `pocket-return`; the owner then credits it with `recordManualReturn` (D41) if the pocket is still open. `writeOffPocket` is refused while the slow withdrawal is open.
 
 #### 5.4 Parameters
 
 | Parameter | Default | Reason |
 |---|---|---|
+| `signer.backend` | `local-keystore` (Phase 1); `gcp-kms` (stage 2) | D70 (RV-028: was missing from the tables) |
+| `signer.keystorePath` | `~/Library/Application Support/Czar/signer/keystore/` | D78: outside the repository |
+| `signer.keychainService` | `dev.czar.signer.keystore` | D78: passphrase only in the macOS keychain |
+| `signer.socketPath` | `~/Library/Application Support/Czar/signer/signer.sock` | local IPC, no TCP port |
+| `signer.freezeStateMaxAgeSec` | 30 | D72: freeze checks fail closed on a stale projection |
 | `kms.maxSignaturesPerMin.K3` | 600 | ten reservations a second across all users is far above Phase 1 load |
 | `kms.maxSignaturesPerMin.K4` | 120 per pocket | nanopayment bursts |
-| `kms.maxSignaturesPerMin.K5` / `K7` / `K8` / `K10` | 10 / 60 / 10 / 300 | by expected volume |
-| `kms.dualControlWindowMinutes` | 30 | two approvals must be close in time |
-| `kms.pocketKeyGraceHours` | 48 | slow-withdrawal recovery window |
+| `kms.maxSignaturesPerMin.K5` / `K7` / `K8` / `K10` / `relayer` | 10 / 60 / 10 / 300 / 120 | by expected volume |
+| `kms.dualControlWindowMinutes` | 30 | stage 2 only (D80) |
+| `signer.pocketKeyRetainHours` | 24 | keep K4 one more day after every balance reads zero (RV-004) |
+| `signer.slowWithdrawMarginHours` | 24 | margin over Gateway's 7-day `withdrawalDelay` |
+| `signer.pocketDustAtomic` | 500 (0.0005 USDC) | native balance below the cost of another sweep counts as zero |
+| `kms.pocketKeyGraceHours` | — | superseded by the three rows above (RV-004) |
 | `kms.relayerMaxBalanceAtomic` | 50000000 (50 USDC) | bounds gas-key loss |
+| `signer.gas.K3.minAtomic` / `targetAtomic` / `maxAtomic` | 500000 / 2000000 / 5000000 (0.5 / 2 / 5 USDC) | §5.5; ≈ 0.003–0.006 USDC per agent transaction at 20 Gwei, so 2 USDC is ≥ 300 transactions |
+| `signer.gas.K7.*` | 100000 / 500000 / 1000000 | §5.5; `complete`/`reject` ≈ 0.002 USDC each |
+| `signer.gas.K8.*` | 100000 / 500000 / 1000000 | §5.5; ≈ 0.07 USDC per day of commits (03 `open-evidence-log.md` §13) |
 | `kms.auditRetentionDays` | 365 | spec 01 §16.3 |
+
+#### 5.5 Gas for keys that send transactions (RV-017)
+
+- The vault checks `msg.sender == agentSigner` (and the escrow checks `msg.sender == evaluator`, the log uses `msg.sender` as publisher), so these calls cannot go through the relayer: K3, K7 and K8 each pay their own gas in native USDC. **Superseded by RV-017:** spec 01's "server calls to the vault pay gas from Czar's relayer in USDC".
+- **Balances:** each of K3, K7, K8 holds native USDC between `signer.gas.<key>.minAtomic` and `maxAtomic`. K5 sends no transactions (§5.1). K6 and K20 are funded once by hand with ≤ 0.1 USDC each.
+- **Refill:** a `gas-refill` job runs every 5 minutes: for each key below `minAtomic`, the relayer key sends `targetAtomic − balance` (a `gas-refill` signature), never pushing a key above `maxAtomic`. The relayer itself is topped up by Zaryab from the testnet faucet; that is a funded-testnet step and needs his approval each time (AGENTS.md, Gate 0).
+- **Alerts:** `czar_signer_gas_low{key}` when a key is below `minAtomic` after a refill attempt, and when the relayer is below the sum of all `targetAtomic`; CZ-15 pauses new reservations when K3 cannot pay for the next transaction ("Waiting on payment network") instead of failing mid-objective.
+- **Bound:** a stolen K3, K7 or K8 can burn at most its `maxAtomic` in gas; the relayer cap bounds the total.
 
 ### 6. Behaviour
 
@@ -439,8 +476,8 @@ stateDiagram-v2
 
 | Key | Runbook |
 |---|---|
-| K3 | create the new key; set it as the factory default (`setDefaults`, K20) for new vaults; for existing vaults the app prompts each owner to run `rotateSigners` (UserOp); the signer accepts both keys until `kms.rotationOverlapDays` (14) end; old key disabled |
-| K4 | per objective; destroyed after `PocketClosed` plus grace |
+| K3 | create the new key; queue it as the factory default (`queueDefaults`, K20, 48 h timelock, RV-015) for new vaults; for existing vaults the app prompts each owner to run `rotateSigners` (UserOp); the signer accepts both keys until `kms.rotationOverlapDays` (14) end; old key disabled |
+| K4 | per pocket; retired only under the §5.3 zero-balance rule (RV-004) |
 | K5 | same as K3 (owner `rotateSigners`) |
 | K7 | new key for new jobs; open jobs keep the old key until they close (jobs name the evaluator at creation, 03 `job-escrow-adapter.md` §5) |
 | K8 | announce with a `POLICY_RELEASE` commit under the old publisher naming the new address (03 `open-evidence-log.md`); readers choose publishers |
@@ -451,9 +488,9 @@ stateDiagram-v2
 | K17 | new VAPID key; clients resubscribe on next open |
 | K18, K19 | provider consoles; secrets rotated in the store |
 | K14–K16 | device-side: the daemon re-keys the DB (`K14`), the app revokes and re-pairs (`K15`), the plugin regenerates the hook token (`K16`) |
-| K6, K20 | factory `queueGuardian` (48 h timelock) / Ownable2Step transfer, dual control |
+| K6, K20 | factory `queueGuardian` (48 h timelock) / Ownable2Step transfer; interactive confirmation in Phase 1, dual control in stage 2 (D80) |
 
-- **Compromise response:** suspected K3 or server breach → guardian `pause()` (K6, dual control; drill quarterly) → app broadcasts "Czar paused all spending" → rotate K3 per runbook → unpause. Suspected K4 → `requestPullback` immediately; if `removeDelegate` was already called by the attacker, write off (bounded by the pocket cap). Suspected K8 → `POLICY_RELEASE` naming a new publisher. User-level: `freeze()` by the owner or agent any time.
+- **Compromise response:** suspected K3 or server breach → guardian `pause()` (K6; interactive confirmation in Phase 1, dual control in stage 2, D80; drill quarterly) → the signer stops every spending kind including pocket nanopayments and evaluator `complete` (D72) → CZ-15 requests pullbacks for every funded pocket → app shows the §12 banner → rotate K3 per runbook → unpause. Suspected K4 → `requestPullback` immediately; the attacker can burn the pocket's balance to any address (§5.3 threat note), so the loss is bounded by that balance; write off what does not come back. A compromise of the Mac in Phase 1 exposes every server key together (D80); the bound is testnet funds. Suspected K8 → `POLICY_RELEASE` naming a new publisher. User-level: `freeze()` by the owner or agent any time.
 - **AR-1 fallback:** if no KMS offers secp256k1 with policies, the signer service holds software keys in an isolated network segment with disk encryption, the same policy code, and no inbound access except mTLS from Czar services; this is a weaker boundary and is listed as a risk until an HSM is in place.
 
 ### 7. AI usage
@@ -467,14 +504,16 @@ None.
 ### 9. Security
 
 - Keys: all of K3–K13, K17–K20 (holder), K14–K16 (documented, device-side).
-- Threats (spec 01 §13): server compromised → the signer refuses out-of-shape requests and rate-limits, so even a hijacked CZ-15 cannot sign a USDC digest to a non-payee; agent key leak → rotation runbook plus guardian pause; pocket key leak → bounded by the pocket cap and the vault-signed pullback; evaluator key leak → bounded by open job budgets; publisher key leak → no funds, detectable by recompute.
+- Threats (spec 01 §13): server compromised → the signer refuses out-of-shape requests, checks K3's envelope and reservation arguments against stored plans (RV-032), and rate-limits, so even a hijacked CZ-15 cannot sign a USDC digest to a non-payee or open an envelope for an unapproved payee set; agent key leak → rotation runbook plus guardian pause (the vault's per-step and per-envelope caps still bind, INV-1, INV-12); pocket key leak → the whole pocket balance (any recipient, §5.3), bounded by the pocket cap; evaluator key leak → bounded by open job budgets; publisher key leak → no funds, detectable by recompute; Mac compromise in Phase 1 → every server key (D80).
 - The vault remains the final boundary; the signer is defence in depth (03 `security-and-testing.md` §1).
 
 ### 10. Failure handling
 
 | Failure | Behaviour |
 |---|---|
-| KMS unavailable | all signing stops; CZ-15 pauses plans ("Waiting on payment network"); reservations expire safely (03 `czar-vault.md` §10) |
+| key store unavailable (keystore locked, keychain denied) | all signing stops; CZ-15 pauses plans ("Waiting on payment network"); reservations expire safely (03 `czar-vault.md` §10) |
+| freeze state unknown or stale (> `signer.freezeStateMaxAgeSec`) | every spending kind denied until the projection catches up (D72) |
+| a key's gas below `minAtomic` and the relayer cannot refill | alert; CZ-15 stops starting reservations; nothing half-done |
 | signer policy denies a legitimate request | logged with the rule; on-call reviews; never bypassed by a flag |
 | projection stale (reservation not yet indexed) | `usdc-3009` denied until the `Reserved` event is indexed; CZ-15 retries with backoff `kms.projectionRetryMs` (500, ×5) |
 | rate limit hit | denied, alert; CZ-15 backs off |
@@ -488,7 +527,7 @@ None.
 | State | Wording |
 |---|---|
 | guardian pause (app banner) | "Czar paused all spending while we check something. Your money is safe in your vault. You can still withdraw." |
-| after unpause | "Spending is back on. Nothing was spent while paused." |
+| after unpause | "Spending is back on. Czar signed no new payments while paused." (D72: the signer refuses every spending kind while paused. Payments signed before the pause could still settle, so the earlier wording "Nothing was spent while paused" is superseded, RV-007.) |
 | key rotation prompt (app) | "Czar updated its signing key. Approve the update so objectives can keep running." |
 
 ### 13. Performance and cost
@@ -500,12 +539,13 @@ None.
 - Policy unit tests: for every kind, one accepted request and one denied per rule (for example a `usdc-3009` request with `to` outside the reservation, `value > unitAmount`, `index ≥ count`; a `vault-call` to `withdraw`; a `gateway-burn` for a `Cancelled` pullback; an `evaluator-call` for a job whose evaluator is another address).
 - Replay: the 02 §6.4 test vectors reproduce through the signer (digest equality before signing).
 - Rotation drills: K3 overlap window; K4 destroy after `PocketClosed`; K7 new-jobs-only.
-- Compromise drill: guardian pause on `arc-anvil` blocks every spending digest (INV-4) and the app shows the §12 banner.
-- Definition of done: no service other than the signer can reach the KMS; every signature has an audit row; dual control enforced for K6/K20; all drills documented.
+- Compromise drill: guardian pause on `arc-anvil` blocks every spending digest (INV-4), the signer refuses `gateway-nano` and `evaluator-call complete` (D72), CZ-15 requests pullbacks for funded pockets, and the app shows the §12 banner.
+- Named tests (RV fixes; also listed in 03 `security-and-testing.md` §3.8): `signer_gatewayNano_whileFrozen_denied`, `signer_evaluatorComplete_whilePaused_denied`, `signer_evaluatorReject_whileFrozen_allowed` (D72, RV-007); `signer_slReceipt_unsettledPayment_denied`, `signer_slReceipt_opaqueStructHash_denied` (RV-013); `signer_openEnvelope_argsNotMatchingStoredPlan_denied`, `signer_reserve_leafNotInPlan_denied` (RV-032); `signer_k3_neverSignableSelectors_denied` for every selector in the never list (RV-055); `signer_k4_usdcApproveOrTransferElsewhere_denied`, `signer_k4_returnToOwningVault_allowed` (RV-004, RV-055); `signer_retirePocketKey_nonZeroBalance_refused` (RV-004); `signer_writeOff_duringSlowWithdraw_denied` (RV-004); `signer_gasRefill_aboveMax_denied`, `gasRefill_keepsK3K7K8WithinBounds` (RV-017); `signer_k5_sendTransaction_denied` (RV-017); `signer_keystoreInsideRepo_refusesStart`, `signer_passphraseFromArgvOrEnv_rejected` (D78, RV-028).
+- Definition of done: no service other than the signer can open the keystore (or reach the KMS in stage 2); every signature has an audit row; K6/K20 need an interactive confirmation in Phase 1 (dual control in stage 2, D80); all drills documented.
 
 ### 15. Dependencies
 
-Cloud KMS (D61, AR-1; vendor chosen at build time), mTLS infrastructure, `@czar/vault-client`, `@czar/hashing`, CZ-19 projections. HSM vs KMS is decided at the pre-mainnet audit (D61); the relayer gas key is in the KMS (D62).
+Phase 1: the local keystore and the macOS keychain through `@napi-rs/keyring` (D70, D78); stage 2: Google Cloud KMS and mTLS (D61 as amended, AR-1). `@czar/vault-client`, `@czar/hashing`, CZ-19 projections (including the freeze state, D72). HSM vs KMS is decided at the pre-mainnet audit (D61); the relayer gas key is in the configured signer backend (D62 as amended by D70).
 
 ---
 
@@ -513,7 +553,7 @@ Cloud KMS (D61, AR-1; vendor chosen at build time), mTLS infrastructure, `@czar/
 
 | Topic | Testnet | Mainnet |
 |---|---|---|
-| Keys | one set per environment; testnet K3/K5/K7/K8 never reused on mainnet | separate KMS keys, dual control on K6/K20 from day one |
+| Keys | one set per environment, in the local keystore on one Mac (D80); testnet K3/K5/K7/K8 never reused on mainnet | separate Cloud KMS keys, dual control on K6/K20 from day one |
 | Gateway API key | none needed (A2-30) | K12 slot filled |
 | Facilitator | keyless trial (p1-F4) | K11 Console key |
 | Autonomy defaults | `autonomy.baseAtomic` 0.50 USDC | re-tuned after measured outcomes; same D40 bounds |
@@ -530,4 +570,14 @@ Cloud KMS (D61, AR-1; vendor chosen at build time), mTLS infrastructure, `@czar/
 | 2026-10-19 | D63 | freeze lowering stated as a follow-up agent step, not atomic. |
 | 2026-10-19 | D69 | K17 VAPID key is stage 2 with CZ-23. |
 | 2026-10-19 | D69 | raise notice is shown in the app (no push in Phase 1). |
-- 2026-10-19 · D70: Phase 1 runs on Zaryab's Mac with a local software signer (encrypted keystore); Google Cloud (KMS, Cloud Run, e2-micro VM) moves to stage 2.
+| 2026-10-19 | D70 | Phase 1 runs on Zaryab's Mac with a local software signer (encrypted keystore); Google Cloud (KMS, Cloud Run, e2-micro VM) moves to stage 2. |
+| 2026-10-19 | RV-004 | K4 `pocket-return` and `pocket-slow-withdraw` kinds; zero-balance retirement rule replaces `kms.pocketKeyGraceHours`; recovery pullbacks; `writeOffPocket` refused during a slow withdrawal (SCR-004). |
+| 2026-10-19 | RV-007 / D72 | freeze and guardian pause enforced by the signer for `gateway-nano` and evaluator `complete`; pullbacks on freeze; unpause wording narrowed (SCR-007). |
+| 2026-10-19 | RV-013 | `sl-receipt` takes receipt fields, checks a settled payment, signs the vault-bound `ReceiptAttestation`; K7 uses `sl-validation-report` (SCR-013). |
+| 2026-10-19 | RV-015 | K20 kinds: `queueGuardian`, `queueDefaults`; K3 rotation uses `queueDefaults`. |
+| 2026-10-19 | RV-016 | Phase 1 keys created by T-105 before T-027. |
+| 2026-10-19 | RV-017 | §5.5 gas for K3, K7, K8 with caps, refill job and alerts; K5 sends no transactions; relayer allowlist restated (SCR-017). |
+| 2026-10-19 | RV-028 / D78 | §2, §3, §15 rewritten for the local keystore: path outside the repo, passphrase only in the keychain, `signer.backend` and related parameters (SCR-028). |
+| 2026-10-19 | RV-032, RV-055 | `vault-call` checks K3 arguments against stored plans; full never-signable list. |
+| 2026-10-19 | RV-045 / D80 | single-Mac custody stated as an accepted testnet exception; interactive confirmation for K6/K20 in Phase 1; keychain ACL hardening noted (unverified). |
+| 2026-10-19 | RV-049, RV-063 | pocket diagram: `confirmPullback` never closes a pocket; leaked-K4 threat text corrected. |
