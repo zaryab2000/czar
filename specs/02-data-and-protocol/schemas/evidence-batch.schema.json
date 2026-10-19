@@ -14,12 +14,12 @@
       "const": "1.0"
     },
     "batchId": {
-      "$ref": "common.schema.json#/$defs/BatchId",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/BatchId",
       "description": "Batch id.",
       "x-privacyClass": "public"
     },
     "publisher": {
-      "$ref": "common.schema.json#/$defs/Address",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Address",
       "description": "Publisher address.",
       "x-privacyClass": "public"
     },
@@ -30,12 +30,12 @@
       "const": "EVIDENCE_BATCH"
     },
     "prevRoot": {
-      "$ref": "common.schema.json#/$defs/Hash32",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
       "description": "Previous root of this publisher and kind; zero for the first.",
       "x-privacyClass": "public"
     },
     "root": {
-      "$ref": "common.schema.json#/$defs/Hash32",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
       "description": "Merkle root (spec 02 §5.3).",
       "x-privacyClass": "public"
     },
@@ -62,7 +62,7 @@
             "x-privacyClass": "public"
           },
           "leafHash": {
-            "$ref": "common.schema.json#/$defs/Hash32",
+            "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
             "description": "Leaf hash.",
             "x-privacyClass": "public"
           },
@@ -85,7 +85,7 @@
       "minItems": 1
     },
     "uriHash": {
-      "$ref": "common.schema.json#/$defs/Hash32",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
       "description": "Phase 1: keccak256(utf8(archiveUri)). Phase 2: keccak256 of the archive's IPFS CID (D54).",
       "x-privacyClass": "public"
     },
@@ -97,7 +97,7 @@
       "x-phase": 2
     },
     "committedTx": {
-      "$ref": "common.schema.json#/$defs/Hash32",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
       "description": "commit transaction.",
       "x-privacyClass": "public"
     },

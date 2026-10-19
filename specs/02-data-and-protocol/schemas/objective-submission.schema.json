@@ -14,24 +14,24 @@
       "const": "1.0"
     },
     "objectiveId": {
-      "$ref": "common.schema.json#/$defs/ObjectiveId",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/ObjectiveId",
       "description": "Objective id.",
       "x-privacyClass": "redacted-to-server"
     },
     "objectiveHash": {
-      "$ref": "common.schema.json#/$defs/Hash32",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
       "description": "objectiveHash per spec 02 \u00a75.2.",
       "x-privacyClass": "hash-on-chain"
     },
     "soulVersionHash": {
-      "$ref": "common.schema.json#/$defs/Hash32",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
       "description": "soulVersionHash per spec 02 \u00a75.2.",
       "x-privacyClass": "hash-on-chain"
     },
     "observationHashes": {
       "type": "array",
       "items": {
-        "$ref": "common.schema.json#/$defs/Hash32",
+        "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
         "description": "Observation hash.",
         "x-privacyClass": "hash-on-chain"
       },
@@ -62,7 +62,7 @@
     "capabilities": {
       "type": "array",
       "items": {
-        "$ref": "common.schema.json#/$defs/CapabilityTag",
+        "$ref": "https://czar.dev/schemas/common/1.0#/$defs/CapabilityTag",
         "description": "Capability tag.",
         "x-privacyClass": "redacted-to-server"
       },
@@ -71,7 +71,7 @@
       "maxItems": 10
     },
     "deadline": {
-      "$ref": "common.schema.json#/$defs/Timestamp",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Timestamp",
       "description": "Deadline if known.",
       "x-privacyClass": "redacted-to-server"
     },
@@ -99,14 +99,14 @@
       "x-privacyClass": "redacted-to-server",
       "properties": {
         "maxTotal": {
-          "$ref": "common.schema.json#/$defs/Amount6",
+          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Amount6",
           "description": "Maximum total spend for this objective.",
           "x-privacyClass": "redacted-to-server"
         },
         "categoriesAllowed": {
           "type": "array",
           "items": {
-            "$ref": "common.schema.json#/$defs/Category",
+            "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Category",
             "description": "Category.",
             "x-privacyClass": "redacted-to-server"
           },
@@ -162,12 +162,12 @@
       ]
     },
     "deviceId": {
-      "$ref": "common.schema.json#/$defs/DeviceId",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/DeviceId",
       "description": "Device id from the device token.",
       "x-privacyClass": "server-only"
     },
     "submittedAt": {
-      "$ref": "common.schema.json#/$defs/Timestamp",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Timestamp",
       "description": "Submission time.",
       "x-privacyClass": "redacted-to-server"
     }

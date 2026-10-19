@@ -26,7 +26,7 @@
       "const": 1
     },
     "userPseudonym": {
-      "$ref": "common.schema.json#/$defs/Hash32",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
       "description": "Rotating per-user pseudonym.",
       "x-privacyClass": "public"
     },
@@ -37,17 +37,17 @@
       "minimum": 1
     },
     "soulVersionHash": {
-      "$ref": "common.schema.json#/$defs/Hash32",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
       "description": "Soul version hash.",
       "x-privacyClass": "public"
     },
     "previousHash": {
-      "$ref": "common.schema.json#/$defs/Hash32",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
       "description": "Previous soul version hash.",
       "x-privacyClass": "public"
     },
     "compiledAt": {
-      "$ref": "common.schema.json#/$defs/UnixSeconds",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/UnixSeconds",
       "description": "Compile time.",
       "x-privacyClass": "public"
     }

@@ -14,17 +14,17 @@
       "const": "1.0"
     },
     "vault": {
-      "$ref": "common.schema.json#/$defs/Address",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Address",
       "description": "Vault address.",
       "x-privacyClass": "public"
     },
     "reservationId": {
-      "$ref": "common.schema.json#/$defs/Uint64",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Uint64",
       "description": "Per-vault counter.",
       "x-privacyClass": "public"
     },
     "envelopeId": {
-      "$ref": "common.schema.json#/$defs/Uint64",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Uint64",
       "description": "Envelope.",
       "x-privacyClass": "public"
     },
@@ -36,12 +36,12 @@
       "maximum": 63
     },
     "payee": {
-      "$ref": "common.schema.json#/$defs/Address",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Address",
       "description": "Payee.",
       "x-privacyClass": "public"
     },
     "unitAmount": {
-      "$ref": "common.schema.json#/$defs/Amount6",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Amount6",
       "description": "Amount per authorization.",
       "x-privacyClass": "public"
     },
@@ -53,7 +53,7 @@
       "maximum": 128
     },
     "validBefore": {
-      "$ref": "common.schema.json#/$defs/UnixSeconds",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/UnixSeconds",
       "description": "Authorization expiry.",
       "x-privacyClass": "public"
     },
@@ -67,7 +67,7 @@
       "x-privacyClass": "public"
     },
     "settledMask": {
-      "$ref": "common.schema.json#/$defs/Hash32",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
       "description": "128-bit mask of settled indices, hex (upper bits zero).",
       "x-privacyClass": "public"
     },
@@ -98,7 +98,7 @@
     "paymentIds": {
       "type": "array",
       "items": {
-        "$ref": "common.schema.json#/$defs/PaymentId",
+        "$ref": "https://czar.dev/schemas/common/1.0#/$defs/PaymentId",
         "description": "Payment id for the index at this position.",
         "x-privacyClass": "server-only"
       },

@@ -26,14 +26,14 @@
       "const": 1
     },
     "userPseudonym": {
-      "$ref": "common.schema.json#/$defs/Hash32",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
       "description": "Rotating per-user pseudonym.",
       "x-privacyClass": "public"
     },
     "observationHashes": {
       "type": "array",
       "items": {
-        "$ref": "common.schema.json#/$defs/Hash32",
+        "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
         "description": "Observation hash.",
         "x-privacyClass": "public"
       },
@@ -42,22 +42,22 @@
       "maxItems": 50
     },
     "objectiveHash": {
-      "$ref": "common.schema.json#/$defs/Hash32",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
       "description": "Objective hash.",
       "x-privacyClass": "public"
     },
     "soulVersionHash": {
-      "$ref": "common.schema.json#/$defs/Hash32",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
       "description": "Soul version hash.",
       "x-privacyClass": "public"
     },
     "planHash": {
-      "$ref": "common.schema.json#/$defs/Hash32",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
       "description": "Plan hash.",
       "x-privacyClass": "public"
     },
     "envelopeRef": {
-      "$ref": "common.schema.json#/$defs/EnvelopeRef",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/EnvelopeRef",
       "description": "Envelope reference.",
       "x-privacyClass": "public"
     },
@@ -76,7 +76,7 @@
           "x-privacyClass": "public"
         },
         "txHash": {
-          "$ref": "common.schema.json#/$defs/Hash32",
+          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
           "description": "Opening transaction.",
           "x-privacyClass": "public"
         },
@@ -97,7 +97,7 @@
     "paymentRefHashes": {
       "type": "array",
       "items": {
-        "$ref": "common.schema.json#/$defs/Hash32",
+        "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
         "description": "paymentRefHash per step payment.",
         "x-privacyClass": "public"
       },
@@ -107,7 +107,7 @@
     "outcomeHashes": {
       "type": "array",
       "items": {
-        "$ref": "common.schema.json#/$defs/Hash32",
+        "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
         "description": "reportHash per step.",
         "x-privacyClass": "public"
       },
@@ -115,7 +115,7 @@
       "x-privacyClass": "public"
     },
     "closedAt": {
-      "$ref": "common.schema.json#/$defs/UnixSeconds",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/UnixSeconds",
       "description": "Envelope close time.",
       "x-privacyClass": "public"
     }
