@@ -267,4 +267,10 @@ curl -s 'https://merchants.testnet.czar.dev/v1/search?q=eip' -o /dev/null -D - \
 
 ## CI status
 
-- Filled in below at the last commit.
+- **Green at `a3a63c6`** on `build-v1`: workflows `ci` (run 39295777850) and `secrets` (run 39295777879) both succeeded.
+- Jobs: lint/typecheck/test, contracts (ubuntu-24.04) and contracts (macos-15) with forge build and test (49 tests, including the OEL invariants), indexer paging against arc-anvil (50,001 blocks), czar-redact, web e2e in Chromium and WebKit, actionlint and zizmor.
+- **indexer-arc-anvil** had been red since tier 1. Three causes, fixed in turn (T-001 commits):
+  - A single `anvil_mine` call outran arc-cast's 45 s client timeout. Mining now runs over curl in 5,000-block chunks with a 600 s limit per call.
+  - Without `--prune-history`, arc-anvil kept every historical state. Each chunk was slower than the last, and the runner ran out of disk at about 30,000 blocks. It now starts with `--prune-history`.
+  - The job timeout was raised to 45 minutes.
+- A flaky sidecar idle test in the daemon (T-064) was given wider timing margins.
