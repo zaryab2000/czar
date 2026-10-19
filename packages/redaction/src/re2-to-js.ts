@@ -219,7 +219,7 @@ export function translateRe2(pattern: string): string {
   }
   if (stack.length !== 1) throw new UnsupportedPatternError(pattern, p, "unbalanced (");
   // Validate the result compiles.
-  new RegExp(out);
+  if (!(new RegExp(out) instanceof RegExp)) throw new UnsupportedPatternError(pattern, p, "compile");
   return out;
 }
 
