@@ -5,7 +5,7 @@
 | ID | SCR-017 |
 | Filed by | Independent reviewer (G0-01), 2026-10-19 |
 | Spec and section | `specs/01-system-architecture/system-architecture.md` (lines 550, 993); CZ-27 key table (lines 367, 380); CZ-24 (line 71) |
-| Status | Open |
+| Status | Accepted, applied in CZ-27 §5.1 (who sends transactions), §5.5 (gas balances, refill, alerts), §5.4 parameters; spec 01 §7.1 gas text; CZ-24 (K3 sends lowerings; K5 never sends); T-036. |
 | Review finding | RV-017 (High) in `specs/06-review/2026-10-19-spec-review.md` |
 
 ## Problem
@@ -30,4 +30,5 @@
 - T-035, T-036, T-048 (M2, M3)
 
 ## Decision
-- <filled in by Zaryab: accepted or rejected, and why>
+- Accepted under Zaryab's 2026-10-19 instruction to apply every review fix (D71–D81 record the decisions he approved for the items that needed one).
+- Applied 2026-10-19 on branch `spec/review-fixes`: Accepted, applied in CZ-27 §5.1 (who sends transactions), §5.5 (gas balances, refill, alerts), §5.4 parameters; spec 01 §7.1 gas text; CZ-24 (K3 sends lowerings; K5 never sends); T-036.

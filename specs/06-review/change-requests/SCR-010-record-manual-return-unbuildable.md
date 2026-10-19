@@ -5,7 +5,7 @@
 | ID | SCR-010 |
 | Filed by | Independent reviewer (G0-01), 2026-10-19 |
 | Spec and section | specs/03-smart-contracts/czar-vault.md §5.4 prose (line 152); `sync()` (line 102); §4 storage; `ICzarVault.sol` (lines 260–261) |
-| Status | Open |
+| Status | Accepted, applied in `czar-vault.md` §5.4 (`recordManualReturn` row: owner only, bound `min(amount, outstanding − pendingPullback, freeBalance())`); D41 clarified; T-017. |
 | Review finding | RV-010 (High) in `specs/06-review/2026-10-19-spec-review.md` |
 
 ## Problem
@@ -29,4 +29,5 @@
 - T-017, T-053 (M1, M4)
 
 ## Decision
-- <filled in by Zaryab: accepted or rejected, and why>
+- Accepted under Zaryab's 2026-10-19 instruction to apply every review fix (D71–D81 record the decisions he approved for the items that needed one).
+- Applied 2026-10-19 on branch `spec/review-fixes`: Accepted, applied in `czar-vault.md` §5.4 (`recordManualReturn` row: owner only, bound `min(amount, outstanding − pendingPullback, freeBalance())`); D41 clarified; T-017.

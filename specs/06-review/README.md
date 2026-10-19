@@ -9,7 +9,7 @@
 | File | What it is |
 |---|---|
 | `2026-10-19-spec-review.md` | The full review: verdict, findings table, each finding in detail, ground-truth and consistency samples, scope gaps, flags |
-| `change-requests/` | One spec change request per Critical or High finding, using `specs/05-build-plan/spec-change-request-template.md`. All are **Open** |
+| `change-requests/` | One spec change request per Critical or High finding. **All 29 applied on 2026-10-19** (Accepted, or Accepted with changes where the file says why); Medium and Low findings applied in place |
 
 ## Change requests
 

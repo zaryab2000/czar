@@ -5,7 +5,7 @@
 | ID | SCR-013 |
 | Filed by | Independent reviewer (G0-01), 2026-10-19 |
 | Spec and section | specs/03-smart-contracts/czar-vault.md §6.3 (line 241); INV-11 (line 428); `specs/02-data-and-protocol/data-and-protocol.md` §6.3.3 (line 539) and §6.3.5 (lines 551–552); CZ-27 `sl-receipt` policy (line 392) |
-| Status | Open |
+| Status | Accepted with changes: applied in `czar-vault.md` §3, §6.3; spec 02 §6.2, §6.3 (tag `.v2`), §6.3.3, §6.3.5, §6.4; `ICzarVault.SlReceipt`; vectors regenerated (`ReceiptAttestation`, `receiptAttestation_5042002`); CZ-27 `sl-receipt`. Change: both the full fix and the binding, using a vault-domain `ReceiptAttestation` wrapper (ERC-7739-style) because the SL `Receipt` type has no payer field to compare with `address(this)`. |
 | Review finding | RV-013 (High) in `specs/06-review/2026-10-19-spec-review.md` |
 
 ## Problem
@@ -33,4 +33,5 @@
 - T-016, T-035, T-049 (M1, M2, M3)
 
 ## Decision
-- <filled in by Zaryab: accepted or rejected, and why>
+- Accepted under Zaryab's 2026-10-19 instruction to apply every review fix (D71–D81 record the decisions he approved for the items that needed one).
+- Applied 2026-10-19 on branch `spec/review-fixes`: Accepted with changes: applied in `czar-vault.md` §3, §6.3; spec 02 §6.2, §6.3 (tag `.v2`), §6.3.3, §6.3.5, §6.4; `ICzarVault.SlReceipt`; vectors regenerated (`ReceiptAttestation`, `receiptAttestation_5042002`); CZ-27 `sl-receipt`. Change: both the full fix and the binding, using a vault-domain `ReceiptAttestation` wrapper (ERC-7739-style) because the SL `Receipt` type has no payer field to compare with `address(this)`.

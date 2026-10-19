@@ -5,7 +5,7 @@
 | ID | SCR-020 |
 | Filed by | Independent reviewer (G0-01), 2026-10-19 |
 | Spec and section | `specs/02-data-and-protocol/mcp/czar-mcp-tools.md` `pay` (lines 201, 222); `specs/02-data-and-protocol/api/openapi.yaml` `PayRequest`/`PayResponse` (lines 240–264); `data-and-protocol.md` §7.1 (line 593) |
-| Status | Open |
+| Status | Accepted (D75), applied in `openapi.yaml` (`PayRequest`, `PayResponse`, `QuoteResponse`), MCP §2.3–§2.4 (copies of the API schemas), spec 02 §7.1 (`quoteId`, `payRequestId`), §9.2, §10; T-009. |
 | Review finding | RV-020 (High) in `specs/06-review/2026-10-19-spec-review.md` |
 
 ## Problem
@@ -28,4 +28,5 @@
 - T-009, T-071, T-072 (M0, M5)
 
 ## Decision
-- <filled in by Zaryab: accepted or rejected, and why>
+- Accepted under Zaryab's 2026-10-19 instruction to apply every review fix (D71–D81 record the decisions he approved for the items that needed one).
+- Applied 2026-10-19 on branch `spec/review-fixes`: Accepted (D75), applied in `openapi.yaml` (`PayRequest`, `PayResponse`, `QuoteResponse`), MCP §2.3–§2.4 (copies of the API schemas), spec 02 §7.1 (`quoteId`, `payRequestId`), §9.2, §10; T-009.

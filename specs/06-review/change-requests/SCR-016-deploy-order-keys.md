@@ -5,7 +5,7 @@
 | ID | SCR-016 |
 | Filed by | Independent reviewer (G0-01), 2026-10-19 |
 | Spec and section | `specs/05-build-plan/phase-1-tasks.md` T-027 (lines 418–431), T-036 (lines 514, 519); `specs/03-smart-contracts/security-and-testing.md` deployment step 2 (line 94) |
-| Status | Open |
+| Status | Accepted, applied in `phase-1-tasks.md` (new T-105 before T-027; T-027 and T-035 depend on it; T-036 uses its keys), `security-and-testing.md` §4 step 2, CZ-27 §5.1. |
 | Review finding | RV-016 (High) in `specs/06-review/2026-10-19-spec-review.md` |
 
 ## Problem
@@ -27,4 +27,5 @@
 - T-027, T-035, T-036 (M1, M2)
 
 ## Decision
-- <filled in by Zaryab: accepted or rejected, and why>
+- Accepted under Zaryab's 2026-10-19 instruction to apply every review fix (D71–D81 record the decisions he approved for the items that needed one).
+- Applied 2026-10-19 on branch `spec/review-fixes`: Accepted, applied in `phase-1-tasks.md` (new T-105 before T-027; T-027 and T-035 depend on it; T-036 uses its keys), `security-and-testing.md` §4 step 2, CZ-27 §5.1.

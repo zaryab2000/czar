@@ -5,7 +5,7 @@
 | ID | SCR-023 |
 | Filed by | Independent reviewer (G0-01), 2026-10-19 |
 | Spec and section | `specs/04-components/server-planning-and-payment.md` CZ-15 (line 398); `specs/04-components/server-acceptance-evidence-selection.md` CZ-16 (line 318); `specs/04-components/ai-prompts.md` (line 46) |
-| Status | Open |
+| Status | Accepted (D76), applied in `ai-prompts.md` P-01 fallback, CZ-15 §5.6 and §7, CZ-16 §5.3, §6, §7; T-046, T-047. |
 | Review finding | RV-023 (High) in `specs/06-review/2026-10-19-spec-review.md` |
 
 ## Problem
@@ -26,4 +26,5 @@
 - T-046, T-047, T-048 (M3)
 
 ## Decision
-- <filled in by Zaryab: accepted or rejected, and why>
+- Accepted under Zaryab's 2026-10-19 instruction to apply every review fix (D71–D81 record the decisions he approved for the items that needed one).
+- Applied 2026-10-19 on branch `spec/review-fixes`: Accepted (D76), applied in `ai-prompts.md` P-01 fallback, CZ-15 §5.6 and §7, CZ-16 §5.3, §6, §7; T-046, T-047.

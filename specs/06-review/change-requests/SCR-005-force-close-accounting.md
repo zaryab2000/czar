@@ -5,7 +5,7 @@
 | ID | SCR-005 |
 | Filed by | Independent reviewer (G0-01), 2026-10-19 |
 | Spec and section | specs/03-smart-contracts/czar-vault.md §5.2 `forceCloseEnvelope` (line 120); §5.4 `grantPocketGas`, `requestPullback`, `confirmPullback` (lines 141, 143, 144); §5.5 `fundJob` (line 161), job refunds (line 165) |
-| Status | Open |
+| Status | Accepted, applied in `czar-vault.md` §4 (`envelope.pocket`, `shortfall`), §5.2 (`forceCloseEnvelope` defined step by step), §5.4 (`confirmPullback` branches), §5.5; INV-2, INV-14; T-014, T-017. |
 | Review finding | RV-005 (Critical) in `specs/06-review/2026-10-19-spec-review.md` |
 
 ## Problem
@@ -33,4 +33,5 @@
 - T-014, T-017, T-018, T-021 (M1)
 
 ## Decision
-- <filled in by Zaryab: accepted or rejected, and why>
+- Accepted under Zaryab's 2026-10-19 instruction to apply every review fix (D71–D81 record the decisions he approved for the items that needed one).
+- Applied 2026-10-19 on branch `spec/review-fixes`: Accepted, applied in `czar-vault.md` §4 (`envelope.pocket`, `shortfall`), §5.2 (`forceCloseEnvelope` defined step by step), §5.4 (`confirmPullback` branches), §5.5; INV-2, INV-14; T-014, T-017.

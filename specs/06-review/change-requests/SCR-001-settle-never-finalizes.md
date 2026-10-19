@@ -5,7 +5,7 @@
 | ID | SCR-001 |
 | Filed by | Independent reviewer (G0-01), 2026-10-19 |
 | Spec and section | specs/03-smart-contracts/czar-vault.md §5.3 (`settle`, `finalize`, lines 131–132); §8.2 (line 320); §5.2 `closeEnvelope` (line 119) |
-| Status | Open |
+| Status | Accepted, applied in `specs/03-smart-contracts/czar-vault.md` §5.3 (`_finalizeIfDone`), §8.2, INV-13; `ICzarVault.sol`; tests in `security-and-testing.md` §3.7; T-015. |
 | Review finding | RV-001 (Critical) in `specs/06-review/2026-10-19-spec-review.md` |
 
 ## Problem
@@ -36,4 +36,5 @@
 - T-015, T-021, T-048, T-050 (M1, M3)
 
 ## Decision
-- <filled in by Zaryab: accepted or rejected, and why>
+- Accepted under Zaryab's 2026-10-19 instruction to apply every review fix (D71–D81 record the decisions he approved for the items that needed one).
+- Applied 2026-10-19 on branch `spec/review-fixes`: Accepted, applied in `specs/03-smart-contracts/czar-vault.md` §5.3 (`_finalizeIfDone`), §8.2, INV-13; `ICzarVault.sol`; tests in `security-and-testing.md` §3.7; T-015.

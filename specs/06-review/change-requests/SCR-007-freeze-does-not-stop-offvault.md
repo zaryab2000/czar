@@ -5,7 +5,7 @@
 | ID | SCR-007 |
 | Filed by | Independent reviewer (G0-01), 2026-10-19 |
 | Spec and section | `specs/04-components/server-autonomy-roi-keys.md` CZ-27 `gateway-nano` and `evaluator-call` policies (lines 394, 397), wording (line 491); `product/czar-product.md` §6.6 (line 166) |
-| Status | Open |
+| Status | Accepted (D72), applied in CZ-27 §5.2 (freeze checks fail closed), CZ-15 §5.3 step 7 and §6 (pullbacks on freeze), CZ-27 §12 and CZ-22 §5.4 wording, `product/czar-product.md` §6.6; T-035, T-052, T-055. |
 | Review finding | RV-007 (High) in `specs/06-review/2026-10-19-spec-review.md` |
 
 ## Problem
@@ -31,4 +31,5 @@
 - T-035, T-037, T-052, T-055 (M2, M4)
 
 ## Decision
-- <filled in by Zaryab: accepted or rejected, and why>
+- Accepted under Zaryab's 2026-10-19 instruction to apply every review fix (D71–D81 record the decisions he approved for the items that needed one).
+- Applied 2026-10-19 on branch `spec/review-fixes`: Accepted (D72), applied in CZ-27 §5.2 (freeze checks fail closed), CZ-15 §5.3 step 7 and §6 (pullbacks on freeze), CZ-27 §12 and CZ-22 §5.4 wording, `product/czar-product.md` §6.6; T-035, T-052, T-055.

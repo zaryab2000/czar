@@ -5,7 +5,7 @@
 | ID | SCR-012 |
 | Filed by | Independent reviewer (G0-01), 2026-10-19 |
 | Spec and section | `specs/04-components/server-planning-and-payment.md` CZ-15 step 7 (line 350); `specs/04-components/phase-1-acceptance-scenario.md` 5.x (line 63) |
-| Status | Open |
+| Status | Accepted, applied in CZ-15 §5.3 step 7 (`value = min(outstanding − pending, availableBalance − maxFee − safety)`), G0-05 step 5 (full-balance drain), T-053. |
 | Review finding | RV-012 (High) in `specs/06-review/2026-10-19-spec-review.md` |
 
 ## Problem
@@ -30,4 +30,5 @@
 - T-053, G0-05 (Gate 0, M4)
 
 ## Decision
-- <filled in by Zaryab: accepted or rejected, and why>
+- Accepted under Zaryab's 2026-10-19 instruction to apply every review fix (D71–D81 record the decisions he approved for the items that needed one).
+- Applied 2026-10-19 on branch `spec/review-fixes`: Accepted, applied in CZ-15 §5.3 step 7 (`value = min(outstanding − pending, availableBalance − maxFee − safety)`), G0-05 step 5 (full-balance drain), T-053.

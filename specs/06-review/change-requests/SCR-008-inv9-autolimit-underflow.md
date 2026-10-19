@@ -5,7 +5,7 @@
 | ID | SCR-008 |
 | Filed by | Independent reviewer (G0-01), 2026-10-19 |
 | Spec and section | specs/03-smart-contracts/czar-vault.md INV-9 (line 426); `lowerAutoLimit` (line 173); `openEnvelope` (line 118); `setCategoryLimits` (line 105); `raiseAutoLimit` (line 172) |
-| Status | Open |
+| Status | Accepted, applied in `czar-vault.md` §5.2 (saturating allowance), §5.6 (`lowerAutoLimit` allows equal; `RaiseNotAbove`), INV-9 restated as `autoLimit ≤ userMax`; `ICzarVault.sol`; T-014, T-019. |
 | Review finding | RV-008 (High) in `specs/06-review/2026-10-19-spec-review.md` |
 
 ## Problem
@@ -34,4 +34,5 @@
 - T-014, T-019, T-021 (M1)
 
 ## Decision
-- <filled in by Zaryab: accepted or rejected, and why>
+- Accepted under Zaryab's 2026-10-19 instruction to apply every review fix (D71–D81 record the decisions he approved for the items that needed one).
+- Applied 2026-10-19 on branch `spec/review-fixes`: Accepted, applied in `czar-vault.md` §5.2 (saturating allowance), §5.6 (`lowerAutoLimit` allows equal; `RaiseNotAbove`), INV-9 restated as `autoLimit ≤ userMax`; `ICzarVault.sol`; T-014, T-019.
