@@ -44,12 +44,12 @@
           "maxLength": 2048
         },
         "payTo": {
-          "$ref": "common.schema.json#/$defs/Address",
+          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Address",
           "description": "Payee.",
           "x-privacyClass": "server-only"
         },
         "paymentRefHash": {
-          "$ref": "common.schema.json#/$defs/Hash32",
+          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
           "description": "Payment reference hash.",
           "x-privacyClass": "server-only"
         }
@@ -122,7 +122,7 @@
       "maxLength": 512
     },
     "bodyCommit": {
-      "$ref": "common.schema.json#/$defs/Hash32",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
       "description": "SL responseCommit.",
       "x-privacyClass": "hash-on-chain"
     }

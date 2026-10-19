@@ -20,22 +20,22 @@
       "maxLength": 128
     },
     "received_at": {
-      "$ref": "common.schema.json#/$defs/Timestamp",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Timestamp",
       "description": "Receipt time.",
       "x-privacyClass": "server-only"
     },
     "policy_version": {
-      "$ref": "common.schema.json#/$defs/SlPolicyVersion",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/SlPolicyVersion",
       "description": "Policy version.",
       "x-privacyClass": "server-only"
     },
     "snapshot_id": {
-      "$ref": "common.schema.json#/$defs/Hash32",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
       "description": "Anchored snapshot root.",
       "x-privacyClass": "server-only"
     },
     "snapshot_anchor_tx": {
-      "$ref": "common.schema.json#/$defs/Hash32",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
       "description": "Anchor transaction.",
       "x-privacyClass": "server-only"
     },
@@ -96,7 +96,7 @@
         "x-privacyClass": "server-only",
         "properties": {
           "service_id": {
-            "$ref": "common.schema.json#/$defs/SlServiceId",
+            "$ref": "https://czar.dev/schemas/common/1.0#/$defs/SlServiceId",
             "description": "Service.",
             "x-privacyClass": "server-only"
           },
@@ -137,12 +137,12 @@
             "minimum": 1
           },
           "service_id": {
-            "$ref": "common.schema.json#/$defs/SlServiceId",
+            "$ref": "https://czar.dev/schemas/common/1.0#/$defs/SlServiceId",
             "description": "Service.",
             "x-privacyClass": "server-only"
           },
           "version_id": {
-            "$ref": "common.schema.json#/$defs/SlVersionId",
+            "$ref": "https://czar.dev/schemas/common/1.0#/$defs/SlVersionId",
             "description": "Version.",
             "x-privacyClass": "server-only"
           },
@@ -227,7 +227,7 @@
         "x-privacyClass": "server-only",
         "properties": {
           "service_id": {
-            "$ref": "common.schema.json#/$defs/SlServiceId",
+            "$ref": "https://czar.dev/schemas/common/1.0#/$defs/SlServiceId",
             "description": "Service.",
             "x-privacyClass": "server-only"
           },
@@ -276,7 +276,7 @@
       "x-privacyClass": "server-only",
       "properties": {
         "service_id": {
-          "$ref": "common.schema.json#/$defs/SlServiceId",
+          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/SlServiceId",
           "description": "Service.",
           "x-privacyClass": "server-only"
         },

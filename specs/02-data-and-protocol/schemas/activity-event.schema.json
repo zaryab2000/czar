@@ -14,7 +14,7 @@
       "const": "1.0"
     },
     "eventId": {
-      "$ref": "common.schema.json#/$defs/EventId",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/EventId",
       "description": "ULID assigned at intake.",
       "x-privacyClass": "local-only"
     },
@@ -36,12 +36,12 @@
       "maxLength": 64
     },
     "sessionRef": {
-      "$ref": "common.schema.json#/$defs/Hash32",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
       "description": "keccak256 of the host session id; never the raw id.",
       "x-privacyClass": "local-only"
     },
     "projectRef": {
-      "$ref": "common.schema.json#/$defs/Hash32",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
       "description": "keccak256 of the absolute project root path.",
       "x-privacyClass": "local-only"
     },
@@ -69,7 +69,7 @@
       "x-privacyClass": "local-only"
     },
     "occurredAt": {
-      "$ref": "common.schema.json#/$defs/Timestamp",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Timestamp",
       "description": "Host time if present, else intake time.",
       "x-privacyClass": "local-only"
     },
@@ -118,7 +118,7 @@
     "fileRefs": {
       "type": "array",
       "items": {
-        "$ref": "common.schema.json#/$defs/Hash32",
+        "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
         "description": "keccak256 of an absolute file path.",
         "x-privacyClass": "local-only"
       },
@@ -139,7 +139,7 @@
       "minimum": 0
     },
     "agentRef": {
-      "$ref": "common.schema.json#/$defs/Hash32",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
       "description": "keccak256 of agent_id when inside a subagent (B1-26).",
       "x-privacyClass": "local-only"
     },

@@ -20,12 +20,12 @@
       "minimum": 1
     },
     "compiledAt": {
-      "$ref": "common.schema.json#/$defs/Timestamp",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Timestamp",
       "description": "Compile time.",
       "x-privacyClass": "local-only"
     },
     "previousHash": {
-      "$ref": "common.schema.json#/$defs/Hash32",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
       "description": "soulVersionHash of version minus 1.",
       "x-privacyClass": "hash-on-chain"
     },
@@ -117,7 +117,7 @@
       "x-privacyClass": "local-only",
       "properties": {
         "amount": {
-          "$ref": "common.schema.json#/$defs/Amount6",
+          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Amount6",
           "description": "Hourly value in USDC atomic units.",
           "x-privacyClass": "local-only"
         },
@@ -194,7 +194,7 @@
       "x-privacyClass": "local-only",
       "properties": {
         "beliefId": {
-          "$ref": "common.schema.json#/$defs/BeliefId",
+          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/BeliefId",
           "description": "Stable id across versions while the belief lives.",
           "x-privacyClass": "local-only"
         },
@@ -212,19 +212,19 @@
           "maximum": 1
         },
         "firstSeen": {
-          "$ref": "common.schema.json#/$defs/Timestamp",
+          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Timestamp",
           "description": "First observation.",
           "x-privacyClass": "local-only"
         },
         "lastSeen": {
-          "$ref": "common.schema.json#/$defs/Timestamp",
+          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Timestamp",
           "description": "Last observation; beliefs fade when not seen.",
           "x-privacyClass": "local-only"
         },
         "receipts": {
           "type": "array",
           "items": {
-            "$ref": "common.schema.json#/$defs/EventId",
+            "$ref": "https://czar.dev/schemas/common/1.0#/$defs/EventId",
             "description": "Observation behind the belief.",
             "x-privacyClass": "local-only"
           },

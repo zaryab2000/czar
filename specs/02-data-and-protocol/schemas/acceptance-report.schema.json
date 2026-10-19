@@ -14,17 +14,17 @@
       "const": "1.0"
     },
     "obs_id": {
-      "$ref": "common.schema.json#/$defs/SlObsId",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/SlObsId",
       "description": "Observation checked.",
       "x-privacyClass": "server-only"
     },
     "profile_id": {
-      "$ref": "common.schema.json#/$defs/SlProfileId",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/SlProfileId",
       "description": "Acceptance profile.",
       "x-privacyClass": "server-only"
     },
     "method_version": {
-      "$ref": "common.schema.json#/$defs/Hash32",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
       "description": "Must equal profile.code_hash.",
       "x-privacyClass": "server-only"
     },
@@ -40,7 +40,7 @@
           "maxLength": 128
         },
         "address": {
-          "$ref": "common.schema.json#/$defs/Address",
+          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Address",
           "description": "Evaluator key K7 address.",
           "x-privacyClass": "server-only"
         }
@@ -67,7 +67,7 @@
           "x-privacyClass": "server-only"
         },
         "salt_commit": {
-          "$ref": "common.schema.json#/$defs/Hash32",
+          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
           "description": "Salt commitment (Phase 3).",
           "x-privacyClass": "server-only"
         }
@@ -135,7 +135,7 @@
       "minimum": 0
     },
     "created_at": {
-      "$ref": "common.schema.json#/$defs/Timestamp",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Timestamp",
       "description": "Creation time.",
       "x-privacyClass": "server-only"
     },
@@ -171,7 +171,7 @@
       "x-privacyClass": "server-only"
     },
     "envelopeRef": {
-      "$ref": "common.schema.json#/$defs/EnvelopeRef",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/EnvelopeRef",
       "description": "Czar envelope.",
       "x-privacyClass": "server-only"
     },
@@ -183,7 +183,7 @@
       "maximum": 63
     },
     "jobKey": {
-      "$ref": "common.schema.json#/$defs/Hash32",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
       "description": "Job key when the step is an ERC-8183 job.",
       "x-privacyClass": "server-only"
     },
@@ -198,17 +198,17 @@
       "x-privacyClass": "server-only"
     },
     "reportHash": {
-      "$ref": "common.schema.json#/$defs/Hash32",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
       "description": "keccak256(jcs(report minus reportHash)); used as the ERC-8183 reason.",
       "x-privacyClass": "hash-on-chain"
     },
     "report_id": {
-      "$ref": "common.schema.json#/$defs/SlReportId",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/SlReportId",
       "description": "rep_ id (SL §5.1).",
       "x-privacyClass": "server-only"
     },
     "sig": {
-      "$ref": "common.schema.json#/$defs/Hex",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hex",
       "description": "EIP-712 ValidationReport signature by K7.",
       "x-privacyClass": "server-only"
     },

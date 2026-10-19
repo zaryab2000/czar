@@ -30,47 +30,47 @@
           "const": "x402-exact"
         },
         "network": {
-          "$ref": "common.schema.json#/$defs/Caip2",
+          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Caip2",
           "description": "Chain.",
           "x-privacyClass": "public"
         },
         "asset": {
-          "$ref": "common.schema.json#/$defs/Address",
+          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Address",
           "description": "Token (USDC).",
           "x-privacyClass": "public"
         },
         "payer": {
-          "$ref": "common.schema.json#/$defs/Address",
+          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Address",
           "description": "Payer (the vault).",
           "x-privacyClass": "public"
         },
         "payTo": {
-          "$ref": "common.schema.json#/$defs/Address",
+          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Address",
           "description": "Payee.",
           "x-privacyClass": "public"
         },
         "amount": {
-          "$ref": "common.schema.json#/$defs/Amount6",
+          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Amount6",
           "description": "Amount.",
           "x-privacyClass": "public"
         },
         "nonce": {
-          "$ref": "common.schema.json#/$defs/Hash32",
+          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
           "description": "EIP-3009 nonce.",
           "x-privacyClass": "public"
         },
         "validBefore": {
-          "$ref": "common.schema.json#/$defs/UnixSeconds",
+          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/UnixSeconds",
           "description": "Authorization expiry.",
           "x-privacyClass": "public"
         },
         "settlementTx": {
-          "$ref": "common.schema.json#/$defs/Hash32",
+          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
           "description": "Settlement transaction.",
           "x-privacyClass": "public"
         },
         "reservationId": {
-          "$ref": "common.schema.json#/$defs/Uint64",
+          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Uint64",
           "description": "Vault reservation (server-only; excluded from paymentRefHash).",
           "x-privacyClass": "server-only"
         },
@@ -106,27 +106,27 @@
           "const": "gateway-batched"
         },
         "network": {
-          "$ref": "common.schema.json#/$defs/Caip2",
+          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Caip2",
           "description": "Chain.",
           "x-privacyClass": "public"
         },
         "payer": {
-          "$ref": "common.schema.json#/$defs/Address",
+          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Address",
           "description": "Pocket EOA.",
           "x-privacyClass": "public"
         },
         "payTo": {
-          "$ref": "common.schema.json#/$defs/Address",
+          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Address",
           "description": "Payee.",
           "x-privacyClass": "public"
         },
         "amount": {
-          "$ref": "common.schema.json#/$defs/Amount6",
+          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Amount6",
           "description": "Amount.",
           "x-privacyClass": "public"
         },
         "nonce": {
-          "$ref": "common.schema.json#/$defs/Hash32",
+          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
           "description": "Authorization nonce.",
           "x-privacyClass": "public"
         },
@@ -137,7 +137,7 @@
           "maxLength": 128
         },
         "batchTx": {
-          "$ref": "common.schema.json#/$defs/Hash32",
+          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
           "description": "submitBatch transaction.",
           "x-privacyClass": "public"
         }
@@ -164,37 +164,37 @@
           "const": "erc8183-job"
         },
         "network": {
-          "$ref": "common.schema.json#/$defs/Caip2",
+          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Caip2",
           "description": "Chain.",
           "x-privacyClass": "public"
         },
         "contract": {
-          "$ref": "common.schema.json#/$defs/Address",
+          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Address",
           "description": "Escrow contract.",
           "x-privacyClass": "public"
         },
         "jobId": {
-          "$ref": "common.schema.json#/$defs/Uint256String",
+          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Uint256String",
           "description": "Job id.",
           "x-privacyClass": "public"
         },
         "client": {
-          "$ref": "common.schema.json#/$defs/Address",
+          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Address",
           "description": "Client (the vault).",
           "x-privacyClass": "public"
         },
         "provider": {
-          "$ref": "common.schema.json#/$defs/Address",
+          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Address",
           "description": "Provider.",
           "x-privacyClass": "public"
         },
         "evaluator": {
-          "$ref": "common.schema.json#/$defs/Address",
+          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Address",
           "description": "Evaluator.",
           "x-privacyClass": "public"
         },
         "budget": {
-          "$ref": "common.schema.json#/$defs/Amount6",
+          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Amount6",
           "description": "Budget.",
           "x-privacyClass": "public"
         }
@@ -223,7 +223,7 @@
           "const": "mpp"
         },
         "network": {
-          "$ref": "common.schema.json#/$defs/Caip2",
+          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Caip2",
           "description": "Chain.",
           "x-privacyClass": "public"
         },
@@ -234,22 +234,22 @@
           "maxLength": 128
         },
         "payer": {
-          "$ref": "common.schema.json#/$defs/Address",
+          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Address",
           "description": "Payer.",
           "x-privacyClass": "public"
         },
         "payTo": {
-          "$ref": "common.schema.json#/$defs/Address",
+          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Address",
           "description": "Payee.",
           "x-privacyClass": "public"
         },
         "amount": {
-          "$ref": "common.schema.json#/$defs/Amount6",
+          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Amount6",
           "description": "Amount.",
           "x-privacyClass": "public"
         },
         "settlementTx": {
-          "$ref": "common.schema.json#/$defs/Hash32",
+          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
           "description": "Settlement transaction.",
           "x-privacyClass": "public"
         }

@@ -37,7 +37,7 @@
           "maxLength": 128
         },
         "address": {
-          "$ref": "common.schema.json#/$defs/Address",
+          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Address",
           "description": "The vault (ERC-1271 kind SL_RECEIPT) or the pocket EOA.",
           "x-privacyClass": "public"
         }
@@ -55,12 +55,12 @@
       "x-privacyClass": "public"
     },
     "payment_ref_hash": {
-      "$ref": "common.schema.json#/$defs/Hash32",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
       "description": "keccak256(jcs(PaymentRef)).",
       "x-privacyClass": "public"
     },
     "listed_price_atomic": {
-      "$ref": "common.schema.json#/$defs/Amount6",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Amount6",
       "description": "Price shown before paying.",
       "x-privacyClass": "public"
     },
@@ -71,7 +71,7 @@
       "maxLength": 2048
     },
     "requirements_hash_seen": {
-      "$ref": "common.schema.json#/$defs/Hash32",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
       "description": "Hash of the 402 received.",
       "x-privacyClass": "public"
     },
@@ -81,7 +81,7 @@
       "x-privacyClass": "public",
       "properties": {
         "commit": {
-          "$ref": "common.schema.json#/$defs/Hash32",
+          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
           "description": "requestCommit.",
           "x-privacyClass": "public"
         },
@@ -118,7 +118,7 @@
           "maximum": 599
         },
         "commit": {
-          "$ref": "common.schema.json#/$defs/Hash32",
+          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
           "description": "responseCommit.",
           "x-privacyClass": "public"
         },
@@ -140,17 +140,17 @@
           "x-privacyClass": "public",
           "properties": {
             "sig": {
-              "$ref": "common.schema.json#/$defs/Hex",
+              "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hex",
               "description": "DeliveryAttestation signature.",
               "x-privacyClass": "public"
             },
             "signer": {
-              "$ref": "common.schema.json#/$defs/Address",
+              "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Address",
               "description": "Signer.",
               "x-privacyClass": "public"
             },
             "ts": {
-              "$ref": "common.schema.json#/$defs/UnixSeconds",
+              "$ref": "https://czar.dev/schemas/common/1.0#/$defs/UnixSeconds",
               "description": "Timestamp.",
               "x-privacyClass": "public"
             }
@@ -171,22 +171,22 @@
       "x-privacyClass": "public",
       "properties": {
         "t_request": {
-          "$ref": "common.schema.json#/$defs/UnixSeconds",
+          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/UnixSeconds",
           "description": "Request time.",
           "x-privacyClass": "public"
         },
         "t_payment_signed": {
-          "$ref": "common.schema.json#/$defs/UnixSeconds",
+          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/UnixSeconds",
           "description": "Authorization signed.",
           "x-privacyClass": "public"
         },
         "t_first_byte": {
-          "$ref": "common.schema.json#/$defs/UnixSeconds",
+          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/UnixSeconds",
           "description": "First byte.",
           "x-privacyClass": "public"
         },
         "t_complete": {
-          "$ref": "common.schema.json#/$defs/UnixSeconds",
+          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/UnixSeconds",
           "description": "Complete.",
           "x-privacyClass": "public"
         }
@@ -226,12 +226,12 @@
       "x-privacyClass": "public",
       "properties": {
         "profile_id": {
-          "$ref": "common.schema.json#/$defs/SlProfileId",
+          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/SlProfileId",
           "description": "Profile.",
           "x-privacyClass": "public"
         },
         "checks_commit": {
-          "$ref": "common.schema.json#/$defs/Hash32",
+          "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hash32",
           "description": "checksCommit.",
           "x-privacyClass": "public"
         }
@@ -243,22 +243,22 @@
       ]
     },
     "created_at": {
-      "$ref": "common.schema.json#/$defs/Timestamp",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Timestamp",
       "description": "Creation time.",
       "x-privacyClass": "public"
     },
     "obs_id": {
-      "$ref": "common.schema.json#/$defs/SlObsId",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/SlObsId",
       "description": "obs_ + keccak of the core (SL \u00a75.1).",
       "x-privacyClass": "public"
     },
     "sig": {
-      "$ref": "common.schema.json#/$defs/Hex",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/Hex",
       "description": "EIP-712 Receipt signature (SL \u00a75.8); for the vault, the SL_RECEIPT envelope bytes.",
       "x-privacyClass": "public"
     },
     "envelopeRef": {
-      "$ref": "common.schema.json#/$defs/EnvelopeRef",
+      "$ref": "https://czar.dev/schemas/common/1.0#/$defs/EnvelopeRef",
       "description": "Czar envelope (server-only).",
       "x-privacyClass": "server-only"
     },
