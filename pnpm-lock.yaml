@@ -26,6 +26,8 @@ importers:
 
   packages/config: {}
 
+  packages/logging: {}
+
 packages:
 
   '@jridgewell/resolve-uri@3.1.2':
