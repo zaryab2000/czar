@@ -21,3 +21,5 @@ dff8c0999617e327870a9192bf5a911878321c34:packages/config/src/registry.ts:generic
 dff8c0999617e327870a9192bf5a911878321c34:packages/config/src/registry.ts:generic-api-key:915
 dff8c0999617e327870a9192bf5a911878321c34:packages/config/src/registry.ts:generic-api-key:923
 dff8c0999617e327870a9192bf5a911878321c34:packages/config/src/registry.ts:generic-api-key:931
+# T-007: byte copy of the spec vectors file (same jobKey false positive as specs/02-data-and-protocol/vectors).
+9d597cf5e61d9d0290923c00da6b3bac563a837b:packages/hashing/fixtures/eip712-vectors.json:generic-api-key:169
