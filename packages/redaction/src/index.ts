@@ -13,3 +13,5 @@ export type {
 export { formatMarker, isValidMarker, parseMarkers, truncatePreservingMarkers } from "./markers.ts";
 export type { Marker, MarkerLayer } from "./markers.ts";
 export type { CompiledAllowlist, CompiledRule, RedactionResult, RuleHit } from "./types.ts";
+export { regexFallback, sidecarLayer2Client } from "./layer2-client.ts";
+export type { SidecarClientOptions } from "./layer2-client.ts";

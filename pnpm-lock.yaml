@@ -32,6 +32,9 @@ importers:
       '@czar/logging':
         specifier: workspace:*
         version: link:../../packages/logging
+      '@czar/redaction':
+        specifier: workspace:*
+        version: link:../../packages/redaction
       '@napi-rs/keyring':
         specifier: 2.1.1
         version: 2.1.1

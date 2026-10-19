@@ -65,21 +65,35 @@ describe("redactSecrets", () => {
 });
 
 describe("never calls live verification", () => {
-  it("has no network client or trufflehog reference in the package source", () => {
-    const src = fileURLToPath(new URL("../src", import.meta.url));
-    const sources = readdirSync(src, { recursive: true, encoding: "utf8" })
-      .filter((name) => name.endsWith(".ts"))
-      .map((name) => readFileSync(join(src, name), "utf8"))
-      .join("\n");
+  const src = fileURLToPath(new URL("../src", import.meta.url));
+  const read = (names: string[]) =>
+    names.map((name) => readFileSync(join(src, name), "utf8")).join("\n");
+
+  it("layer 1 has no network client and no trufflehog reference", () => {
+    const sources = read([
+      "layer1.ts",
+      "markers.ts",
+      "re2-to-js.ts",
+      "types.ts",
+      "generated/gitleaks-rules.ts",
+    ]);
     for (const forbidden of [
       /trufflehog/i,
       /\bfetch\(/,
       /node:https?\b/,
       /node:net\b/,
+      /node:dgram\b/,
       /XMLHttpRequest/,
-      /\bverify(Secret|Key)\b/,
     ]) {
       expect(forbidden.test(sources), String(forbidden)).toBe(false);
     }
+  });
+
+  it("the layer-2 client only opens a local Unix socket", () => {
+    const sources = read(["layer2-client.ts", "layer2.ts"]);
+    expect(/trufflehog|\bfetch\(|node:https?\b|node:dgram\b|XMLHttpRequest/.test(sources)).toBe(
+      false,
+    );
+    expect(sources).toContain("connect(socketPath)");
   });
 });

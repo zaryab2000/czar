@@ -10,7 +10,8 @@
     ".": "./src/index.ts",
     "./launchd": "./src/launchd.ts",
     "./hook-server": "./src/hook-server.ts",
-    "./status": "./src/status.ts"
+    "./status": "./src/status.ts",
+    "./sidecar": "./src/sidecar.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
@@ -19,6 +20,7 @@
   "dependencies": {
     "@czar/config": "workspace:*",
     "@czar/logging": "workspace:*",
+    "@czar/redaction": "workspace:*",
     "@napi-rs/keyring": "2.1.1",
     "better-sqlite3-multiple-ciphers": "13.0.3"
   }

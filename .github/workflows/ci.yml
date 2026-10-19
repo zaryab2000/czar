@@ -119,3 +119,35 @@ jobs:
         env:
           ARC_ANVIL_URL: http://127.0.0.1:8545
         run: pnpm --filter @czar/indexer exec vitest run test/sync-50k.test.ts
+
+  redact-sidecar:
+    name: czar-redact (Presidio helper)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.11.32"
+          enable-cache: false
+      - name: uv run pytest -q (T-064)
+        working-directory: apps/redact-sidecar
+        run: |
+          uv sync --frozen
+          uv run pytest -q
+      - name: build the installer bundle
+        run: scripts/bundle-redact-sidecar.sh "$RUNNER_TEMP/czar-redact"
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - run: pnpm install --frozen-lockfile
+      - name: daemon runs the bundled helper with an empty environment
+        env:
+          CZAR_TEST_SIDECAR_CMD: ${{ runner.temp }}/czar-redact/bin/czar-redact
+        run: pnpm --filter @czar/daemon exec vitest run test/sidecar-integration.test.ts
