@@ -3,6 +3,9 @@ info:
   title: Czar daemon local viewer API
   version: "1.0"
   summary: Loopback routes the daemon serves to the desktop soul viewer (CZ-05, D34). Never exposed off the machine.
+  license:
+    name: Proprietary (Czar specification; not for redistribution)
+    identifier: LicenseRef-Czar-Proprietary
   description: |
     Served by the daemon (CZ-02) on its Unix domain socket (mode 0600) or on `127.0.0.1:<port>`; never on `0.0.0.0` (D3-08).
     Every request must carry the local viewer bearer token (stored in the OS keychain, same rules as K16) and, over HTTP,
@@ -10,6 +13,7 @@ info:
     Everything here is `local-only` (spec 02 §3). Nothing in these responses is sent to Czar's server.
     Errors use the same RFC 9457 shape as `openapi.yaml` (`czarCode`, `retryable`).
     Source: amendment AM-16; route list from spec 04 `local-soul-and-drives.md` CZ-05.
+    Change log 2026-10-19: license field and 4XX responses added (lint, G0-01 review verification).
 servers:
   - url: http://127.0.0.1
     description: Loopback only; the port is chosen at install and stored in daemon settings.
@@ -137,6 +141,7 @@ paths:
       summary: Newest weekly diff.
       operationId: getLocalSoulDiff
       responses:
+        "4XX": { description: "Problem (unauthorised local token, bad Origin, not found)", content: { application/problem+json: { schema: { type: object } } } }
         "200": { description: Diff, content: { application/json: { schema: { $ref: "#/components/schemas/SoulDiff" } } } }
   /local/soul/receipts/{beliefId}:
     get:
@@ -152,6 +157,7 @@ paths:
       summary: Shadow-mode "what you missed" report (CZ-08).
       operationId: getLocalShadowReport
       responses:
+        "4XX": { description: "Problem (unauthorised local token, bad Origin, not found)", content: { application/problem+json: { schema: { type: object } } } }
         "200": { description: Report, content: { application/json: { schema: { $ref: "#/components/schemas/ShadowReport" } } } }
   /local/audit/egress:
     get:
@@ -160,6 +166,7 @@ paths:
       parameters:
         - { name: since, in: query, schema: { type: string, format: date-time } }
       responses:
+        "4XX": { description: "Problem (unauthorised local token, bad Origin, not found)", content: { application/problem+json: { schema: { type: object } } } }
         "200": { description: Entries, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/EgressEntry" } } } } }
 
 # x-changeLog (2026-10-18):
