@@ -113,7 +113,9 @@ jobs:
         run: |
           arc-anvil --network arc --chain-id 5042002 --port 8545 > "$RUNNER_TEMP/anvil.log" 2>&1 &
           for _ in $(seq 1 30); do arc-cast chain-id --rpc-url http://127.0.0.1:8545 && break; sleep 1; done
-          arc-cast rpc --rpc-url http://127.0.0.1:8545 anvil_mine 0xc351
+          # One 50,001-block anvil_mine outlasts the RPC client timeout; mine in 5,000-block chunks.
+          for _ in $(seq 1 10); do arc-cast rpc --rpc-url http://127.0.0.1:8545 anvil_mine 0x1388; done
+          arc-cast rpc --rpc-url http://127.0.0.1:8545 anvil_mine 0x1
           arc-cast block-number --rpc-url http://127.0.0.1:8545
       - name: 50,000-block sync through the fault proxy
         env:
