@@ -16,7 +16,7 @@
 
 ## Proposed change
 - Record the full sha256 of `arc-foundry-v0.8.0-2-x86_64-unknown-linux-gnu.tar.gz` and `arc-foundry-v0.8.0-2-aarch64-apple-darwin.tar.gz` in A9-13.
-- Until then, `scripts/install-arc-foundry.sh` pins the digests in `scripts/arc-foundry.sha256` as first observed by CI, and the builder checks the Linux digest against the `90e3eefb…db87` fragment.
+- Observed 2026-10-19 in CI (each matched the release `.sha256`): darwin `90e3eefbf7dd80652fd283a7562e9263301a48797bc2224cc21a3964e2d5db87` (matches the A9-13 fragment, so A9-13 was the macOS archive); linux x86_64 `088bdb96a84418b757f9825d491e702792f1d1d1e29a9145af305a6600a79556` (no independent record). Both are pinned in `scripts/arc-foundry.sha256`; please confirm the Linux digest against a second source.
 
 ## Affected tasks
 - T-003, T-022, every CI job that installs Arc Foundry
