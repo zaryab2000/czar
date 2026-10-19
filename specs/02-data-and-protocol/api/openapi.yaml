@@ -28,6 +28,8 @@ tags:
     description: Czar web app ↔ server (passkey-backed session). Phase 1 runs in a desktop browser (D69). Approvals, envelopes, ledger; push routes are stage 2.
   - name: public
     description: Public, unauthenticated, rate-limited reads (Czar discovery index, AM-07).
+  - name: provider
+    description: "ERC-8183 specialist providers (signature-authenticated reads of their own job brief, RV-025)."
   - name: claim
     description: Claim server (Phase 2, D23, D29). Builder GitHub sign-in or FUNDING.json claims.
 
@@ -45,6 +47,11 @@ components:
       scheme: bearer
       bearerFormat: opaque
       description: Short-lived session created from a passkey assertion (D26). 24 h, refreshed on use.
+    ProviderBriefSignature:
+      type: apiKey
+      in: header
+      name: X-Czar-Brief-Signature
+      description: "EIP-712 BriefRequest(jobKey, issuedAt) signature by the job's provider address (EOA or ERC-1271), sent with X-Czar-Provider-Address and X-Czar-Brief-Issued-At (spec 02 §6.2, §9.2; RV-025). issuedAt must be within api.briefSignatureMaxAgeSeconds (300)."
     GitHubOAuth:
       type: oauth2
       description: Builder sign-in (D23). Phase 2. Scope read-only on repository administration.
@@ -1003,6 +1010,23 @@ paths:
         "409": { description: "replay-not-stored (RV-043)", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "429": { $ref: "#/components/responses/RateLimited" }
         "503": { description: Model unavailable or over budget; the daemon falls back (D58), content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+
+  # ---------------- provider ----------------
+  /v1/jobs/{jobKey}/brief:
+    get:
+      tags: [provider]
+      summary: The ERC-8183 job brief, for the job's provider only (RV-025).
+      description: "Returns the JobBrief whose fields are the preimage of the job's on-chain descriptionHash. Only the provider named in the job can read it; any other caller gets 404, so the route is no existence oracle."
+      operationId: getJobBrief
+      security: [ { ProviderBriefSignature: [] } ]
+      parameters:
+        - { name: jobKey, in: path, required: true, schema: { $ref: "#/components/schemas/Hash32" } }
+        - { name: X-Czar-Provider-Address, in: header, required: true, schema: { $ref: "#/components/schemas/Address" } }
+        - { name: X-Czar-Brief-Issued-At, in: header, required: true, schema: { type: integer, minimum: 0, description: "Unix seconds signed in BriefRequest.issuedAt." } }
+      responses:
+        "200": { description: The brief, content: { application/json: { schema: { $ref: "../schemas/job-brief.schema.json" } } } }
+        "404": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
 
   # ---------------- public ----------------
   /v2/x402/discovery/resources:

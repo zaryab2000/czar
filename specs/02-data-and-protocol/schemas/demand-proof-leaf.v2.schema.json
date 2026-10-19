@@ -1,0 +1,133 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://czar.dev/schemas/demand-proof-leaf.v2.schema.json",
+  "title": "DemandProofLeaf (version 2)",
+  "description": "Proof-of-demand chain for one objective, anchored as an EVIDENCE_BATCH leaf (spec 02 \u00a74.17; product \u00a76.22). Version 2 (RV-026): no pseudonym and no bare soulVersionHash; the soul link is a per-envelope salted commitment only the user can open.",
+  "type": "object",
+  "x-privacyClass": "public",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "description": "Schema version, major.minor; this file is 2.0.",
+      "x-privacyClass": "public",
+      "const": "2.0"
+    },
+    "leafType": {
+      "type": "string",
+      "description": "Leaf type.",
+      "x-privacyClass": "public",
+      "const": "demand-proof"
+    },
+    "leafVersion": {
+      "type": "integer",
+      "description": "Leaf version.",
+      "x-privacyClass": "public",
+      "const": 2
+    },
+    "observationHashes": {
+      "type": "array",
+      "items": {
+        "$ref": "common.schema.json#/$defs/Hash32",
+        "description": "Observation hash.",
+        "x-privacyClass": "public"
+      },
+      "description": "Observation hashes.",
+      "x-privacyClass": "public",
+      "maxItems": 50
+    },
+    "objectiveHash": {
+      "$ref": "common.schema.json#/$defs/Hash32",
+      "description": "Objective hash.",
+      "x-privacyClass": "public"
+    },
+    "soulVersionCommit": {
+      "$ref": "common.schema.json#/$defs/Hash32",
+      "description": "keccak256(abi.encode(soulVersionHash, demandSalt)); demandSalt is per envelope, server-only, never used in a soul-version leaf; revealed only to the user (spec 02 \u00a74.17, RV-026).",
+      "x-privacyClass": "public"
+    },
+    "planHash": {
+      "$ref": "common.schema.json#/$defs/Hash32",
+      "description": "Plan hash.",
+      "x-privacyClass": "public"
+    },
+    "envelopeRef": {
+      "$ref": "common.schema.json#/$defs/EnvelopeRef",
+      "description": "Envelope reference.",
+      "x-privacyClass": "public"
+    },
+    "approval": {
+      "type": "object",
+      "description": "Approval reference.",
+      "x-privacyClass": "public",
+      "properties": {
+        "approver": {
+          "type": "string",
+          "enum": [
+            "owner",
+            "agent"
+          ],
+          "description": "Who opened the envelope.",
+          "x-privacyClass": "public"
+        },
+        "txHash": {
+          "$ref": "common.schema.json#/$defs/Hash32",
+          "description": "Opening transaction.",
+          "x-privacyClass": "public"
+        },
+        "blockNumber": {
+          "type": "integer",
+          "description": "Block number.",
+          "x-privacyClass": "public",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "approver",
+        "txHash",
+        "blockNumber"
+      ]
+    },
+    "paymentRefHashes": {
+      "type": "array",
+      "items": {
+        "$ref": "common.schema.json#/$defs/Hash32",
+        "description": "paymentRefHash per step payment.",
+        "x-privacyClass": "public"
+      },
+      "description": "Payment reference hashes.",
+      "x-privacyClass": "public"
+    },
+    "outcomeHashes": {
+      "type": "array",
+      "items": {
+        "$ref": "common.schema.json#/$defs/Hash32",
+        "description": "reportHash per step.",
+        "x-privacyClass": "public"
+      },
+      "description": "Outcome hashes.",
+      "x-privacyClass": "public"
+    },
+    "closedAt": {
+      "$ref": "common.schema.json#/$defs/UnixSeconds",
+      "description": "Envelope close time.",
+      "x-privacyClass": "public"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "leafType",
+    "leafVersion",
+    "observationHashes",
+    "objectiveHash",
+    "soulVersionCommit",
+    "planHash",
+    "envelopeRef",
+    "approval",
+    "paymentRefHashes",
+    "outcomeHashes",
+    "closedAt"
+  ],
+  "$comment": "2026-10-19: created for RV-026; replaces demand-proof-leaf.schema.json (1.0), which stays for reference."
+}

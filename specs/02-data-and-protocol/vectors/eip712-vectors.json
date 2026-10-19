@@ -65,14 +65,20 @@
     "ReceiptAttestation": {
       "typeString": "ReceiptAttestation(bytes32 receiptStructHash)",
       "typeHash": "0x01b75f6051eb731488fad2e8de7925f8a64c89ef33c418e2a62e77ae02691eff"
+    },
+    "BriefRequest": {
+      "typeString": "BriefRequest(bytes32 jobKey,uint64 issuedAt)",
+      "typeHash": "0xe012200f525ff4d3cacf52809316e0f39197c977a4498fb16c875c1defcfc215"
     }
   },
   "domains": {
     "USDC_5042": "0x940506929bba468048a19b567f4f0d534714bc06604b5c3017e5d16785ccdf84",
     "CzarVault_5042_exampleVault": "0xc5b5d62f4382d2cb6a455b9848f98172337df886e42c7c57c0ff82f43c4fa755",
+    "CzarJobBrief_5042": "0x124726bc61ee7eca6ecd36b71428f9fa58889c84a48213eff1e76b3b8559ac24",
     "SelectionLayer_5042": "0x2a6156c387de0428b039beeb8edae161131616d6fc1fd3901b1f1836dfdc5a82",
     "USDC_5042002": "0x361191522483d32a83e70ae7183b4b9629442c13a78bc9921d6f707911c8c6b0",
     "CzarVault_5042002_exampleVault": "0x64b8044ade387c82cd664c7d2b51859e664c6cee481b628977a3b94c6f77b6b0",
+    "CzarJobBrief_5042002": "0x8c06faf59aae1fd812b66bab954eb62f8a9a8d5607d9e79e5e83d67e60fd1e54",
     "SelectionLayer_5042002": "0x4937387a5eb9c824f88751eb9abc6792a901e035deb9ec3fa75f584cc4669f69",
     "GatewayWallet_nameVersionOnly": "0x23a37920eca61226c76d13c4462857a362147e4b18da665dba894fa297ae4f34"
   },
@@ -157,6 +163,13 @@
         "deadline": "1760900000"
       },
       "digest": "0x69b896f95e60ed729ed2cfab1c7a025da52213188bb0fa2fcee14cda92c559f5"
+    },
+    "briefRequest_5042002": {
+      "message": {
+        "jobKey": "0x6efe19b20afe9e34b362d2ee0fb069d50cc530e41ad2965472de264bbf7c0058",
+        "issuedAt": "1792026000"
+      },
+      "digest": "0x991363ddab9205ec2a375be2469430bd8d1b2b9cb767f0e8f21218038a9954fe"
     },
     "derivedNonce_example": {
       "nonceTag": "0x28f8dafc03e5ff5b4b3e5b50613f61c133f15f5a15b023ddecb25e6e9034577d",

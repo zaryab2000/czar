@@ -3,7 +3,7 @@
 // `npm install viem@2.57.2`, then: node <scratch>/compute-eip712-vectors.mjs > eip712-vectors.json
 // Check: node compute-eip712-vectors.mjs | diff - eip712-vectors.json  (must print nothing)
 // Changed 2026-10-19: ReceiptAttestation type and vector, SL_RECEIPT kind tag v2 (RV-013); autonomyRaise deadline
-// moved inside its period (RV-061). Output is fully deterministic (`generatedAt` is the spec date).
+// moved inside its period (RV-061); BriefRequest type, domain and vector (RV-025). Output is fully deterministic (`generatedAt` is the spec date).
 import { keccak256, toHex, hashTypedData, hashDomain, hashStruct, encodeAbiParameters, parseAbiParameters, pad } from "viem";
 const th = (s) => keccak256(toHex(s));
 // generatedAt is the spec date, not the wall clock, so a rerun reproduces the file byte for byte
@@ -30,6 +30,8 @@ const TYPES = {
   OwnerAction: "OwnerAction(uint8 action,bytes32 payloadHash,uint256 nonce,uint256 deadline)",
   // Czar vault-bound wrapper for SL_RECEIPT signatures (RV-013): the agent signs this under the CzarVault domain
   ReceiptAttestation: "ReceiptAttestation(bytes32 receiptStructHash)",
+  // Provider authentication for GET /v1/jobs/{jobKey}/brief (RV-025), domain CzarJobBrief v1 with chainId, no contract
+  BriefRequest: "BriefRequest(bytes32 jobKey,uint64 issuedAt)",
 };
 for (const [k, s] of Object.entries(TYPES)) out.typeHashes[k] = { typeString: s, typeHash: th(s) };
 // Domains
@@ -38,6 +40,7 @@ const VAULT = "0x00000000000000000000000000000000000c2a21"; // invented example 
 for (const chainId of [5042, 5042002]) {
   out.domains[`USDC_${chainId}`] = hashDomain({ domain: { name: "USDC", version: "2", chainId, verifyingContract: USDC }, types: { EIP712Domain: [{name:"name",type:"string"},{name:"version",type:"string"},{name:"chainId",type:"uint256"},{name:"verifyingContract",type:"address"}] } });
   out.domains[`CzarVault_${chainId}_exampleVault`] = hashDomain({ domain: { name: "CzarVault", version: "1", chainId, verifyingContract: VAULT }, types: { EIP712Domain: [{name:"name",type:"string"},{name:"version",type:"string"},{name:"chainId",type:"uint256"},{name:"verifyingContract",type:"address"}] } });
+  out.domains[`CzarJobBrief_${chainId}`] = hashDomain({ domain: { name: "CzarJobBrief", version: "1", chainId }, types: { EIP712Domain: [{name:"name",type:"string"},{name:"version",type:"string"},{name:"chainId",type:"uint256"}] } });
   out.domains[`SelectionLayer_${chainId}`] = hashDomain({ domain: { name: "SelectionLayer", version: "1", chainId }, types: { EIP712Domain: [{name:"name",type:"string"},{name:"version",type:"string"},{name:"chainId",type:"uint256"}] } });
 }
 out.domains.GatewayWallet_nameVersionOnly = hashDomain({ domain: { name: "GatewayWallet", version: "1" }, types: { EIP712Domain: [{name:"name",type:"string"},{name:"version",type:"string"}] } });
@@ -67,6 +70,10 @@ const ra = { receiptStructHash };
 out.vectors.receiptAttestation_5042002 = { message: ra, vault: VAULT, digest: hashTypedData({ domain: { name: "CzarVault", version: "1", chainId: 5042002, verifyingContract: VAULT }, types: { ReceiptAttestation: [{ name: "receiptStructHash", type: "bytes32" }] }, primaryType: "ReceiptAttestation", message: ra }) };
 const oa = { action: 1, payloadHash: "0x7777777777777777777777777777777777777777777777777777777777777777", nonce: 3n, deadline: 1760900000n };
 out.vectors.ownerAction_5042002 = { message: oa, digest: hashTypedData({ domain: { name: "CzarVault", version: "1", chainId: 5042002, verifyingContract: VAULT }, types: { OwnerAction: [["action","uint8"],["payloadHash","bytes32"],["nonce","uint256"],["deadline","uint256"]].map(([name,type])=>({name,type})) }, primaryType: "OwnerAction", message: oa }) };
+// BriefRequest example (RV-025): jobKey = keccak256(abi.encode(jobEscrow, jobId)) for Circle's testnet escrow and job 42
+const briefJobKey = keccak256(encodeAbiParameters(parseAbiParameters("address,uint256"), ["0x0747EEf0706327138c69792bF28Cd525089e4583", 42n]));
+const br = { jobKey: briefJobKey, issuedAt: 1792026000n };
+out.vectors.briefRequest_5042002 = { message: br, digest: hashTypedData({ domain: { name: "CzarJobBrief", version: "1", chainId: 5042002 }, types: { BriefRequest: [{ name: "jobKey", type: "bytes32" }, { name: "issuedAt", type: "uint64" }] }, primaryType: "BriefRequest", message: br }) };
 // Derived nonce example (spec 02 §7): keccak256(abi.encode(NONCE_TAG, vault, reservationId, index))
 const NONCE_TAG = keccak256(toHex("czar.vault.nonce.v1"));
 out.vectors.derivedNonce_example = { nonceTag: NONCE_TAG, vault: VAULT, reservationId: 12n, index: 3, nonce: keccak256(encodeAbiParameters(parseAbiParameters("bytes32,address,uint64,uint32"), [NONCE_TAG, VAULT, 12n, 3])) };

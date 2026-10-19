@@ -176,7 +176,7 @@ None. The contract calls nothing and reads nothing outside its own storage. `blo
 
 | Leaf type | Object | Content | Who can verify |
 |---|---|---|---|
-| `demand-proof` | spec 02 §4.17 `DemandProofLeaf` | observation hashes → `objectiveHash` → `soulVersionHash` → `planHash` → `envelopeRef` + approval tx → `paymentRefHashes` → `outcomeHashes` | anyone can check the `EnvelopeOpened` event carries the same `objectiveHash` and `planHash`; only the user can open the observation preimages |
+| `demand-proof` (leaf version 2) | spec 02 §4.17 `DemandProofLeaf` v2 | observation hashes → `objectiveHash` → `soulVersionCommit` (salted, per envelope, RV-026) → `planHash` → `envelopeRef` + approval tx → `paymentRefHashes` → `outcomeHashes`; no pseudonym | anyone can check the `EnvelopeOpened` event carries the same `objectiveHash` and `planHash`; only the user can open the observation preimages and the soul link (by revealing `demandSalt`) |
 | `soul-version` | spec 02 §4.18 `SoulVersionLeaf` | `userPseudonym`, `soulVersion`, `soulVersionHash`, `previousHash`, `compiledAt` | the user can later reveal any belief against `sectionHashes` (spec 02 §5.2) |
 | SL rows | `observation`, `report`, `assessment`, `correction`, `exposure`, `submission-log` | SL §5 objects | per SL §11 disclosure |
 
@@ -230,4 +230,5 @@ Estimates; measured values go in `security-and-testing.md` gas snapshots.
 |---|---|---|
 | 2026-10-18 | D54 | Phase 1 archives stay on Czar's server; `uriHash = keccak256(utf8(archiveUri))`; IPFS pinning moved to Phase 2 (§11, §12, §13). The verbatim SL quote in §1 is unchanged; §11 states how Czar uses `uriHash`. |
 | 2026-10-19 | RV-014 | `commit` of an already-known `PROBE_INTENT` root reverts `AlreadyCommitted` (§1.1, §6, §7, §8); OEL-2 tightened, OEL-6 added (SCR-014). The architecture document's §7.1 carries the same amendment. |
-| 2026-10-19 | D78 | §11: Phase 1 `archiveUri` rule (local server; anchors carry the stage-2 public host), see below. |
+| 2026-10-19 | D78 | §11: Phase 1 `archiveUri` is the host-free `czar-archive:<root>`; archives served by the local server; the stage-2 public host serves the same roots. |
+| 2026-10-19 | RV-026 | §11: `demand-proof` leaf version 2 (no pseudonym; salted soul commitment). |
