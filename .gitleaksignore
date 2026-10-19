@@ -1,0 +1,8 @@
+# Reviewed false positives (T-002, 2026-10-19): bytes32 jobKey values in spec examples,
+# idempotency UUIDs in experiment logs and a contract address in research notes. No key material.
+4f345f5c5469bb9672e13f865e0a6d989c12bc54:specs/02-data-and-protocol/examples/job-record.example.json:generic-api-key:8
+4f345f5c5469bb9672e13f865e0a6d989c12bc54:specs/02-data-and-protocol/examples/job-brief.example.json:generic-api-key:7
+b187082d343942fe3311aadffb313997fb63ab42:specs/02-data-and-protocol/vectors/eip712-vectors.json:generic-api-key:169
+dd198662429bb8ffb2841c23530702f3386ee3eb:research/evidence/experiments/a1-erc1271-usdc/raw/fund-transfer.json:generic-api-key:3
+dd198662429bb8ffb2841c23530702f3386ee3eb:research/evidence/arc-circle-docs-2026-10-18.md:generic-api-key:77
+dd198662429bb8ffb2841c23530702f3386ee3eb:research/evidence/experiments/a2-gateway-e2e/raw/fund-transfer.json:generic-api-key:3
