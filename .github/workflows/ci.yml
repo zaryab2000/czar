@@ -94,7 +94,7 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -113,9 +113,15 @@ jobs:
         run: |
           arc-anvil --network arc --chain-id 5042002 --port 8545 > "$RUNNER_TEMP/anvil.log" 2>&1 &
           for _ in $(seq 1 30); do arc-cast chain-id --rpc-url http://127.0.0.1:8545 && break; sleep 1; done
-          # One 50,001-block anvil_mine outlasts the RPC client timeout; mine in 5,000-block chunks.
-          for _ in $(seq 1 10); do arc-cast rpc --rpc-url http://127.0.0.1:8545 anvil_mine 0x1388; done
-          arc-cast rpc --rpc-url http://127.0.0.1:8545 anvil_mine 0x1
+          # arc-anvil mines a few hundred blocks a second and arc-cast gives up after 45 s, so mine
+          # in 5,000-block chunks over curl with a long per-call limit, printing progress.
+          mine() {
+            curl -sS --fail --max-time 600 -H 'content-type: application/json' \
+              --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"anvil_mine\",\"params\":[\"$1\"]}" \
+              http://127.0.0.1:8545 > /dev/null
+          }
+          for i in $(seq 1 10); do mine 0x1388; echo "mined chunk $i at ${SECONDS}s"; done
+          mine 0x1
           arc-cast block-number --rpc-url http://127.0.0.1:8545
       - name: 50,000-block sync through the fault proxy
         env:
