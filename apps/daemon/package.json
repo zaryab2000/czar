@@ -1,0 +1,25 @@
+{
+  "name": "@czar/daemon",
+  "version": "0.0.0",
+  "private": true,
+  "bin": {
+    "czar": "./src/cli.ts"
+  },
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./launchd": "./src/launchd.ts",
+    "./hook-server": "./src/hook-server.ts",
+    "./status": "./src/status.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@czar/config": "workspace:*",
+    "@czar/logging": "workspace:*",
+    "@napi-rs/keyring": "2.1.1",
+    "better-sqlite3-multiple-ciphers": "13.0.3"
+  }
+}
