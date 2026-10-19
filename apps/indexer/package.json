@@ -1,0 +1,22 @@
+{
+  "name": "@czar/indexer",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./rpc": "./src/rpc/arc-transport.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json && tsc -p test/fixtures/resume/tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@czar/config": "workspace:*",
+    "@czar/logging": "workspace:*",
+    "ponder": "0.18.2",
+    "viem": "2.57.7"
+  },
+  "devDependencies": {
+    "hono": "4.13.13"
+  }
+}

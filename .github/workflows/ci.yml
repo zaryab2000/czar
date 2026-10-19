@@ -88,3 +88,34 @@ jobs:
         env:
           FOUNDRY_PROFILE: arc
         run: arc-forge test -vvv
+
+  indexer-arc-anvil:
+    name: indexer paging against arc-anvil
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - run: pnpm install --frozen-lockfile
+      - run: |
+          scripts/install-arc-foundry.sh "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      # T-030: the fault proxy sits in front of arc-anvil, which has no log-range cap of its own (RV-057).
+      - name: start arc-anvil and mine 50,001 blocks
+        run: |
+          arc-anvil --network arc --chain-id 5042002 --port 8545 > "$RUNNER_TEMP/anvil.log" 2>&1 &
+          for _ in $(seq 1 30); do arc-cast chain-id --rpc-url http://127.0.0.1:8545 && break; sleep 1; done
+          arc-cast rpc --rpc-url http://127.0.0.1:8545 anvil_mine 0xc351
+          arc-cast block-number --rpc-url http://127.0.0.1:8545
+      - name: 50,000-block sync through the fault proxy
+        env:
+          ARC_ANVIL_URL: http://127.0.0.1:8545
+        run: pnpm --filter @czar/indexer exec vitest run test/sync-50k.test.ts
