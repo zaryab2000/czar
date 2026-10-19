@@ -1,0 +1,920 @@
+diff -ru src-1.2.0/src/chain-map.ts src-1.2.2/src/chain-map.ts
+--- src-1.2.0/src/chain-map.ts	2026-10-18 19:48:05
++++ src-1.2.2/src/chain-map.ts	2026-10-18 19:48:05
+@@ -195,7 +195,7 @@
+     chainFamily: 'evm',
+     walletSupported: true,
+     nativeCurrency: 'USDC',
+-    defaultRpcUrl: 'https://rpc.testnet.arc.network',
++    defaultRpcUrl: 'https://rpc.testnet.arc.io',
+     cctpDomain: 26,
+   },
+ ]
+diff -ru src-1.2.0/src/cli.ts src-1.2.2/src/cli.ts
+--- src-1.2.0/src/cli.ts	2026-10-18 19:48:05
++++ src-1.2.2/src/cli.ts	2026-10-18 19:48:05
+@@ -708,6 +708,7 @@
+   'update',
+   'terms',
+   'skill',
++  'telemetry',
+ ])
+ 
+ /**
+@@ -735,6 +736,7 @@
+     resource === 'help' ||
+     resource === 'update' ||
+     resource === 'skill' ||
++    resource === 'telemetry' ||
+     resource === '--version' ||
+     resource === '-v' ||
+     isHelpInvocation(argv)
+diff -ru src-1.2.0/src/command-registry.ts src-1.2.2/src/command-registry.ts
+--- src-1.2.0/src/command-registry.ts	2026-10-18 19:48:05
++++ src-1.2.2/src/command-registry.ts	2026-10-18 19:48:05
+@@ -39,6 +39,10 @@
+     defaultVerb: 'help',
+     verbs: ['status', 'enable', 'disable'],
+   },
++  terms: {
++    defaultVerb: 'show',
++    verbs: ['show', 'accept', 'reset'],
++  },
+   transaction: {
+     defaultVerb: 'help',
+     verbs: ['list', 'cancel', 'accelerate'],
+diff -ru src-1.2.0/src/commands/helpers.ts src-1.2.2/src/commands/helpers.ts
+--- src-1.2.0/src/commands/helpers.ts	2026-10-18 19:48:05
++++ src-1.2.2/src/commands/helpers.ts	2026-10-18 19:48:05
+@@ -36,6 +36,7 @@
+     '--timeout',
+     '--category',
+     '--max-amount',
++    '--payment-id',
+     '--data',
+     '-d',
+     '--header',
+diff -ru src-1.2.0/src/commands/services/inspect.ts src-1.2.2/src/commands/services/inspect.ts
+--- src-1.2.0/src/commands/services/inspect.ts	2026-10-18 19:48:05
++++ src-1.2.2/src/commands/services/inspect.ts	2026-10-18 19:48:05
+@@ -9,15 +9,23 @@
+ } from '../../output.js'
+ import { setTelemetryContext } from '../../telemetry.js'
+ import {
++  describePaymentOption,
+   formatUsdcAmount,
++  isUsdcPaymentOption,
+   networkToChainName,
++  paymentCompatibilityError,
+   parsePaymentRequiredFromResponse,
++  selectPaymentOption,
+ } from '../../x402-client.js'
+ import { positionalArgs, readFlagValue } from '../helpers.js'
+ 
+ import { makeRequest } from './http-client.js'
+ 
+-import type { InspectStatus, PaymentRequired } from '../../x402-client.js'
++import type {
++  InspectStatus,
++  PaymentOption,
++  PaymentRequired,
++} from '../../x402-client.js'
+ 
+ const DISCOVERY_URL =
+   process.env.CIRCLE_DISCOVERY_URL ??
+@@ -65,10 +73,26 @@
+   price?: { amount: string; formatted: string }
+   chains?: string[]
+   scheme?: string
++  assetTransferMethod?: string
++  amountKind?: 'price' | 'authorized_maximum'
++  clientSupport?: 'supported' | 'unsupported'
++  prerequisites?: 'not_checked'
+   seller?: string
+   input?: Record<string, unknown>
++  paymentOptions?: InspectedPaymentOption[]
+ }
+ 
++type InspectedPaymentOption = ReturnType<typeof describePaymentOption> & {
++  network: string
++  asset: string
++  amount: string
++  price?: { amount: string; formatted: string }
++  clientSupport: 'supported' | 'unsupported'
++  compatibilityError?: string
++  prerequisites: 'not_checked'
++  seller: string
++}
++
+ type SchemaProperty = {
+   type?: string
+   description?: string
+@@ -264,6 +288,33 @@
+     .join('\n\n')
+ }
+ 
++/** Report each offer independently; USDC formatting requires a registered token. */
++function inspectPaymentOption(
++  payment: PaymentRequired,
++  option: PaymentOption,
++): InspectedPaymentOption {
++  const compatibilityError = paymentCompatibilityError(payment, option)
++  return {
++    ...describePaymentOption(option),
++    network: option.network,
++    asset: option.asset,
++    amount: option.amount,
++    ...(isUsdcPaymentOption(option)
++      ? {
++          price: {
++            amount: option.amount,
++            formatted: formatUsdcAmount(option.amount),
++          },
++        }
++      : {}),
++    clientSupport: compatibilityError ? 'unsupported' : 'supported',
++    compatibilityError,
++    prerequisites: 'not_checked',
++    seller: option.payTo,
++  }
++}
++
++/** Combine endpoint metadata with per-offer support and a supported headline. */
+ function buildInspectResult(
+   url: string,
+   discovery: DiscoveryMetadata | null,
+@@ -284,19 +335,29 @@
+     result.method = discovery.method
+     result.input = discovery.input
+   }
+-  if (probe.payment && probe.payment.accepts.length > 0) {
+-    const accepts = probe.payment.accepts
+-    result.price = {
+-      amount: accepts[0].amount,
+-      formatted: formatUsdcAmount(accepts[0].amount),
+-    }
++  const payment = probe.payment
++  if (payment && payment.accepts.length > 0) {
++    const accepts = payment.accepts
++    const paymentOptions = accepts.map((a) => inspectPaymentOption(payment, a))
++    result.paymentOptions = paymentOptions
++    const supported = accepts.filter(
++      (_a, i) => paymentOptions[i].clientSupport === 'supported',
++    )
++    const representative = selectPaymentOption(supported) ?? accepts[0]
++    const summary = paymentOptions[accepts.indexOf(representative)]
++    result.price = summary.price
+     result.chains = [...new Set(accepts.map((a) => a.network))]
+-    result.scheme = accepts[0].extra?.name ?? accepts[0].scheme
+-    result.seller = accepts[0].payTo
++    result.scheme = summary.scheme
++    result.assetTransferMethod = summary.assetTransferMethod
++    result.amountKind = summary.amountKind
++    result.clientSupport = supported.length > 0 ? 'supported' : 'unsupported'
++    result.prerequisites = 'not_checked'
++    result.seller = summary.seller
+   }
+   return result
+ }
+ 
++/** Render endpoint status, pricing and each advertised payment mechanism. */
+ // eslint-disable-next-line sonarjs/cognitive-complexity
+ function renderInspectText(result: InspectResult): string {
+   const lines: string[] = []
+@@ -347,11 +408,32 @@
+ 
+   if (result.price) {
+     lines.push('')
+-    lines.push(`Price:       ${result.price.formatted}`)
++    lines.push(
++      `${result.amountKind === 'authorized_maximum' ? 'Authorized max' : 'Price'}:       ${result.price.formatted}`,
++    )
+   }
+   if (result.scheme) lines.push(`Scheme:      ${result.scheme}`)
++  if (result.assetTransferMethod)
++    lines.push(`Transfer:    ${result.assetTransferMethod}`)
++  if (result.clientSupport) lines.push(`Client:      ${result.clientSupport}`)
++  if (result.prerequisites) lines.push(`Prereqs:     ${result.prerequisites}`)
+   if (result.chains) lines.push(`Chains:      ${formatChains(result.chains)}`)
+   if (result.seller) lines.push(`Seller:      ${result.seller}`)
++
++  if (result.paymentOptions && result.paymentOptions.length > 1) {
++    lines.push('', 'Payment options:')
++    for (const option of result.paymentOptions) {
++      const amount = option.price?.formatted ?? `${option.amount} atomic units`
++      const kind =
++        option.amountKind === 'authorized_maximum' ? 'authorized max' : 'price'
++      const method = option.assetTransferMethod ?? 'unspecified'
++      lines.push(
++        `  ${networkToChainName(option.network)}: ${option.scheme}, ${method}, ${kind} ${amount}, ${option.clientSupport}`,
++      )
++      if (option.compatibilityError)
++        lines.push(`    ${option.compatibilityError}`)
++    }
++  }
+ 
+   if (result.input) {
+     const schema = renderInputSchema(result.input)
+diff -ru src-1.2.0/src/commands/services/pay.ts src-1.2.2/src/commands/services/pay.ts
+--- src-1.2.0/src/commands/services/pay.ts	2026-10-18 19:48:05
++++ src-1.2.2/src/commands/services/pay.ts	2026-10-18 19:48:05
+@@ -1,8 +1,11 @@
++import { randomUUID } from 'node:crypto'
+ import { mkdir, writeFile } from 'node:fs/promises'
+ import { join } from 'node:path'
+ 
+ import { supportsBatching } from '@circle-fin/x402-batching'
+ import { encodePaymentSignatureHeader } from '@x402/core/http'
++import { PERMIT2_ADDRESS } from '@x402/evm'
++import { decodeAbiParameters, parseAbiParameters } from 'viem'
+ 
+ import { USDC_DECIMALS, parseAmount } from '../../amount.js'
+ import { isTestnet, getEvmChainId, resolveBlockchain } from '../../chain-map.js'
+@@ -31,9 +34,11 @@
+ import {
+   createX402Scheme,
+   createX402SchemeV1,
++  describePaymentOption,
+   extractChainId,
+   formatUsdcAmount,
+   networkToChainName,
++  paymentCompatibilityError,
+   parseFacilitatorError,
+   parsePaymentRequiredFromResponse,
+   selectPaymentOption,
+@@ -63,6 +68,7 @@
+   -d, --data <data>      Request body JSON string (implies POST if no -X given)
+   -H, --header <header>  Custom header as "Key: Value"
+   --max-amount <usdc>    Refuse to pay more than this in USDC (e.g. 0.01)
++  --payment-id <id>      Stable 16-128 character payment identifier for a manual retry
+   --timeout <seconds>    Request timeout in seconds (default: 30)
+   --estimate             Show payment requirements without paying
+   ${OUTPUT_FLAG_HELP}
+@@ -87,6 +93,7 @@
+   maxAmountSubunits: bigint | null
+   timeout: number
+   estimate: boolean
++  paymentId: string | null
+ }
+ 
+ function stringifyError(err: unknown): string {
+@@ -134,6 +141,7 @@
+   return hasData ? 'POST' : 'GET'
+ }
+ 
++/** Parse the endpoint and wallet flags, rejecting invalid amounts and timeouts. */
+ function validateInput(args: string[]): ValidatedInput | null {
+   const url = positionalArgs(args)[0]
+   if (!url) {
+@@ -197,6 +205,7 @@
+     maxAmountSubunits,
+     timeout,
+     estimate: args.includes('--estimate'),
++    paymentId: readFlagValue(args, '--payment-id'),
+   }
+ }
+ 
+@@ -269,6 +278,7 @@
+   accepts: PaymentOption[]
+   x402Version: number
+   resource?: { url?: string; description?: string; mimeType?: string }
++  extensions?: Record<string, unknown>
+ }
+ 
+ function handleInitialRequestError(err: unknown, args: string[]): void {
+@@ -322,6 +332,7 @@
+   process.exitCode = 1
+ }
+ 
++/** Classify the initial HTTP response and select an advertised payment offer. */
+ async function fetchPaymentRequirements(
+   input: ValidatedInput,
+   blockchain: string,
+@@ -386,7 +397,17 @@
+     return null
+   }
+ 
+-  const option = selectPaymentOption(payment.accepts, getEvmChainId(blockchain))
++  const chainId = getEvmChainId(blockchain)
++  const compatibleSameChain = payment.accepts.filter(
++    (offer) =>
++      extractChainId(offer.network) === chainId &&
++      paymentCompatibilityError(payment, offer) === undefined,
++  )
++  // Retain the original offer for compatibility errors or chain hints when none
++  // can be paid on the requested chain. Never switch chains to find support.
++  const option =
++    selectPaymentOption(compatibleSameChain, chainId) ??
++    selectPaymentOption(payment.accepts, chainId)
+   if (!option) {
+     const supported = [
+       ...new Set(payment.accepts.map((a) => networkToChainName(a.network))),
+@@ -404,9 +425,90 @@
+     accepts: payment.accepts,
+     x402Version: payment.x402Version,
+     resource: payment.resource,
++    extensions: payment.extensions,
+   }
+ }
+ 
++const PAYMENT_IDENTIFIER = 'payment-identifier'
++const PAYMENT_ID_PATTERN = /^[a-zA-Z0-9_-]{16,128}$/
++
++/** Echo declared extensions and assign a stable identifier before signing. */
++
++function prepareExtensions(
++  extensions: Record<string, unknown> | undefined,
++  paymentId: string | null,
++  x402Version: number,
++): Record<string, unknown> | undefined {
++  if (paymentId !== null && x402Version !== 2) {
++    throw new Error('--payment-id is supported only by x402 version 2.')
++  }
++  if (paymentId !== null && extensions?.[PAYMENT_IDENTIFIER] === undefined) {
++    throw new Error(
++      '--payment-id requires an advertised payment-identifier extension.',
++    )
++  }
++  if (!extensions) return undefined
++  const copy = structuredClone(extensions)
++  const identifier = copy[PAYMENT_IDENTIFIER]
++  if (identifier === undefined) return copy
++  const info = (identifier as { info: Record<string, unknown> }).info
++  const id =
++    paymentId ??
++    (typeof info.id === 'string' ? info.id : randomUUID().replaceAll('-', ''))
++  if (!PAYMENT_ID_PATTERN.test(id)) {
++    throw new Error(
++      'Invalid --payment-id: use 16-128 alphanumeric, hyphen, or underscore characters.',
++    )
++  }
++  info.id = id
++  return copy
++}
++
++/** Fail closed unless the selected wallet already approved the full ceiling. */
++async function verifyPermit2Allowance(
++  session: { client: CircleHttpClient },
++  owner: string,
++  blockchain: string,
++  option: PaymentOption,
++  args: string[],
++): Promise<boolean> {
++  try {
++    const { outputData } = await session.client.queryContract({
++      address: option.asset,
++      blockchain,
++      abiFunctionSignature: 'allowance(address,address)',
++      abiParameters: [owner, PERMIT2_ADDRESS],
++    })
++    if (!/^0x[0-9a-fA-F]{64}$/.test(outputData))
++      throw new Error('malformed output')
++    const [allowance] = decodeAbiParameters(
++      parseAbiParameters('uint256'),
++      outputData as `0x${string}`,
++    )
++    if (allowance < BigInt(option.amount)) {
++      outputError(
++        `USDC allowance to Permit2 is below the authorized maximum ${formatUsdcAmount(option.amount)}.`,
++        args,
++        'INVALID_ARGUMENT',
++        `Approve ${PERMIT2_ADDRESS} from the selected wallet first; Circle CLI will not create an approval automatically.`,
++      )
++      process.exitCode = 1
++      return false
++    }
++    return true
++  } catch (err) {
++    outputError(
++      "Could not verify the selected wallet's token allowance to Permit2.",
++      args,
++      'INTERNAL',
++      `No payment was signed. Verify the allowance for ${option.asset} on ${blockchain} and retry. (${stringifyError(err)})`,
++    )
++    process.exitCode = 1
++    return false
++  }
++}
++
++/** Return the resource body with authorization and seller-receipt evidence. */
+ function outputPaidResponse(
+   responseBody: string,
+   option: ParsedPayment['option'],
+@@ -424,16 +526,33 @@
+     } catch {
+       parsedBody = responseBody
+     }
++    const payment =
++      option.scheme === 'upto'
++        ? {
++            authorizedMaximum: formatUsdcAmount(option.amount),
++            actualAmount: sellerReportedUptoAmount(
++              paymentResponse,
++              option.amount,
++            ),
++            actualAmountEvidence: paymentResponse
++              ? 'seller-reported receipt; not independently confirmed'
++              : 'unknown (no seller receipt)',
++            chain: networkToChainName(option.network),
++            ...describePaymentOption(option),
++            seller: option.payTo,
++            receipt: paymentResponse,
++          }
++        : {
++            amount: formatUsdcAmount(option.amount),
++            chain: networkToChainName(option.network),
++            ...describePaymentOption(option),
++            seller: option.payTo,
++            receipt: paymentResponse,
++          }
+     output(
+       {
+         response: parsedBody,
+-        payment: {
+-          amount: formatUsdcAmount(option.amount),
+-          chain: networkToChainName(option.network),
+-          scheme: option.extra?.name ?? option.scheme,
+-          seller: option.payTo,
+-          receipt: paymentResponse,
+-        },
++        payment,
+       },
+       args,
+     )
+@@ -442,6 +561,32 @@
+   process.stdout.write(responseBody + '\n')
+ }
+ 
++/** Accept only a seller receipt amount bounded by the signed authorization. */
++function sellerReportedUptoAmount(
++  receipt: string | undefined,
++  authorizedMaximum: string,
++): string | undefined {
++  if (!receipt) return undefined
++  try {
++    const decoded = JSON.parse(
++      Buffer.from(receipt, 'base64').toString('utf-8'),
++    ) as {
++      amount?: unknown
++      payload?: { amount?: unknown }
++    }
++    const amount = decoded.amount ?? decoded.payload?.amount
++    if (
++      typeof amount !== 'string' ||
++      !/^\d+$/.test(amount) ||
++      BigInt(amount) > BigInt(authorizedMaximum)
++    )
++      return undefined
++    return formatUsdcAmount(amount)
++  } catch {
++    return undefined
++  }
++}
++
+ /**
+  * Decimal amount string (e.g. `"0.141"`, `"-1.5"`) to atomic units for
+  * `decimals`. Returns `0n` for unparseable input: a balance the CLI can't
+@@ -834,9 +979,11 @@
+       address: input.address,
+       blockchain: input.blockchain,
+       payment: {
+-        amount: formatUsdcAmount(option.amount),
++        ...(option.scheme === 'upto'
++          ? { authorizedMaximum: formatUsdcAmount(option.amount) }
++          : { amount: formatUsdcAmount(option.amount) }),
+         chain: networkToChainName(option.network),
+-        scheme: option.extra?.name ?? option.scheme,
++        ...describePaymentOption(option),
+         seller: option.payTo,
+       },
+       paymentHeader,
+@@ -868,11 +1015,13 @@
+  * the V1 spec — keeping the SDK contract intact and forward-compatible with
+  * any future top-level field.
+  */
++/** Encode the signed payment in the selected protocol version's wire envelope. */
+ function buildPaymentHeader(
+   parsed: ParsedPayment,
+   url: string,
+   effectiveOption: PaymentOption,
+   paymentPayload: SignedPayment['paymentPayload'],
++  extensions: Record<string, unknown> | undefined,
+ ): { headerName: string; headerValue: string; fullPayload: unknown } {
+   if (parsed.x402Version === 1) {
+     // The function name reads V2-only, but @x402/core's
+@@ -899,7 +1048,12 @@
+         description: 'Paid resource',
+         mimeType: 'application/json',
+       }
+-  const fullPayload = { ...paymentPayload, accepted: effectiveOption, resource }
++  const fullPayload = {
++    ...paymentPayload,
++    accepted: effectiveOption,
++    resource,
++    ...(extensions ? { extensions } : {}),
++  }
+   return {
+     headerName: 'PAYMENT-SIGNATURE',
+     // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-explicit-any -- x402 SDK encodes any JSON-serializable payload
+@@ -1022,6 +1176,7 @@
+   }
+ }
+ 
++/** Sign and submit once, retaining the authorization if submission is uncertain. */
+ async function executePaymentFlow(
+   input: ValidatedInput,
+   session: {
+@@ -1053,7 +1208,13 @@
+     headerName,
+     headerValue: paymentHeader,
+     fullPayload,
+-  } = buildPaymentHeader(parsed, input.url, effectiveOption, paymentPayload)
++  } = buildPaymentHeader(
++    parsed,
++    input.url,
++    effectiveOption,
++    paymentPayload,
++    parsed.extensions,
++  )
+ 
+   log('Sending paid request...\n')
+   let paidRes: Response
+@@ -1119,15 +1280,16 @@
+   const responseBody = await paidRes.text()
+   outputPaidResponse(
+     responseBody,
+-    option,
++    effectiveOption,
+     readPaymentResponseHeader(parsed, paidRes.headers),
+     args,
+   )
+   log(
+-    `Paid ${formatUsdcAmount(option.amount)} on ${networkToChainName(option.network)}\n`,
++    `${option.scheme === 'upto' ? 'Authorized up to' : 'Paid'} ${formatUsdcAmount(option.amount)} on ${networkToChainName(option.network)}\n`,
+   )
+ }
+ 
++/** Resolve the managed signer and check Gateway funds or existing Permit2 allowance. */
+ async function resolveSignerAndPreflight(
+   input: ValidatedInput,
+   session: {
+@@ -1179,6 +1341,20 @@
+     if (!supportsBatching(activeOption)) signerAddress = input.address
+   }
+ 
++  if (
++    activeOption.scheme === 'upto' ||
++    activeOption.extra?.assetTransferMethod === 'permit2'
++  ) {
++    const allowed = await verifyPermit2Allowance(
++      session,
++      input.address,
++      input.blockchain,
++      activeOption,
++      args,
++    )
++    if (!allowed) return null
++  }
++
+   return { signerAddress, activeOption }
+ }
+ 
+@@ -1300,9 +1476,9 @@
+   return undefined
+ }
+ 
+-/**
+- *
+- */
++/** Validate a USDC offer, preflight its signer, then submit one paid request. */
++// Command orchestration keeps its explicit early exits so no signing follows a failed preflight.
++// eslint-disable-next-line sonarjs/cognitive-complexity
+ export async function servicesPayCommand(args: string[]): Promise<void> {
+   if (args.includes('--help') || args.includes('-h')) {
+     process.stdout.write(HELP_TEXT + '\n')
+@@ -1318,22 +1494,54 @@
+   const parsed = await fetchPaymentRequirements(input, input.blockchain, args)
+   if (!parsed) return
+ 
++  const mechanismError = paymentCompatibilityError(parsed, parsed.option)
++  if (mechanismError) {
++    outputError(mechanismError, args, 'INVALID_ARGUMENT')
++    process.exitCode = 1
++    return
++  }
++  try {
++    // Validate required extensions before any Circle signing challenge.
++    parsed.extensions = prepareExtensions(
++      parsed.extensions,
++      input.paymentId,
++      parsed.x402Version,
++    )
++  } catch (err) {
++    outputError(
++      'Could not prepare required x402 extensions.',
++      args,
++      'INVALID_ARGUMENT',
++      stringifyError(err),
++    )
++    process.exitCode = 1
++    return
++  }
++
+   // --estimate only needs the payment requirements (price preview), not the
+   // signer or Gateway balance. Skip preflight to avoid blocking users who
+   // haven't deposited yet. Chain-mismatch validation is skipped too — a
+   // price preview is chain-agnostic and useful even when the user will
+   // retry with a different chain.
+   if (input.estimate) {
++    const amount = formatUsdcAmount(parsed.option.amount)
++    const description = describePaymentOption(parsed.option)
++    const label =
++      description.amountKind === 'authorized_maximum'
++        ? 'Authorized maximum'
++        : 'Payment required'
+     output(
+       {
+-        message: `Payment required: ${formatUsdcAmount(parsed.option.amount)}`,
+-        price: formatUsdcAmount(parsed.option.amount),
++        message: `${label}: ${amount}`,
++        ...(parsed.option.scheme === 'upto'
++          ? { authorizedMaximum: amount }
++          : { price: amount }),
+         chain: networkToChainName(parsed.option.network),
+-        scheme: parsed.option.extra?.name ?? parsed.option.scheme,
++        ...description,
+         seller: parsed.option.payTo,
+       },
+       args,
+-      formatUsdcAmount(parsed.option.amount),
++      parsed.option.scheme === 'upto' ? `${label}: ${amount}` : amount,
+     )
+     return
+   }
+diff -ru src-1.2.0/src/telemetry.ts src-1.2.2/src/telemetry.ts
+--- src-1.2.0/src/telemetry.ts	2026-10-18 19:48:05
++++ src-1.2.2/src/telemetry.ts	2026-10-18 19:48:05
+@@ -247,9 +247,11 @@
+   }
+ }
+ 
+-/** Keeps telemetry-management commands from emitting telemetry. */
++const TELEMETRY_SILENT_RESOURCES = new Set(['telemetry', 'terms'])
++
++/** Keeps telemetry-management and Terms commands from emitting telemetry. */
+ export function shouldEmitTelemetryFor(argv: string[]): boolean {
+-  return getCommandDescriptor(argv).resource !== 'telemetry'
++  return !TELEMETRY_SILENT_RESOURCES.has(getCommandDescriptor(argv).resource)
+ }
+ 
+ function redactPathSegment(segment: string): string {
+diff -ru src-1.2.0/src/x402-client.ts src-1.2.2/src/x402-client.ts
+--- src-1.2.0/src/x402-client.ts	2026-10-18 19:48:05
++++ src-1.2.2/src/x402-client.ts	2026-10-18 19:48:05
+@@ -6,13 +6,16 @@
+   BatchEvmScheme,
+   CompositeEvmScheme,
+ } from '@circle-fin/x402-batching/client'
+-import { ExactEvmScheme } from '@x402/evm'
++import { ExactEvmScheme, UptoEvmScheme } from '@x402/evm'
+ import { ExactEvmSchemeV1 } from '@x402/evm/exact/v1/client'
+ import { EVM_NETWORK_CHAIN_ID_MAP } from '@x402/evm/v1'
++import { getTypesForEIP712Domain, isAddress, zeroAddress } from 'viem'
+ import * as viemChains from 'viem/chains'
+ 
+ import { USDC_DECIMALS, USDC_SCALE } from './amount.js'
++import { resolveBlockchain } from './chain-map.js'
+ import { executeChallenge } from './commands/wallet/helpers.js'
++import { getUsdcAddress } from './contract-addresses.js'
+ 
+ import type { CircleHttpClient } from './circle-http-client.js'
+ import type { CircleWallet, EnvSession } from './types.js'
+@@ -46,6 +49,8 @@
+      * token-to-Permit2 allowance to settle.
+      */
+     assetTransferMethod?: string
++    /** Required by the x402 upto Permit2 witness. */
++    facilitatorAddress?: string
+   }
+ }
+ 
+@@ -53,9 +58,113 @@
+   x402Version: number
+   resource?: { url?: string; description?: string; mimeType?: string }
+   accepts: PaymentOption[]
++  extensions?: Record<string, unknown>
+ }
+ 
++/** Match the offered token to the chain's registered USDC deployment. */
++export function isUsdcPaymentOption(option: PaymentOption): boolean {
++  const chainId = extractChainId(option.network)
++  const blockchain =
++    chainId === undefined ? undefined : resolveBlockchain(String(chainId))
++  const usdc = blockchain ? getUsdcAddress(blockchain) : null
++  return (
++    usdc !== null &&
++    typeof option.asset === 'string' &&
++    option.asset.toLowerCase() === usdc.toLowerCase()
++  )
++}
++
++/** Describe the protocol mechanism without exposing unvalidated transfer values. */
++export function describePaymentOption(option: PaymentOption): {
++  scheme: string
++  assetTransferMethod?: string
++  amountKind: 'price' | 'authorized_maximum'
++} {
++  const method = option.extra?.assetTransferMethod
++  let assetTransferMethod: string | undefined
++  if (method === undefined || typeof method === 'string') {
++    if (supportsBatching(option)) assetTransferMethod = 'gateway'
++    else if (method !== undefined) assetTransferMethod = method
++    else if (option.scheme === 'upto') assetTransferMethod = 'permit2'
++    else if (option.scheme === 'exact') assetTransferMethod = 'eip3009'
++  }
++  return {
++    scheme: option.scheme,
++    assetTransferMethod,
++    amountKind: option.scheme === 'upto' ? 'authorized_maximum' : 'price',
++  }
++}
++
+ /**
++ * Validate the wire-level features the CLI can represent before signing or
++ * promising support in inspection output. This deliberately does not check
++ * wallet balances or approvals, which require the selected wallet.
++ */
++// Keeps all protocol-version, mechanism, and extension invariants together.
++// eslint-disable-next-line sonarjs/cognitive-complexity
++export function paymentCompatibilityError(
++  payment: Pick<PaymentRequired, 'x402Version' | 'extensions'>,
++  option: PaymentOption,
++): string | undefined {
++  if (payment.x402Version !== 1 && payment.x402Version !== 2) {
++    return `Unsupported x402 version '${payment.x402Version}'.`
++  }
++  if (!isUsdcPaymentOption(option)) {
++    return `Only registered USDC payments are supported on ${networkToChainName(option.network)}.`
++  }
++  for (const [name, value] of Object.entries(payment.extensions ?? {})) {
++    const info =
++      value !== null && typeof value === 'object' && 'info' in value
++        ? (value as { info?: unknown }).info
++        : undefined
++    const required =
++      info !== null && typeof info === 'object' && 'required' in info
++        ? (info as { required?: unknown }).required === true
++        : false
++    if (required && payment.x402Version === 1) {
++      return `Required x402 extension '${name}' is unsupported in x402 version 1.`
++    }
++    if (required && name !== 'payment-identifier') {
++      return `Required x402 extension '${name}' is not supported.`
++    }
++    if (name === 'payment-identifier' && value !== undefined) {
++      if (
++        info === null ||
++        typeof info !== 'object' ||
++        typeof (info as { required?: unknown }).required !== 'boolean'
++      ) {
++        return "The server's payment-identifier extension is malformed."
++      }
++    }
++  }
++  const method = option.extra?.assetTransferMethod
++  if (option.scheme === 'exact') {
++    if (payment.x402Version === 1 && method === 'permit2') {
++      return 'x402 version 1 exact payments support only EIP-3009 transfers.'
++    }
++    return method === undefined || method === 'eip3009' || method === 'permit2'
++      ? undefined
++      : `Unsupported x402 asset transfer method '${method}' for exact.`
++  }
++  if (option.scheme === 'upto') {
++    if (payment.x402Version === 1) {
++      return 'The x402 upto scheme is supported only by x402 version 2.'
++    }
++    if (method !== undefined && method !== 'permit2') {
++      return `Unsupported x402 asset transfer method '${method}' for upto.`
++    }
++    return option.extra?.facilitatorAddress &&
++      isAddress(option.extra.facilitatorAddress) &&
++      option.extra.facilitatorAddress.toLowerCase() !== zeroAddress
++      ? undefined
++      : 'The upto payment option requires a valid extra.facilitatorAddress.'
++  }
++  return supportsBatching(option)
++    ? undefined
++    : `Unsupported x402 payment scheme '${option.scheme}'.`
++}
++
++/**
+  * Format an atomic USDC amount (6-decimal subunit string) for display.
+  * Tolerates V1 payment requirements by accepting either `amount` or
+  * `maxAmountRequired`; returns "$? USDC" when neither is set so callers
+@@ -319,25 +428,25 @@
+   signTypedData: (args: ViemTypedDataArgs) => Promise<`0x${string}`>
+ }
+ 
+-function serializeForCircleApi(args: ViemTypedDataArgs): string {
++/**
++ * Circle's typed-data endpoint consumes EIP-712 JSON, which represents every
++ * integer as a decimal string. Preserve nested structs and arrays: Permit2's
++ * authorization and witness fields are part of the signed digest.
++ */
++export function serializeForCircleApi(args: ViemTypedDataArgs): string {
+   const { domain, types, primaryType, message } = args
+   const serializable = {
+     types: {
+-      EIP712Domain: [
+-        { name: 'name', type: 'string' },
+-        { name: 'version', type: 'string' },
+-        { name: 'chainId', type: 'uint256' },
+-        { name: 'verifyingContract', type: 'address' },
+-      ],
++      EIP712Domain: getTypesForEIP712Domain({ domain }),
+       ...types,
+     },
+     primaryType,
+     domain,
+-    message: Object.fromEntries(
+-      Object.entries(message).map(([k, v]) => [k, String(v)]),
+-    ),
++    message,
+   }
+-  return JSON.stringify(serializable)
++  return JSON.stringify(serializable, (_key, value: unknown) =>
++    typeof value === 'bigint' ? value.toString() : value,
++  )
+ }
+ 
+ /**
+@@ -374,16 +483,26 @@
+ }
+ 
+ /**
+- * Creates a CompositeEvmScheme that handles both Gateway batched and
+- * standard x402 payments using the Circle wallet API for signing.
++ * Common payload interface for Gateway, exact and upto scheme implementations.
+  */
++export interface X402Scheme {
++  createPaymentPayload: (
++    x402Version: number,
++    paymentRequirements: PaymentOption,
++    context?: unknown,
++  ) => Promise<{ x402Version: number; payload: unknown }>
++}
++
++/**
++ * Dispatch payments to their SDK scheme using Circle-managed typed-data signing.
++ */
+ export function createX402Scheme(
+   client: CircleHttpClient,
+   proxyUrl: string,
+   env: EnvSession,
+   wallet: CircleWallet,
+   signerAddress: string,
+-): CompositeEvmScheme {
++): X402Scheme {
+   const signer = createCircleViemSigner(
+     client,
+     proxyUrl,
+@@ -393,7 +512,37 @@
+   )
+   const batchScheme = new BatchEvmScheme(signer)
+   const exactScheme = new ExactEvmScheme(signer)
+-  return new CompositeEvmScheme(batchScheme, exactScheme)
++  const uptoScheme = new UptoEvmScheme(signer)
++  const composite = new CompositeEvmScheme(batchScheme, exactScheme)
++  return {
++    createPaymentPayload: (x402Version, paymentRequirements, context) => {
++      if (supportsBatching(paymentRequirements)) {
++        return composite.createPaymentPayload(
++          x402Version,
++          paymentRequirements as never,
++        )
++      }
++      if (paymentRequirements.scheme === 'upto') {
++        return uptoScheme.createPaymentPayload(
++          x402Version,
++          paymentRequirements as never,
++          context as never,
++        )
++      }
++      if (paymentRequirements.scheme !== 'exact') {
++        return Promise.reject(
++          new Error(
++            `Unsupported x402 payment scheme '${paymentRequirements.scheme}'.`,
++          ),
++        )
++      }
++      return exactScheme.createPaymentPayload(
++        x402Version,
++        paymentRequirements as never,
++        context as never,
++      )
++    },
++  }
+ }
+ 
+ /**

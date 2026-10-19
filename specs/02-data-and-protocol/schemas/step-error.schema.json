@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://czar.dev/schemas/step-error/1.0",
+  "title": "StepError",
+  "description": "Error object returned by MCP tools and APIs (spec 02 \u00a74.16).",
+  "type": "object",
+  "x-privacyClass": "server-only",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "description": "Schema version, major.minor; this file is 1.0.",
+      "x-privacyClass": "server-only",
+      "const": "1.0"
+    },
+    "code": {
+      "type": "string",
+      "description": "Stable error code.",
+      "x-privacyClass": "server-only",
+      "maxLength": 64
+    },
+    "message": {
+      "type": "string",
+      "description": "Human-readable message; never contains user text.",
+      "x-privacyClass": "server-only",
+      "maxLength": 512
+    },
+    "retryable": {
+      "type": "boolean",
+      "description": "Whether a retry may succeed.",
+      "x-privacyClass": "server-only"
+    },
+    "elicitationUrl": {
+      "type": "string",
+      "description": "URL-mode elicitation target when approval is needed (D3-11).",
+      "x-privacyClass": "server-only",
+      "format": "uri",
+      "maxLength": 2048
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "code",
+    "message",
+    "retryable"
+  ]
+}

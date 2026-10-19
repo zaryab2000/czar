@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://czar.dev/schemas/demand-proof-leaf/1.0",
+  "title": "DemandProofLeaf",
+  "description": "Proof-of-demand chain for one objective, anchored as an EVIDENCE_BATCH leaf (spec 02 \u00a74.17; product \u00a76.22).",
+  "type": "object",
+  "x-privacyClass": "public",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "description": "Schema version, major.minor; this file is 1.0.",
+      "x-privacyClass": "public",
+      "const": "1.0"
+    },
+    "leafType": {
+      "type": "string",
+      "description": "Leaf type.",
+      "x-privacyClass": "public",
+      "const": "demand-proof"
+    },
+    "leafVersion": {
+      "type": "integer",
+      "description": "Leaf version.",
+      "x-privacyClass": "public",
+      "const": 1
+    },
+    "userPseudonym": {
+      "$ref": "common.schema.json#/$defs/Hash32",
+      "description": "Rotating per-user pseudonym.",
+      "x-privacyClass": "public"
+    },
+    "observationHashes": {
+      "type": "array",
+      "items": {
+        "$ref": "common.schema.json#/$defs/Hash32",
+        "description": "Observation hash.",
+        "x-privacyClass": "public"
+      },
+      "description": "Observation hashes.",
+      "x-privacyClass": "public",
+      "maxItems": 50
+    },
+    "objectiveHash": {
+      "$ref": "common.schema.json#/$defs/Hash32",
+      "description": "Objective hash.",
+      "x-privacyClass": "public"
+    },
+    "soulVersionHash": {
+      "$ref": "common.schema.json#/$defs/Hash32",
+      "description": "Soul version hash.",
+      "x-privacyClass": "public"
+    },
+    "planHash": {
+      "$ref": "common.schema.json#/$defs/Hash32",
+      "description": "Plan hash.",
+      "x-privacyClass": "public"
+    },
+    "envelopeRef": {
+      "$ref": "common.schema.json#/$defs/EnvelopeRef",
+      "description": "Envelope reference.",
+      "x-privacyClass": "public"
+    },
+    "approval": {
+      "type": "object",
+      "description": "Approval reference.",
+      "x-privacyClass": "public",
+      "properties": {
+        "approver": {
+          "type": "string",
+          "enum": [
+            "owner",
+            "agent"
+          ],
+          "description": "Who opened the envelope.",
+          "x-privacyClass": "public"
+        },
+        "txHash": {
+          "$ref": "common.schema.json#/$defs/Hash32",
+          "description": "Opening transaction.",
+          "x-privacyClass": "public"
+        },
+        "blockNumber": {
+          "type": "integer",
+          "description": "Block number.",
+          "x-privacyClass": "public",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "approver",
+        "txHash",
+        "blockNumber"
+      ]
+    },
+    "paymentRefHashes": {
+      "type": "array",
+      "items": {
+        "$ref": "common.schema.json#/$defs/Hash32",
+        "description": "paymentRefHash per step payment.",
+        "x-privacyClass": "public"
+      },
+      "description": "Payment reference hashes.",
+      "x-privacyClass": "public"
+    },
+    "outcomeHashes": {
+      "type": "array",
+      "items": {
+        "$ref": "common.schema.json#/$defs/Hash32",
+        "description": "reportHash per step.",
+        "x-privacyClass": "public"
+      },
+      "description": "Outcome hashes.",
+      "x-privacyClass": "public"
+    },
+    "closedAt": {
+      "$ref": "common.schema.json#/$defs/UnixSeconds",
+      "description": "Envelope close time.",
+      "x-privacyClass": "public"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "leafType",
+    "leafVersion",
+    "userPseudonym",
+    "observationHashes",
+    "objectiveHash",
+    "soulVersionHash",
+    "planHash",
+    "envelopeRef",
+    "approval",
+    "paymentRefHashes",
+    "outcomeHashes",
+    "closedAt"
+  ]
+}

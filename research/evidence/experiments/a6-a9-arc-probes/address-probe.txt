@@ -1,0 +1,52 @@
+### mainnet chainid=5042 block=26616061 date=2026-10-18T14:20:44Z
+EntryPoint v0.6                               0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789 size=23689 codehash=0xc93c806e738300b5357ecdc2e971d6438d34d8e4e17b99b758b1f9cac91c8e70
+EntryPoint v0.7                               0x0000000071727De22E5E9d8BAf0edAc6f37da032 size=16035 codehash=0x8db5ff695839d655407cc8490bb7a5d82337a86a6b39c3f0258aa6c3b582fc58
+EntryPoint v0.8                               0x4337084D9E255Ff0702461CF8895CE9E3b5Ff108 size=21738 codehash=0x2280fdb15bcd1a7e84d70d4d0e691ddf4390dffea82e0bc2850a2b03163959f3
+EntryPoint v0.9                               0x433709009B8330FDa32311DF1C2AFA402eD8D009 size=22425 codehash=0x4010230b3946226250d001da83c6c45c421437ba34a1cb35a7b32590d85490f9
+SenderCreator v0.9                            0x0A630a99Df908A81115A3022927Be82f9299987e size=1210 codehash=0xa7d4dd260bca9c96da49f7c0682fdda7f0074694d935815a336d3e60ee3ec6ad
+0xSplits v1 SplitMain                         0x2ed6c4B5dA6378c7897AC67Ba9e43102Feb694EE size=0 codehash=-
+0xSplits v2 PullSplitFactory (v2.0)           0x80f1B766817D04870f115fEBbcCADF8DBF75E017 size=0 codehash=-
+0xSplits v2 PushSplitFactory (v2.0)           0xaDC87646f736d6A82e9a6539cddC488b2aA07f38 size=0 codehash=-
+0xSplits PullSplitFactoryV2.1                 0x5cbA88D55Cec83caD5A105Ad40C8c9aF20bE21d1 size=0 codehash=-
+0xSplits PushSplitFactoryV2.1                 0xDc6259E13ec0621e6F19026b2e49D846525548Ed size=0 codehash=-
+0xSplits PullSplitFactoryV2.2                 0x6B9118074aB15142d7524E8c4ea8f62A3Bdb98f1 size=3030 codehash=0x4afb2e8534a0c17d446f2f6aaec61af1a1495dceab696e683d4cdc85cb49d602
+0xSplits PushSplitFactoryV2.2                 0x8E8eB0cC6AE34A38B67D5Cf91ACa38f60bc3Ecf4 size=3030 codehash=0x7289581fdbc21ec0b07d4f34c870a5548a03564691d6e24ef9c770134f8e95fb
+0xSplits SplitsWarehouse                      0x8fb66F38cF86A3d5e8768f8F1754A24A6c661Fb8 size=12146 codehash=0x674c650a523a70e0fe00ad4627b21d0834a4977d9031e6f3c57faec1979b4665
+EAS (Ethereum mainnet addr)                   0xA1207F3BBa224E2c9c3c6D5aF63D0eb1582Ce587 size=0 codehash=-
+EAS SchemaRegistry (Ethereum mainnet addr)    0xA7b39296258348C78294F95B872b282326A97BDF size=0 codehash=-
+EAS OP-stack predeploy                        0x4200000000000000000000000000000000000021 size=0 codehash=-
+EAS SchemaRegistry OP-stack predeploy         0x4200000000000000000000000000000000000020 size=0 codehash=-
+EAS (Arbitrum One addr)                       0xbD75f629A22Dc1ceD33dDA0b68c546A1c035c458 size=0 codehash=-
+EAS (Polygon addr)                            0x5E634ef5355f45A855d02D66eCD687b1502AF790 size=0 codehash=-
+ENS Registry (Ethereum addr)                  0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e size=2747 codehash=0xd7325375d651f956cf883e45f01f57654994f0d1c95b074bc3c5073d41b261db
+Multicall3                                    0xcA11bde05977b3631167028862bE2a173976CA11 size=3808 codehash=0xd5c15df687b16f2ff992fc8d767b4216323184a2bbc6ee2f9c398c318e770891
+Arachnid CREATE2 deployer                     0x4e59b44847b379578588920cA78FbF26c0B4956C size=69 codehash=0x2fa86add0aed31f33a762c9d88e807c475bd51d0f52bd0955754b2608f7e4989
+Safe singleton factory                        0x914d7Fec6aaC8cd542e72Bca78B30650d45643d7 size=69 codehash=0x2fa86add0aed31f33a762c9d88e807c475bd51d0f52bd0955754b2608f7e4989
+CreateX                                       0xba5Ed099633D3B313e4D5F7bdc1305d3c28ba5Ed size=11838 codehash=0xbd8a7ea8cfca7b4e5f5041d7d4b17bc317c5ce42cfbc42066a00cf26b43eb53f
+Permit2                                       0x000000000022D473030F116dDEE9F6B43aC78BA3 size=9152 codehash=0x05a793d6bdba8b8715c8f4cef0725ec3a961f567d33ebb2d360f541f19f70c8f
+### testnet chainid=5042002 block=67853245 date=2026-10-18T14:20:55Z
+EntryPoint v0.6                               0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789 size=23689 codehash=0xc93c806e738300b5357ecdc2e971d6438d34d8e4e17b99b758b1f9cac91c8e70
+EntryPoint v0.7                               0x0000000071727De22E5E9d8BAf0edAc6f37da032 size=16035 codehash=0x8db5ff695839d655407cc8490bb7a5d82337a86a6b39c3f0258aa6c3b582fc58
+EntryPoint v0.8                               0x4337084D9E255Ff0702461CF8895CE9E3b5Ff108 size=21738 codehash=0xaddd0fa04cef9cb38325fa1f177f7ec6e43e45c6365e565ac295d1d4bac236e4
+EntryPoint v0.9                               0x433709009B8330FDa32311DF1C2AFA402eD8D009 size=22425 codehash=0x4912531cbb1316092e1c25164d8fd78bdb94374d990be9575246e6d98e38a25a
+SenderCreator v0.9                            0x0A630a99Df908A81115A3022927Be82f9299987e size=1210 codehash=0xa7d4dd260bca9c96da49f7c0682fdda7f0074694d935815a336d3e60ee3ec6ad
+0xSplits v1 SplitMain                         0x2ed6c4B5dA6378c7897AC67Ba9e43102Feb694EE size=0 codehash=-
+0xSplits v2 PullSplitFactory (v2.0)           0x80f1B766817D04870f115fEBbcCADF8DBF75E017 size=0 codehash=-
+0xSplits v2 PushSplitFactory (v2.0)           0xaDC87646f736d6A82e9a6539cddC488b2aA07f38 size=0 codehash=-
+0xSplits PullSplitFactoryV2.1                 0x5cbA88D55Cec83caD5A105Ad40C8c9aF20bE21d1 size=0 codehash=-
+0xSplits PushSplitFactoryV2.1                 0xDc6259E13ec0621e6F19026b2e49D846525548Ed size=0 codehash=-
+0xSplits PullSplitFactoryV2.2                 0x6B9118074aB15142d7524E8c4ea8f62A3Bdb98f1 size=3030 codehash=0x4afb2e8534a0c17d446f2f6aaec61af1a1495dceab696e683d4cdc85cb49d602
+0xSplits PushSplitFactoryV2.2                 0x8E8eB0cC6AE34A38B67D5Cf91ACa38f60bc3Ecf4 size=3030 codehash=0x7289581fdbc21ec0b07d4f34c870a5548a03564691d6e24ef9c770134f8e95fb
+0xSplits SplitsWarehouse                      0x8fb66F38cF86A3d5e8768f8F1754A24A6c661Fb8 size=12146 codehash=0x6425027b61df5fea44dbb6faee475a4c606a2c2da7354d4031c460acad496541
+EAS (Ethereum mainnet addr)                   0xA1207F3BBa224E2c9c3c6D5aF63D0eb1582Ce587 size=0 codehash=-
+EAS SchemaRegistry (Ethereum mainnet addr)    0xA7b39296258348C78294F95B872b282326A97BDF size=0 codehash=-
+EAS OP-stack predeploy                        0x4200000000000000000000000000000000000021 size=0 codehash=-
+EAS SchemaRegistry OP-stack predeploy         0x4200000000000000000000000000000000000020 size=0 codehash=-
+EAS (Arbitrum One addr)                       0xbD75f629A22Dc1ceD33dDA0b68c546A1c035c458 size=0 codehash=-
+EAS (Polygon addr)                            0x5E634ef5355f45A855d02D66eCD687b1502AF790 size=0 codehash=-
+ENS Registry (Ethereum addr)                  0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e size=0 codehash=-
+Multicall3                                    0xcA11bde05977b3631167028862bE2a173976CA11 size=3808 codehash=0xd5c15df687b16f2ff992fc8d767b4216323184a2bbc6ee2f9c398c318e770891
+Arachnid CREATE2 deployer                     0x4e59b44847b379578588920cA78FbF26c0B4956C size=69 codehash=0x2fa86add0aed31f33a762c9d88e807c475bd51d0f52bd0955754b2608f7e4989
+Safe singleton factory                        0x914d7Fec6aaC8cd542e72Bca78B30650d45643d7 size=69 codehash=0x2fa86add0aed31f33a762c9d88e807c475bd51d0f52bd0955754b2608f7e4989
+CreateX                                       0xba5Ed099633D3B313e4D5F7bdc1305d3c28ba5Ed size=11838 codehash=0xbd8a7ea8cfca7b4e5f5041d7d4b17bc317c5ce42cfbc42066a00cf26b43eb53f
+Permit2                                       0x000000000022D473030F116dDEE9F6B43aC78BA3 size=9152 codehash=0x53681d3cf8f702f849c1504b491049c3d0a282e4595d9b297c410dcf36f0908e

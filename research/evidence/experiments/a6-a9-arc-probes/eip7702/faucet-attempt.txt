@@ -1,0 +1,7 @@
+Error: Wallet not found for address 0x0646f156a04AbD5d9e214f443a4139F1dB585961 on ARC-TESTNET.
+{
+  "error": {
+    "code": "NOT_FOUND",
+    "message": "Wallet not found for address 0x0646f156a04AbD5d9e214f443a4139F1dB585961 on ARC-TESTNET."
+  }
+}

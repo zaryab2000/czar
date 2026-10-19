@@ -1,0 +1,14 @@
+{"at":"2026-10-18T14:22:03.123Z","event":"seller.listening","url":"http://127.0.0.1:4022/premium","payTo":"0xDC5b9476099311D00D5b183aA4BFDfF836C5e84f","price":"$0.001"}
+{"at":"2026-10-18T14:22:13.236Z","event":"seller.request","method":"GET","url":"/premium","hasPayment":false}
+{"at":"2026-10-18T14:22:13.905Z","event":"seller.request","method":"GET","url":"/premium","hasPayment":false}
+{"at":"2026-10-18T14:22:13.914Z","event":"seller.request","method":"GET","url":"/premium","hasPayment":true}
+{"at":"2026-10-18T14:22:15.131Z","event":"seller.handler","payment":{"verified":true,"payer":"0xe5b81fb66503ab5df7ea62dc4fb2096570b90b55","amount":"1000","network":"eip155:5042002","transaction":"f1f4ddc1-8324-4420-97b9-bb0ae32e3a27"}}
+{"at":"2026-10-18T14:22:28.684Z","event":"seller.request","method":"GET","url":"/premium","hasPayment":false}
+{"at":"2026-10-18T14:22:28.687Z","event":"seller.request","method":"GET","url":"/premium","hasPayment":true}
+{"at":"2026-10-18T14:22:45.713Z","event":"seller.request","method":"GET","url":"/premium","hasPayment":false}
+{"at":"2026-10-18T14:23:16.667Z","event":"seller.request","method":"GET","url":"/premium","hasPayment":false}
+{"at":"2026-10-18T14:27:16.131Z","event":"seller.request","method":"GET","url":"/premium","hasPayment":false}
+{"at":"2026-10-18T14:27:16.140Z","event":"seller.request","method":"GET","url":"/premium","hasPayment":false}
+{"at":"2026-10-18T14:27:16.147Z","event":"seller.request","method":"GET","url":"/premium","hasPayment":true}
+{"at":"2026-10-18T14:27:17.140Z","event":"seller.handler","payment":{"verified":true,"payer":"0xe5b81fb66503ab5df7ea62dc4fb2096570b90b55","amount":"1000","network":"eip155:5042002","transaction":"d863fd6a-6e1c-4ab6-ac61-22966d41529a"}}
+{"at":"2026-10-18T14:31:46.006Z","event":"seller.request","method":"GET","url":"/premium","hasPayment":false}

@@ -1,0 +1,163 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://czar.dev/schemas/objective/1.0",
+  "title": "Objective",
+  "description": "A candidate objective produced by the drives engine before publication (spec 02 §4.3). Holds local evidence links.",
+  "type": "object",
+  "x-privacyClass": "local-only",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "description": "Schema version, major.minor; this file is 1.0.",
+      "x-privacyClass": "local-only",
+      "const": "1.0"
+    },
+    "objectiveId": {
+      "$ref": "common.schema.json#/$defs/ObjectiveId",
+      "description": "Objective id; the id itself is sent to the server.",
+      "x-privacyClass": "redacted-to-server"
+    },
+    "soulVersion": {
+      "type": "integer",
+      "description": "Soul version the objective was derived from.",
+      "x-privacyClass": "local-only",
+      "minimum": 1
+    },
+    "detector": {
+      "type": "string",
+      "enum": [
+        "placeholder",
+        "repeated-error",
+        "agent-refusal",
+        "stale-work",
+        "repeated-search",
+        "copy-paste-loop",
+        "deadline"
+      ],
+      "description": "Detector that produced it; three in Phase 1.",
+      "x-privacyClass": "redacted-to-server"
+    },
+    "goal": {
+      "type": "string",
+      "description": "Plain-language goal; redacted-to-server after layer 2.",
+      "x-privacyClass": "redacted-to-server",
+      "maxLength": 1000
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "$ref": "common.schema.json#/$defs/CapabilityTag",
+        "description": "Capability tag.",
+        "x-privacyClass": "redacted-to-server"
+      },
+      "description": "Capabilities needed.",
+      "x-privacyClass": "redacted-to-server",
+      "maxItems": 10
+    },
+    "deadline": {
+      "$ref": "common.schema.json#/$defs/Timestamp",
+      "description": "Deadline if known.",
+      "x-privacyClass": "redacted-to-server"
+    },
+    "minutesSaved": {
+      "type": "integer",
+      "description": "Estimated minutes saved.",
+      "x-privacyClass": "redacted-to-server",
+      "minimum": 0
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "description": "Local evidence link.",
+        "x-privacyClass": "local-only",
+        "properties": {
+          "eventId": {
+            "$ref": "common.schema.json#/$defs/EventId",
+            "description": "Linked observation.",
+            "x-privacyClass": "local-only"
+          },
+          "beliefId": {
+            "$ref": "common.schema.json#/$defs/BeliefId",
+            "description": "Linked belief.",
+            "x-privacyClass": "local-only"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "eventId"
+        ]
+      },
+      "description": "Local evidence links.",
+      "x-privacyClass": "local-only",
+      "maxItems": 50
+    },
+    "observationHashes": {
+      "type": "array",
+      "items": {
+        "$ref": "common.schema.json#/$defs/Hash32",
+        "description": "observationHash per linked event (spec 02 §5.2).",
+        "x-privacyClass": "hash-on-chain"
+      },
+      "description": "Observation hashes.",
+      "x-privacyClass": "hash-on-chain",
+      "maxItems": 50
+    },
+    "roi": {
+      "type": "object",
+      "description": "Value-of-time filter output.",
+      "x-privacyClass": "local-only",
+      "properties": {
+        "hourlyBand": {
+          "type": "string",
+          "enum": [
+            "A",
+            "B",
+            "C",
+            "D",
+            "E"
+          ],
+          "description": "Hourly-value band; only the band leaves the machine.",
+          "x-privacyClass": "redacted-to-server"
+        },
+        "ratio": {
+          "type": "number",
+          "description": "Value-of-time ratio (minutes saved × hourly value ÷ price).",
+          "x-privacyClass": "local-only",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "hourlyBand",
+        "ratio"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "candidate",
+        "dismissed",
+        "shadowed",
+        "published"
+      ],
+      "description": "Local lifecycle status: candidate, dismissed, shadowed (priced in shadow mode, never sent for payment), published.",
+      "x-privacyClass": "local-only"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "objectiveId",
+    "soulVersion",
+    "detector",
+    "goal",
+    "capabilities",
+    "minutesSaved",
+    "evidence",
+    "observationHashes",
+    "roi",
+    "status"
+  ],
+  "$comment": "Change log: 2026-10-18 AM-14 status enum now candidate|dismissed|shadowed|published."
+}

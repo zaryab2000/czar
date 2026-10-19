@@ -1,0 +1,4 @@
+### mainnet scanning blocks 26616340..26616939 date=2026-10-18T14:28:09Z
+type-4 tx count in window:        0
+### testnet scanning blocks 67853542..67854141 date=2026-10-18T14:28:28Z
+type-4 tx count in window:        0

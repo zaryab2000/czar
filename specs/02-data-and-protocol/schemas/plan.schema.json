@@ -1,0 +1,335 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://czar.dev/schemas/plan/1.0",
+  "title": "Plan",
+  "description": "The priced plan for one objective (spec 02 §4.5). What the user approves; planHash is written into the envelope.",
+  "type": "object",
+  "x-privacyClass": "server-only",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "description": "Schema version, major.minor; this file is 1.0.",
+      "x-privacyClass": "server-only",
+      "const": "1.0"
+    },
+    "planId": {
+      "$ref": "common.schema.json#/$defs/PlanId",
+      "description": "Plan id.",
+      "x-privacyClass": "server-only"
+    },
+    "objectiveId": {
+      "$ref": "common.schema.json#/$defs/ObjectiveId",
+      "description": "Objective id.",
+      "x-privacyClass": "server-only"
+    },
+    "objectiveHash": {
+      "$ref": "common.schema.json#/$defs/Hash32",
+      "description": "objectiveHash.",
+      "x-privacyClass": "hash-on-chain"
+    },
+    "planHash": {
+      "$ref": "common.schema.json#/$defs/Hash32",
+      "description": "planHash per spec 02 §5.2.",
+      "x-privacyClass": "hash-on-chain"
+    },
+    "network": {
+      "$ref": "common.schema.json#/$defs/Caip2",
+      "description": "Chain.",
+      "x-privacyClass": "hash-on-chain"
+    },
+    "category": {
+      "$ref": "common.schema.json#/$defs/Category",
+      "description": "Spending category; categoryId = keccak256(utf8(category)) on-chain.",
+      "x-privacyClass": "hash-on-chain"
+    },
+    "cap": {
+      "$ref": "common.schema.json#/$defs/Amount6",
+      "description": "Envelope cap = sum of step caps × (1 + slack).",
+      "x-privacyClass": "hash-on-chain"
+    },
+    "slackBps": {
+      "$ref": "common.schema.json#/$defs/Bps",
+      "description": "Slack over the step caps; default 2500.",
+      "x-privacyClass": "hash-on-chain"
+    },
+    "maxStepAmount": {
+      "$ref": "common.schema.json#/$defs/Amount6",
+      "description": "Maximum over step caps.",
+      "x-privacyClass": "hash-on-chain"
+    },
+    "pocketCapBps": {
+      "$ref": "common.schema.json#/$defs/Bps",
+      "description": "Pocket cap in bps of cap; default 2500 (D22).",
+      "x-privacyClass": "hash-on-chain"
+    },
+    "expiresAt": {
+      "$ref": "common.schema.json#/$defs/Timestamp",
+      "description": "Envelope expiry.",
+      "x-privacyClass": "hash-on-chain"
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Step"
+      },
+      "description": "Steps.",
+      "x-privacyClass": "server-only",
+      "maxItems": 64
+    },
+    "payeeLeaves": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/PayeeLeaf"
+      },
+      "description": "Plan payees plus at most two alternates per step (D36).",
+      "x-privacyClass": "hash-on-chain"
+    },
+    "payeeRoot": {
+      "$ref": "common.schema.json#/$defs/Hash32",
+      "description": "Merkle root of payeeLeaves (spec 02 §5.3).",
+      "x-privacyClass": "public"
+    },
+    "rankingDecisionIds": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "description": "SL query_id.",
+        "x-privacyClass": "server-only",
+        "maxLength": 128
+      },
+      "description": "Selection Layer decisions used.",
+      "x-privacyClass": "server-only"
+    },
+    "shadow": {
+      "type": "boolean",
+      "description": "True for shadow-mode pricing (no envelope).",
+      "x-privacyClass": "server-only"
+    },
+    "createdAt": {
+      "$ref": "common.schema.json#/$defs/Timestamp",
+      "description": "Creation time.",
+      "x-privacyClass": "server-only"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "planId",
+    "objectiveId",
+    "objectiveHash",
+    "planHash",
+    "network",
+    "category",
+    "cap",
+    "slackBps",
+    "maxStepAmount",
+    "pocketCapBps",
+    "expiresAt",
+    "steps",
+    "payeeLeaves",
+    "payeeRoot",
+    "shadow",
+    "createdAt"
+  ],
+  "$defs": {
+    "Step": {
+      "type": "object",
+      "description": "One step of a plan (spec 02 §4.6).",
+      "x-privacyClass": "server-only",
+      "properties": {
+        "stepIndex": {
+          "type": "integer",
+          "description": "Position; used in PayeeLeaf.",
+          "x-privacyClass": "hash-on-chain",
+          "minimum": 0,
+          "maximum": 63
+        },
+        "stepId": {
+          "$ref": "common.schema.json#/$defs/StepId",
+          "description": "Step id.",
+          "x-privacyClass": "server-only"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "x402-exact",
+            "gateway-nano",
+            "erc8183-job",
+            "local",
+            "tip"
+          ],
+          "description": "Payment path from the router (spec 01 §8.7, D37); tip is Phase 2.",
+          "x-privacyClass": "server-only"
+        },
+        "capability": {
+          "$ref": "common.schema.json#/$defs/CapabilityTag",
+          "description": "Capability this step provides.",
+          "x-privacyClass": "server-only"
+        },
+        "serviceId": {
+          "$ref": "common.schema.json#/$defs/SlServiceId",
+          "description": "Selection Layer service id.",
+          "x-privacyClass": "server-only"
+        },
+        "resource": {
+          "type": "object",
+          "description": "The merchant endpoint.",
+          "x-privacyClass": "server-only",
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "Merchant endpoint URL.",
+              "x-privacyClass": "server-only",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "method": {
+              "type": "string",
+              "enum": [
+                "GET",
+                "POST",
+                "PUT",
+                "DELETE"
+              ],
+              "description": "HTTP method.",
+              "x-privacyClass": "server-only"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "url",
+            "method"
+          ]
+        },
+        "payee": {
+          "$ref": "common.schema.json#/$defs/Address",
+          "description": "payTo or job provider; absent for local steps.",
+          "x-privacyClass": "hash-on-chain"
+        },
+        "alternates": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/Address",
+            "description": "Alternate payee.",
+            "x-privacyClass": "hash-on-chain"
+          },
+          "description": "Up to two ranked alternates (D36).",
+          "x-privacyClass": "hash-on-chain",
+          "maxItems": 2
+        },
+        "unitAmount": {
+          "$ref": "common.schema.json#/$defs/Amount6",
+          "description": "Expected price per call from the live 402 (p1-D7).",
+          "x-privacyClass": "hash-on-chain"
+        },
+        "expectedCalls": {
+          "type": "integer",
+          "description": "Expected number of calls; batch size n (D37).",
+          "x-privacyClass": "server-only",
+          "minimum": 1
+        },
+        "stepCap": {
+          "$ref": "common.schema.json#/$defs/Amount6",
+          "description": "Per-step cap, at least unitAmount × expectedCalls.",
+          "x-privacyClass": "hash-on-chain"
+        },
+        "routingReason": {
+          "type": "string",
+          "description": "Why the router chose this kind, e.g. below-pocket-threshold.",
+          "x-privacyClass": "server-only",
+          "maxLength": 128
+        },
+        "acceptanceProfileId": {
+          "$ref": "common.schema.json#/$defs/SlProfileId",
+          "description": "Acceptance profile (SL §5.5).",
+          "x-privacyClass": "server-only"
+        },
+        "inputTemplate": {
+          "type": "object",
+          "description": "Structured input only; never user text (spec 01 §11.2 layer 3). Optional expectedKeys names the output keys the requirement check needs (AM-09).",
+          "x-privacyClass": "server-only",
+          "properties": {
+            "expectedKeys": {
+              "type": "array",
+              "maxItems": 50,
+              "items": {
+                "type": "string",
+                "maxLength": 64,
+                "description": "Key the merchant output must contain.",
+                "x-privacyClass": "server-only"
+              },
+              "description": "Keys the requirement check (CZ-16) and the reader (P-02 expectedFields) look for in the output.",
+              "x-privacyClass": "server-only"
+            }
+          }
+        },
+        "dependsOn": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "description": "Step index this step depends on.",
+            "x-privacyClass": "server-only",
+            "minimum": 0,
+            "maximum": 63
+          },
+          "description": "Dependencies.",
+          "x-privacyClass": "server-only"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "stepIndex",
+        "stepId",
+        "kind",
+        "capability",
+        "unitAmount",
+        "expectedCalls",
+        "stepCap",
+        "routingReason",
+        "acceptanceProfileId"
+      ]
+    },
+    "PayeeLeaf": {
+      "type": "object",
+      "description": "A payee leaf of payeeRoot (spec 02 §4.7, §5.3).",
+      "x-privacyClass": "public",
+      "properties": {
+        "payee": {
+          "$ref": "common.schema.json#/$defs/Address",
+          "description": "Payee address.",
+          "x-privacyClass": "public"
+        },
+        "kind": {
+          "type": "integer",
+          "description": "1 x402 payTo, 2 ERC-8183 provider, 3 tip repo (Phase 2).",
+          "x-privacyClass": "public",
+          "enum": [
+            1,
+            2,
+            3
+          ]
+        },
+        "stepIndex": {
+          "type": "integer",
+          "description": "Step index.",
+          "x-privacyClass": "public",
+          "minimum": 0,
+          "maximum": 63
+        },
+        "stepCap": {
+          "$ref": "common.schema.json#/$defs/Amount6",
+          "description": "Per-step cap shared by the payee and its alternates (D36).",
+          "x-privacyClass": "public"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "payee",
+        "kind",
+        "stepIndex",
+        "stepCap"
+      ]
+    }
+  },
+  "$comment": "Change log: 2026-10-18 AM-09 added inputTemplate.expectedKeys."
+}

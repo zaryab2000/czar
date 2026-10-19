@@ -1,0 +1,271 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://czar.dev/schemas/soul/1.0",
+  "title": "soul.json",
+  "description": "The machine-readable Work Soul (spec 02 §4.2): eight sections of beliefs with receipts. Local only.",
+  "type": "object",
+  "x-privacyClass": "local-only",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "description": "Schema version, major.minor; this file is 1.0.",
+      "x-privacyClass": "local-only",
+      "const": "1.0"
+    },
+    "version": {
+      "type": "integer",
+      "description": "Monotonically increasing per compile.",
+      "x-privacyClass": "local-only",
+      "minimum": 1
+    },
+    "compiledAt": {
+      "$ref": "common.schema.json#/$defs/Timestamp",
+      "description": "Compile time.",
+      "x-privacyClass": "local-only"
+    },
+    "previousHash": {
+      "$ref": "common.schema.json#/$defs/Hash32",
+      "description": "soulVersionHash of version minus 1.",
+      "x-privacyClass": "hash-on-chain"
+    },
+    "sections": {
+      "type": "object",
+      "description": "The eight soul sections.",
+      "x-privacyClass": "local-only",
+      "properties": {
+        "place": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Belief"
+          },
+          "description": "Beliefs in the place section.",
+          "x-privacyClass": "local-only"
+        },
+        "mission": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Belief"
+          },
+          "description": "Beliefs in the mission section.",
+          "x-privacyClass": "local-only"
+        },
+        "rituals": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Belief"
+          },
+          "description": "Beliefs in the rituals section.",
+          "x-privacyClass": "local-only"
+        },
+        "friction": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Belief"
+          },
+          "description": "Beliefs in the friction section.",
+          "x-privacyClass": "local-only"
+        },
+        "drives": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Belief"
+          },
+          "description": "Beliefs in the drives section.",
+          "x-privacyClass": "local-only"
+        },
+        "taste": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Belief"
+          },
+          "description": "Beliefs in the taste section.",
+          "x-privacyClass": "local-only"
+        },
+        "constraints": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Belief"
+          },
+          "description": "Beliefs in the constraints section.",
+          "x-privacyClass": "local-only"
+        },
+        "spendingPosture": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Belief"
+          },
+          "description": "Beliefs in the spendingPosture section.",
+          "x-privacyClass": "local-only"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "place",
+        "mission",
+        "rituals",
+        "friction",
+        "drives",
+        "taste",
+        "constraints",
+        "spendingPosture"
+      ]
+    },
+    "hourlyValue": {
+      "type": "object",
+      "description": "Hourly value of the person's time; only the band leaves the machine.",
+      "x-privacyClass": "local-only",
+      "properties": {
+        "amount": {
+          "$ref": "common.schema.json#/$defs/Amount6",
+          "description": "Hourly value in USDC atomic units.",
+          "x-privacyClass": "local-only"
+        },
+        "currency": {
+          "type": "string",
+          "description": "Display currency code (ISO 4217).",
+          "x-privacyClass": "local-only",
+          "maxLength": 3
+        },
+        "setByUser": {
+          "type": "boolean",
+          "description": "True when the person set it.",
+          "x-privacyClass": "local-only"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "amount",
+        "currency",
+        "setByUser"
+      ]
+    },
+    "excerptPolicy": {
+      "type": "object",
+      "description": "What may be sent to the hosted model for compilation.",
+      "x-privacyClass": "local-only",
+      "properties": {
+        "maxChars": {
+          "type": "integer",
+          "description": "Maximum characters of redacted excerpt sent to the hosted model (D31).",
+          "x-privacyClass": "local-only",
+          "minimum": 0,
+          "maximum": 20000
+        },
+        "allowSections": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "place",
+              "mission",
+              "rituals",
+              "friction",
+              "drives",
+              "taste",
+              "constraints",
+              "spendingPosture"
+            ],
+            "description": "Section name.",
+            "x-privacyClass": "local-only"
+          },
+          "description": "Sections eligible for excerpts.",
+          "x-privacyClass": "local-only"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "maxChars",
+        "allowSections"
+      ]
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "version",
+    "compiledAt",
+    "sections",
+    "excerptPolicy"
+  ],
+  "$defs": {
+    "Belief": {
+      "type": "object",
+      "description": "One belief with receipts.",
+      "x-privacyClass": "local-only",
+      "properties": {
+        "beliefId": {
+          "$ref": "common.schema.json#/$defs/BeliefId",
+          "description": "Stable id across versions while the belief lives.",
+          "x-privacyClass": "local-only"
+        },
+        "text": {
+          "type": "string",
+          "description": "The belief in plain words; markers allowed. Only becomes redacted-to-server when selected as a compilation excerpt (D31).",
+          "x-privacyClass": "local-only",
+          "maxLength": 500
+        },
+        "confidence": {
+          "type": "number",
+          "description": "Confidence 0 to 1.",
+          "x-privacyClass": "local-only",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "firstSeen": {
+          "$ref": "common.schema.json#/$defs/Timestamp",
+          "description": "First observation.",
+          "x-privacyClass": "local-only"
+        },
+        "lastSeen": {
+          "$ref": "common.schema.json#/$defs/Timestamp",
+          "description": "Last observation; beliefs fade when not seen.",
+          "x-privacyClass": "local-only"
+        },
+        "receipts": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/EventId",
+            "description": "Observation behind the belief.",
+            "x-privacyClass": "local-only"
+          },
+          "description": "Observations behind the belief.",
+          "x-privacyClass": "local-only",
+          "maxItems": 50
+        },
+        "userEdited": {
+          "type": "boolean",
+          "description": "True after the person edits or pins it.",
+          "x-privacyClass": "local-only"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "candidate",
+            "active",
+            "faded",
+            "archived"
+          ],
+          "description": "Belief lifecycle state (CZ-04). Only active and faded beliefs render to SOUL.md.",
+          "x-privacyClass": "local-only"
+        },
+        "key": {
+          "type": "string",
+          "maxLength": 256,
+          "description": "Normalized dedupe key used to merge repeated observations into one belief. Never leaves the machine.",
+          "x-privacyClass": "local-only"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "beliefId",
+        "text",
+        "confidence",
+        "firstSeen",
+        "lastSeen",
+        "receipts",
+        "userEdited"
+      ]
+    }
+  },
+  "$comment": "Change log: 2026-10-18 AM-13 added Belief.state and Belief.key (local-only)."
+}

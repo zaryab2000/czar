@@ -1,0 +1,44 @@
+[2026-10-18T14:29:50.614Z] config {
+  "mode": "verify",
+  "payer": "0xd80fe1aD38eC902df4Db294795D7CD18163A23EE",
+  "owner": "0x4015D942267415f057D2A4735A82DD38Eb55D264",
+  "seller": "0xF201E44a8cE66C57175014e120ce73568724dB27",
+  "price": "100000"
+}
+[2026-10-18T14:29:50.627Z] buyer got HTTP 402 PAYMENT-REQUIRED {
+  "x402Version": 2,
+  "error": "payment required",
+  "resource": {
+    "url": "http://127.0.0.1:4021/premium",
+    "description": "Czar A1 ERC-1271 probe",
+    "mimeType": "application/json"
+  },
+  "accepts": [
+    {
+      "scheme": "exact",
+      "network": "eip155:5042002",
+      "amount": "100000",
+      "asset": "0x3600000000000000000000000000000000000000",
+      "payTo": "0xF201E44a8cE66C57175014e120ce73568724dB27",
+      "maxTimeoutSeconds": 60,
+      "extra": {
+        "name": "USDC",
+        "version": "2",
+        "assetTransferMethod": "eip3009"
+      }
+    }
+  ]
+}
+[2026-10-18T14:29:51.348Z] facilitator /verify HTTP 200 in 718 ms {
+  "isValid": true,
+  "payer": "0xd80fe1ad38ec902df4db294795d7cd18163a23ee"
+}
+[2026-10-18T14:29:51.350Z] buyer got HTTP 200 {
+  "body": {
+    "verified": {
+      "isValid": true,
+      "payer": "0xd80fe1ad38ec902df4db294795d7cd18163a23ee"
+    }
+  },
+  "paymentResponse": null
+}

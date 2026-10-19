@@ -1,0 +1,57 @@
+### mainnet blocks 26607557..26616557 (~75 min) date=2026-10-18T14:24:55Z
+EntryPoint v0.6 0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789 UserOperationEvent count=4
+   bundler(tx.from, sample of up to 15 txs):    1 0x4337011463EF6BD863E47E7b5E743D2522261131
+   bundler(tx.from, sample of up to 15 txs):    2 0x463928D45eD7e052b62EE86999c6d75F861E1944
+   bundler(tx.from, sample of up to 15 txs):    1 0x6447AAd0827975425F23811cE660275a9aA1b15a
+EntryPoint v0.7 0x0000000071727De22E5E9d8BAf0edAc6f37da032 UserOperationEvent count=520
+   bundler(tx.from, sample of up to 15 txs):    1 0x463928D45eD7e052b62EE86999c6d75F861E1944
+   bundler(tx.from, sample of up to 15 txs):   14 0xB1bcCa2AC714A6eED7742866a2EC772394E9ea1A
+EntryPoint v0.8 0x4337084D9E255Ff0702461CF8895CE9E3b5Ff108 UserOperationEvent count=38
+   bundler(tx.from, sample of up to 15 txs):    1 0x4337002C5702CE424Cb62A56CA038e31e1D4A93d
+   bundler(tx.from, sample of up to 15 txs):    1 0x4337005db25DbAD41Da5692ba1188751eE5D98b6
+   bundler(tx.from, sample of up to 15 txs):    1 0x4337006f33e2940FcbEbD899bF2396117E65dF9B
+   bundler(tx.from, sample of up to 15 txs):    1 0x4337009Be43c7ECc9bfbDe0F1780553Aa065187E
+   bundler(tx.from, sample of up to 15 txs):    1 0x4337015333e7c8a3c5af4ACD2c4aA4bEfb0D663C
+   bundler(tx.from, sample of up to 15 txs):    1 0x4337016838785634c63Fce393bfc6222564436C4
+   bundler(tx.from, sample of up to 15 txs):    1 0x4337020f43D3d7d2F5E4160397EfeA49AEfa5E7D
+   bundler(tx.from, sample of up to 15 txs):    2 0x43370250bfc02C7F085cB105558DA41E9CDB2D79
+   bundler(tx.from, sample of up to 15 txs):    1 0x4337041D8047569945950ec533E3F1AF96d7be70
+   bundler(tx.from, sample of up to 15 txs):    1 0x4337042D8a539c80C92D84E141271db09f9Bec68
+   bundler(tx.from, sample of up to 15 txs):    1 0x43370473d8D9527C84D8CC9464DBBEd89085dDDf
+   bundler(tx.from, sample of up to 15 txs):    1 0x4337054681fb21ECd8576720eeE873f5358eE061
+   bundler(tx.from, sample of up to 15 txs):    2 0x4337055bCa06a9d578086e56546cA214A64ac271
+EntryPoint v0.9 0x433709009B8330FDa32311DF1C2AFA402eD8D009 UserOperationEvent count=0
+### testnet blocks 67844775..67853775 (~75 min) date=2026-10-18T14:25:23Z
+EntryPoint v0.6 0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789 UserOperationEvent count=48
+   bundler(tx.from, sample of up to 15 txs):    1 0x0365a12a29bECE28C674661bf1c4996086ea2e63
+   bundler(tx.from, sample of up to 15 txs):    1 0x0A3493F52C2F42ace9A6bd754E954f798D7a8d4a
+   bundler(tx.from, sample of up to 15 txs):    1 0x2a4c921aBB746eD0B2A25cAdD3D214E92766CEa7
+   bundler(tx.from, sample of up to 15 txs):    1 0x3fd9b30eaC4F3F4F91e8676BBbc6304bF8a698F7
+   bundler(tx.from, sample of up to 15 txs):    1 0x4337005db25DbAD41Da5692ba1188751eE5D98b6
+   bundler(tx.from, sample of up to 15 txs):    1 0x433702948d7be4201A2bCEe6C349ad807C547A5D
+   bundler(tx.from, sample of up to 15 txs):    1 0x43370308b53e3611521BA48E2F7632A5644d7b1f
+   bundler(tx.from, sample of up to 15 txs):    1 0x4337032d9C9291f05BEbdeD166D947f22b25FA00
+   bundler(tx.from, sample of up to 15 txs):    1 0x43370483638Fd43F9A9eD2884C028BfA4E546ca5
+   bundler(tx.from, sample of up to 15 txs):    1 0x433705768549b21d1e681fE454A7D2ff26A22E1C
+   bundler(tx.from, sample of up to 15 txs):    1 0x4d3e1639Ba320AAF2A3f647cdc4D92fDC86ceB85
+   bundler(tx.from, sample of up to 15 txs):    1 0x927e53DD99D5042459Ae15e72B4E933d1F08764e
+   bundler(tx.from, sample of up to 15 txs):    1 0xc6Fb8d992b950b6e189664B00105580D13795668
+   bundler(tx.from, sample of up to 15 txs):    2 0xf2BF9c0142bAF0Cb1408faCF6541cfA4cE0dffEc
+EntryPoint v0.7 0x0000000071727De22E5E9d8BAf0edAc6f37da032 UserOperationEvent count=40
+   bundler(tx.from, sample of up to 15 txs):    1 0x0678c8f99AB8b126B53d3Ce40cC848B0980B210a
+   bundler(tx.from, sample of up to 15 txs):    1 0x3ea01B9b75a1A162bA73A522063e0C94EEce6e65
+   bundler(tx.from, sample of up to 15 txs):    2 0x4072b39972eBCe60eADb275bD631f478d3Bad72F
+   bundler(tx.from, sample of up to 15 txs):    1 0x4337004ec9c1417F1c7a26EBD4B4fbed6ACf9E5d
+   bundler(tx.from, sample of up to 15 txs):    1 0x4337012eaf1f862B8dBDC6b62a01782AE01Ef038
+   bundler(tx.from, sample of up to 15 txs):    1 0x43370277eCaAb8cb1F98622138Efc679F9aC3063
+   bundler(tx.from, sample of up to 15 txs):    1 0x43370350f0a1c28abA50545fb34722B06Ae25627
+   bundler(tx.from, sample of up to 15 txs):    1 0x43370483638Fd43F9A9eD2884C028BfA4E546ca5
+   bundler(tx.from, sample of up to 15 txs):    1 0x43370525d26C72e0A096E19Cd4f45367b4B29369
+   bundler(tx.from, sample of up to 15 txs):    1 0x4337062690416e632d08d14e819892d6498F9ad4
+   bundler(tx.from, sample of up to 15 txs):    1 0x6bf8e13d041ab7Fd5be374Dc8a9e9D1B260beF7E
+   bundler(tx.from, sample of up to 15 txs):    1 0x99a29Bff54D34711aE80Dd569eA48A3E3e96c743
+   bundler(tx.from, sample of up to 15 txs):    1 0xA7fA08fc6ccE632981aC45FD4cF278358233B762
+   bundler(tx.from, sample of up to 15 txs):    1 0xB029E8EAee8F51c8B6feB933832F8052a6c9Dc4b
+EntryPoint v0.8 0x4337084D9E255Ff0702461CF8895CE9E3b5Ff108 UserOperationEvent count=1
+   bundler(tx.from, sample of up to 15 txs):    1 0x3ea01B9b75a1A162bA73A522063e0C94EEce6e65
+EntryPoint v0.9 0x433709009B8330FDa32311DF1C2AFA402eD8D009 UserOperationEvent count=0

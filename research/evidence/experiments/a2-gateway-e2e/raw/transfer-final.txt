@@ -1,0 +1,16 @@
+HTTP/2 200 
+date: Sun, 18 Oct 2026 14:24:19 GMT
+content-type: application/json; charset=utf-8
+content-length: 516
+access-control-allow-origin: *
+cache-control: no-store
+etag: W/"204-D0tJgL0LdBoUM8VYX3Nl3A1crnM"
+pragma: no-cache
+strict-transport-security: max-age=31536000; includeSubDomains
+x-frame-options: DENY
+set-cookie: __cf_bm=DmXIPFvXpqPOm66AuUJISPWGonRN3Fa4Tt7NEuAycGU-1792333459.7181253-1.0.1.1-En.xmPblcluQiIrYZ3dfWOjrpowgWeRm4MLZXlaGJSGBHK0LScYYdhhQAv435PN1.WV.TefZf.IxGolTbMF5Ma508cnWIGy6h3GKYImBqvoE.irWwQ99saIXG2vrQIkq; HttpOnly; SameSite=None; Secure; Path=/; Domain=circle.com; Expires=Sun, 18 Oct 2026 14:54:19 GMT
+cf-cache-status: DYNAMIC
+server: cloudflare
+cf-ray: a4c834bb38c83fe7-BOM
+
+{"id":"f1f4ddc1-8324-4420-97b9-bb0ae32e3a27","status":"completed","token":"USDC","sendingNetwork":"eip155:5042002","recipientNetwork":"eip155:5042002","fromAddress":"0xe5b81fb66503ab5df7ea62dc4fb2096570b90b55","toAddress":"0xdc5b9476099311d00d5b183aa4bfdff836c5e84f","amount":"1000","nonce":"0xd3bed23ea0d77043c5001af8627d9305f6c517a3af3f9e6a21744beb9405fea2","txHash":"0x10acef079f1eecdf3141a24ac1f777a56591c773a79b1a0fc3442b4bdb80e02d","createdAt":"2026-10-18T14:22:14.994Z","updatedAt":"2026-10-18T14:24:04.189Z"}

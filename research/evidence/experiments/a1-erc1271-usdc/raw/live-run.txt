@@ -1,0 +1,126 @@
+start 2026-10-18T14:29:33Z block 67854270
+owner 0x4015D942267415f057D2A4735A82DD38Eb55D264 usdc=2000000
+== deploy 2026-10-18T14:29:35Z
+{
+  "deployer": "0x4015D942267415f057D2A4735A82DD38Eb55D264",
+  "deployedTo": "0xd80fe1aD38eC902df4Db294795D7CD18163A23EE",
+  "transactionHash": "0xe147acdb1baf831a8aa352a732fb3dd9356a13cbf46f4877f1492819912bacda"
+}
+wallet 0xd80fe1aD38eC902df4Db294795D7CD18163A23EE codesize 753 owner() 0x4015D942267415f057D2A4735A82DD38Eb55D264
+== fund wallet with 1 USDC 2026-10-18T14:29:38Z
+tx 0xfae95790c161ef6659272f00ff78b6f8595b5160a514b77874a51cd26a0a2454 block 67854283 status 0x1
+wallet usdc=1000000
+== direct on-chain: bytes overload, from=wallet, relayer=owner, 0.1 USDC to seller 2026-10-18T14:29:41Z
+tx 0x8f5cd4f148c60b2635b3ef606dac7cc8568bb19c6a9818ea29e1c1d3dbf5ef51 block 67854293 status 0x1 gasUsed 121739
+send->receipt ms 3487
+wallet usdc 1000000 -> 900000; seller usdc 0 -> 100000
+authorizationState true
+== facilitator /verify with contract payer 2026-10-18T14:29:50Z
+[2026-10-18T14:29:50.614Z] config {
+  "mode": "verify",
+  "payer": "0xd80fe1aD38eC902df4Db294795D7CD18163A23EE",
+  "owner": "0x4015D942267415f057D2A4735A82DD38Eb55D264",
+  "seller": "0xF201E44a8cE66C57175014e120ce73568724dB27",
+  "price": "100000"
+}
+[2026-10-18T14:29:50.627Z] buyer got HTTP 402 PAYMENT-REQUIRED {
+  "x402Version": 2,
+  "error": "payment required",
+  "resource": {
+    "url": "http://127.0.0.1:4021/premium",
+    "description": "Czar A1 ERC-1271 probe",
+    "mimeType": "application/json"
+  },
+  "accepts": [
+    {
+      "scheme": "exact",
+      "network": "eip155:5042002",
+      "amount": "100000",
+      "asset": "0x3600000000000000000000000000000000000000",
+      "payTo": "0xF201E44a8cE66C57175014e120ce73568724dB27",
+      "maxTimeoutSeconds": 60,
+      "extra": {
+        "name": "USDC",
+        "version": "2",
+        "assetTransferMethod": "eip3009"
+      }
+    }
+  ]
+}
+[2026-10-18T14:29:51.348Z] facilitator /verify HTTP 200 in 718 ms {
+  "isValid": true,
+  "payer": "0xd80fe1ad38ec902df4db294795d7cd18163a23ee"
+}
+[2026-10-18T14:29:51.350Z] buyer got HTTP 200 {
+  "body": {
+    "verified": {
+      "isValid": true,
+      "payer": "0xd80fe1ad38ec902df4db294795d7cd18163a23ee"
+    }
+  },
+  "paymentResponse": null
+}
+== facilitator /verify + /settle with contract payer 2026-10-18T14:29:51Z
+[2026-10-18T14:29:51.512Z] config {
+  "mode": "settle",
+  "payer": "0xd80fe1aD38eC902df4Db294795D7CD18163A23EE",
+  "owner": "0x4015D942267415f057D2A4735A82DD38Eb55D264",
+  "seller": "0xF201E44a8cE66C57175014e120ce73568724dB27",
+  "price": "100000"
+}
+[2026-10-18T14:29:51.532Z] buyer got HTTP 402 PAYMENT-REQUIRED {
+  "x402Version": 2,
+  "error": "payment required",
+  "resource": {
+    "url": "http://127.0.0.1:4021/premium",
+    "description": "Czar A1 ERC-1271 probe",
+    "mimeType": "application/json"
+  },
+  "accepts": [
+    {
+      "scheme": "exact",
+      "network": "eip155:5042002",
+      "amount": "100000",
+      "asset": "0x3600000000000000000000000000000000000000",
+      "payTo": "0xF201E44a8cE66C57175014e120ce73568724dB27",
+      "maxTimeoutSeconds": 60,
+      "extra": {
+        "name": "USDC",
+        "version": "2",
+        "assetTransferMethod": "eip3009"
+      }
+    }
+  ]
+}
+[2026-10-18T14:29:52.035Z] facilitator /verify HTTP 200 in 500 ms {
+  "isValid": true,
+  "payer": "0xd80fe1ad38ec902df4db294795d7cd18163a23ee"
+}
+[2026-10-18T14:29:54.657Z] facilitator /settle HTTP 200 in 2621 ms {
+  "success": true,
+  "payer": "0xd80fe1ad38ec902df4db294795d7cd18163a23ee",
+  "transaction": "0x78d909c8f9b9ac6827b616d25a1a1070078390492677dc8672597db41c06e66d",
+  "network": "eip155:5042002",
+  "amount": "100000"
+}
+[2026-10-18T14:29:54.658Z] buyer got HTTP 200 {
+  "body": {
+    "data": "premium",
+    "settled": {
+      "success": true,
+      "payer": "0xd80fe1ad38ec902df4db294795d7cd18163a23ee",
+      "transaction": "0x78d909c8f9b9ac6827b616d25a1a1070078390492677dc8672597db41c06e66d",
+      "network": "eip155:5042002",
+      "amount": "100000"
+    }
+  },
+  "paymentResponse": {
+    "success": true,
+    "payer": "0xd80fe1ad38ec902df4db294795d7cd18163a23ee",
+    "transaction": "0x78d909c8f9b9ac6827b616d25a1a1070078390492677dc8672597db41c06e66d",
+    "network": "eip155:5042002",
+    "amount": "100000"
+  }
+}
+wallet usdc=800000 seller usdc=200000
+end 2026-10-18T14:29:56Z block 67854315

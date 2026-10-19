@@ -1,0 +1,9 @@
+(node:52662) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+Error: Wallet not found for address 0xE5b81Fb66503ab5DF7ea62dC4FB2096570b90b55 on ARC-TESTNET.
+{
+  "error": {
+    "code": "NOT_FOUND",
+    "message": "Wallet not found for address 0xE5b81Fb66503ab5DF7ea62dC4FB2096570b90b55 on ARC-TESTNET."
+  }
+}
