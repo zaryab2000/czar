@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "1.1",
+  "envelopeRef": "eip155:07:0x940cb3b72ed4b78bc1bfd2fbe45f5afda13f5073:205",
+  "vault": "0x608CBB87C714ddB7d36Cd98F74bFDaB5dC84fF88",
+  "envelopeId": 0,
+  "objectiveHash": "0xc257d9daa95a23a2bacc3842dbe7ade61da752d6d29137cd8ea5bde9e21fb3fe",
+  "planHash": "0xd27ad5e8b84ab7e817f3719e10d0871983b9d2fb48bcfd09670e26bffc1ad4de",
+  "payeeRoot": "0xcc7fd02de15a9ac2662f6818a1b59b1527eac7ce66c1f95dbd11540d309aeca3",
+  "categoryId": "0xdf7096787c0214573c4c45784dbc60dc6662e783ce74d8f8fe69099abc49a04a",
+  "cap": "129",
+  "maxStepAmount": "5756",
+  "pocketCapBps": 0,
+  "expiresAt": 0,
+  "approver": "owner",
+  "approvalTx": "0xbc4cbeb13e23ae206e4b4a2cc0e3d826827b02582d58febd5563c11ecb703b46",
+  "spent": "85",
+  "reserved": "0",
+  "pocketOutstanding": "0",
+  "jobEscrowed": "0",
+  "state": "Open",
+  "lastEventBlock": 0
+}

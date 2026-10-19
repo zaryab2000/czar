@@ -23,6 +23,12 @@
       "description": "PaymentRef for rail x402-exact (SL \u00a75.2).",
       "x-privacyClass": "public",
       "properties": {
+        "schemaVersion": {
+          "type": "string",
+          "description": "Schema version, major.minor; this file is 1.0.",
+          "x-privacyClass": "public",
+          "const": "1.0"
+        },
         "rail": {
           "type": "string",
           "description": "Payment rail.",
@@ -99,6 +105,12 @@
       "description": "PaymentRef for rail gateway-batched (SL \u00a75.2).",
       "x-privacyClass": "public",
       "properties": {
+        "schemaVersion": {
+          "type": "string",
+          "description": "Schema version, major.minor; this file is 1.0.",
+          "x-privacyClass": "public",
+          "const": "1.0"
+        },
         "rail": {
           "type": "string",
           "description": "Payment rail.",
@@ -157,6 +169,12 @@
       "description": "PaymentRef for rail erc8183-job (SL \u00a75.2).",
       "x-privacyClass": "public",
       "properties": {
+        "schemaVersion": {
+          "type": "string",
+          "description": "Schema version, major.minor; this file is 1.0.",
+          "x-privacyClass": "public",
+          "const": "1.0"
+        },
         "rail": {
           "type": "string",
           "description": "Payment rail.",
@@ -216,6 +234,12 @@
       "description": "PaymentRef for rail mpp (SL \u00a75.2).",
       "x-privacyClass": "public",
       "properties": {
+        "schemaVersion": {
+          "type": "string",
+          "description": "Schema version, major.minor; this file is 1.0.",
+          "x-privacyClass": "public",
+          "const": "1.0"
+        },
         "rail": {
           "type": "string",
           "description": "Payment rail.",
@@ -264,5 +288,6 @@
         "amount"
       ]
     }
-  ]
+  ],
+  "$comment": " 2026-10-19: schemaVersion allowed in every rail branch; before this fix the top-level required schemaVersion and each branch additionalProperties:false made every instance invalid."
 }

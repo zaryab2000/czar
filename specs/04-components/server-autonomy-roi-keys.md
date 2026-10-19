@@ -306,11 +306,11 @@ None.
 | pending Gateway | "Paid, settling (up to 16 min)" |
 | monthly headline | "Czar saved you 14 hours for $9 this month." |
 | unverified estimate note | "Time saved is Czar's estimate until you confirm it." |
-| currency note | "Shown in <currency> at today's rate; charged in USDC." |
+| currency note | "Shown in USD; USDC counts 1:1 as USD." (D51; the local-currency wording is superseded, RV-047) |
 
 ### 13. Performance and cost
 
-- O(receipts) per statement; no external calls except the FX source (GAP).
+- O(receipts) per statement; no external calls (D51; the FX-source GAP is superseded, RV-047).
 
 ### 14. Tests and definition of done
 
@@ -320,7 +320,7 @@ None.
 
 ### 15. Dependencies
 
-CZ-19 projections, CZ-12 outcome intake, OpenAPI schemas. Open question: FX source.
+CZ-19 projections, CZ-12 outcome intake, OpenAPI schemas. No FX source in Phase 1 (D51, RV-047).
 
 ---
 
@@ -581,3 +581,4 @@ Phase 1: the local keystore and the macOS keychain through `@napi-rs/keyring` (D
 | 2026-10-19 | RV-032, RV-055 | `vault-call` checks K3 arguments against stored plans; full never-signable list. |
 | 2026-10-19 | RV-045 / D80 | single-Mac custody stated as an accepted testnet exception; interactive confirmation for K6/K20 in Phase 1; keychain ACL hardening noted (unverified). |
 | 2026-10-19 | RV-049, RV-063 | pocket diagram: `confirmPullback` never closes a pocket; leaked-K4 threat text corrected. |
+| 2026-10-19 | RV-047 | CZ-25 leftover local-currency and FX text removed (D51). |

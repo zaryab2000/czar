@@ -2,7 +2,7 @@
 
 - **Date:** 2026-10-18. **Status:** ready to run. Gate 0 must pass before any production code (milestone M0 may start only on the repo baseline, check G0-12).
 - **Rule:** a result that changes a spec choice produces a spec change request (`spec-change-request-template.md`) **before** any milestone task that depends on it starts.
-- **Funds rule:** no check spends anything without Zaryab's written approval in the check's record. Testnet only. Test keys are created with `cast wallet new`, imported into an encrypted keystore (`cast wallet import`), never printed, and kept in gitignored folders (the pattern used in experiments A1 and A2).
+- **Funds rule:** no check spends anything without Zaryab's written approval in the check's record. Testnet only. Test keys are created with `cast wallet new`, imported into an encrypted keystore (`cast wallet import`, which writes to `~/.foundry/keystores/`, outside the repository), never printed, and their passphrase is typed at the prompt, never passed on the command line or in an environment variable (D78). **Superseded by D78:** "kept in gitignored folders (the pattern used in experiments A1 and A2)".
 - **Test funds:** Circle's CLI faucet drips 20 testnet USDC per request but only to Zaryab's own Circle wallets (p1-A11, A6-26). So Zaryab funds his agent wallet from the faucet and transfers small amounts to test addresses with `circle wallet transfer` (as in A1 and A2 experiment READMEs).
 - **D69 (2026-10-19):** G0-02 (iPhone passkeys) and G0-15 (web push) are moved to stage 2 and are not part of Gate 0. Phase 1 approvals run in a desktop browser; the desktop passkey check is part of task T-082. The procedures below are kept for stage 2.
 - **Records:** every check writes `specs/05-build-plan/gate-0-results/G0-<nn>.md` with date, commands, outputs (no keys, no secrets), result and any SCR filed.
@@ -15,7 +15,7 @@
 | G0-02 | ~~Passkey ceremony inside the installed iPhone Home Screen web app~~ — **moved to stage 2 (D69)**; see `stage-2-backlog.md` §2 (M-1) | — | — | not part of Gate 0 | — |
 | G0-03 | AR-2: Circle MSCA UserOp calls an arbitrary contract | agent, after Zaryab supplies a Modular Wallets client key (K2) and approves ≤ 0.1 testnet USDC | ≤ 0.1 USDC | UserOp mines and the target contract records `msg.sender == msca` | spec 01 §7.1 via SCR; D30 fallback (P-256 `executeOwnerAction`) becomes the Phase 1 path |
 | G0-04 | AR-3: keyless Facilitator `/verify` with a long ERC-1271 signature | agent, after Zaryab approves ≤ 0.1 testnet USDC for one deployment | ≤ 0.1 USDC (`/verify` itself is free, A1-15) | `isValid: true` for the 416-byte envelope signature | none if it fails: set `vaultSignatureMode = digest` (spec 02 §6.3.4); record it |
-| G0-05 | AR-5 / AR-14: Gateway pullback through a vault-style `isValidSignature` | agent, **after Zaryab approves about 1 testnet USDC** | ≈ 1 USDC | attestation `201`, mint lands, `isTransferSpecHashUsed == true` | spec 03 `czar-vault.md` §5.4 via SCR (pocket key's own 7-day withdrawal becomes the drain path) |
+| G0-05 | AR-5 / AR-14: Gateway pullback through a vault-style `isValidSignature`, including a **full-balance drain** (RV-012) | agent, **after Zaryab approves about 1 testnet USDC** | ≈ 1 USDC | attestation `201`, mint lands, `isTransferSpecHashUsed == true`; a drain of `availableBalance − maxFee` leaves the pocket at `≤ maxFee − fee`, and the response to a request for the whole balance is recorded | spec 03 `czar-vault.md` §5.4 via SCR (pocket key's own 7-day withdrawal becomes the drain path) |
 | G0-06 | AR-6: faucet or transfer to an MSCA address | agent with Zaryab (transfer from his wallet) | ≤ 0.1 USDC | MSCA balance increases | spec 04 `app-and-notifications.md` onboarding funding step |
 | G0-07 | AR-7: a pocket EOA can hold gas and call `addDelegate` | agent, after Zaryab approves ≤ 0.6 testnet USDC | ≤ 0.6 USDC (0.5 for a `depositFor`) | `DelegateAdded`, `isAuthorizedForBalance(USDC, pocket, testContract) == true` | spec 03 §5.4 / spec 04 CZ-15 §5.3 via SCR |
 | G0-08 | Arc block gas limit and contract size limit | agent (read-only RPC, local `arc-anvil`) | none | values recorded; vault plan fits (`finalize` chunk, `createVault` gas, size ≤ limit) | spec 03 constants (`FINALIZE_CHUNK`) or D42 library split |
@@ -23,9 +23,11 @@
 | G0-10 | Toolchain: `arc-forge` builds with solc 0.8.30 `evm_version = prague` | agent (local) | none | the seven interface files compile, 0 warnings | spec 03 header via SCR |
 | G0-11 | Hosts and protocols: `claude plugin validate --strict` on a skeleton plugin; `http` hook to `127.0.0.1` (AR-18, D46); `.mcp.json` env substitution (AR-20); MCP revision each host negotiates | agent (local Claude Code) | none | validation passes; hook payload reaches a local listener; env reaches the MCP child; revision logged | spec 04 `local-observers-and-daemon.md`, `local-agent-surfaces.md` via SCR |
 | G0-12 | Repo security baseline | agent | none | `.gitignore` present; secret scan in CI passes; no key files tracked | — (blocks M0) |
-| G0-13 | KMS secp256k1 signing over raw digests with per-key policies (AR-1, AR-28, D61, D62) | agent, after Zaryab picks the KMS vendor and creates the account | none (cloud costs only) | a signature over a known digest recovers to the KMS key's address; a denied principal is refused | spec 04 `server-autonomy-roi-keys.md` CZ-27 (software signer fallback) |
+| G0-13 | Local signer backend (D70, D78): `local-keystore` signs raw digests under per-key policies; keystore outside the repository; passphrase only from the macOS keychain (RV-028). The cloud KMS form of this check is stage 2 | agent (local; no account, no funds) | none | a signature over a known digest recovers to the key's address; a denied selector never reaches the backend; the keystore path is outside every git working tree; the passphrase is read from the keychain and never appears in `ps` output or the process environment | spec 04 `server-autonomy-roi-keys.md` CZ-27 §3 via SCR |
 | G0-14 | Bundlers and paymaster on Arc testnet: Circle's endpoint, one secondary bundler (AR-26), gas sponsorship (A6-08, A6-19 GAP), MSCA factory EntryPoint (A6-07) | agent (read-only `eth_supportedEntryPoints`; one UserOp shared with G0-03) | shared with G0-03 | entry points recorded; sponsorship yes/no recorded | spec 04 CZ-22 gas-reserve text (D52 stays until sponsorship confirmed) |
 | G0-15 | ~~Declarative Web Push to the installed app~~ — **moved to stage 2 (D69)**; see `stage-2-backlog.md` §2 (M-4) | — | — | not part of Gate 0 | — |
+| G0-16 | AR-8: the chosen model provider's published data-retention and training terms (RV-062) | agent (read-only: public terms pages), then Zaryab approves opening the K18 account | none | the terms are recorded with date and URL; the D31 disclosure wording in CZ-04 and CZ-22 matches them; Zaryab's written approval of the account is recorded before T-046 | spec 04 D31 disclosure wording via SCR |
+| G0-17 | Live re-checks the review could not run (network blocked): B3-10 (Cursor runs Claude Code hooks from `~/.claude/settings.json`) and A9-06 (`eth_getLogs` range cap on `rpc.testnet.arc.io`) | agent (read-only: cursor.com docs, one Cursor run if installed; read-only RPC) | none | each fact recorded as confirmed or changed, with date and source; **B3-10 must pass before T-062 starts** | spec 02 §8.1, §8.4 and spec 04 `local-observers-and-daemon.md` (B3-10); CZ-19 paging (A9-06) via SCR |
 
 ## Procedures
 
@@ -75,8 +77,9 @@
   2. Create a pocket EOA; fund it with 0.6 USDC (approved); the pocket calls `GatewayWallet.addDelegate(USDC, testContract)` and `deposit` 0.5 USDC.
   3. Build the burn intent (same-chain, domains 26/26, recipient = test contract) and sign the envelope; `POST https://gateway-api-testnet.circle.com/v1/transfer` with `contractSigner: true` (A2-19c).
   4. Call `GatewayMinter.gatewayMint(attestation, signature)` from a funded relayer (`0x0022222ABE238Cc2C7Bb1f21003F0a260052475B`).
-- **Record:** the request, the `201` response fields (not the attestation bytes), mint tx, `AttestationUsed` event, `isTransferSpecHashUsed(transferSpecHash)`.
-- **Pass:** all four succeed and the test contract's balance rises by `value`.
+  5. **Full-balance drain (RV-012):** read the pocket's balance from the Gateway API (`/v1/balances`); request a second burn with `value = availableBalance − maxFee`; then, separately, request one with `value = availableBalance` (the whole balance) and record whether the API refuses to attest or the burn reverts.
+- **Record:** the request, the `201` response fields (not the attestation bytes), mint tx, `AttestationUsed` event, `isTransferSpecHashUsed(transferSpecHash)`, and step 5's two outcomes.
+- **Pass:** steps 1–4 succeed and the test contract's balance rises by `value`; the `availableBalance − maxFee` drain mints; step 5's whole-balance outcome is recorded (it decides nothing, but documents why CZ-15 leaves fee headroom).
 - **On failure:** SCR on spec 03 §5.4 and spec 04 CZ-15 §5.3: the drain path becomes the pocket key's own transfer or 7-day withdrawal (A2-13 to A2-16), and the pocket cap may need lowering.
 
 ### G0-06 AR-6: funding an MSCA address
@@ -124,12 +127,21 @@
 - `git ls-files | grep -E '\.key$|\.key\.json$|\.env'` returns nothing.
 - **Pass:** all three.
 
-### G0-13 KMS (D61, D62) — moved to stage 2 (D70)
-- **Phase 1 replacement:** the agent checks the `local-keystore` signer backend instead: create one testnet secp256k1 key in an encrypted keystore, sign a known digest, recover the address, confirm a denied selector never reaches the backend, and confirm the keystore path is gitignored.
+### G0-13 Local signer backend (D70, D78); the KMS form is stage 2
+- **Phase 1 check (RV-028):** the agent checks the `local-keystore` signer backend: create one testnet secp256k1 key in an encrypted keystore at `signer.keystorePath` (outside the repository), with the passphrase stored in the macOS keychain item `signer.keychainService`; sign a known digest; recover the address; confirm a denied selector never reaches the backend; confirm the keystore path is outside every git working tree and that the passphrase never appears in `ps` output or the environment. **Superseded by D78:** "confirm the keystore path is gitignored".
 - **Stage 2 (original check, kept):** Zaryab creates the Google Cloud account and KMS (his action).
 - The agent creates one secp256k1 signing key, signs a known 32-byte digest, recovers the address with `cast wallet verify`/viem, and checks a second principal is denied.
 - **Pass:** recovery matches; denial observed.
 - **On failure:** CZ-27 software signer in an isolated segment (spec 04 `server-autonomy-roi-keys.md`), recorded for the pre-mainnet HSM decision.
+
+### G0-16 AR-8: model provider retention terms (RV-062)
+- **Steps:** read the chosen provider's public data-retention, zero-retention and training-use terms for API traffic (read-only, no account needed); record URL, date and the relevant wording; compare with the D31 disclosure text the user sees (CZ-04, CZ-22). Then Zaryab approves, in writing, opening the K18 model account (AGENTS.md: account creation needs approval).
+- **Pass:** terms recorded; wording matches or an SCR changes it; approval recorded before T-046.
+
+### G0-17 Live re-checks the review could not run (RV review flags B3-10, A9-06)
+- **Why:** the G0-01 review and the review-fix pass both ran where `cursor.com`, `docs.arc.io` and `rpc.testnet.arc.io` were refused by the network policy, so these two facts rest on captures only.
+- **Steps:** (1) read Cursor's current hooks documentation and, if Cursor is installed, run one session with a Claude Code `PreToolUse` hook in `~/.claude/settings.json` and record whether Cursor runs it and with which payload shape (B3-10); (2) `eth_getLogs` against `https://rpc.testnet.arc.io` over 10,000 and 10,001 blocks and record the error code (A9-06).
+- **Pass:** both facts recorded. B3-10 gates T-062: if Cursor no longer runs Claude Code hooks, spec 02 §8.1 rule 1 and §8.4's de-duplication change through an SCR before T-062 starts. A9-06 changes only CZ-19's page size.
 
 ### G0-14 Bundlers and sponsorship
 - `eth_supportedEntryPoints` on Circle's Modular Wallets endpoint and one secondary bundler (Pimlico, Alchemy or ZeroDev support Arc testnet, A6-15 to A6-17).
@@ -148,3 +160,7 @@
 |---|---|---|
 | 2026-10-19 | D69 | G0-02 (iPhone passkeys) and G0-15 (web push) moved out of Gate 0 to stage 2; procedures kept and marked; header note added. |
 | 2026-10-19 | D70 | Phase 1 runs on Zaryab's Mac with a local software signer (encrypted keystore); Google Cloud (KMS, Cloud Run, e2-micro VM) moves to stage 2. |
+| 2026-10-19 | RV-012 | G0-05 adds a full-balance drain step. |
+| 2026-10-19 | RV-028 / D78 | Funds rule and G0-13 rewritten for the local keystore (outside the repository, passphrase only in the keychain); the KMS form is stage 2. |
+| 2026-10-19 | RV-062 | G0-16 checks the model provider's retention terms and records approval for the K18 account. |
+| 2026-10-19 | review flags | G0-17 re-checks B3-10 (gates T-062) and A9-06 live. |

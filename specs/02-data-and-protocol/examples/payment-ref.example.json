@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "1.0",
+  "rail": "x402-exact",
+  "network": "eip155:4560",
+  "asset": "0xC88De4F2bbe71CDBe513cB6ae6630695DFaAFEb2",
+  "payer": "0xb4e9F89DC8fD1E849aBDFba0e08e9eDBebbec58a",
+  "payTo": "0x70f7DFDE6bE3Ba84Fd930Edfc81aCfa17Fcb2c68",
+  "amount": "871",
+  "nonce": "0xe92c4e3e44f42a3aadd0825851115c12f4df91e41f8516af704acaf7a11de1c5",
+  "validBefore": 0
+}

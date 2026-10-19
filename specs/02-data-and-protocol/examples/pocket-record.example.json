@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "1.1",
+  "vault": "0xcDCFD4B2cE6F6E7D5C556f6cBC120A5Ff5dc6E8f",
+  "envelopeId": 0,
+  "pocket": "0x0b18D1Dc1A0d0B32e8f47677EE489C59dcb0f1Af",
+  "keyRef": "example",
+  "state": "Registered",
+  "funded": "69",
+  "gasGranted": "0",
+  "outstanding": "7",
+  "pendingPullback": "12",
+  "pullbacks": [
+    {
+      "pullbackId": 0,
+      "value": "213",
+      "salt": "0xf41ac63f988435d40b0e9542312830778088780149b260d826647c1561f9f4b4",
+      "maxFee": "589",
+      "maxBlockHeight": 0,
+      "transferSpecHash": "0x7d6022c2072ec228e5f3e3530cc0a0ec8b7dd963fbcc3e99b5aaa46c81d06ade",
+      "requestedAtBlock": 0,
+      "state": "Pending"
+    }
+  ]
+}

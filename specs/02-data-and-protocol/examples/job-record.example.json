@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "1.1",
+  "vault": "0xcd2D6F1Bbc2A9dFEEa0E821C63ffcbCA1204648D",
+  "envelopeId": 0,
+  "stepIndex": 0,
+  "jobEscrow": "0x7377B8CaF4c0b2b79eEf9f77edd96abDbfac6E63",
+  "jobId": "5",
+  "jobKey": "0xc14ef0b148b6a3a3ef0c90f3c46014da22d12f4c6c3e6e7333c43aa21716bc7f",
+  "provider": "0x70d6Aeb0cac4ec1208CaBddAFF8B6E61Bc3F5aa0",
+  "evaluator": "0xeeA03d3860C31DBCcC7C4D5EFeFE7f80A539A67F",
+  "reservedCap": "90",
+  "descriptionHash": "0x345c9090defbbb61795301156e513992cb7b1b1920d63f676aeedc4a357bed64",
+  "state": "Opened",
+  "expiredAt": 0
+}

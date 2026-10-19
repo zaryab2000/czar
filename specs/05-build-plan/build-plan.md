@@ -136,8 +136,8 @@ Task details are in `phase-1-tasks.md`. "Exit gate" commands run in CI unless ma
 - **Exit gate:**
   - indexer integration tests replay a scripted `fork` session and the projections equal the vault's on-chain state field by field
   - a forced `Upgraded` event on a forked proxy raises the alert and sets the halt flag (T-033)
-  - signer policy tests: a USDC digest whose `to` is outside the reservation is refused before the KMS is called; rate limits enforced; K6 and K20 need dual control
-  - **testnet:** the signer signs one `reserve` call and one `USDC_3009` digest with the KMS key; a denied principal is refused; the relayer gas key lives in KMS (D62)
+  - signer policy tests: a USDC digest whose `to` is outside the reservation is refused before the key store is used; rate limits enforced; K6 and K20 need an interactive confirmation (dual control is stage 2, D80)
+  - **testnet:** the signer signs one `reserve` call and one `USDC_3009` digest with the keystore key; a denied request is refused before the backend; the relayer gas key lives in the local keystore (D62 as amended by D70); K3, K7, K8 hold capped gas balances (RV-017). **Superseded by RV-028:** "with the KMS key … lives in KMS"
 - **Risks:** the agent runs only while the Mac is awake (D70); Ponder on 0.5 s blocks (AR-23). KMS vendor limits (AR-1) move to stage 2.
 
 ### M3 First money path (T-040 to T-050, 11 tasks)
@@ -337,7 +337,7 @@ Each parallel agent works in its own worktree (CLAUDE.md worktree rule).
 | Secret scanning | gitleaks (pinned rules) on every push and pull request; `git ls-files` has no `*.key`, `*.key.json`, `.env*` | T-002, G0-12 |
 | CI hygiene | GitHub Actions pinned to SHAs with version comments, `persist-credentials: false`; `zizmor` clean; `arc-foundry` from the checksummed release | T-002, T-003 |
 | Plugin | `claude plugin validate --strict plugins/claude-code` | T-062 |
-| Key policies | signer policy tests on testnet: wrong payee refused before KMS; rate limits; dual control for K6/K20; relayer gas key in KMS | T-036, D61, D62 |
+| Key policies | signer policy tests on testnet: wrong payee refused before the key store; rate limits; interactive confirmation for K6/K20 (dual control stage 2, D80); relayer gas key in the local keystore (D70); keys created by T-105 before T-027 (RV-016) | T-036, T-105, D61, D62, D80 |
 | Injection | every injection eval case in `ai-prompts.md` passes; scenario step 7.1 passes | T-046, T-066, T-068, T-092, T-101 |
 | Logs | automated scan of all logs from the acceptance run: no objective text, soul text, merchant body, path or email (cross-cutting §4) | T-103 |
 | Dependencies | `pnpm audit --audit-level=moderate`; `uv` hashes for the Python helper | T-002, T-064 |
@@ -440,3 +440,4 @@ Each parallel agent works in its own worktree (CLAUDE.md worktree rule).
 | 2026-10-19 | D69 | §11 adds the stage-2 mobile milestone row. |
 | 2026-10-19 | D63–D68 | OD-35..OD-40 marked Decided; D64 fixture limited to M3–M4 and removed in M6 (plus pre-mainnet check); D66 cloud choice added to M2 entry; D67 macOS-only note. |
 | 2026-10-19 | D70 | Phase 1 runs on Zaryab's Mac with a local software signer (encrypted keystore); Google Cloud (KMS, Cloud Run, e2-micro VM) moves to stage 2. |
+| 2026-10-19 | G0-01 review | M2 exit and §8 for the local keystore (RV-028, D80); T-105 before T-027 (RV-016); T-086 depends on T-095 and the M5 exit, so M6 starts T-086 last (RV-053). |
