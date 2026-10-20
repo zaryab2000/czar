@@ -24,7 +24,7 @@
 | Malicious observer input | none on-chain | — | off-chain; the vault only sees hashes |
 | Dependency upgraded against Czar | `CzarVault` | USDC changes ERC-1271 semantics; Gateway changes delegate rules; ERC-8183 changes fees | the vault never trusts a dependency for accounting: settle reads `authorizationState`, pullback reads `isTransferSpecHashUsed`, fund reads fees in the same tx; indexer `Upgraded` alerts halt new actions; worst case per path bounded as spec 01 §13 |
 | Claim server lies (D17) | `BuilderEscrow` | release to a wrong wallet | timelocked, public, cancellable release (builder-escrow spec) |
-| Phished user approval | `CzarVault` | user approves a bad plan | on-chain bound = that envelope's cap; `userMax` per category; freeze; the app rebuilds `payeeRoot` and `planHash` from the displayed leaves before signing (CZ-22, RV-044) |
+| Phished user approval | `CzarVault` | user approves a bad plan | on-chain bound = that envelope's cap (`userMax` bounds only envelopes the agent opens by itself, not the owner's own approvals; `czar-vault.md` §15.10, D88); freeze; the app rebuilds `payeeRoot` and `planHash` from the displayed leaves before signing (CZ-22, RV-044) |
 | Selection Layer operator misconduct | `OpenEvidenceLog` | drop or reorder evidence | per-publisher hash chain, inclusion tickets (off-chain), anyone can publish |
 | Reentrancy | `CzarVault`, escrows | re-enter during `depositFor`, `transfer`, `fund`, `gatewayMint` callbacks | `ReentrancyGuardTransient` on every externally-calling function; checks-effects-interactions; USDC and Gateway make no callbacks to the vault except the `view` `isValidSignature` |
 | Griefing with `settle`/`finalize` by anyone | `CzarVault` | call early or with wrong indices | `finalize` requires `now > validBefore`; indices validated; loops bounded by `FINALIZE_CHUNK` |
@@ -42,7 +42,7 @@
 
 | Id | Where defined |
 |---|---|
-| INV-1 … INV-15 | `czar-vault.md` §11 |
+| INV-1 … INV-16 | `czar-vault.md` §11 |
 | FAC-1 … FAC-5 | `czar-vault-factory.md` §9 |
 | JOB-1 … JOB-5 | `job-escrow-adapter.md` §8 (JOB-5 = INV-16, H1/H2) |
 | OEL-1 … OEL-6 | `open-evidence-log.md` |
@@ -55,11 +55,11 @@ Each is written so a Foundry `invariant_*` test can assert it after every handle
 
 ### 3.1 Unit tests (per function and per error)
 
-- One test per row of every function table and one per custom error, including the role matrix (`czar-vault.md` §2): every (role × function) cell has a test that expects success or the exact error.
+- One test per row of every function table and one per custom error, including the role matrix (`czar-vault.md` §2 and §15.1, binding since D88): every (role × function) cell has a test that expects success or the exact error.
 - `isValidSignature`: for each kind and the fallback: happy path; every numbered check failing one at a time (wrong nonce, wrong index, index ≥ count, done bit set, wrong `to`, `value != unitAmount` (both larger and smaller, RV-035), `validAfter != 0`, wrong `validBefore`, expired, frozen, paused, wrong digest, wrong signer, high-s, bad `v`); never reverts; returns `0xffffffff` for a bare 65-byte signature against an unregistered digest.
 - `GATEWAY_BURN`: each `TransferSpec` field mutated → `INVALID`; cross-chain domain → `INVALID`; `Cancelled` record → `INVALID`.
 - Digest reproduction: the seven entries in 02 §6.4 must be reproduced on-chain: `derivedNonce`, USDC digest, burn digest with `transferSpecHash`, `Receipt` digest and struct hash, `ReceiptAttestation` digest (RV-013), `AutonomyRaise` (its `deadline` lies inside `periodId`, so the on-chain `raiseAutoLimit` call succeeds, RV-061), `OwnerAction`.
-- D30: WebAuthn fixtures (a real assertion captured from a test passkey, RP ID `localhost`, D78) verified through `executeOwnerAction`; wrong `rpIdHash`, missing UV, wrong challenge → `InvalidPasskeyAssertion`; a **high-s** fixture is refused as sent and accepted after the client normalises `s` to `N − s` (RV-034); gas: 6,900 per precompile call, ≈ 6,900 on the valid path and ≈ 13,800 on the invalid path (A6-02, RV-034); every `OwnerActionKind` 1–16 dispatches to its function (RV-033).
+- D30: WebAuthn fixtures (a real assertion captured from a test passkey, RP ID `localhost`, D78) verified through `executeOwnerAction`; wrong `rpIdHash`, missing UV, wrong challenge → `InvalidPasskeyAssertion`; a **high-s** fixture is refused as sent and accepted after the client normalises `s` to `N − s` (RV-034); gas: 6,900 per precompile call, ≈ 6,900 on the valid path and ≈ 13,800 on the invalid path (A6-02, RV-034); every `OwnerActionKind` 1–17 dispatches to its function (RV-033, H2).
 
 ### 3.2 Fuzz tests (reservation and envelope math)
 
@@ -71,7 +71,10 @@ Each is written so a Foundry `invariant_*` test can assert it after every handle
 ### 3.3 Foundry invariant tests
 
 - Handlers: owner (including `withdraw`, `forceCloseEnvelope`, `recordManualReturn`, `setMaxPullbackFee`), agent, autonomy, guardian, a USDC mock that honours ERC-1271 exactly like `NativeFiatTokenV2_2` (nonce map, `validBefore`, pause, blacklist), a Gateway mock (`depositFor`, `isAuthorizedForBalance`, `isTransferSpecHashUsed`), an ERC-8183 mock for both ABIs (Czar kind with partial claims, `settledAmount`).
+- Handlers also cover `cancelJob`, `fundJob(jobKey, expectedBudget)` with a budget that may change, and the Gateway mint path (a mock `testMint` that marks the transfer-spec hash used and credits the vault in one call) (D88, G-52, G-64).
 - Assert every INV/FAC/JOB id after each call. Use `arc-anvil --network arc` as the test node so native-USDC semantics (18/6 decimals, zero-address rule, P-256) are real (A9-13, A9-14).
+- **One ledger for native value and USDC (D88, G-62).** On Arc the native balance and USDC `balanceOf` are the same ledger (A1-05): `grantPocketGas`, `receive()` and the K4 native sweep all change `balanceOf`. Vault unit, fuzz and invariant tests therefore use `MockArcUSDC`, a test-only USDC mock whose ledger is the native balance: `balanceOf(a) = a.balance / 1e12`, and every transfer moves native value with `vm.deal` on both sides. `MockUSDC3009` stays for its own self-tests. The fork tests (§3.4) check the real system contract. 07 PRD 04 specifies `MockArcUSDC`.
+- **Vault placement for vector tests (D88, G-58, G-66).** A `MockVaultFactory` (settable `networkConfig`, `defaults`, `guardianPaused`) deploys the vault with `deployCodeTo` at `0x00000000000000000000000000000000000c2a21` under `vm.chainId(5042002)`, so the vault-domain vectors reproduce. Vectors that the public API cannot produce (the burn digest with salt `0x22…22`) are reproduced through `CzarVaultHarness`, a test-only subclass that exposes the internal digest functions.
 
 ### 3.4 Fork tests (pinned `arc-anvil`, Arc testnet fork)
 
@@ -115,12 +118,12 @@ Each row is a Foundry test the builder writes first (builder rules: tests first 
 | `test_confirmPullback_afterForceClose_creditsFreeBalance` | RV-005 | a `Pending` pullback minted after force-close does not touch `committedTotal` and does not underflow | INV-2, INV-7 | T-017 |
 | `test_fundJob_whileFrozenOrPaused_reverts` | RV-006 | `FrozenVault` / `Paused` | INV-4 | T-018 |
 | `test_grantPocketGas_whileFrozenPausedOrExpired_reverts` | RV-006 | `FrozenVault`, `Paused`, `EnvelopeExpired` | INV-4 | T-017 |
-| `test_grantPocketGas_reentrantPocket_reverts` | RV-006 | an EIP-7702-style pocket that re-enters on receive cannot re-enter any guarded function | — | T-017 |
+| `test_grantPocketGas_reentrantPocket_reverts` | RV-006 | register an EOA, `vm.etch` code onto it that calls a guarded vault function on receive without catching the revert; `grantPocketGas` reverts `NativeSendFailed` (D88, G-42) | — | T-017 |
 | `test_lowerBelowUsed_openEnvelopeRevertsAllowanceExceeded` | RV-008 | `usedInPeriod = 8`, lower to 0 → agent `openEnvelope` reverts `AllowanceExceeded(c, 0, cap)`, never panic 0x11 | INV-9 | T-014, T-019 |
 | `test_lowerAutoLimit_equalIsNoop` / `test_raiseAutoLimit_notAbove_reverts` | RV-008 | lowering 0 → 0 succeeds; raise to ≤ current reverts `RaiseNotAbove` | INV-9 | T-019 |
 | `test_syncJob_openedAfterExpiry_released` / `test_syncJob_openedRejected_released` | RV-009 | `Released`, `reserved` and `stepUsed` drop by `reservedCap`, `openJobs−−`, envelope can close | INV-8, INV-12 | T-018 |
 | `test_syncJob_czarPartialClaim_refundsBudgetMinusSettled` | RV-009 | Czar kind: `settledAmount = 0.3`, budget 1.0, reject → credit 0.7, `spent += 0.3` | INV-1, INV-2 | T-018 |
-| `test_closeEnvelope_afterDuplicateOpenJobRetry` | RV-009 | two `openJob` for one step (crash retry), one never funded; after expiry `syncJob` releases it and the envelope closes | INV-8 | T-018 |
+| `test_closeEnvelope_afterDuplicateOpenJobRetry` | RV-009 | an `openJob` whose receipt the agent lost; its retry on the same step reverts `StepCapExceeded` (a job reserves the whole step cap); after `expiredAt` `syncJob` releases the first job and the envelope closes (D88, G-19: two `openJob` on one step can never both succeed) | INV-8 | T-018 |
 | `test_recordManualReturn_boundedByOutstandingAndFree` / `_notOwner_reverts` / `_closedPocket_reverts` | RV-010 | credit = `min(amount, outstanding − pendingPullback, freeBalance())`; only the owner; `PocketWrongState` on `Closed` | INV-2, INV-7 | T-017 |
 | `test_freeBalance_saturatesInSettleWindow` | RV-011 | USDC moves out through an authorization before `settle`: `freeBalance() == 0`, no revert; `withdraw` reverts `InsufficientFree` | INV-2 | T-013 |
 | `test_withdrawBeforeConfirmPullback_recordsShortfall` | RV-011 | mint lands, owner withdraws it, `confirmPullback` → `ShortfallRecorded`, `committedTotal ≤ balanceOf` | INV-1, INV-2 | T-017 |
@@ -132,7 +135,7 @@ Each row is a Foundry test the builder writes first (builder rules: tests first 
 | `test_queueDefaults_appliesOnlyAfter48h` | RV-015 | `applyDefaults` before `eta` reverts `TooEarly` | FAC-3 | T-012 |
 | `test_raiseSignedBeforeFreeze_cannotLand` / `test_raiseAutoLimit_whileFrozen_reverts` | RV-030 | freeze bumps `autonomyNonce`; the old signature fails `BadSigner`; while frozen `FrozenVault` | INV-10 | T-019 |
 | `test_twoRaisesAcrossPeriodBoundary_secondReverts` | RV-031 | raise at `boundary − 1 s`, raise at `boundary + 1 s` → `RaiseAlreadyThisPeriod` | INV-9 | T-019 |
-| `test_ownerAction_everyKindDispatches` | RV-033 | kinds 1–16 each reach their function; unknown kind → `UnknownAction` | — | T-019 |
+| `test_ownerAction_everyKindDispatches` | RV-033 | kinds 1–17 each reach their function; unknown kind → `UnknownAction` | — | T-019 |
 | `test_passkey_highS_refusedThenNormalisedAccepted` | RV-034 | raw high-s assertion → `InvalidPasskeyAssertion`; `N − s` → success; gas per precompile call 6,900 | — | T-019 |
 | `test_usdc3009_valueBelowUnitAmount_invalid` | RV-035 | `value = unitAmount − 1` returns `0xffffffff` | INV-5 | T-016 |
 | `test_cancelPullback_beforeMaxBlockPlusDelay_reverts` / `test_gatewayBurn_afterMaxBlockHeight_invalid` | RV-036 | `TooEarly`; digest invalid once `block.number > maxBlockHeight` | INV-6, INV-7 | T-017 |
@@ -185,11 +188,12 @@ The off-chain fixes are proven by tests named in their component specs; this ind
 
 | Step | Detail |
 |---|---|
-| 1 | Deploy `OpenEvidenceLog` through Arachnid CREATE2 (`0x4e59b44847b379578588920cA78FbF26c0B4956C`, A9-15) with a fixed salt; same address on both networks. |
-| 2 | Deploy `CzarVaultFactory` through CREATE2 with constructor args: network immutables (USDC, GatewayWallet, GatewayMinter, domain 26, job escrow address and kind), initial `defaults` (agent K3, autonomy K5, evaluator K7 addresses from the signer service's local keystore, D70/D78, created by task T-105 before T-027, RV-016), guardian (K6), admin (K20, Ownable2Step pending). |
-| 3 | Admin accepts ownership. There is no version registration step: the factory deploys only the vault bytecode compiled into it (D73, RV-015; the earlier "register version 1 without timelock" step is superseded). Publish `VAULT_CREATION_CODE_HASH`. |
+| 1 | Deploy `OpenEvidenceLog` through Arachnid CREATE2 (`0x4e59b44847b379578588920cA78FbF26c0B4956C`, A9-15) with salt `keccak256("czar.open-evidence-log.v1")` = `0xefdc186d7c05979030751df4b0defd2a979cb96094dd7792b5cb93d652e24199`, built with the reproducible profile (`bytecode_hash = "none"`, `cbor_metadata = false`); same address on both networks. Czar deploys it (T-027) (D88, G-49). |
+| 1a | If PRD 11 introduced linked libraries: deploy each through Arachnid CREATE2 with salt `keccak256("czar.lib.<LibraryName>.v1")` and the reproducible profile, before the factory; their addresses are baked into the vault creation code and so into the factory address (`czar-vault-factory.md` §11, D88). |
+| 2 | Deploy `CzarVaultFactory` through CREATE2 with constructor args: network immutables (USDC, GatewayWallet, GatewayMinter, domain 26, job escrow address and kind), initial `defaults` (agent K3, autonomy K5, evaluator K7 addresses from the signer service's local keystore, D70/D78, created by task T-105 before T-027, RV-016), guardian (K6), admin (K20). Salt `FACTORY_SALT` (`czar-vault-factory.md` §3); reproducible profile. |
+| 3 | No ownership step: the constructor sets the admin directly with `Ownable(admin_)`, because under the CREATE2 deployer `msg.sender` is the deployer contract (D88, G-46). There is no version registration step: the factory deploys only the vault bytecode compiled into it (D73, RV-015; the earlier "register version 1 without timelock" step is superseded). Publish `VAULT_CREATION_CODE_HASH`. |
 | 4 | Publish bytecode hashes (`creationCodeHash`, runtime code hash of a reference vault) and verified sources on the Arc explorer (testnet API keyless, A9-10; mainnet needs a key, A9-11). |
-| 5 | Pre-mainnet: deploy `CzarJobEscrow` proxy with Czar admin timelocks; then a new factory version whose immutables point to it. |
+| 5 | Pre-mainnet: deploy `CzarJobEscrow` proxy with Czar admin timelocks; then a new factory whose immutables point to it (D73). |
 | 6 | Phase 2: `BuilderEscrow`, `RecipeSplits`. |
 | 7 | Indexer: subscribe to `Upgraded(address)` on USDC proxy `0x3600…0000` (admin slot per A1-01), GatewayWallet and GatewayMinter proxies, ERC-8183 proxy, ERC-8004 registries (A5-11); page `eth_getLogs` ≤ 9,999 blocks (A9-06); halt the affected path on any event. |
 
@@ -213,4 +217,5 @@ Constructor arguments are recorded per network in the build plan; `maxFeePerGas 
 | Date | ID | Change |
 |---|---|---|
 | 2026-10-19 | G0-01 review | Threat model rows for RV-002/003/013/014/015/063; invariant ranges INV-1…15, FAC-1…5, OEL-1…6; §3.1–§3.3 updated; §3.7 named contract regression tests; §3.8 off-chain regression tests; deployment steps 2–3 (D73, T-105, D78); pre-mainnet checklist (D80, RV-038). |
-| 2026-10-20 | H1, H2, M1-b, N7 | Threat rows; JOB-5 / INV-16; tests in §3.8. |
+| 2026-10-20 | H1, H2, M1-b, N7 | Threat rows; JOB-5 / INV-16; tests in §3.7a (this row said §3.8 until D88). |
+| 2026-10-20 | D88 | INV range to 16; owner actions 1–17; role matrix binds to §15.1; invariant handlers for `cancelJob`, `fundJob(expectedBudget)` and the mint path; one-ledger `MockArcUSDC`; `MockVaultFactory` and `CzarVaultHarness` for vector tests; reentrant-pocket and duplicate-`openJob` tests restated; phished-approval row; deployment salts, reproducible profile, no ownership-accept step. |

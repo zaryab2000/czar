@@ -1,6 +1,6 @@
 # Spec change request template
 
-- File each request as `docs/specs/05-build-plan/scr/SCR-<nnn>-<short-slug>.md` (kebab-case).
+- File each request as `docs/specs/06-review/change-requests/SCR-<nnn>-<short-slug>.md` (kebab-case), where the existing requests are (D88; this line said `05-build-plan/scr/`, a folder that was never used).
 - Work on the affected item stops until the request is **Accepted** or **Rejected** by Zaryab.
 - An accepted request is applied to the spec with a change-log line that cites the SCR ID.
 

@@ -26,16 +26,32 @@
 
 ## 3. Adapter surface (vault-internal, `library JobEscrowAdapter`)
 
+**Binding signatures (D88, G-05).** `IJobEscrowAdapter.sol` is a type source (`JobEscrowKind`, `EscrowStatus`) and documentation only; nothing inherits it. The library is `library JobEscrowAdapter` in `contracts/src/libraries/JobEscrowAdapter.sol` with exactly these `internal` functions:
+
+```solidity
+function create(JobEscrowKind kind, address escrow, address provider, address evaluator, uint64 expiredAt, bytes32 descriptionHash) internal returns (uint256 jobId);
+function readBudget(JobEscrowKind kind, address escrow, uint256 jobId) internal view returns (uint256 budget, EscrowStatus status, address token);
+function readFees(JobEscrowKind kind, address escrow) internal view returns (uint256 platformBp, uint256 evaluatorBp);
+function fund(JobEscrowKind kind, address escrow, address usdc, uint256 jobId, uint256 budget) internal;
+function readOutcome(JobEscrowKind kind, address escrow, uint256 jobId) internal view returns (EscrowStatus status, uint256 budget, uint256 settledAmount, uint64 expiredAt);
+function cancel(JobEscrowKind kind, address escrow, uint256 jobId, bytes32 reason) internal;
+function claimRefund(JobEscrowKind kind, address escrow, uint256 jobId) internal;
+```
+
+- `fund` takes the USDC address because it approves the escrow (the vault's immutable `USDC`).
+- The library raises no errors of its own: the vault does every check in the "Checks it adds" column, in the order of `czar-vault.md` §15.3, before or after the call as stated there. External reverts bubble unchanged (§15.5).
+- The superseded `status(kind, escrow, jobId)` row is removed (D88): it duplicated `readOutcome`, and escrow status is not the vault's `JobState`.
+
+
 | Function | What it does per kind | Checks it adds |
 |---|---|---|
-| `create(kind, escrow, provider, evaluator, expiredAt, descriptionHash) → jobId` | Circle: `createJob(provider, evaluator, uint256(expiredAt), "czar:"+hex, address(0))`. Czar: `createJob(provider, evaluator, uint48(expiredAt), "czar:"+hex, address(0), 0)`. | `expiredAt ≥ now + MIN_JOB_EXPIRY_LEAD` (p1-E7: `ExpiryTooShort` under 5 min); `evaluator == vault.evaluator`; `provider != evaluator`; description is only `"czar:" + hex(descriptionHash)` (02 §5.2), never user text (p1-E7: calldata is public) |
+| `create(kind, escrow, provider, evaluator, expiredAt, descriptionHash) → jobId` | Circle: `createJob(provider, evaluator, uint256(expiredAt), description, address(0))`. Czar: `createJob(provider, evaluator, uint48(expiredAt), description, address(0), 0)`. `description = DESCRIPTION_PREFIX + 64 lowercase hex chars of descriptionHash, no 0x` (69 ASCII chars; `czar-vault.md` §15.6). | `expiredAt ≥ now + MIN_JOB_EXPIRY_LEAD` (p1-E7: `ExpiryTooShort` under 5 min); `evaluator == vault.evaluator`; `provider != evaluator`; description is only `"czar:" + hex(descriptionHash)` (02 §5.2), never user text (p1-E7: calldata is public) |
 | `readBudget(kind, escrow, jobId) → (budget, status, token)` | Circle: `jobs(jobId)` tuple (budget, status) and `paymentToken()`. Czar: `getJob(jobId)` (`budget`, `status`, `paymentToken`). | `status == Open`; `token == USDC`; `budget == expectedBudget` passed by `fundJob` (M1-b; Circle's `setBudget` can be called any number of times while `Open`, raising or lowering, R3) |
 | `readFees(kind, escrow) → (platformBp, evaluatorBp)` | both: `platformFeeBP()`, `evaluatorFeeBP()` | Circle: both must be `0` (A4-07) else `UnexpectedFees`; Czar: sum ≤ `MAX_JOB_FEE_BPS` (500) |
-| `fund(kind, escrow, jobId, budget)` | Circle: `USDC.forceApprove(escrow, budget)` then `fund(jobId, "")` (contract pulls `job.budget`, p1-E7). Czar: `forceApprove` then `fund(jobId, USDC, budget, "")`. | the vault re-reads the budget in the same transaction right before `fund`, so a provider cannot raise it between read and fund (same-tx atomicity replaces the missing `expectedBudget`, A4-05); approval reset to 0 after |
-| `status(kind, escrow, jobId) → uint8` | as `readBudget` | maps both enums to the vault's `JobState` |
+| `fund(kind, escrow, usdc, jobId, budget)` | Circle: `USDC.forceApprove(escrow, budget)` then `fund(jobId, "")` (contract pulls `job.budget`, p1-E7). Czar: `forceApprove` then `fund(jobId, USDC, budget, "")`. | the vault re-reads the budget in the same transaction right before `fund`, so a provider cannot raise it between read and fund (same-tx atomicity replaces the missing `expectedBudget`, A4-05); approval reset to 0 after |
 | `readOutcome(kind, escrow, jobId) → (status, budget, settledAmount, expiredAt)` | Circle: `jobs(jobId)` (`settledAmount = 0`, the instance has no partial claims). Czar: `getJob(jobId)` (`ICzarJobEscrowClient.getJob`, base line 1081) | `syncJob` decides only from this read, never from balances or events (RV-009) |
-| `cancel(kind, escrow, jobId, reason)` (H2) | both: `reject(jobId, reason, "")` with the vault as `msg.sender` (= `job.client`); Circle's instance allows a client reject only while `Open` (deployed lines 265–266, R5) | status `Open`, else `JobNotCancellable`; `reason = keccak256("czar:cancel")` |
-| `claimRefund(kind, escrow, jobId)` | both: `claimRefund(jobId)` | after `expiredAt` (Circle) or `expiredAt + 1 h` when `Submitted` (Czar) |
+| `cancel(kind, escrow, jobId, reason)` (H2) | both: `reject(jobId, reason, "")` with the vault as `msg.sender` (= `job.client`); Circle's instance allows a client reject only while `Open` (deployed lines 265–266, R5) | status `Open`, else `JobNotCancellable`; `reason = CANCEL_REASON` (`keccak256("czar:cancel")`) |
+| `claimRefund(kind, escrow, jobId)` | both: `claimRefund(jobId)` | after `expiredAt` (Circle; Czar `Funded`) or `expiredAt + CZAR_ESCROW_EVALUATION_GRACE` (1 h) when `Submitted` (Czar) |
 
 - `optParams` is always empty (`""`); nothing private is ever passed (p1-E7, A4-03).
 - The evaluator key (K7) calls `complete(jobId, reportHash, "")` or `reject(jobId, reportHash, "")` on the escrow directly; the `reason` is `reportHash` (02 §5.2). The adapter never holds the evaluator key.
@@ -56,7 +72,7 @@
 
 ## 7. Events and errors (adapter-level, emitted by the vault)
 
-See `czar-vault.md` §9: `JobOpened`, `JobFunded`, `JobSynced`, `JobRefunded`; errors `UnexpectedFees`, `WrongToken`, `JobNotOpen`, `JobWrongState`, `BudgetExceedsReserved`.
+See `czar-vault.md` §9: `JobOpened`, `JobFunded`, `JobSynced`, `JobRefunded`, `JobCancelled`, `StepUsed`, `ShortfallRecorded`; errors `UnexpectedFees`, `WrongToken`, `JobNotOpen`, `JobWrongState`, `BudgetExceedsReserved`, `BudgetChanged`, `JobNotCancellable`. Which call emits what: `czar-vault.md` §15.4 (D88, G-55).
 
 ## 8. Invariants
 
@@ -65,7 +81,7 @@ See `czar-vault.md` §9: `JobOpened`, `JobFunded`, `JobSynced`, `JobRefunded`; e
 | JOB-1 | A job is funded only with `budget ≤ reservedCap`, read in the same transaction as `fund`. |
 | JOB-2 | A job is created only with `evaluator == vault.evaluator` and `provider` proven under `payeeRoot` (kind 2). |
 | JOB-3 | `optParams` is always empty and `description` is always `"czar:" + 64 hex chars`. |
-| JOB-4 | `jobEscrowed` equals the sum of budgets of jobs in state `Funded` or `Submitted`. |
+| JOB-4 | For every envelope, open or closed: its `jobEscrowed` equals the sum of the budgets of its jobs in state `Funded` or `Submitted` (D88). |
 | JOB-5 | A job the vault never funded always ends `Released` through `syncJob` or `cancelJob`, never needing `forceCloseEnvelope` (H1, H2; = INV-16). |
 
 ## 9. Edge cases
@@ -80,7 +96,7 @@ See `czar-vault.md` §9: `JobOpened`, `JobFunded`, `JobSynced`, `JobRefunded`; e
 
 ## 10. Gas budget
 
-See `czar-vault.md` §13 (`openJob` ≈ 230k, `fundJob` ≈ 150k, `syncJob` ≈ 50k, `claimJobRefund` ≈ 90k).
+See `czar-vault.md` §5.5 and §13 (`openJob` ≈ 252k, `fundJob` ≈ 150k, `syncJob` ≈ 55k; `claimJobRefund` ≈ 95k is in §5.5 only; D88 aligned these).
 
 ## 11. Mainnet differences
 
@@ -93,3 +109,4 @@ Kind switches from `CIRCLE_TESTNET` to `CZAR_BASE` (no official mainnet instance
 | 2026-10-19 | RV-009 | `readOutcome` (adds `settledAmount`, `expiredAt`); `ICzarJobEscrowClient.getJob`; `Opened` jobs released by `syncJob`; refunds decided from escrow status only (SCR-009). |
 | 2026-10-19 | D77 | Deliverable hash mismatch is a reject (RV-024). |
 | 2026-10-20 | H1, H2, M1-b | `cancel` (client reject while `Open`); `expectedBudget` check; zero-budget submit edge case; JOB-5. |
+| 2026-10-20 | D88 | Binding `library JobEscrowAdapter` signatures (`fund` takes `usdc`); `status` row removed; description format; constants `CANCEL_REASON`, `CZAR_ESCROW_EVALUATION_GRACE`; §7 events and errors after D87; JOB-4 per envelope; gas figures. |

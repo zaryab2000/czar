@@ -111,19 +111,19 @@ Task details are in `phase-1-tasks.md`. "Exit gate" commands run in CI unless ma
   - CI secret scan and `zizmor` pass; `arc-forge build` compiles the 7 interface files with 0 warnings
 - **Risks:** `$id`-based schema refs need a loader that registers all schemas (follow-up in `amendment-verification.md` §4).
 
-### M1 Contracts (T-010 to T-027, 18 tasks)
+### M1 Contracts (T-010 to T-027 and T-105, 19 tasks)
 
 - **Goal:** `CzarVaultFactory`, `CzarVault` and `OpenEvidenceLog` built to spec 03, proven by tests, deployed to testnet at CREATE2 addresses.
 - **Components:** on-chain parts of CZ-15, CZ-17, CZ-24; contracts in spec 03.
 - **Specs:** 03 `czar-vault.md` §2–§14, `czar-vault-factory.md`, `job-escrow-adapter.md`, `open-evidence-log.md`, `security-and-testing.md`; 02 §5–§7.
 - **Entry:** M0 exit; G0-08, G0-09, G0-10 recorded.
 - **Exit gate:**
-  - `arc-forge test` passes all unit tests, with one test per row of the role table (`czar-vault.md` §2) and one per custom error
-  - `arc-forge test --match-path 'test/invariant/*'` passes INV-1 to INV-11, FAC-1 to FAC-4, JOB-1 to JOB-4, OEL-1 to OEL-5 with `runs ≥ 256`, `depth ≥ 64`
+  - `arc-forge test` passes all unit tests, with one test per row of the role table (`czar-vault.md` §2 and the binding caller list §15.1) and one per custom error
+  - `arc-forge test --match-path 'test/invariant/*'` passes INV-1 to INV-16, FAC-1 to FAC-5, JOB-1 to JOB-5, OEL-1 to OEL-6 with `runs ≥ 256`, `depth ≥ 64`
   - `arc-forge test --match-path 'test/fork/*' --fork-url https://rpc.testnet.arc.io --fork-block-number <pinned>` passes (USDC bytes overload, `authorizationState`, `depositFor`, `addDelegate`, Circle ERC-8183)
   - the spec 02 §6.4 vectors are reproduced on-chain (T-023)
   - `arc-forge build --sizes` shows every contract under the limit recorded in G0-08 (D42 decided in T-020)
-  - `slither .` with the committed triage file reports 0 untriaged findings
+  - `slither contracts/ --config-file contracts/slither.config.json` with the committed triage file reports 0 untriaged findings
   - **testnet:** factory and evidence log deployed through Arachnid CREATE2 (A9-15); bytecode hashes published; `arc-cast code` non-empty at both addresses
 - **Risks:** vault size (D42); `isValidSignature` subtleties (02 §6.3); the AR-3 outcome (both modes are built either way).
 
@@ -318,7 +318,7 @@ Each parallel agent works in its own worktree (CLAUDE.md worktree rule).
 |---|---|---|---|
 | Unit | every function and error path; table-driven routing; state-machine transitions | each task | `local`, CI |
 | Contract fuzz | reservation and envelope math, pocket accounting, autonomy periods, rounding | 03 `security-and-testing.md` §3.2 | CI |
-| Contract invariants | INV-1 to INV-11, FAC-1 to FAC-4, JOB-1 to JOB-4, OEL-1 to OEL-5 with faithful USDC, Gateway and ERC-8183 mocks | 03 §2, §3.3 | CI |
+| Contract invariants | INV-1 to INV-16, FAC-1 to FAC-5, JOB-1 to JOB-5, OEL-1 to OEL-6 with faithful USDC, Gateway and ERC-8183 mocks | 03 §2, §3.3 | CI |
 | Contract fork | live testnet USDC, GatewayWallet, Circle ERC-8183 on a pinned fork | 03 §3.4 | CI (`fork`) |
 | Gas | `forge snapshot`; fail on > 5% regression; feeds routing parameters | 03 §3.5 | CI |
 | Vectors | the 02 §6.4 digests in TypeScript and Solidity from one fixture | 02 `vectors/` | CI |
@@ -333,7 +333,7 @@ Each parallel agent works in its own worktree (CLAUDE.md worktree rule).
 
 | Gate | Command or check | Task |
 |---|---|---|
-| Static analysis | `slither .` with the committed triage file: 0 untriaged; custom checks: no `tx.origin`, no `block.prevrandao`, no unbounded loops | T-025 |
+| Static analysis | `slither contracts/ --config-file contracts/slither.config.json` with the committed triage file: 0 untriaged; custom checks: no `tx.origin`, no `block.prevrandao`, no unbounded loops | T-025 |
 | Secret scanning | gitleaks (pinned rules) on every push and pull request; `git ls-files` has no `*.key`, `*.key.json`, `.env*` | T-002, G0-12 |
 | CI hygiene | GitHub Actions pinned to SHAs with version comments, `persist-credentials: false`; `zizmor` clean; `arc-foundry` from the checksummed release | T-002, T-003 |
 | Plugin | `claude plugin validate --strict plugins/claude-code` | T-062 |
@@ -441,3 +441,4 @@ Each parallel agent works in its own worktree (CLAUDE.md worktree rule).
 | 2026-10-19 | D63–D68 | OD-35..OD-40 marked Decided; D64 fixture limited to M3–M4 and removed in M6 (plus pre-mainnet check); D66 cloud choice added to M2 entry; D67 macOS-only note. |
 | 2026-10-19 | D70 | Phase 1 runs on Zaryab's Mac with a local software signer (encrypted keystore); Google Cloud (KMS, Cloud Run, e2-micro VM) moves to stage 2. |
 | 2026-10-19 | G0-01 review | M2 exit and §8 for the local keystore (RV-028, D80); T-105 before T-027 (RV-016); T-086 depends on T-095 and the M5 exit, so M6 starts T-086 last (RV-053). |
+| 2026-10-20 | D88 | M1 task count (19, with T-105); invariant ranges INV-1..16, FAC-1..5, JOB-1..5, OEL-1..6; one `slither` command. |

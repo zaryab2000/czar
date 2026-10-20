@@ -370,7 +370,7 @@ Leaf hash: §5.3.
 | `provider`, `evaluator` | `Address` | yes | PUB | |
 | `reservedCap` | `Amount6` | yes | PUB | step cap reserved at `openJob` |
 | `budget` | `Amount6` | no | PUB | from `BudgetSet`/`getJob` |
-| `descriptionHash` | `Hash32` | yes | PUB | what went into the on-chain `description` string: `czar:<hash>` |
+| `descriptionHash` | `Hash32` | yes | PUB | what went into the on-chain `description` string: `"czar:"` followed by the 64 lowercase hex characters of the hash, no `0x` (69 characters; D88) |
 | `deliverableHash` | `Hash32` | no | PUB | from `JobSubmitted` |
 | `deliverableRef` | string ≤ 200 | no | SO | object-store key of the uploaded deliverable whose keccak256 equals the on-chain `deliverable` (D87 push model, §9.2 `uploadJobDeliverable`). **Superseded by D87:** `deliverableUri` and the D53 `.well-known` URL; a fetched-bytes mismatch can no longer happen, because the hash is checked at upload |
 | `reportHash` | `Hash32` | no | PUB | the `reason` passed to `complete`/`reject` |
@@ -544,7 +544,7 @@ type PaymentRef =
 | `planHash` | `{hashRule:"czar-hash-v1", kind:"plan", planId, objectiveHash, network, category, cap, slackBps, maxStepAmount, pocketCapBps, expiresAt, payeeRoot, taskSpecHash, steps:[{stepIndex, kind, payee?, alternates?, unitAmount, expectedCalls, stepCap, acceptanceProfileId, serviceId?, fanOut?, callInputsHash?}]}` | excludes `resource` URLs and `inputTemplate`; includes `taskSpecHash` and each step's `callInputsHash`, so what runs is what was approved (D84) |
 | `reportHash` | `jcs(AcceptanceReport minus reportHash)` | the ERC-8183 `reason` |
 | `paymentRefHash` | SL §5.2 (`PaymentRef` without ★ fields) | |
-| `descriptionHash` | `H({hashRule:"czar-hash-v1", kind:"job-description", planHash, stepIndex, acceptanceProfileId, inputCommit})` | the ERC-8183 `description` string is `"czar:" + descriptionHash` |
+| `descriptionHash` | `H({hashRule:"czar-hash-v1", kind:"job-description", planHash, stepIndex, acceptanceProfileId, inputCommit})` | the ERC-8183 `description` string is `"czar:"` followed by the 64 lowercase hex characters of `descriptionHash`, with no `0x` (69 characters; `czar-vault.md` §15.6, D88) |
 | `inputCommit` | `H({hashRule:"czar-hash-v1", kind:"job-input", inputs, inputSalt})` with `inputs` and `inputSalt` from the `JobBrief` (§4.21) | RV-025: previously used but never defined |
 | `soulVersionCommit` | `keccak256(abi.encode(bytes32 soulVersionHash, bytes32 demandSalt))`, `demandSalt = keccak256(abi.encode(bytes32 userDemandSecret, address vault, uint64 envelopeId))` | RV-026: the only soul reference in a public demand-proof leaf |
 
@@ -605,7 +605,7 @@ Digest = `keccak256("\x19\x01" ‖ domainSeparator ‖ structHash)` (EIP-712; Ga
 
 `AutonomyRaise` fields: `category` = `keccak256(utf8(category))`; `newLimit` = `Amount6` as `uint256`; `periodId = floor(block.timestamp / 604800)`; `nonce` = the vault's `autonomyNonce`; `deadline` = unix seconds.
 
-`OwnerAction` fields: `action` enum `1 OPEN_ENVELOPE`, `2 SET_LIMITS`, `3 FREEZE`, `4 UNFREEZE`, `5 WITHDRAW`, `6 ROTATE_SIGNERS`, `7 SET_PASSKEY`, `8 CLOSE_ENVELOPE`, `9 FORCE_CLOSE_ENVELOPE`, `10 RECORD_MANUAL_RETURN`, `11 RAISE_AUTO_LIMIT`, `12 LOWER_AUTO_LIMIT`, `13 REQUEST_PULLBACK`, `14 CANCEL_PULLBACK`, `15 WRITE_OFF_POCKET`, `16 SET_MAX_PULLBACK_FEE` (9–16 added by RV-033 and D81; the type string is unchanged); `payloadHash = keccak256(abi.encode(...args of the matching vault function))` (spec 03 lists the encoding per action); `nonce` = the vault's `ownerActionNonce`; `deadline` unix seconds.
+`OwnerAction` fields: `action` enum `1 OPEN_ENVELOPE`, `2 SET_LIMITS`, `3 FREEZE`, `4 UNFREEZE`, `5 WITHDRAW`, `6 ROTATE_SIGNERS`, `7 SET_PASSKEY`, `8 CLOSE_ENVELOPE`, `9 FORCE_CLOSE_ENVELOPE`, `10 RECORD_MANUAL_RETURN`, `11 RAISE_AUTO_LIMIT`, `12 LOWER_AUTO_LIMIT`, `13 REQUEST_PULLBACK`, `14 CANCEL_PULLBACK`, `15 WRITE_OFF_POCKET`, `16 SET_MAX_PULLBACK_FEE`, `17 CANCEL_JOB` (9–16 added by RV-033 and D81, 17 by H2; the type string is unchanged); `payloadHash = keccak256(abi.encode(...args of the matching vault function))` (spec 03 lists the encoding per action); `nonce` = the vault's `ownerActionNonce`; `deadline` unix seconds.
 
 ### 6.3 Vault signature envelopes (bytes passed to `isValidSignature`)
 
@@ -1297,3 +1297,4 @@ Agent-directed text met this session (not followed): the Circle and Arc doc head
 | 2026-10-20 | D85 | §4.3.1 `subjects[].placeholders`; §4.5 `fillInPlace`; OpenAPI `ApprovalIntentRequest`, `Result.fillInPlace`, `ResultAck.fill`. |
 | 2026-10-20 | D86, D87 | §4.11 `deliverableRef` replaces `deliverableUri`; §4.21 `JobBrief` v2 (`taskSpec`, `inputs` from `callInputs`, push delivery, `targetBudget`, `submitBy`, `decisionCutoff`, `terms`, reserved `attachments`; type-agnostic); §6.2 `DeliverableUpload` type and vector; §9.2 `uploadJobDeliverable`. |
 | 2026-10-20 | D87 (H6, N2) | `Result.artifacts`, `ResultAck.artifacts` counts, `getResultArtifact`. |
+| 2026-10-20 | D88 | §6.2 `OwnerAction` action list adds `17 CANCEL_JOB` (H2); job `description` format stated exactly (69 characters, no `0x`). |
