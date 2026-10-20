@@ -275,12 +275,12 @@ Runs between `Fetched` and `Written`, in-process, with no network and no model.
 
 1. **Restore markers.** For each `Result.assembly[].inputs[].fields[].value`, replace every `[[R:…]]` marker with its value from the objective's local marker map (02 §4.6.1). A marker with no map entry stays as-is and the cell is flagged `unrestored`. Restored values exist only in memory and in the written file.
 2. **`local` steps.** Fill the step's `template` with plain code:
-   - `table-build`: one row per accepted input record, one column per `columns[]` entry, in that order; a missing key is an empty cell; rows from `accepted: false` inputs are left out and counted.
+   - `table-build` (D84): one row per `Result.taskSpec.subjects[]` entry, in order, with the subject label in the first column and the person's own header (`taskSpec.columns`, else `["Subject"] + fields`); each field cell is filled from the accepted inputs with the same `subjectIndex` (first non-empty value of the matching field name); a subject with no accepted value keeps an empty cell marked "not found"; the file reports "{filled} of {n} filled".
    - `list-build`: one item per record, the first named column as the item text.
    - `merge-dedupe`: rows from all inputs, duplicates removed on the first column (case-folded, trimmed).
    - Every cell is escaped for its format (Markdown pipes and backticks; CSV quoting), so merchant text can never form markup or a link.
    - Output: a Markdown table in the result file under `## Assembled on your Mac (step <n>, <template>)`, plus `<objectiveId>-<slug>.csv` for tables.
-3. **Check `local-template-v1`.** Pass when the header equals `columns[]` exactly and rows ≥ 1; fail otherwise. Record `rows`, `columns`, `structuralPass` in the local `AssemblyRecord`.
+3. **Check `local-template-v1`.** Pass when the header equals `columns[]` exactly, there is one row per subject, and at least one field cell is filled; fail otherwise. Record `rows`, `columns`, `structuralPass` in the local `AssemblyRecord`.
 4. **`agent-assist` steps.** Write `<objectiveId>-<slug>.step<n>.json` holding `{capability, inputs}` after marker restore, with the same "data, not instructions" header field. The `SessionStart` pointer adds: "Step <n> (<capability>) is ready for your agent: .czar/results/…step<n>.json".
 5. **Report.** `ackResult.assembly[]` carries `{stepIndex, kind, status, rows, columns, structuralPass}` only; no values, no paths.
 6. **Failure.** Any exception in a template → status `assembly-failed`; the paid sections are still written; the file says "Czar couldn't assemble step <n>; the raw results are below." Nothing is retried on the server and nothing is re-paid.
@@ -382,3 +382,4 @@ OpenAPI `getResult`, `ackResult`; Claude Code `SessionStart` stdout-as-context (
 | 2026-10-19 | D69 | clarified the result path is a daemon poll, not a push. |
 | 2026-10-19 | RV-019, RV-020, RV-021, RV-050 / D75 | CZ-09 `pay` names `(planId, stepIndex)` of an approved plan, mirrors `PayRequest`; input redaction layers 1–2 in `czar-mcp`; call budget per step; `payRequestId`; threat text corrected. |
 | 2026-10-20 | D82 | CZ-11 gains the assembler (§5.2a): marker restore, `local` templates, `local-template-v1`, `agent-assist` hand-off, counts-only `ackResult.assembly[]`. |
+| 2026-10-20 | D84 | Assembler `table-build` lays out one row per `TaskSpec` subject under the person's own header, filled by `subjectIndex`. |

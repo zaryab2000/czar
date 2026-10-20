@@ -149,7 +149,7 @@ Decoded by `@czar/vault-client` to the names in 03 `czar-vault.md` §9.2 and `cz
 
 - Model ids above are the Claude platform ids current on 2026-10-18 (environment-provided; STRONG SIGNAL). Prices were not read this session: **GAP**. Model prices are read in build task T-046 (D68); until then every budget stays in tokens and request counts, and T-046 converts them to money from the platform pricing page.
 - All model calls use structured outputs (JSON schema) and the system prompts in `models/`; the prompt file hash is logged with every call.
-- No model ever receives: keys, raw hook payloads, soul text outside the redacted excerpt, merchant bodies (except P-01 and P-02), or user text outside the redacted goal.
+- No model ever receives: keys, raw hook payloads, soul text outside the redacted excerpt, merchant bodies (except P-01 and P-02), or user text outside the goal and the `TaskSpec` (D84).
 
 ### 6.2 Token budget per user per month (defaults, `models.*`)
 

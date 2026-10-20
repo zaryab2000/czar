@@ -744,6 +744,9 @@
 - **D82 (2026-10-20):** CZ-15 `handed_off` for unpaid steps: build `Result.assembly[]` from accepted dependencies' `StepResult.fields`; mark the step `done` on `ackResult.assembly[]`. Test: an unpaid step never reserves, signs or calls a merchant.
 - **D83 (2026-10-20):** the buyer refuses any `accepts[]` entry whose network is not in `x402.allowedPaymentNetworks` (`[eip155:5042002]`). Test: a mainnet-only 402 yields no payable offer and a typed error.
 - **D83 (2026-10-20):** candidates only on `selection.paymentNetwork`; drop a live 402 without a payment-network entry (`gate: network`); shadow plans carry `marketReference` once T-107 exists (until then, absent).
+- **D84 (2026-10-20):** add `merchants.searchBackend` with a `live` mode over the web search source chosen here (recorded in the task report) and the existing fixed index as `fixture` for CI.
+- **D84 (2026-10-20):** P-03 receives `TaskSpec`; CZ-13 step 4a renders `callInputs` (fan-out per subject); `planHash` includes `taskSpecHash` and `callInputsHash`; rule-based fallback fans out. Test: a 5-subject `TaskSpec` yields 5 `callInputs` per paid step with each subject in its input.
+- **D84 (2026-10-20):** send `callInputs[i].input` to the merchant; resolve `{{dep.N.field}}` per `subjectIndex`; `dependency-missing` skips the call and releases its index. Test: search then extract for 5 subjects sends 5 distinct queries and 5 distinct URLs.
 
 ---
 
@@ -874,6 +877,8 @@
   - Write the run report.
 - **Acceptance tests:**
   - On testnet, every event in Stages 4–6 is present, the pocket pullback confirms, and T-058 verifies the anchored batch (exit 0).
+- **D84 (2026-10-20):** `czar-extract` accepts any public https page through `safeFetch`; remove the domain allowlist. Test: a page on a non-listed public domain is fetched; private ranges are still blocked.
+- **D84 (2026-10-20):** `JobBrief.inputs` come from the step's `callInputs`.
 
 ---
 
@@ -1097,6 +1102,10 @@
   - Extra outputs: `apps/daemon/src/writeback/assembler/` (templates `table-build`, `list-build`, `merge-dedupe`; marker restore; `local-template-v1` check); marker-map storage written by T-069.
   - Extra acceptance tests: every assembler test in CZ-11 §14; a Phase 1 scenario run where `table-build` after `web-search` and `page-extract` writes a table with restored names and reports `assembled` with `structuralPass = true`; no model call and no network call happen during assembly (asserted by a network-deny test).
 - **D82 (2026-10-20):** store the per-objective marker map at layer 2 (`local-only`, 02 §4.6.1); test that it never appears in any outbound request (sender guard).
+- **D84 (2026-10-20):** store `tool_input.file_path` in the local `file_paths` table (CZ-02 §5.3); test that paths never leave the Mac (sender guard).
+- **D84 (2026-10-20):** placeholder detector reads the file from disk via `file_paths`; daily rescan; build `TaskSpec` per CZ-06 §5.1a for all three detectors. Acceptance: the CZ-06 §14 `TaskSpec` golden tests.
+- **D84 (2026-10-20):** `ObjectiveSubmission.taskSpec`; `objectiveHash` includes `taskSpecHash`; layer 2 allows `TaskSpec` values; P-05 goal names the subjects (eval 1 and 7).
+- **D84 (2026-10-20):** `table-build` lays out one row per `TaskSpec` subject under the person's own header, filled by `subjectIndex`.
 
 ---
 
@@ -1215,6 +1224,7 @@
   - Record the result.
 - **Acceptance tests:**
   - With Circle's bundler mocked to reject, the app retries through the configured secondary bundler and the UserOp mines (testnet), or the test records the AR-26 failure and files an SCR.
+- **D84 (2026-10-20):** approval screen shows the subject list and supports `revisePlanSubjects`; test that the app recomputes the new `planHash` before approve.
 
 ---
 
@@ -1386,6 +1396,7 @@
   - Zaryab signs the record.
 - **Acceptance tests:**
   - Every item in `build-plan.md` §9 is checked with a link to its evidence; Zaryab signs the release record.
+- **D84 (2026-10-20):** includes scenario 2.1/2.3 `TaskSpec` checks and the 7.2a outcome check; the five Czar-hosted test company sites are part of the fixture.
 
 ---
 
@@ -1459,3 +1470,4 @@
 | 2026-10-19 | G0-01 review (Pass B/C) | T-036, T-040 rewritten for local hosting (RV-028); review-fix acceptance criteria on T-003…T-102; deps: T-035←T-105, T-046←G0-16, T-062←G0-17, T-086←T-095 and M5 exit (RV-053). |
 | 2026-10-20 | D82 | T-073 extended with the assembler (size L); notes on T-045, T-048, T-069. |
 | 2026-10-20 | D83 | New T-106 (test-merchant lab) and T-107 (market view); notes on T-042, T-045, T-091, T-105. |
+| 2026-10-20 | D84 | Notes on T-043, T-045, T-048, T-051, T-054, T-063, T-068, T-069, T-073, T-084, T-101 for carrying the task's subject end to end. |

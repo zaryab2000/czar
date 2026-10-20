@@ -98,7 +98,12 @@ sequenceDiagram
   participant V as CzarVault
   U->>A: open /approve/{planId} from the pending list
   A->>S: getApproval → Plan
-  A->>A: render goal, steps, payees, cap, fee, expiry
+  A->>A: render goal, "Czar will look up" subject list (D84), steps, payees, cap, fee, expiry
+  opt person edits subjects
+    U->>A: remove or add subjects
+    A->>S: revisePlanSubjects → new Plan (old plan superseded)
+    A->>A: re-render with the new cap and planHash
+  end
   U->>A: tap "Approve"
   A->>S: createApprovalIntent → ApprovalIntent
   A->>A: rebuild payeeRoot from the payee leaves it displays and planHash from the displayed plan (@czar/hashing); re-encode with @czar/vault-client; refuse unless both equal the calldata's (RV-044)
@@ -214,6 +219,8 @@ Idempotency: every creating call sends `Idempotency-Key`; `notifySubmitted` with
 | frozen banner (`Me.frozen`) | "Frozen. No payments can start until you unfreeze. Money already on its way back to you still arrives." |
 | paused banner (`Me.paused`) | "Czar paused all spending for safety. Nothing can start. Your money stays in your vault." |
 | approval card | "Spend up to {capDisplay} ({cap} USDC) on \"{goal}\"" |
+| subject list (D84) | "Czar will look up {fields} for: {subject 1}, {subject 2}, …" with "Edit list"; source line "From {fileName}, {topic}" |
+| subject edit saved | "List updated. New estimate: {capDisplay}." |
 | step, x402 or nanopayment | "Paid per call, checked before the next step" |
 | step, ERC-8183 job | "Held in escrow, money back if rejected" |
 | payee | "{host}" plus badge "New payee" when never paid before |
@@ -353,3 +360,4 @@ K17 VAPID private key in the secret store; a leak lets an attacker spam notifica
 | 2026-10-19 | RV-044 | approval integrity check recomputes `payeeRoot` and `planHash` on the device from the displayed leaves. |
 | 2026-10-19 | RV-007 / D72 | freeze wording: payments cannot start; pockets pulled back. |
 | 2026-10-20 | D83 | Wording: Czar test merchant badge; real-market panel (read-only). |
+| 2026-10-20 | D84 | Approval shows the subjects Czar will look up and lets the person edit them (`revisePlanSubjects`). |

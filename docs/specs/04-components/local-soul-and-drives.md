@@ -365,11 +365,27 @@ In: `events`, `beliefs`, settings (hourly value, mode). Out: `objectives` rows (
 
 | Detector | Trigger rule | Parameters (defaults) | Normalized key |
 |---|---|---|---|
-| `placeholder` | a `file-write` event with `provenance.trusted = true` whose `summary` contains a placeholder token: `TODO`, `FIXME`, `TBD`, `XXX`, or a bracket placeholder matching `\[(Add|Insert|Fill|Link|Cite)[^\]]{0,60}\]`; the same `(projectRef, fileRef, token)` seen in ≥ `drives.placeholderMinSeen` (2) writes at least `drives.placeholderMinAgeHours` (24) apart | `drives.placeholderMinSeen` 2, `drives.placeholderMinAgeHours` 24, `drives.placeholderMaxPerProject` 3 | `placeholder:<fileRef>:<token-hash>` |
+| `placeholder` | **(D84)** any `file-write` or `file-read` event (any provenance) naming a file in a known project triggers a **disk read** of that file through the local `file_paths` map (text files with an allowlisted extension, ≤ `drives.fileReadMaxBytes`); the file on disk is `user-file` trust. The detector fires when the file contains a placeholder token: `TODO`, `FIXME`, `TBD`, `XXX`, or a bracket placeholder matching `\[(Add|Insert|Fill|Link|Cite)[^\]]{0,60}\]`, and the same `(projectRef, fileRef, token)` was seen in ≥ `drives.placeholderMinSeen` (2) disk reads at least `drives.placeholderMinAgeHours` (24) apart. Files with a known placeholder are re-read once a day (`drives.placeholderRescanHours` 24), so edits made outside Claude Code are seen. **Superseded by D84:** "`file-write` event with `provenance.trusted = true` whose `summary` contains" (no such event exists in Claude Code: `tool_response` is always untrusted, 02 §8.2) | `drives.placeholderMinSeen` 2, `drives.placeholderMinAgeHours` 24, `drives.placeholderMaxPerProject` 3 | `placeholder:<fileRef>:<token-hash>` |
 | `repeated-error` | ≥ `drives.repeatedErrorMin` (3) `tool-failure` or `error` events with the same normalized `errorClass` and `projectRef` within `drives.repeatedErrorWindowHours` (24) | `drives.repeatedErrorMin` 3, `drives.repeatedErrorWindowHours` 24 | `error:<projectRef>:<errorClass>` |
 | `agent-refusal` | ≥ `drives.refusalMin` (2) `agent-refusal` events (P-06 or regex) in one `sessionRef`, or ≥ `drives.refusalMinProject` (3) in a project within 7 days; the refusal reason class (from P-06: `no-tool`, `no-access`, `cannot-browse`, `cannot-pay`, `other`) becomes a capability hint | `drives.refusalMin` 2, `drives.refusalMinProject` 3 | `refusal:<projectRef>:<reasonClass>` |
 
 Later detectors (`stale-work`, `repeated-search`, `copy-paste-loop`, `deadline`) are Phase 2 and share the same pipeline.
+
+#### 5.1a Building the `TaskSpec` (D84; code only, no model)
+
+Every objective carries a `TaskSpec` (02 §4.3.1) with the task's real subject. Rules per detector:
+
+| Detector | Source (trust) | `kind` | `subjects[]` | `fields[]` / `columns[]` | `topic` | `context` |
+|---|---|---|---|---|---|---|
+| `placeholder`, Markdown or CSV table | the file on disk (`user-file`) | `table-fill` | the first-column cell of every row that holds a placeholder, in file order, with `sourceLine` | `fields` = header of each column that holds a placeholder; `columns` = the full header row | nearest heading above the table, else the file name | the heading line, header row and separator (≤ 2,000) |
+| `placeholder`, list item or plain line | the file on disk (`user-file`) | `list-fill` | the line text with the placeholder removed, trimmed, ≤ 200 chars, one per line | the placeholder's inner text with the verb removed (`[Add price]` → `price`) | nearest heading | ± `drives.contextLines` (3) lines around each hit |
+| `placeholder`, `TODO`/`FIXME` comment in code | the file on disk (`user-file`) | `line-fill` | the comment text after the token | `[]` | the enclosing function or class name when a regex finds one, else the file name | ± 3 lines |
+| `repeated-error` | error events (`tool-output`) | `error-fix` | one subject: the normalized `errorClass` | `[]` | `errorClass` | the latest error text after layer 1, plus `toolName` and file base name (≤ 2,000) |
+| `agent-refusal` | the person's last `prompt` event before the refusal (`user-prompt`) | `refused-task` | one subject: the prompt, ≤ 200 chars | `[]` | the refusal `reasonClass` | the full prompt after layer 1 (≤ 2,000) |
+
+- Limits: `drives.maxSubjects` 50 (extra rows are left out and counted in `context`); a subject that is empty after trimming is dropped.
+- Layer 1 runs on every string. Layer 2 does not replace `TaskSpec` values (D84 point 3).
+- `fileName` is the base name only; paths never leave the Mac.
 
 #### 5.2 Dedupe and rate limits
 
@@ -399,9 +415,9 @@ The user can override the estimate per objective in the app; actual minutes come
 #### 5.6 From open loop to `Objective`
 
 1. Collect the triggering events; `observationHashes = keccak256(jcs(preimage))` per 02 §5.2 for each (the daemon keeps the preimages).
-2. Build structured detector output: `{detector, keyKind, tokens[], counts, errorClass?, reasonClass?, fileExt?, capabilitiesDefault[]}` with no free text from untrusted events (placeholder tokens are allowlisted strings; the surrounding line is never included).
-3. P-05 writes `goal` (≤ 1,000 chars) and orders `capabilities`; fallback template without a model: "Fill the <token> placeholders in <ext> file" etc.
-4. Layer 2 redaction on `goal` (CZ-26) → `objective.goal`; the marker → value pairs for this objective are stored in the local marker map (02 §4.6.1, D82), never sent.
+2. Build the detector output `{detector, keyKind, tokens[], counts, errorClass?, reasonClass?, fileExt?, capabilitiesDefault[], taskSpec}` with the `TaskSpec` from §5.1a (D84). **Superseded by D84:** "no free text … the surrounding line is never included": the subject is the point of the task.
+3. P-05 writes `goal` (≤ 1,000 chars) naming the topic and subjects, and orders `capabilities`; fallback template without a model: "Find {fields} for {n} {topic} rows ({first 5 subjects}…) and fill the table in {fileName}" for `table-fill`, and the matching templates in `ai-prompts.md` P-05.
+4. Layer 2 redaction on `goal` (CZ-26), with every `TaskSpec` value on the allow list (D84) → `objective.goal`; the marker → value pairs for this objective are stored in the local marker map (02 §4.6.1, D82), never sent.
 5. `minutesSaved` from §5.4; `deadline` only from a `deadline`-type trusted match (Phase 2) or the mission belief's deadline if present.
 6. `roi` computed in §5.5; status `candidate`; row in `objectives`.
 7. Live mode → CZ-07 publishes when the filter passes; shadow mode → CZ-08.
@@ -446,7 +462,7 @@ P-05 `drives-helper` (inputs: structured detector output, trusted; taxonomy, tru
 
 ### 9. Security
 
-No keys. Threats: **memory poisoning → fake objectives** (ASI06): detectors use only trusted file-write summaries and structured error classes; a placeholder planted in tool output cannot trigger (`trusted=false`); refusal text goes through P-06 with injection cases; every objective still needs approval or an earned allowance (spec 01 §13). **Hijacked P-05**: it cannot add capabilities outside the taxonomy or set payees; goal text is redacted and shown to the user before any spend.
+No keys. Threats: **memory poisoning → fake objectives** (ASI06): the placeholder detector reads the person's own file on disk (D84); a placeholder planted only in tool output cannot trigger, but text an agent wrote into a project file can. Accepted (D84): such text can choose what Czar looks up, never who is paid or how much; the subjects are shown and editable on the approval screen; refusal text goes through P-06 with injection cases; every objective still needs approval or an earned allowance (spec 01 §13). **Hijacked P-05**: it cannot add capabilities outside the taxonomy or set payees; goal text is redacted and shown to the user before any spend.
 
 ### 10. Failure handling
 
@@ -463,7 +479,7 @@ Counts per detector, dedupe drops, filter pass/fail, queue depth.
 
 ### 12. Interface wording
 
-Candidate card (viewer and app): "Fill the competitor price table (5 placeholders) · about 95 min of your time · Czar estimate $0.88 · Why: 2 edits to pricing.md left placeholders." Dismiss: "Not useful" / "Not now (ask again in 30 days)".
+Candidate card (viewer and app): "Fill Competitor pricing in pricing.md: Billora, InvoiceKite, Ledgerline, PayStub Pro, Quillbill · about 95 min of your time · Czar estimate $0.88 · Why: 2 edits to pricing.md left placeholders." (D84: the card names the subjects) Dismiss: "Not useful" / "Not now (ask again in 30 days)".
 
 ### 13. Performance
 
@@ -471,7 +487,7 @@ Scan ≤ 1 s on 50,000 events; ≤ 2,000 tokens per P-05 call.
 
 ### 14. Tests and definition of done
 
-Each detector: fixtures that fire and near-misses that do not (thresholds ± 1); dedupe windows; rate caps; untrusted placeholder never fires; P-05/P-06 injection evals (`ai-prompts.md`); `objectiveHash` matches the server's recomputation. Done when a 7-day synthetic corpus yields the expected candidate set exactly.
+Each detector: fixtures that fire and near-misses that do not (thresholds ± 1); **`TaskSpec` golden tests (D84):** a Markdown table with 5 named rows and 5 `[Add price]` cells yields `kind = table-fill`, those 5 subjects in order, `fields = [the price column header]` and the full `columns`; a list file, a code `TODO`, a repeated error and a refusal each yield the §5.1a shape; a placeholder edited in an outside editor is found by the daily rescan; a path never appears in `TaskSpec`; dedupe windows; rate caps; untrusted placeholder never fires; P-05/P-06 injection evals (`ai-prompts.md`); `objectiveHash` matches the server's recomputation. Done when a 7-day synthetic corpus yields the expected candidate set exactly.
 
 ### 15. Dependencies
 
@@ -637,3 +653,4 @@ CZ-06, CZ-07, server planner (CZ-13 in dry-run).
 | 2026-10-19 | RV-027 | §5.7: local `status` and `serverStatus` are separate; `serverStatus` uses the one canonical enum. |
 | 2026-10-20 | D82 | Objective publisher stores the local marker map at layer 2. |
 | 2026-10-20 | D83 | CZ-08 shadow rows show the real-market price line from `Plan.marketReference`. |
+| 2026-10-20 | D84 | CZ-06 placeholder detector reads the file from disk; new §5.1a `TaskSpec` rules for all three detectors; §5.6 record carries `TaskSpec`; goal names subjects; security, wording and tests updated. |

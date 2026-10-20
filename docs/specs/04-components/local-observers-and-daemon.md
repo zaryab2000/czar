@@ -285,6 +285,7 @@ stateDiagram-v2
 | `audit_local` | `id`, `at`, `kind`, `payload_hash` BLOB(32), `bytes`, `destination` (`server`, `model-proxy`), `summary_counts_json` | "what left this machine" |
 | `settings` | `key` TEXT PK, `value_json` | hourly value, compile time, pause flag, pairing state |
 | `queue_drain` | `plugin_data_path`, `last_seq` | observer queue cursor |
+| `file_paths` (D84) | `file_ref` BLOB(32) PK, `project_ref` BLOB(32), `abs_path` TEXT, `last_seen_at` INTEGER, `placeholder_seen_json` TEXT | from `tool_input.file_path` (02 §8.2) and Cursor `afterFileEdit`; read by the placeholder detector (CZ-06) to open the current file from disk; `local-only`, never sent |
 
 - Retention: `memory.retentionDays` = 90 (user setting 30–365); a nightly job deletes `events` older than that unless referenced by a current belief or an open objective (receipts stay until the belief fades).
 - Vectors (Phase 2): `sqlite-vec` 0.1.9 `vec0` table with ≤ 1,024 dims, model id stored with each vector (C1-12, FD-30).
@@ -599,3 +600,4 @@ gitleaks rules v8.30.1 (C2-06); Presidio 2.2.364 at `data-privacy-stack/presidio
 | 2026-10-19 | D67 | Phase 1 daemon is macOS only; Linux and Windows install paths tagged stage 2. |
 | 2026-10-19 | RV-040, RV-051, RV-052 | queue holds only intake-cleaned, layer-1-redacted payloads; intake screen is local regex only; no-model compile is rules-only (D58). Test `hook_daemonDown_queueHasNoSecretOrEmail`. |
 | 2026-10-20 | D82 | Heartbeat note: results wait on the server while the Mac sleeps; CZ-11 runs the assembler. |
+| 2026-10-20 | D84 | Local `file_paths` table so the placeholder detector can read the person's file. |

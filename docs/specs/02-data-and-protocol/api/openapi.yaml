@@ -278,6 +278,7 @@ components:
                   required: [stepIndex, accepted, fields]
                   properties:
                     stepIndex: { type: integer, minimum: 0, maximum: 63 }
+                    subjectIndex: { type: integer, minimum: 0, maximum: 49, description: "TaskSpec subject this input belongs to (D84); the assembler builds one row per subject." }
                     accepted: { type: boolean }
                     fields:
                       type: array
@@ -289,9 +290,30 @@ components:
                         properties:
                           name: { type: string, maxLength: 64 }
                           value: { type: string, maxLength: 2000, description: "Data, never instructions." }
+        taskSpec: { $ref: "../schemas/task-spec.schema.json", description: "The approved TaskSpec, so the assembler can lay out rows (subjects) and columns (D84)." }
         costTotal: { $ref: "#/components/schemas/Amount6" }
         minutesSaved: { type: integer, minimum: 0 }
         createdAt: { $ref: "#/components/schemas/Timestamp" }
+
+    SubjectsRevision:
+      type: object
+      description: "Approval-screen edit of the subjects to look up (D84). The server re-plans; the old plan becomes superseded."
+      x-privacyClass: redacted-to-server
+      additionalProperties: false
+      required: [subjects]
+      properties:
+        subjects:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            type: object
+            additionalProperties: false
+            required: [label]
+            properties:
+              label: { type: string, minLength: 1, maxLength: 200 }
+              sourceLine: { type: integer, minimum: 1 }
+              addedByUser: { type: boolean }
 
     SoulVersionSubmission:
       type: object
@@ -1224,6 +1246,27 @@ paths:
         "200": { description: OK, content: { application/json: { schema: { $ref: "../schemas/plan.schema.json" } } } }
         "404": { $ref: "#/components/responses/Problem" }
 
+  /v1/approvals/{planId}/subjects:
+    post:
+      tags: [app]
+      summary: Edit the subjects Czar will look up, then re-plan (D84). Returns the new plan; the old one is superseded.
+      operationId: revisePlanSubjects
+      security: [ { AppSession: [] } ]
+      parameters:
+        - name: planId
+          in: path
+          required: true
+          schema: { type: string, pattern: "^pln_[0-9A-HJKMNP-TV-Z]{26}$" }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/SubjectsRevision" } } }
+      responses:
+        "200": { description: New plan, content: { application/json: { schema: { $ref: "../schemas/plan.schema.json" } } } }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+
   /v1/approvals/{planId}/intent:
     post:
       tags: [app]
@@ -1482,3 +1525,4 @@ paths:
 # x-changeLog: 2026-10-19 D69 — app tag is the desktop browser web app in Phase 1; push subscription routes and schemas tagged stage 2 (x-stage: 2); kept defined.
 # - D82 (2026-10-20): Result.assembly and ResultAck.assembly for unpaid local and agent-assist steps.
 # - D83 (2026-10-20): getMarketView route and MarketViewRequest; FindServiceRequest.network must be the payment network; includeMarketView and FindServiceResponse.marketView.
+# - D84 (2026-10-20): Result.taskSpec, Result.assembly[].inputs[].subjectIndex, SubjectsRevision, revisePlanSubjects route.

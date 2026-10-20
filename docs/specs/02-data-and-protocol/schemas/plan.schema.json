@@ -202,6 +202,11 @@
           }
         }
       }
+    },
+    "taskSpec": {
+      "$ref": "task-spec.schema.json",
+      "description": "The TaskSpec this plan was built from, including approval-screen edits (D84).",
+      "x-privacyClass": "server-only"
     }
   },
   "required": [
@@ -418,6 +423,59 @@
           },
           "description": "Dependencies.",
           "x-privacyClass": "server-only"
+        },
+        "fanOut": {
+          "type": "string",
+          "enum": [
+            "none",
+            "subjects"
+          ],
+          "description": "subjects: one call per TaskSpec subject (D84).",
+          "x-privacyClass": "server-only"
+        },
+        "callInputs": {
+          "type": "array",
+          "maxItems": 128,
+          "description": "Concrete input per call, rendered by CZ-13 from inputTemplate and the TaskSpec; {{dep.*}} values are filled at run time (D84).",
+          "x-privacyClass": "server-only",
+          "items": {
+            "type": "object",
+            "description": "One call's input.",
+            "x-privacyClass": "server-only",
+            "additionalProperties": false,
+            "required": [
+              "callIndex",
+              "input"
+            ],
+            "properties": {
+              "callIndex": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 127,
+                "description": "Call index within the step.",
+                "x-privacyClass": "server-only"
+              },
+              "subjectIndex": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 49,
+                "description": "TaskSpec subject this call serves.",
+                "x-privacyClass": "server-only"
+              },
+              "input": {
+                "type": "object",
+                "description": "Key/value input sent to the merchant; values are strings, numbers or booleans, or a {{dep.<stepIndex>.<field>}} reference.",
+                "x-privacyClass": "server-only",
+                "additionalProperties": {
+                  "type": [
+                    "string",
+                    "number",
+                    "boolean"
+                  ]
+                }
+              }
+            }
+          }
         }
       },
       "additionalProperties": false,

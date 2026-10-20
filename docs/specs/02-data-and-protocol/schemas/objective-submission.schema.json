@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://czar.dev/schemas/objective-submission.schema.json",
   "title": "ObjectiveSubmission",
-  "description": "The only object the daemon sends to the server for a new objective (spec 02 \u00a74.4; D25). Contains no local-only field.",
+  "description": "The only object the daemon sends to the server for a new objective (spec 02 §4.4; D25). Contains no local-only field.",
   "type": "object",
   "x-privacyClass": "redacted-to-server",
   "additionalProperties": false,
@@ -20,12 +20,12 @@
     },
     "objectiveHash": {
       "$ref": "common.schema.json#/$defs/Hash32",
-      "description": "objectiveHash per spec 02 \u00a75.2.",
+      "description": "objectiveHash per spec 02 §5.2.",
       "x-privacyClass": "hash-on-chain"
     },
     "soulVersionHash": {
       "$ref": "common.schema.json#/$defs/Hash32",
-      "description": "soulVersionHash per spec 02 \u00a75.2.",
+      "description": "soulVersionHash per spec 02 §5.2.",
       "x-privacyClass": "hash-on-chain"
     },
     "observationHashes": {
@@ -170,6 +170,11 @@
       "$ref": "common.schema.json#/$defs/Timestamp",
       "description": "Submission time.",
       "x-privacyClass": "redacted-to-server"
+    },
+    "taskSpec": {
+      "$ref": "task-spec.schema.json",
+      "description": "The task's real subject (D84, §4.3.1).",
+      "x-privacyClass": "redacted-to-server"
     }
   },
   "required": [
@@ -185,6 +190,7 @@
     "hourlyBand",
     "redaction",
     "deviceId",
-    "submittedAt"
+    "submittedAt",
+    "taskSpec"
   ]
 }
