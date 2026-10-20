@@ -3,15 +3,16 @@
 ## 1. Scope
 - **You build:** six files under `contracts/src/libraries/` and one test file.
   - `CzarConstants.sol`, `SatMath.sol`, `CzarHashing.sol`, `PayeeLeaf.sol`, `CzarNonces.sol`, `PasskeyVerifier.sol`
-  - `contracts/test/unit/Libraries.t.sol`
+  - `contracts/test/LibrariesTest.t.sol`
 - **You do not build:** `JobEscrowAdapter.sol` (PRD 09), or any vault storage or function (PRD 04 onward).
 - **Task:** first part of T-013 (vault core). Finish this PRD before starting PRD 04.
 - **Dependencies:** T-003 (toolchain) and T-010 (mocks). Both are done.
 - **Why first:** every vault module calls these libraries. Each one is tested against the frozen vectors in `docs/specs/02-data-and-protocol/vectors/eip712-vectors.json`, so a wrong hash is caught here and not deep inside a vault test.
 
 ## 2. This PRD is already verified
-- Every code block below was compiled with solc 0.8.30 (EVM `prague`, optimizer on, no `via_ir`) against OpenZeppelin v5.7.0 and forge-std at the pinned submodule commits.
-- The test file in §9 was executed on an EVM, with and without a P-256 precompile at `0x100`: 34 tests, 0 failed.
+- Every code block below was built and tested on **Arc Foundry v0.8.0-2** (the checksummed release, `forge` commit `d497beea`) with `FOUNDRY_PROFILE=arc`, solc 0.8.30, OpenZeppelin v5.7.0 and forge-std at the pinned submodule commits: `--deny-warnings` build clean (lint included), `fmt --check` clean, 34 tests passed, 0 failed.
+- Under `FOUNDRY_PROFILE=arc` the P-256 precompile is live: a valid passkey assertion costs 25,778 gas. The suite was also run on a plain Prague EVM without the precompile (OpenZeppelin's Solidity fallback, ≈ 260k gas): also 34 passed.
+- The code blocks are already in `arc-forge fmt` layout.
 - **So:** copy each file exactly. Do not retype values, reorder fields or "simplify" code. If your build or tests fail, the cause is almost always a copy error or a wrong path. Compare your file with the block character by character before anything else.
 
 ## 3. Sources (read these, nothing else)
@@ -44,7 +45,7 @@
 | `contracts/src/libraries/PayeeLeaf.sol` | create | §7.3 |
 | `contracts/src/libraries/CzarNonces.sol` | create | §7.4 |
 | `contracts/src/libraries/PasskeyVerifier.sol` | create | §7.5 |
-| `contracts/test/unit/Libraries.t.sol` | create | §9 |
+| `contracts/test/LibrariesTest.t.sol` | create | §9 |
 
 ## 6. `CzarConstants.sol`
 
@@ -70,44 +71,46 @@ pragma solidity 0.8.30;
 // Every hash literal is checked against docs/specs/02-data-and-protocol/vectors/eip712-vectors.json by test/unit/Libraries.t.sol.
 
 // ── Addresses (testnet and mainnet share USDC; the rest are vault immutables, PRD 04) ──
-address constant USDC_ADDRESS = 0x3600000000000000000000000000000000000000;            // A1-01
+address constant USDC_ADDRESS = 0x3600000000000000000000000000000000000000; // A1-01
 
 // ── EIP-712 type hashes (02 §6.2; vectors.typeHashes) ──
-bytes32 constant EIP712_DOMAIN_FULL_TYPEHASH        = 0x8b73c3c69bb8fe3d512ecc4cf759cc79239f7b179b0ffacaa9a75d522b39400f; // EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)
-bytes32 constant EIP712_DOMAIN_NO_CONTRACT_TYPEHASH = 0xc2f8787176b8ac6bf7215b4adcc1e069bf4ab82d9ab1df05a57a91d425935b6e; // EIP712Domain(string name,string version,uint256 chainId)
-bytes32 constant TRANSFER_WITH_AUTHORIZATION_TYPEHASH = 0x7c7c6cdb67a18743f49ec6fa9b35f50d52ed05cbed4cc592e13b44501c1a2267;
+bytes32 constant EIP712_DOMAIN_FULL_TYPEHASH = 0x8b73c3c69bb8fe3d512ecc4cf759cc79239f7b179b0ffacaa9a75d522b39400f; // EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)
+bytes32 constant EIP712_DOMAIN_NO_CONTRACT_TYPEHASH =
+    0xc2f8787176b8ac6bf7215b4adcc1e069bf4ab82d9ab1df05a57a91d425935b6e; // EIP712Domain(string name,string version,uint256 chainId)
+bytes32 constant TRANSFER_WITH_AUTHORIZATION_TYPEHASH =
+    0x7c7c6cdb67a18743f49ec6fa9b35f50d52ed05cbed4cc592e13b44501c1a2267;
 bytes32 constant TRANSFER_SPEC_TYPEHASH = 0x44409c7ba8872720f5fc290d2788c2d70a3905b7ca1cdb2ffa152791a69e089b;
-bytes32 constant BURN_INTENT_TYPEHASH   = 0x8b99d17a83a2dd1add9fc2a450e22732c7e8564aa110ab99c20485a7a10ba37c;
-bytes32 constant RECEIPT_TYPEHASH       = 0xcd6ca6db33168140e9fc8604767fd5dc89fc51ca3853b876f9003e8bedd295f2;
+bytes32 constant BURN_INTENT_TYPEHASH = 0x8b99d17a83a2dd1add9fc2a450e22732c7e8564aa110ab99c20485a7a10ba37c;
+bytes32 constant RECEIPT_TYPEHASH = 0xcd6ca6db33168140e9fc8604767fd5dc89fc51ca3853b876f9003e8bedd295f2;
 bytes32 constant RECEIPT_ATTESTATION_TYPEHASH = 0x01b75f6051eb731488fad2e8de7925f8a64c89ef33c418e2a62e77ae02691eff;
 bytes32 constant AUTONOMY_RAISE_TYPEHASH = 0x6247988191abc5977b0b6f569e66d23eff38cc0f0fe30f8ed678b03c3f21b368;
-bytes32 constant OWNER_ACTION_TYPEHASH   = 0x5a8b2f7d5d70ba2335e2ee47a9d897748d8694bdb44c148ad01f541eeb2f0248;
+bytes32 constant OWNER_ACTION_TYPEHASH = 0x5a8b2f7d5d70ba2335e2ee47a9d897748d8694bdb44c148ad01f541eeb2f0248;
 
 // ── Domain separators that do not depend on chain or contract (02 §6.1) ──
 bytes32 constant GATEWAY_DOMAIN_SEPARATOR = 0x23a37920eca61226c76d13c4462857a362147e4b18da665dba894fa297ae4f34; // name "GatewayWallet", version "1", no chainId, no contract
 
 // ── Name / version hashes used to compute the other domain separators at construction (PRD 04) ──
-bytes32 constant USDC_NAME_HASH      = keccak256("USDC");
-bytes32 constant USDC_VERSION_HASH   = keccak256("2");
-bytes32 constant VAULT_NAME_HASH     = keccak256("CzarVault");
-bytes32 constant SL_NAME_HASH        = keccak256("SelectionLayer");
-bytes32 constant VERSION_1_HASH      = keccak256("1");
+bytes32 constant USDC_NAME_HASH = keccak256("USDC");
+bytes32 constant USDC_VERSION_HASH = keccak256("2");
+bytes32 constant VAULT_NAME_HASH = keccak256("CzarVault");
+bytes32 constant SL_NAME_HASH = keccak256("SelectionLayer");
+bytes32 constant VERSION_1_HASH = keccak256("1");
 
 // ── Signature kind tags (02 §6.3; vectors.vectors.kindTags) ──
-bytes32 constant KIND_USDC_3009    = 0x86b499474d9c0ea9b4a99b5ce22c4ae0f1ef4bf774214e3c1e4095c0371888cb; // keccak256("czar.vault.sig.USDC_3009.v1")
+bytes32 constant KIND_USDC_3009 = 0x86b499474d9c0ea9b4a99b5ce22c4ae0f1ef4bf774214e3c1e4095c0371888cb; // keccak256("czar.vault.sig.USDC_3009.v1")
 bytes32 constant KIND_GATEWAY_BURN = 0xf453aa3365355a8cf99e674b4443d5009b132245c53a3eb3b5a14953d97265f2; // keccak256("czar.vault.sig.GATEWAY_BURN.v1")
-bytes32 constant KIND_SL_RECEIPT   = 0x01c314900cb74ef1a689e81bddd748cc950a7aceb730d7cb9b7660a5aa6a3eaa; // keccak256("czar.vault.sig.SL_RECEIPT.v2")
+bytes32 constant KIND_SL_RECEIPT = 0x01c314900cb74ef1a689e81bddd748cc950a7aceb730d7cb9b7660a5aa6a3eaa; // keccak256("czar.vault.sig.SL_RECEIPT.v2")
 
 // ── Tags (02 §5.3, §7.2) ──
 bytes32 constant PAYEE_LEAF_TAG = 0xabf82537a2dce15f109dca3554542a6a546f104bd1343c99de6c06fdd41462fe; // keccak256("czar.payee-leaf.v1")
-bytes32 constant NONCE_TAG      = 0x28f8dafc03e5ff5b4b3e5b50613f61c133f15f5a15b023ddecb25e6e9034577d; // keccak256("czar.vault.nonce.v1")
+bytes32 constant NONCE_TAG = 0x28f8dafc03e5ff5b4b3e5b50613f61c133f15f5a15b023ddecb25e6e9034577d; // keccak256("czar.vault.nonce.v1")
 
 // ── Gateway TransferSpec byte encoding (czar-vault.md §3, §5.4) ──
 bytes4 constant TRANSFER_SPEC_MAGIC = 0xca85def7;
 uint32 constant TRANSFER_SPEC_VERSION = 1;
 
 // ── ERC-1271 (A1-09) ──
-bytes4 constant EIP1271_MAGIC   = 0x1626ba7e;
+bytes4 constant EIP1271_MAGIC = 0x1626ba7e;
 bytes4 constant EIP1271_INVALID = 0xffffffff;
 
 // ── secp256k1 low-s bound ──
@@ -116,38 +119,38 @@ uint256 constant SECP256K1_HALF_N = 0x7fffffffffffffffffffffffffffffff5d576e7357
 // ── Limits (czar-vault.md §3) ──
 uint256 constant MAX_AUTHORIZATIONS_PER_RESERVATION = 128;
 uint256 constant MAX_DIGEST_MODE_COUNT = 8;
-uint256 constant MIN_RESERVATION_TTL = 30;          // seconds
-uint256 constant MAX_RESERVATION_TTL = 600;         // seconds
+uint256 constant MIN_RESERVATION_TTL = 30; // seconds
+uint256 constant MAX_RESERVATION_TTL = 600; // seconds
 uint256 constant FINALIZE_CHUNK = 32;
 uint256 constant MAX_ENVELOPE_DURATION = 30 days;
-uint16  constant DEFAULT_POCKET_CAP_BPS = 2500;
-uint16  constant MAX_POCKET_CAP_BPS = 5000;         // owner-opened envelopes
-uint16  constant MAX_AGENT_POCKET_CAP_BPS = 2500;   // agent-opened envelopes (D71)
-uint8   constant PAYEE_KIND_X402 = 1;
-uint8   constant PAYEE_KIND_JOB = 2;
-uint8   constant PAYEE_KIND_TIP = 3;                // Phase 2; never accepted by Phase 1 functions
-uint8   constant PAYEE_KIND_POCKET = 4;
-uint32  constant POCKET_STEP_INDEX = type(uint32).max;
-uint256 constant DEFAULT_MAX_PULLBACK_FEE = 10_000;     // 0.01 USDC (D81)
-uint256 constant MAX_PULLBACK_FEE_CEILING = 500_000;    // 0.50 USDC (D81)
+uint16 constant DEFAULT_POCKET_CAP_BPS = 2500;
+uint16 constant MAX_POCKET_CAP_BPS = 5000; // owner-opened envelopes
+uint16 constant MAX_AGENT_POCKET_CAP_BPS = 2500; // agent-opened envelopes (D71)
+uint8 constant PAYEE_KIND_X402 = 1;
+uint8 constant PAYEE_KIND_JOB = 2;
+uint8 constant PAYEE_KIND_TIP = 3; // Phase 2; never accepted by Phase 1 functions
+uint8 constant PAYEE_KIND_POCKET = 4;
+uint32 constant POCKET_STEP_INDEX = type(uint32).max;
+uint256 constant DEFAULT_MAX_PULLBACK_FEE = 10_000; // 0.01 USDC (D81)
+uint256 constant MAX_PULLBACK_FEE_CEILING = 500_000; // 0.50 USDC (D81)
 uint256 constant MAX_PULLBACK_WINDOW_BLOCKS = 7_200;
 uint256 constant PULLBACK_CANCEL_DELAY_BLOCKS = 3_000;
-uint256 constant GAS_GRANT_UNIT_WEI = 1e12;             // one 6-decimal unit in 18-decimal wei
-uint256 constant MAX_GAS_GRANT_PER_POCKET = 50_000;     // units (0.05 USDC)
-uint256 constant PERIOD_LENGTH = 604_800;               // 7 days, seconds
+uint256 constant GAS_GRANT_UNIT_WEI = 1e12; // one 6-decimal unit in 18-decimal wei
+uint256 constant MAX_GAS_GRANT_PER_POCKET = 50_000; // units (0.05 USDC)
+uint256 constant PERIOD_LENGTH = 604_800; // 7 days, seconds
 uint256 constant MAX_RAISE_STEP_BPS = 2_000;
 uint256 constant BPS = 10_000;
 uint256 constant MAX_JOB_FEE_BPS = 500;
 uint256 constant MIN_JOB_EXPIRY_LEAD = 6 minutes;
-uint256 constant FORCE_CLOSE_DELAY = 1 days;            // forceCloseEnvelope after expiresAt + 1 day (czar-vault.md §5.2)
+uint256 constant FORCE_CLOSE_DELAY = 1 days; // forceCloseEnvelope after expiresAt + 1 day (czar-vault.md §5.2)
 
 // ── Job escrow (job-escrow-adapter.md §3; czar-vault.md §5.5) ──
 bytes32 constant CANCEL_REASON = 0x4be893f3f036dcd68d7b6cb119f5dd94b5db100d08a34bd429ab72d9a6ad1a90; // keccak256("czar:cancel")
-string constant DESCRIPTION_PREFIX = "czar:";               // job description = prefix + 64 lowercase hex chars (JOB-3)
-uint256 constant CZAR_ESCROW_EVALUATION_GRACE = 1 hours;    // Czar-instance claimRefund on Submitted (ERC8183.sol line 78)
+string constant DESCRIPTION_PREFIX = "czar:"; // job description = prefix + 64 lowercase hex chars (JOB-3)
+uint256 constant CZAR_ESCROW_EVALUATION_GRACE = 1 hours; // Czar-instance claimRefund on Submitted (ERC8183.sol line 78)
 
 // ── Passkey (czar-vault.md §7) ──
-bool constant REQUIRE_UV = true;                            // user verification flag must be set
+bool constant REQUIRE_UV = true; // user verification flag must be set
 ```
 
 ## 7. Library files
@@ -197,14 +200,18 @@ import {
 library CzarHashing {
     /// @dev EIP-712 domain with chainId and verifyingContract (02 §6.1: USDC, CzarVault).
     function domainSeparatorFull(bytes32 nameHash, bytes32 versionHash, uint256 chainId, address verifyingContract)
-        internal pure returns (bytes32)
+        internal
+        pure
+        returns (bytes32)
     {
         return keccak256(abi.encode(EIP712_DOMAIN_FULL_TYPEHASH, nameHash, versionHash, chainId, verifyingContract));
     }
 
     /// @dev EIP-712 domain with chainId and no contract (02 §6.1: SelectionLayer).
     function domainSeparatorNoContract(bytes32 nameHash, bytes32 versionHash, uint256 chainId)
-        internal pure returns (bytes32)
+        internal
+        pure
+        returns (bytes32)
     {
         return keccak256(abi.encode(EIP712_DOMAIN_NO_CONTRACT_TYPEHASH, nameHash, versionHash, chainId));
     }
@@ -216,9 +223,16 @@ library CzarHashing {
 
     /// @dev USDC TransferWithAuthorization struct hash (02 §6.3.1).
     function transferWithAuthorizationHash(
-        address from, address to, uint256 value, uint256 validAfter, uint256 validBefore, bytes32 nonce
+        address from,
+        address to,
+        uint256 value,
+        uint256 validAfter,
+        uint256 validBefore,
+        bytes32 nonce
     ) internal pure returns (bytes32) {
-        return keccak256(abi.encode(TRANSFER_WITH_AUTHORIZATION_TYPEHASH, from, to, value, validAfter, validBefore, nonce));
+        return keccak256(
+            abi.encode(TRANSFER_WITH_AUTHORIZATION_TYPEHASH, from, to, value, validAfter, validBefore, nonce)
+        );
     }
 
     /// @dev Gateway TransferSpec struct hash (czar-vault.md §6.2 table; hookData is empty, so its hash is keccak256("")).
@@ -227,15 +241,36 @@ library CzarHashing {
     function transferSpecStructHash(TransferSpecFields memory f) internal pure returns (bytes32) {
         // Split in two abi.encode calls to stay under the 16-slot stack limit without via-IR.
         // All fields are static 32-byte words, so the concatenation equals one abi.encode of all 15 values.
-        return keccak256(bytes.concat(
-            abi.encode(TRANSFER_SPEC_TYPEHASH, f.version, f.sourceDomain, f.destinationDomain, f.sourceContract, f.destinationContract, f.sourceToken),
-            abi.encode(f.destinationToken, f.sourceDepositor, f.destinationRecipient, f.sourceSigner, f.destinationCaller, f.value, f.salt, keccak256(""))
-        ));
+        return keccak256(
+            bytes.concat(
+                abi.encode(
+                    TRANSFER_SPEC_TYPEHASH,
+                    f.version,
+                    f.sourceDomain,
+                    f.destinationDomain,
+                    f.sourceContract,
+                    f.destinationContract,
+                    f.sourceToken
+                ),
+                abi.encode(
+                    f.destinationToken,
+                    f.sourceDepositor,
+                    f.destinationRecipient,
+                    f.sourceSigner,
+                    f.destinationCaller,
+                    f.value,
+                    f.salt,
+                    keccak256("")
+                )
+            )
+        );
     }
 
     /// @dev Gateway BurnIntent struct hash (czar-vault.md §6.2 step 3).
     function burnIntentStructHash(uint256 maxBlockHeight, uint256 maxFee, bytes32 specStructHash)
-        internal pure returns (bytes32)
+        internal
+        pure
+        returns (bytes32)
     {
         return keccak256(abi.encode(BURN_INTENT_TYPEHASH, maxBlockHeight, maxFee, specStructHash));
     }
@@ -245,12 +280,23 @@ library CzarHashing {
     function transferSpecReplayHash(TransferSpecFields memory f) internal pure returns (bytes32) {
         // Two nested concats (stack limit without via-IR). Byte layout: 4 + 3×4 + 8×32 + 32 + 32 + 4 = 340.
         bytes memory head = bytes.concat(
-            TRANSFER_SPEC_MAGIC, bytes4(f.version), bytes4(f.sourceDomain), bytes4(f.destinationDomain),
-            f.sourceContract, f.destinationContract, f.sourceToken, f.destinationToken
+            TRANSFER_SPEC_MAGIC,
+            bytes4(f.version),
+            bytes4(f.sourceDomain),
+            bytes4(f.destinationDomain),
+            f.sourceContract,
+            f.destinationContract,
+            f.sourceToken,
+            f.destinationToken
         );
         bytes memory tail = bytes.concat(
-            f.sourceDepositor, f.destinationRecipient, f.sourceSigner, f.destinationCaller,
-            bytes32(f.value), f.salt, bytes4(uint32(0))
+            f.sourceDepositor,
+            f.destinationRecipient,
+            f.sourceSigner,
+            f.destinationCaller,
+            bytes32(f.value),
+            f.salt,
+            bytes4(uint32(0))
         );
         return keccak256(bytes.concat(head, tail));
     }
@@ -258,10 +304,22 @@ library CzarHashing {
     /// @dev SL Receipt struct hash (02 §6.3.3); `originAsserted` is hashed as keccak256(bytes(string)).
     function receiptStructHash(ICzarVault.SlReceipt memory r) internal pure returns (bytes32) {
         // Split in two abi.encode calls (stack limit without via-IR); every field is a static 32-byte word.
-        return keccak256(bytes.concat(
-            abi.encode(RECEIPT_TYPEHASH, r.paymentRefHash, r.requestCommit, r.responseCommit, r.statusCode, keccak256(bytes(r.originAsserted)), r.requirementsHashSeen),
-            abi.encode(r.tRequest, r.tPaymentSigned, r.tComplete, r.outcome, r.localChecksCommit, r.disclosure, r.createdAt)
-        ));
+        return keccak256(
+            bytes.concat(
+                abi.encode(
+                    RECEIPT_TYPEHASH,
+                    r.paymentRefHash,
+                    r.requestCommit,
+                    r.responseCommit,
+                    r.statusCode,
+                    keccak256(bytes(r.originAsserted)),
+                    r.requirementsHashSeen
+                ),
+                abi.encode(
+                    r.tRequest, r.tPaymentSigned, r.tComplete, r.outcome, r.localChecksCommit, r.disclosure, r.createdAt
+                )
+            )
+        );
     }
 
     /// @dev ReceiptAttestation(bytes32 receiptStructHash) struct hash (02 §6.2; RV-013).
@@ -270,15 +328,21 @@ library CzarHashing {
     }
 
     /// @dev AutonomyRaise(bytes32 category,uint256 newLimit,uint64 periodId,uint256 nonce,uint256 deadline).
-    function autonomyRaiseStructHash(bytes32 category, uint256 newLimit, uint64 periodId, uint256 nonce, uint256 deadline)
-        internal pure returns (bytes32)
-    {
+    function autonomyRaiseStructHash(
+        bytes32 category,
+        uint256 newLimit,
+        uint64 periodId,
+        uint256 nonce,
+        uint256 deadline
+    ) internal pure returns (bytes32) {
         return keccak256(abi.encode(AUTONOMY_RAISE_TYPEHASH, category, newLimit, periodId, nonce, deadline));
     }
 
     /// @dev OwnerAction(uint8 action,bytes32 payloadHash,uint256 nonce,uint256 deadline).
     function ownerActionStructHash(uint8 action, bytes32 payloadHash, uint256 nonce, uint256 deadline)
-        internal pure returns (bytes32)
+        internal
+        pure
+        returns (bytes32)
     {
         return keccak256(abi.encode(OWNER_ACTION_TYPEHASH, action, payloadHash, nonce, deadline));
     }
@@ -325,9 +389,14 @@ library PayeeLeaf {
     }
 
     /// @dev True when the leaf is in the tree with this root (sorted-pair nodes, OpenZeppelin MerkleProof).
-    function verify(bytes32[] calldata proof, bytes32 root, address payee, uint8 kind, uint32 stepIndex, uint256 stepCap)
-        internal pure returns (bool)
-    {
+    function verify(
+        bytes32[] calldata proof,
+        bytes32 root,
+        address payee,
+        uint8 kind,
+        uint32 stepIndex,
+        uint256 stepCap
+    ) internal pure returns (bool) {
         return MerkleProof.verifyCalldata(proof, root, hash(payee, kind, stepIndex, stepCap));
     }
 }
@@ -380,7 +449,9 @@ library PasskeyVerifier {
     /// (3) OpenZeppelin WebAuthn.verify(challenge = abi.encodePacked(digest), auth, qx, qy, REQUIRE_UV) is true.
     /// czar-vault.md §7. Never reverts on a bad assertion; returns false.
     function verify(bytes32 digest, ICzarVault.WebAuthnAuth calldata a, bytes32 qx, bytes32 qy, bytes32 rpIdHash)
-        internal view returns (bool)
+        internal
+        view
+        returns (bool)
     {
         if (a.authenticatorData.length < 37) return false;
         if (bytes32(a.authenticatorData[0:32]) != rpIdHash) return false;
@@ -410,7 +481,7 @@ library PasskeyVerifier {
 | `0x000000000000000000000000000000000000d00d` | 2 | 1 | 400,000 | `0x04e78038f4a24b35844ef3fcf59c513c5437c3866b648a9e11cf2f90978bf372` |
 | `0x000000000000000000000000000000000000b0c0` | 4 | 4294967295 | 0 | `0xab9631b63ff19fbac7755a1065d573f639d8d443130d6077cf2f1c7e3113f856` |
 
-## 9. Test file `contracts/test/unit/Libraries.t.sol`
+## 9. Test file `contracts/test/LibrariesTest.t.sol`
 - **What it covers:** every constant, every hashing function against its vector, both payee trees, the nonce and salt rules, and every passkey case (valid, wrong RP ID, missing UV, high `s`, wrong digest, short authenticator data, gas).
 - **Passkey assertions are built inside the test, the way a browser builds them:**
   - Foundry's `vm.signP256` signs the exact 32-byte hash it is given. The test passes `sha256(authenticatorData ‖ sha256(clientDataJSON))`, which is what WebAuthn signs.
@@ -422,12 +493,12 @@ pragma solidity 0.8.30;
 
 import {Test} from "forge-std/Test.sol";
 import {Base64} from "@openzeppelin/contracts/utils/Base64.sol";
-import {ICzarVault} from "../../src/interfaces/ICzarVault.sol";
-import {SatMath} from "../../src/libraries/SatMath.sol";
-import {CzarHashing, TransferSpecFields} from "../../src/libraries/CzarHashing.sol";
-import {PayeeLeaf} from "../../src/libraries/PayeeLeaf.sol";
-import {CzarNonces} from "../../src/libraries/CzarNonces.sol";
-import {PasskeyVerifier} from "../../src/libraries/PasskeyVerifier.sol";
+import {ICzarVault} from "../src/interfaces/ICzarVault.sol";
+import {SatMath} from "../src/libraries/SatMath.sol";
+import {CzarHashing, TransferSpecFields} from "../src/libraries/CzarHashing.sol";
+import {PayeeLeaf} from "../src/libraries/PayeeLeaf.sol";
+import {CzarNonces} from "../src/libraries/CzarNonces.sol";
+import {PasskeyVerifier} from "../src/libraries/PasskeyVerifier.sol";
 import {
     USDC_ADDRESS,
     EIP712_DOMAIN_FULL_TYPEHASH,
@@ -453,9 +524,9 @@ import {
     SECP256K1_HALF_N,
     CANCEL_REASON,
     DESCRIPTION_PREFIX
-} from "../../src/libraries/CzarConstants.sol";
+} from "../src/libraries/CzarConstants.sol";
 
-/// @dev PRD 07-contract-build/01-shared-libraries.md. Every expected value is copied from
+/// @dev 07-contract-build/01-shared-libraries.md (first part of T-013). Every expected value is copied from
 /// docs/specs/02-data-and-protocol/vectors/eip712-vectors.json or 07-contract-build/fixtures/payee-tree.json.
 contract LibrariesTest is Test {
     address internal constant VAULT = address(0xc2a21); // vectors: example vault 0x...0c2a21
@@ -476,18 +547,28 @@ contract LibrariesTest is Test {
     }
 
     function test_constants_typeHashesMatchTypeStrings() public pure {
-        assertEq(EIP712_DOMAIN_FULL_TYPEHASH, keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"));
-        assertEq(EIP712_DOMAIN_NO_CONTRACT_TYPEHASH, keccak256("EIP712Domain(string name,string version,uint256 chainId)"));
+        assertEq(
+            EIP712_DOMAIN_FULL_TYPEHASH,
+            keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)")
+        );
+        assertEq(
+            EIP712_DOMAIN_NO_CONTRACT_TYPEHASH, keccak256("EIP712Domain(string name,string version,uint256 chainId)")
+        );
         assertEq(
             TRANSFER_WITH_AUTHORIZATION_TYPEHASH,
-            keccak256("TransferWithAuthorization(address from,address to,uint256 value,uint256 validAfter,uint256 validBefore,bytes32 nonce)")
+            keccak256(
+                "TransferWithAuthorization(address from,address to,uint256 value,uint256 validAfter,uint256 validBefore,bytes32 nonce)"
+            )
         );
         assertEq(RECEIPT_ATTESTATION_TYPEHASH, keccak256("ReceiptAttestation(bytes32 receiptStructHash)"));
         assertEq(
             AUTONOMY_RAISE_TYPEHASH,
             keccak256("AutonomyRaise(bytes32 category,uint256 newLimit,uint64 periodId,uint256 nonce,uint256 deadline)")
         );
-        assertEq(OWNER_ACTION_TYPEHASH, keccak256("OwnerAction(uint8 action,bytes32 payloadHash,uint256 nonce,uint256 deadline)"));
+        assertEq(
+            OWNER_ACTION_TYPEHASH,
+            keccak256("OwnerAction(uint8 action,bytes32 payloadHash,uint256 nonce,uint256 deadline)")
+        );
         // TransferSpec, BurnIntent and Receipt type strings are long; their hashes are checked through the digest vectors below.
         assertEq(TRANSFER_SPEC_TYPEHASH, 0x44409c7ba8872720f5fc290d2788c2d70a3905b7ca1cdb2ffa152791a69e089b);
         assertEq(BURN_INTENT_TYPEHASH, 0x8b99d17a83a2dd1add9fc2a450e22732c7e8564aa110ab99c20485a7a10ba37c);
@@ -500,7 +581,9 @@ contract LibrariesTest is Test {
 
     function test_constants_gatewayDomain() public pure {
         bytes32 nameVersionOnly = 0xb03948446334eb9b2196d5eb166f69b9d49403eb4a12f36de8d3f9f3cb8e15c3;
-        assertEq(GATEWAY_DOMAIN_SEPARATOR, keccak256(abi.encode(nameVersionOnly, keccak256("GatewayWallet"), keccak256("1"))));
+        assertEq(
+            GATEWAY_DOMAIN_SEPARATOR, keccak256(abi.encode(nameVersionOnly, keccak256("GatewayWallet"), keccak256("1")))
+        );
     }
 
     // ─────────────── SatMath (PRD §6) ───────────────
@@ -543,7 +626,12 @@ contract LibrariesTest is Test {
 
     function test_hashing_usdcTransferDigestVector() public pure {
         bytes32 structHash = CzarHashing.transferWithAuthorizationHash(
-            VAULT, address(0xbEEF), 100000, 0, 1760800000, bytes32(uint256(0x1111111111111111111111111111111111111111111111111111111111111111))
+            VAULT,
+            address(0xbEEF),
+            100000,
+            0,
+            1760800000,
+            bytes32(uint256(0x1111111111111111111111111111111111111111111111111111111111111111))
         );
         assertEq(
             CzarHashing.typedDataHash(_usdcDomain(TESTNET), structHash),
@@ -570,14 +658,18 @@ contract LibrariesTest is Test {
     function test_hashing_burnIntentVector() public pure {
         bytes32 specHash = CzarHashing.transferSpecStructHash(_burnSpec());
         assertEq(
-            CzarHashing.typedDataHash(GATEWAY_DOMAIN_SEPARATOR, CzarHashing.burnIntentStructHash(68000000, 10000, specHash)),
+            CzarHashing.typedDataHash(
+                GATEWAY_DOMAIN_SEPARATOR, CzarHashing.burnIntentStructHash(68000000, 10000, specHash)
+            ),
             0xbaa687f22d9719e8afd3f756b6c2c3991f4fcf2674f419c095132f7ec22d6ec8
         );
     }
 
     function test_hashing_transferSpecReplayVector() public pure {
         TransferSpecFields memory f = _burnSpec();
-        assertEq(CzarHashing.transferSpecReplayHash(f), 0xa2f49c1a7ff819bf27ffd2ff6d87a0ea51b77284f7b879ac42deb760376d3616);
+        assertEq(
+            CzarHashing.transferSpecReplayHash(f), 0xa2f49c1a7ff819bf27ffd2ff6d87a0ea51b77284f7b879ac42deb760376d3616
+        );
         // Length check of the same byte layout (vectors: transferSpecBytesLength = 340).
         bytes memory encoded = bytes.concat(
             bytes.concat(bytes4(0xca85def7), bytes4(f.version), bytes4(f.sourceDomain), bytes4(f.destinationDomain)),
@@ -645,11 +737,14 @@ contract LibrariesTest is Test {
     // ─────────────── PayeeLeaf (PRD §8.2) ───────────────
 
     /// @dev External so the proof is calldata, as PayeeLeaf.verify requires.
-    function verifyExt(bytes32[] calldata proof, bytes32 root, address payee, uint8 kind, uint32 stepIndex, uint256 stepCap)
-        external
-        pure
-        returns (bool)
-    {
+    function verifyExt(
+        bytes32[] calldata proof,
+        bytes32 root,
+        address payee,
+        uint8 kind,
+        uint32 stepIndex,
+        uint256 stepCap
+    ) external pure returns (bool) {
         return PayeeLeaf.verify(proof, root, payee, kind, stepIndex, stepCap);
     }
 
@@ -678,32 +773,154 @@ contract LibrariesTest is Test {
     }
 
     function test_payeeLeaf_fourLeafTree() public view {
-        _assertLeaf(0x5260a09a91439828d8270628cc7759cccd88e6fb8c0913079b9cb3b4ed7a8053, address(0xbeef), 1, 0, 1000000, 0x730c32c180b9f083f727dd233f0736cd6a5a0ae28a6e6c49dea73bfa0bf9c6f8, _proof(0xab9631b63ff19fbac7755a1065d573f639d8d443130d6077cf2f1c7e3113f856, 0x89c3e8f52ad7e7775b76d91a2e009bd59bb09b3c83b270fc21645a4443a2cde9));
-        _assertLeaf(0x5260a09a91439828d8270628cc7759cccd88e6fb8c0913079b9cb3b4ed7a8053, address(0xcafe), 1, 0, 1000000, 0x26c269f6eccb85afb6706039229e977df700c4e25fe066861064966295b1dfe7, _proof(0x04e78038f4a24b35844ef3fcf59c513c5437c3866b648a9e11cf2f90978bf372, 0x2bc447d59d756cdde730e0958a2ffe4f559f7ebfb0f71c1bc6c372a3407438aa));
-        _assertLeaf(0x5260a09a91439828d8270628cc7759cccd88e6fb8c0913079b9cb3b4ed7a8053, address(0xd00d), 2, 1, 400000, 0x04e78038f4a24b35844ef3fcf59c513c5437c3866b648a9e11cf2f90978bf372, _proof(0x26c269f6eccb85afb6706039229e977df700c4e25fe066861064966295b1dfe7, 0x2bc447d59d756cdde730e0958a2ffe4f559f7ebfb0f71c1bc6c372a3407438aa));
-        _assertLeaf(0x5260a09a91439828d8270628cc7759cccd88e6fb8c0913079b9cb3b4ed7a8053, address(0xb0c0), 4, 4294967295, 0, 0xab9631b63ff19fbac7755a1065d573f639d8d443130d6077cf2f1c7e3113f856, _proof(0x730c32c180b9f083f727dd233f0736cd6a5a0ae28a6e6c49dea73bfa0bf9c6f8, 0x89c3e8f52ad7e7775b76d91a2e009bd59bb09b3c83b270fc21645a4443a2cde9));
+        _assertLeaf(
+            0x5260a09a91439828d8270628cc7759cccd88e6fb8c0913079b9cb3b4ed7a8053,
+            address(0xbeef),
+            1,
+            0,
+            1000000,
+            0x730c32c180b9f083f727dd233f0736cd6a5a0ae28a6e6c49dea73bfa0bf9c6f8,
+            _proof(
+                0xab9631b63ff19fbac7755a1065d573f639d8d443130d6077cf2f1c7e3113f856,
+                0x89c3e8f52ad7e7775b76d91a2e009bd59bb09b3c83b270fc21645a4443a2cde9
+            )
+        );
+        _assertLeaf(
+            0x5260a09a91439828d8270628cc7759cccd88e6fb8c0913079b9cb3b4ed7a8053,
+            address(0xcafe),
+            1,
+            0,
+            1000000,
+            0x26c269f6eccb85afb6706039229e977df700c4e25fe066861064966295b1dfe7,
+            _proof(
+                0x04e78038f4a24b35844ef3fcf59c513c5437c3866b648a9e11cf2f90978bf372,
+                0x2bc447d59d756cdde730e0958a2ffe4f559f7ebfb0f71c1bc6c372a3407438aa
+            )
+        );
+        _assertLeaf(
+            0x5260a09a91439828d8270628cc7759cccd88e6fb8c0913079b9cb3b4ed7a8053,
+            address(0xd00d),
+            2,
+            1,
+            400000,
+            0x04e78038f4a24b35844ef3fcf59c513c5437c3866b648a9e11cf2f90978bf372,
+            _proof(
+                0x26c269f6eccb85afb6706039229e977df700c4e25fe066861064966295b1dfe7,
+                0x2bc447d59d756cdde730e0958a2ffe4f559f7ebfb0f71c1bc6c372a3407438aa
+            )
+        );
+        _assertLeaf(
+            0x5260a09a91439828d8270628cc7759cccd88e6fb8c0913079b9cb3b4ed7a8053,
+            address(0xb0c0),
+            4,
+            4294967295,
+            0,
+            0xab9631b63ff19fbac7755a1065d573f639d8d443130d6077cf2f1c7e3113f856,
+            _proof(
+                0x730c32c180b9f083f727dd233f0736cd6a5a0ae28a6e6c49dea73bfa0bf9c6f8,
+                0x89c3e8f52ad7e7775b76d91a2e009bd59bb09b3c83b270fc21645a4443a2cde9
+            )
+        );
     }
 
     function test_payeeLeaf_threeLeafTreeOddCarry() public view {
-        _assertLeaf(0xe963ac023d4d117e5d7256956871299fbb685e71713ea9eb912cb79f97f6a281, address(0xbeef), 1, 0, 1000000, 0x730c32c180b9f083f727dd233f0736cd6a5a0ae28a6e6c49dea73bfa0bf9c6f8, _proof(0x89c3e8f52ad7e7775b76d91a2e009bd59bb09b3c83b270fc21645a4443a2cde9));
-        _assertLeaf(0xe963ac023d4d117e5d7256956871299fbb685e71713ea9eb912cb79f97f6a281, address(0xcafe), 1, 0, 1000000, 0x26c269f6eccb85afb6706039229e977df700c4e25fe066861064966295b1dfe7, _proof(0x04e78038f4a24b35844ef3fcf59c513c5437c3866b648a9e11cf2f90978bf372, 0x730c32c180b9f083f727dd233f0736cd6a5a0ae28a6e6c49dea73bfa0bf9c6f8));
-        _assertLeaf(0xe963ac023d4d117e5d7256956871299fbb685e71713ea9eb912cb79f97f6a281, address(0xd00d), 2, 1, 400000, 0x04e78038f4a24b35844ef3fcf59c513c5437c3866b648a9e11cf2f90978bf372, _proof(0x26c269f6eccb85afb6706039229e977df700c4e25fe066861064966295b1dfe7, 0x730c32c180b9f083f727dd233f0736cd6a5a0ae28a6e6c49dea73bfa0bf9c6f8));
+        _assertLeaf(
+            0xe963ac023d4d117e5d7256956871299fbb685e71713ea9eb912cb79f97f6a281,
+            address(0xbeef),
+            1,
+            0,
+            1000000,
+            0x730c32c180b9f083f727dd233f0736cd6a5a0ae28a6e6c49dea73bfa0bf9c6f8,
+            _proof(0x89c3e8f52ad7e7775b76d91a2e009bd59bb09b3c83b270fc21645a4443a2cde9)
+        );
+        _assertLeaf(
+            0xe963ac023d4d117e5d7256956871299fbb685e71713ea9eb912cb79f97f6a281,
+            address(0xcafe),
+            1,
+            0,
+            1000000,
+            0x26c269f6eccb85afb6706039229e977df700c4e25fe066861064966295b1dfe7,
+            _proof(
+                0x04e78038f4a24b35844ef3fcf59c513c5437c3866b648a9e11cf2f90978bf372,
+                0x730c32c180b9f083f727dd233f0736cd6a5a0ae28a6e6c49dea73bfa0bf9c6f8
+            )
+        );
+        _assertLeaf(
+            0xe963ac023d4d117e5d7256956871299fbb685e71713ea9eb912cb79f97f6a281,
+            address(0xd00d),
+            2,
+            1,
+            400000,
+            0x04e78038f4a24b35844ef3fcf59c513c5437c3866b648a9e11cf2f90978bf372,
+            _proof(
+                0x26c269f6eccb85afb6706039229e977df700c4e25fe066861064966295b1dfe7,
+                0x730c32c180b9f083f727dd233f0736cd6a5a0ae28a6e6c49dea73bfa0bf9c6f8
+            )
+        );
     }
 
     function test_payeeLeaf_wrongKindFails() public view {
-        assertFalse(this.verifyExt(_proof(0xab9631b63ff19fbac7755a1065d573f639d8d443130d6077cf2f1c7e3113f856, 0x89c3e8f52ad7e7775b76d91a2e009bd59bb09b3c83b270fc21645a4443a2cde9), 0x5260a09a91439828d8270628cc7759cccd88e6fb8c0913079b9cb3b4ed7a8053, address(0xbeef), 2, 0, 1000000));
+        assertFalse(
+            this.verifyExt(
+                _proof(
+                    0xab9631b63ff19fbac7755a1065d573f639d8d443130d6077cf2f1c7e3113f856,
+                    0x89c3e8f52ad7e7775b76d91a2e009bd59bb09b3c83b270fc21645a4443a2cde9
+                ),
+                0x5260a09a91439828d8270628cc7759cccd88e6fb8c0913079b9cb3b4ed7a8053,
+                address(0xbeef),
+                2,
+                0,
+                1000000
+            )
+        );
     }
 
     function test_payeeLeaf_wrongCapFails() public view {
-        assertFalse(this.verifyExt(_proof(0xab9631b63ff19fbac7755a1065d573f639d8d443130d6077cf2f1c7e3113f856, 0x89c3e8f52ad7e7775b76d91a2e009bd59bb09b3c83b270fc21645a4443a2cde9), 0x5260a09a91439828d8270628cc7759cccd88e6fb8c0913079b9cb3b4ed7a8053, address(0xbeef), 1, 0, 1000001));
+        assertFalse(
+            this.verifyExt(
+                _proof(
+                    0xab9631b63ff19fbac7755a1065d573f639d8d443130d6077cf2f1c7e3113f856,
+                    0x89c3e8f52ad7e7775b76d91a2e009bd59bb09b3c83b270fc21645a4443a2cde9
+                ),
+                0x5260a09a91439828d8270628cc7759cccd88e6fb8c0913079b9cb3b4ed7a8053,
+                address(0xbeef),
+                1,
+                0,
+                1000001
+            )
+        );
     }
 
     function test_payeeLeaf_wrongStepFails() public view {
-        assertFalse(this.verifyExt(_proof(0xab9631b63ff19fbac7755a1065d573f639d8d443130d6077cf2f1c7e3113f856, 0x89c3e8f52ad7e7775b76d91a2e009bd59bb09b3c83b270fc21645a4443a2cde9), 0x5260a09a91439828d8270628cc7759cccd88e6fb8c0913079b9cb3b4ed7a8053, address(0xbeef), 1, 1, 1000000));
+        assertFalse(
+            this.verifyExt(
+                _proof(
+                    0xab9631b63ff19fbac7755a1065d573f639d8d443130d6077cf2f1c7e3113f856,
+                    0x89c3e8f52ad7e7775b76d91a2e009bd59bb09b3c83b270fc21645a4443a2cde9
+                ),
+                0x5260a09a91439828d8270628cc7759cccd88e6fb8c0913079b9cb3b4ed7a8053,
+                address(0xbeef),
+                1,
+                1,
+                1000000
+            )
+        );
     }
 
     function test_payeeLeaf_wrongRootFails() public view {
-        assertFalse(this.verifyExt(_proof(0xab9631b63ff19fbac7755a1065d573f639d8d443130d6077cf2f1c7e3113f856, 0x89c3e8f52ad7e7775b76d91a2e009bd59bb09b3c83b270fc21645a4443a2cde9), 0xe963ac023d4d117e5d7256956871299fbb685e71713ea9eb912cb79f97f6a281, address(0xbeef), 1, 0, 1000000));
+        assertFalse(
+            this.verifyExt(
+                _proof(
+                    0xab9631b63ff19fbac7755a1065d573f639d8d443130d6077cf2f1c7e3113f856,
+                    0x89c3e8f52ad7e7775b76d91a2e009bd59bb09b3c83b270fc21645a4443a2cde9
+                ),
+                0xe963ac023d4d117e5d7256956871299fbb685e71713ea9eb912cb79f97f6a281,
+                address(0xbeef),
+                1,
+                0,
+                1000000
+            )
+        );
     }
 
     function test_payeeLeaf_singleLeafTree() public view {
@@ -714,7 +931,9 @@ contract LibrariesTest is Test {
     // ─────────────── CzarNonces (PRD §9) ───────────────
 
     function test_nonces_derivedNonceVector() public pure {
-        assertEq(CzarNonces.derivedNonce(VAULT, 12, 3), 0x1f7eb762975d3148f76637d5498c320aa01d5daa71be09a5e6ca4947371fd59f);
+        assertEq(
+            CzarNonces.derivedNonce(VAULT, 12, 3), 0x1f7eb762975d3148f76637d5498c320aa01d5daa71be09a5e6ca4947371fd59f
+        );
     }
 
     function testFuzz_nonces_distinctIndices(uint64 reservationId, uint32 i, uint32 j) public pure {
@@ -734,11 +953,13 @@ contract LibrariesTest is Test {
     bytes1 internal constant FLAGS_UP_ONLY = 0x01;
 
     /// @dev External so the assertion is calldata, as PasskeyVerifier.verify requires.
-    function verifyPasskeyExt(bytes32 digest, ICzarVault.WebAuthnAuth calldata a, bytes32 qx, bytes32 qy, bytes32 rpIdHash)
-        external
-        view
-        returns (bool)
-    {
+    function verifyPasskeyExt(
+        bytes32 digest,
+        ICzarVault.WebAuthnAuth calldata a,
+        bytes32 qx,
+        bytes32 qy,
+        bytes32 rpIdHash
+    ) external view returns (bool) {
         return PasskeyVerifier.verify(digest, a, qx, qy, rpIdHash);
     }
 
@@ -755,7 +976,9 @@ contract LibrariesTest is Test {
     {
         bytes memory authenticatorData = abi.encodePacked(rpIdHash, flags, uint32(0)); // 37 bytes
         string memory clientDataJSON = string.concat(
-            '{"type":"webauthn.get","challenge":"', Base64.encodeURL(abi.encodePacked(digest)), '","origin":"http://localhost"}'
+            '{"type":"webauthn.get","challenge":"',
+            Base64.encodeURL(abi.encodePacked(digest)),
+            '","origin":"http://localhost"}'
         );
         bytes32 messageHash = sha256(abi.encodePacked(authenticatorData, sha256(bytes(clientDataJSON))));
         (bytes32 r, bytes32 s) = vm.signP256(PASSKEY_PK, messageHash);
@@ -845,21 +1068,19 @@ contract LibrariesTest is Test {
 
 ## 10. Build steps (tests first)
 1. Do §4 (submodules and interface copies).
-2. Create `test/unit/Libraries.t.sol` from §9. Run `FOUNDRY_PROFILE=arc arc-forge test -vvv --match-path test/unit/Libraries.t.sol`. It must fail to compile, because the libraries do not exist yet. Paste the first error line into your report.
+2. Create `test/LibrariesTest.t.sol` from §9. Run `FOUNDRY_PROFILE=arc arc-forge test -vvv --match-path test/LibrariesTest.t.sol`. It must fail to compile, because the libraries do not exist yet. Paste the first error line into your report.
 3. Create `CzarConstants.sol` (§6.2) and `SatMath.sol` (§7.1).
 4. Create `CzarHashing.sol` (§7.2), `PayeeLeaf.sol` (§7.3) and `CzarNonces.sol` (§7.4).
 5. Create `PasskeyVerifier.sol` (§7.5).
-6. Format only the files you created:
-   - `arc-forge fmt src/libraries test/unit/Libraries.t.sol`
-   - The formatter changes layout only. Never run `arc-forge fmt` with no path (00-conventions §2.2).
+6. Check the format of only the files you created: `arc-forge fmt --check src/libraries test/LibrariesTest.t.sol`. It must print nothing, because the blocks are already formatted. If it prints a diff, you changed a line while copying; compare with this PRD. Never run `arc-forge fmt` with no path (00-conventions §2.2).
 7. Run the test file again: 34 passed, 0 failed.
 8. Run the full build with sizes and the full test suite (00-conventions §2.2).
 
 ## 11. Definition of done
-- `FOUNDRY_PROFILE=arc arc-forge test -vvv --match-path test/unit/Libraries.t.sol` shows 34 passed, 0 failed.
-- In that run, `test_passkey_gas` passes against the 60,000 bound. If it passes only because the precompile probe reported "missing" under `FOUNDRY_PROFILE=arc`, say so in the report: it means the Arc profile is not active (audit G-69).
+- `FOUNDRY_PROFILE=arc arc-forge test -vvv --match-path test/LibrariesTest.t.sol` shows 34 passed, 0 failed.
+- In that run, `test_passkey_validAssertion` reports about 26,000 gas (precompile live). If it uses about 260,000, the Arc profile is not active: you forgot `FOUNDRY_PROFILE=arc` (audit G-69).
 - `FOUNDRY_PROFILE=arc arc-forge build --deny-warnings --sizes` shows no warnings.
-- `arc-forge fmt --check src/libraries test/unit/Libraries.t.sol` prints nothing.
+- `arc-forge fmt --check src/libraries test/LibrariesTest.t.sol` prints nothing.
 - `diff -r src/interfaces ../docs/specs/03-smart-contracts/interfaces` prints nothing.
 
 ## 12. Stop conditions
@@ -870,3 +1091,4 @@ contract LibrariesTest is Test {
 | Date | Change |
 |---|---|
 | 2026-10-20 | First version. Code compiled with solc 0.8.30 and OZ 5.7.0; test file executed (34 passed) with and without a P-256 precompile. Added the G-11 constants from the contract gap audit. |
+| 2026-10-20 | Verified on Arc Foundry v0.8.0-2 (`FOUNDRY_PROFILE=arc`); blocks replaced with their `fmt` layout; test file moved to `test/LibrariesTest.t.sol` (00-conventions §3). |

@@ -65,6 +65,16 @@ How to file:
 
 - CI (`.github/workflows/ci.yml`) runs three of these: the interface diff, the build with sizes, and all tests. Run the rest yourself. A task is not done until CI is green and your own runs pass.
 - Never run `arc-forge fmt` with no path. It would reformat `src/interfaces/*.sol`, which must stay byte-identical to the spec copies, and the CI diff would fail.
+- Arc Foundry v0.8.0-2 prints `Warning: Key \`deny_warnings\` is being deprecated…` on every command (build, test and fmt) and `Warning: \`--deny-warnings\` is being deprecated…` on build. These are notices about the flag name, not compiler warnings, and "prints nothing" in a PRD ignores them. Keep the commands exactly as written; CI uses them.
+- **Which test command is the gate:** the command printed in the PRD's Definition of done, exactly. `-vvv` only adds trace output for debugging; use it when a test fails.
+
+### 2.4 Lint
+- `arc-forge build` also runs forge-lint on `src/` (tests are excluded by `[lint] ignore` in `foundry.toml`). With `--deny-warnings`, **a lint warning fails the build** exactly like a compiler warning.
+- `block-timestamp` is excluded in `foundry.toml` (PRD 03 adds the line): every time comparison is a spec rule (`czar-vault.md` §15.7).
+- Fix every other lint finding in code, never by excluding it:
+  - `missing-zero-check`: add the zero check only if the spec lists `ZeroAddress` for that function; otherwise stop and file an SCR.
+  - `unsafe-typecast`: use OpenZeppelin `SafeCast` (`SafeCast.toUint64(x)`), unless the PRD shows the value is already bounded.
+  - Any other lint: stop and report it with the exact lint id and line; do not add `forge-lint: disable` comments unless a PRD gives the exact comment.
 
 ### 2.3 Interface files
 - `contracts/src/interfaces/*.sol` must be **byte-identical** copies of `docs/specs/03-smart-contracts/interfaces/*.sol`. CI fails on any difference.
@@ -74,42 +84,59 @@ How to file:
 
 ## 3. File layout
 
+The file and test-contract names below are the ones `docs/specs/05-build-plan/phase-1-tasks.md` uses, so task acceptance commands (`--match-contract VaultCoreTest`) work as written.
+
 ```
 contracts/
+  foundry.toml                  PRD 03 adds `exclude_lints = ["block-timestamp"]` (§2.4)
   src/
     interfaces/                 copies of the spec interfaces (never edited)
-    libraries/                  pure / view libraries (PRD 01)
-      CzarConstants.sol
-      SatMath.sol
-      CzarHashing.sol
-      PayeeLeaf.sol
-      CzarNonces.sol
-      PasskeyVerifier.sol
+    libraries/                  internal libraries (PRD 01; JobEscrowAdapter in PRD 09)
+      CzarConstants.sol  SatMath.sol  CzarHashing.sol  PayeeLeaf.sol  CzarNonces.sol  PasskeyVerifier.sol
       JobEscrowAdapter.sol        (PRD 09)
-    vault/                      the vault, split by topic into abstract contracts (PRDs 04–10)
-      VaultStorage.sol
-      VaultCore.sol
-      VaultEnvelopes.sol
-      VaultReservations.sol
-      VaultSignatures.sol
-      VaultPockets.sol
-      VaultJobs.sol
-      VaultAutonomy.sol
-      VaultOwnerActions.sol
-      CzarVault.sol               the only concrete vault contract
-    CzarVaultFactory.sol         (PRD 03)
-    OpenEvidenceLog.sol          (already built, T-011; PRD 02 checks it)
+    vault/                      vault modules: abstract contracts (PRDs 03–10)
+      VaultStorage.sol            PRD 03: every immutable and storage variable, the constructor, shared checks
+      VaultStubs.sol              PRD 03: TEMPORARY placeholders (§3.1); deleted by PRD 10
+      VaultCore.sol               PRD 04
+      VaultEnvelopes.sol          PRD 05
+      VaultReservations.sol       PRD 06
+      VaultSignatures.sol         PRD 07
+      VaultPockets.sol            PRD 08
+      VaultJobs.sol               PRD 09
+      VaultAutonomy.sol           PRD 10
+      VaultOwnerActions.sol       PRD 10
+    CzarVault.sol                 the only concrete vault contract (PRD 03 creates it; each PRD adds its module)
+    CzarVaultFactory.sol          PRD 03
+    OpenEvidenceLog.sol           already built (T-011); PRD 02 checks it
   test/
-    mocks/                      already built (T-010); extend only where a PRD says so
-    helpers/                    shared test setup (PRD 04 creates VaultTestBase.sol)
-    unit/                       one file per vault module: Vault<Topic>.t.sol
-    invariant/                  handlers and invariant suites (PRD 12)
-    fork/                       fork tests against Arc testnet (PRD 12)
+    mocks/                      T-010 mocks, plus MockArcUSDC.sol and MockVaultFactory.sol (PRD 03)
+    helpers/                    VaultTestBase.sol and CzarVaultHarness.sol (PRD 03), extended by later PRDs
+    LibrariesTest.t.sol           PRD 01
+    FactoryTest.t.sol             PRD 03 (T-012)
+    VaultCoreTest.t.sol           PRD 04 (T-013)
+    EnvelopeTest.t.sol            PRD 05 (T-014)
+    ReserveTest.t.sol             PRD 06 (T-015)
+    SignatureTest.t.sol           PRD 07 (T-016)
+    PocketTest.t.sol              PRD 08 (T-017)
+    JobTest.t.sol                 PRD 09 (T-018)
+    AutonomyTest.t.sol, OwnerActionTest.t.sol   PRD 10 (T-019)
+    VectorsTest.t.sol             PRD 12 (T-023)
+    invariant/  fuzz/  fork/      PRD 12 (T-021, T-022)
   script/                       deployment scripts (PRD 13)
 ```
 
-- **Why the vault is split into abstract contracts:** each PRD builds one file; the concrete `CzarVault` inherits them all. Inheritance does not change the deployed bytecode size. If the size is too big, PRD 11 moves selected `library` code to linked external libraries.
-- Each abstract vault file inherits `VaultStorage` (directly or through another module), never declares storage of its own, and never has a constructor.
+- **Why the vault is split into abstract contracts:** each PRD builds one file; the concrete `CzarVault` inherits them all. Inheritance does not change the deployed bytecode size. If the size is too big, PRD 11 moves selected code to linked external libraries.
+- **`VaultStorage is ICzarVault, ReentrancyGuardTransient`.** Every module inherits `VaultStorage` (directly or through another module), so every module sees the interface's types, events and errors without qualification, and a module function with the interface's exact signature implements it without the `override` keyword.
+- **The modules form one chain**, each inheriting the one before it, so a later module can call an earlier module's functions (for example `VaultEnvelopes` calls `freeBalance()` from `VaultCore`):
+  `VaultStorage` ← `VaultCore` ← `VaultEnvelopes` ← `VaultReservations` ← `VaultSignatures` ← `VaultPockets` ← `VaultJobs` ← `VaultAutonomy` ← `VaultOwnerActions`.
+  `CzarVault` inherits only the newest module plus `VaultStubs`: `contract CzarVault is VaultEnvelopes, VaultStubs` after PRD 05, and `contract CzarVault is VaultOwnerActions` after PRD 10.
+- **Constructors:** only `VaultStorage` has one (Solidity lets only the declaring contract's constructor assign an immutable) and `CzarVault` passes the owner to it. No other module has a constructor.
+- **No module declares storage.** All storage is in `VaultStorage`, in its fixed order.
+
+### 3.1 The temporary stubs (`VaultStubs.sol`)
+- `CzarVault` can only be deployed when every `ICzarVault` function has a body. `VaultStubs` gives each function that is not built yet a body that reverts `NotBuilt()`.
+- **Every PRD from 04 to 10:** delete the stubs of exactly the functions it builds, add its module to the `CzarVault` inheritance list, and build. A function with both a stub and a real body fails to compile with `Error (6480): Derived contract must override function "<name>". Two or more base classes define function with same name and parameter types.` That error means a stub was not deleted: delete it. Never "fix" it by adding an `override` to `CzarVault`.
+- `NotBuilt` exists only in `VaultStubs.sol`. PRD 10 deletes the file and removes it from `CzarVault`; from then on `grep -rn NotBuilt src/` must print nothing.
 
 ---
 
@@ -134,7 +161,7 @@ pragma solidity 0.8.30;
 | Functions, variables, parameters | camelCase | `openEnvelope`, `stepUsed`, `envelopeId` |
 | Constants and immutables | UPPER_SNAKE_CASE | `MAX_AUTHORIZATIONS_PER_RESERVATION`, `USDC` |
 | Internal / private functions | leading underscore | `_finalizeIfDone`, `_requireAgent` |
-| Storage mappings whose names the spec gives | exactly the spec name | `envelopes`, `reservations`, `pockets`, `pullbacks`, `jobs`, `limits`, `stepUsed`, `digestSlot` |
+| Storage mappings whose names the spec gives | exactly the spec name, `internal` | `envelopes`, `reservations`, `pockets`, `pullbacks`, `jobs`, `limits`, `digestSlot`, `passkey`; **one exception:** the step map is `_stepUsed`, because `stepUsed(uint64,uint32)` is the interface getter and one contract cannot have a variable and a function with the same name |
 
 - Use the spec's names for every function, event, error, constant, struct field and storage variable. Never rename.
 
@@ -187,15 +214,19 @@ pragma solidity 0.8.30;
 | Division of an odd literal is a fraction | `0xFF…4141 / 2` (compile error: fixed-point type) | `uint256(0xFF…4141) / 2` |
 | More than about 12 values in one `abi.encode`, `abi.encodePacked` or `bytes.concat` | "Stack too deep" (the repo does not use `via_ir`; do not turn it on) | split into two calls and concatenate: `bytes.concat(abi.encode(a, …, f), abi.encode(g, …, n))`. For static 32-byte values this gives the same bytes as one call. PRD code already does this |
 | NatSpec on a file-level constant | `/// text` (an implicit `@notice`: compile error) | `/// @dev text` or `// text` |
+| A file-level constant with the same name as an interface getter (`MAX_PULLBACK_FEE_CEILING`) | importing it by its own name into `VaultStorage` (name clash with the public constant that implements the getter) | import it under an alias: `import {MAX_PULLBACK_FEE_CEILING as MAX_PULLBACK_FEE_CEILING_VALUE} from …` (PRD 03 shows it) |
+| A stub or function body that reads no state | "Function state mutability can be restricted to pure" (a warning, so the build fails) | declare it `pure`; an implementation may be stricter than the interface (`nonpayable` or `view` → `pure`) |
+| `@inheritdoc ICzarVault` in a module file | `Error (9397): Documentation tag @inheritdoc references inexistent contract "ICzarVault".` when `ICzarVault` is not imported in that file | `import {ICzarVault} from "../interfaces/ICzarVault.sol";` in every module that uses `@inheritdoc ICzarVault` |
 
 ---
 
 ## 5. Tests
 
 ### 5.1 Framework and layout
-- `forge-std` `Test`. Unit tests in `test/unit/`, invariant suites in `test/invariant/`, fork tests in `test/fork/`.
+- `forge-std` `Test`. Unit test files sit directly in `test/` with the names in §3; invariant suites in `test/invariant/`, fuzz in `test/fuzz/`, fork tests in `test/fork/`.
 - Every test file starts with a `/// @notice` line naming the task and the PRD section it covers.
-- Shared setup for the vault lives in `test/helpers/VaultTestBase.sol` (built in PRD 04 and extended by later PRDs). It deploys the mocks, a factory and one vault, and exposes helpers such as `_openEnvelopeAsOwner(...)` and `_payeeProof(...)`.
+- Shared setup for the vault lives in `test/helpers/VaultTestBase.sol` (built in PRD 03 and extended by later PRDs). It sets the chain id, time and block, places `MockArcUSDC` at `0x3600…0000`, deploys the Gateway and escrow mocks and a `MockVaultFactory`, and deploys one vault. Later PRDs add helpers such as `_openEnvelopeAsOwner(...)`.
+- Internal values (domain separators, digests) are read through `test/helpers/CzarVaultHarness.sol`, a test-only `CzarVault` subclass with `exposed_*` functions (PRD 03).
 
 ### 5.2 Test names
 - `test_<function>_<condition>_<expectedResult>`, for example `test_withdraw_aboveFree_revertsInsufficientFree`.
@@ -214,12 +245,26 @@ For every external function the PRD lists:
 - Chain id: `vm.chainId(5042002)` in `VaultTestBase.setUp()` so domain separators match the testnet vectors in `eip712-vectors.json`.
 
 ### 5.5 Mocks
-- Use the existing mocks in `test/mocks/`: `MockUSDC3009`, `MockGatewayWallet`, `MockGatewayMinter`, `MockCircleAgenticCommerce`, `MockCzarJobEscrow`.
+- Vault tests use **`MockArcUSDC`** (PRD 03): one ledger, as on Arc. `balanceOf(a) = a.balance / 1e12`, and every transfer moves native value, so the vault's native gas sends lower its USDC balance exactly as on Arc (`security-and-testing.md` §3.3, D88). `MockUSDC3009` stays for its own self-tests only.
+- **`MockVaultFactory`** (PRD 03) is the vault's factory in vault tests: settable `networkConfig`, `defaults`, `guardianPaused`, and `deploy`, `deployCode`, `deployCodeAt` helpers that deploy with the mock as `msg.sender`.
+- The other T-010 mocks are used unchanged: `MockGatewayWallet`, `MockGatewayMinter`, `MockCircleAgenticCommerce`, `MockCzarJobEscrow`.
 - Place a mock at a fixed real address with forge-std's `deployCodeTo`, never `vm.etch`. `deployCodeTo` runs the constructor at that address, so storage the constructor sets (the mock's `controller`) exists there. `vm.etch` copies runtime code only; `controller` would stay `address(0)` and every `mint` would revert.
-  - USDC: `deployCodeTo("MockUSDC3009.sol:MockUSDC3009", USDC_ADDRESS);` then `MockUSDC3009(USDC_ADDRESS).mint(...)`. The test contract is the controller.
-  - Gateway Wallet, Gateway Minter and the job escrows reach the vault as constructor values (through the factory's `networkConfig()`), not as constants, so deploy them with `new` at any address. PRD 04 gives the exact setup code.
+  - USDC: `deployCodeTo("MockArcUSDC.sol:MockArcUSDC", USDC_ADDRESS);` then `MockArcUSDC(USDC_ADDRESS).mint(...)`. The test contract is the controller.
+  - Gateway Wallet, Gateway Minter and the job escrows reach the vault as constructor values (through the factory's `networkConfig()`), not as constants, so deploy them with `new` at any address. `VaultTestBase` (PRD 03) does all of this.
 - `test/MockSelfTest.t.sol` uses `vm.etch` for a view-only check; that is fine there and must not be copied into vault tests.
 - Extend a mock only when a PRD step says so, and only with the function named.
+
+### 5.6 Test traps (each one was hit while checking these PRDs)
+- **`vm.prank` and `vm.expectRevert` apply to the very next call, including a call inside an argument.** `sha256(...)` is a precompile call, and `vault.someView()` is a call too. Compute every argument into a local variable first, then `vm.prank`, then `vm.expectRevert`, then the call:
+  ```solidity
+  bytes32 rp = sha256("localhost");   // first
+  vm.prank(owner);
+  vm.expectRevert(ICzarVault.BadParams.selector);
+  vault.setPasskey(qx, bytes32(0), rp);
+  ```
+  (`keccak256` and `abi.encode` are not calls and are safe inline.)
+- **A constructor revert is caught at the deploying call:** to test a vault constructor error, `vm.expectRevert(...)` then `vaultFactory.deploy(owner)`; the error bubbles up unchanged.
+- **`vm.snapshotState()` / `vm.revertToState(id)`** are the snapshot cheatcodes in this forge-std; the older `vm.snapshot` names print deprecation warnings.
 
 ---
 
@@ -247,3 +292,4 @@ Open issues / could not verify: <list>
 |---|---|
 | 2026-10-20 | First version. |
 | 2026-10-20 | §2.2: format only your own files; say which commands CI runs. §4.11 compiler traps. §5.5: `deployCodeTo` instead of `vm.etch` for the USDC mock. |
+| 2026-10-20 | Checked on Arc Foundry v0.8.0-2: §2.2 flag notices; §2.4 lint; §3 layout with the task file names, `VaultStorage is ICzarVault`, constructor rule, §3.1 stubs; §4.3 `_stepUsed`; §4.11 three more traps; §5.1 flat test files, harness; §5.5 `MockArcUSDC` and `MockVaultFactory`; §5.6 test traps. |

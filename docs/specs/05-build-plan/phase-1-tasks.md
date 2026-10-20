@@ -240,7 +240,7 @@
 
 ## M1 Contracts
 
-- **D88 (2026-10-20):** every M1 contract task is built from the step-by-step PRDs in `docs/specs/07-contract-build/` (start with `00-conventions.md`; the README there maps PRDs to tasks). `S03/czar-vault.md` §15 is binding for callers, errors, check order, events, reentrancy and boundaries.
+- **D88 (2026-10-20):** every M1 contract task is built from the step-by-step PRDs in `docs/specs/07-contract-build/` (start with `00-conventions.md`; the README there maps PRDs to tasks). `S03/czar-vault.md` §15 is binding for callers, errors, check order, events, reentrancy and boundaries. Where a task's Outputs say "functions in `CzarVault.sol`", the functions go in the module file under `contracts/src/vault/` that the PRD names; `contracts/src/CzarVault.sol` stays the concrete contract that inherits the modules.
 
 ### T-010 Contract test mocks: USDC honouring ERC-1271 like NativeFiatTokenV2_2, Gateway mock, ERC-8183 mocks (both ABIs)
 - **Milestone / group / who:** M1 / M1-a / agent. **Size:** M. **Deps:** T-003.
@@ -337,7 +337,7 @@
 ### T-018 Job adapter (CircleTestnet kind) and openJob/fundJob/syncJob/claimJobRefund
 - **Milestone / group / who:** M1 / M1-d / agent. **Size:** L. **Deps:** T-014.
 - **Spec refs:** `S03/job-escrow-adapter.md` §2–§9 (JOB-1..5); `S03/czar-vault.md` §15 (D88); `S03/czar-vault.md` §5.5, §8.4, §9.1 (`JobSynced.state` mapping, AM-19); D27, D32; A4-03, A4-05, A4-07.
-- **Outputs:** `contracts/src/JobEscrowAdapter.sol` (internal library), job functions in `CzarVault.sol`; `contracts/test/JobTest.t.sol` against both mocks.
+- **Outputs:** `contracts/src/libraries/JobEscrowAdapter.sol` (internal library; path per `S03/job-escrow-adapter.md` §3 and 07 conventions §3), job functions in `contracts/src/vault/VaultJobs.sol`; `contracts/test/JobTest.t.sol` against both mocks.
 - **Steps:** tests first: budget read and `fund` in one tx; fee check (both 0 on the Circle kind); `BudgetExceedsReserved`; `fundJob` gated by freeze, pause, envelope state and expiry (RV-006); per-step `stepUsed` (RV-002); description is exactly `"czar:" + 64 hex`; `optParams` empty; `syncJob` from `Opened` (`Released`), refunds from escrow status only, Czar-kind refunds of `budget − settledAmount` (RV-009); refunds credit the envelope (bounded, RV-011) or free balance.
 - **Inputs:** `contracts/src/CzarVault.sol` with envelopes from T-014; ERC-8183 mocks from T-010.
 - **Acceptance tests:**
@@ -1526,3 +1526,4 @@
 | 2026-10-20 | Job-path review PR 2 (D86, D87) | Notes on T-007, T-022, T-035, T-045, T-054, T-055, T-073, T-084. |
 | 2026-10-20 | Job-path review PR 3 (D87: N1, N2, H6, H7, N12) | New T-108 (two-instance test provider); T-059 depends on it; notes on T-035, T-045, T-046, T-055, T-073, T-084, T-091, T-101, T-105. |
 | 2026-10-20 | D88 (contract build readiness, plus its independent review) | T-012 steps (guardian apply, cancel, constructor checks); T-013/T-015 full vector values; T-019 owner actions 1–17; T-027 no ownership step, linked-library deployment; M1 note pointing at `docs/specs/07-contract-build/`; T-017 vector reproduced as a digest through `CzarVaultHarness`; T-018 JOB-1..5 and §15; T-020 also measures the factory; T-021 ranges, fuzz runs and handlers; T-023 six on-chain digests and `fs_permissions`; T-105 key count; T-011 OEL test follow-up (G-61). |
+| 2026-10-20 | 07 contract PRDs | M1 note: vault functions live in modules under `contracts/src/vault/`; T-018 adapter path `contracts/src/libraries/JobEscrowAdapter.sol`. |
