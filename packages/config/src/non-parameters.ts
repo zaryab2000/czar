@@ -27,6 +27,10 @@ export const NON_PARAMETERS: readonly { readonly token: string; readonly reason:
     reason: "daemon socket JSON-RPC method",
   },
   {
+    token: "soul.propose",
+    reason: "daemon socket JSON-RPC method",
+  },
+  {
     token: "status.get",
     reason: "daemon socket JSON-RPC method",
   },
@@ -436,6 +440,27 @@ export const NON_PARAMETERS: readonly { readonly token: string; readonly reason:
     reason:
       "superseded by signer.pocketKeyRetainHours, signer.slowWithdrawMarginHours and signer.pocketDustAtomic (RV-004)",
   },
+  {
+    token: "merchants.lab.<service>.*",
+    reason:
+      "wildcard for per-service lab behaviour profiles (failRate, delayMs, schemaBreakRate, driftRate, driftBps, payeeSwapEveryDays)",
+  },
+  {
+    token: "merchants.lab.<service>.enabled",
+    reason: "per-service enable flag within lab behaviour profiles",
+  },
+  {
+    token: "merchants.lab.<service>.failRate",
+    reason: "per-service fail rate within lab behaviour profiles",
+  },
+  {
+    token: "merchants.provider.<instance>.modes",
+    reason: "per-instance work modes (OD-41)",
+  },
+  {
+    token: "merchants.provider.<instance>.minWorkSeconds",
+    reason: "per-instance minimum work time before submitBy",
+  },
 ];
 
 export const WILDCARDS: Readonly<Record<string, readonly string[]>> = {
@@ -467,6 +492,7 @@ export const WILDCARDS: Readonly<Record<string, readonly string[]>> = {
     "models.soulMonthlyTokens",
     "models.drivesMonthlyTokens",
     "models.refusalMonthlyTokens",
+    "models.sourceExtractorMonthlyTokens",
     "models.userMonthlyTokens",
     "models.screen.timeoutMs",
     "models.reader.timeoutMs",
@@ -474,6 +500,7 @@ export const WILDCARDS: Readonly<Record<string, readonly string[]>> = {
     "models.planner.timeoutMs",
     "models.drives-helper.timeoutMs",
     "models.refusal-classifier.timeoutMs",
+    "models.sourceExtractor.timeoutMs",
   ],
   "models.<name>.timeoutMs": [
     "models.screen.timeoutMs",
@@ -482,6 +509,7 @@ export const WILDCARDS: Readonly<Record<string, readonly string[]>> = {
     "models.soul-compiler.timeoutMs",
     "models.drives-helper.timeoutMs",
     "models.refusal-classifier.timeoutMs",
+    "models.sourceExtractor.timeoutMs",
   ],
   "routing.gas.*": [
     "routing.gas.reserve",

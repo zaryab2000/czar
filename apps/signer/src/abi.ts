@@ -27,6 +27,7 @@ export const VAULT_ABI = parseAbi([
   "function fundJob(bytes32 jobKey)",
   "function syncJob(bytes32 jobKey)",
   "function claimJobRefund(bytes32 jobKey)",
+  "function cancelJob(bytes32 jobKey)",
   "function raiseAutoLimit(bytes32 categoryId, uint256 newLimit, uint64 periodId, uint256 deadline, bytes sig)",
   "function lowerAutoLimit(bytes32 categoryId, uint256 newLimit)",
   "function withdraw(address to, uint256 amount)",
@@ -47,6 +48,7 @@ export const FACTORY_ABI = parseAbi([
   "function applyGuardian(bytes32 changeId)",
   "function queueDefaults(address agentSigner, address autonomySigner, address evaluator)",
   "function applyDefaults(bytes32 changeId, address agentSigner, address autonomySigner, address evaluator)",
+  "function cancelChange(bytes32 changeId)",
 ]);
 
 export const JOB_ESCROW_ABI = parseAbi([
@@ -108,6 +110,7 @@ export const K3_NEVER: readonly VaultFunctionName[] = [
   "setMaxPullbackFee",
   "raiseAutoLimit",
   "executeOwnerAction",
+  "cancelJob",
 ];
 
 /** Spending selectors: the freeze check applies (D72). */

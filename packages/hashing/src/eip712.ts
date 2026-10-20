@@ -41,6 +41,8 @@ export const TYPE_STRINGS = {
   OwnerAction: "OwnerAction(uint8 action,bytes32 payloadHash,uint256 nonce,uint256 deadline)",
   ReceiptAttestation: "ReceiptAttestation(bytes32 receiptStructHash)",
   BriefRequest: "BriefRequest(bytes32 jobKey,uint64 issuedAt)",
+  DeliverableUpload:
+    "DeliverableUpload(bytes32 jobKey,bytes32 contentHash,uint64 issuedAt)",
 } as const;
 
 export const typeHash = (typeString: string): Hash32 => keccak256(toHex(typeString));
@@ -423,6 +425,25 @@ export function briefRequestDigest(chainId: number, m: BriefRequest): Hash32 {
     encodeAbiParameters(
       [{ type: "bytes32" }, { type: "bytes32" }, { type: "uint64" }],
       [TH.BriefRequest, m.jobKey, m.issuedAt],
+    ),
+  );
+  return toTypedDataHash(domainSeparator(DOMAINS.czarJobBrief(chainId)), structHash);
+}
+
+// ───────────── DeliverableUpload (D87) ─────────────
+
+export interface DeliverableUpload {
+  readonly jobKey: Hash32;
+  readonly contentHash: Hash32;
+  readonly issuedAt: bigint;
+}
+
+/** `DeliverableUpload(bytes32 jobKey,bytes32 contentHash,uint64 issuedAt)` under the `CzarJobBrief` domain (02 §6.2, D87). */
+export function deliverableUploadDigest(chainId: number, m: DeliverableUpload): Hash32 {
+  const structHash = keccak256(
+    encodeAbiParameters(
+      [{ type: "bytes32" }, { type: "bytes32" }, { type: "bytes32" }, { type: "uint64" }],
+      [TH.DeliverableUpload, m.jobKey, m.contentHash, m.issuedAt],
     ),
   );
   return toTypedDataHash(domainSeparator(DOMAINS.czarJobBrief(chainId)), structHash);

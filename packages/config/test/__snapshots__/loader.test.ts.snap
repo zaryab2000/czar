@@ -9,6 +9,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 1,
   },
   {
+    "key": "acceptance.decisionMarginSeconds",
+    "source": "default",
+    "unit": "seconds",
+    "value": 900,
+  },
+  {
     "key": "acceptance.deliverableFetchTimeoutMs",
     "source": "default",
     "unit": "ms",
@@ -39,6 +45,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 30000,
   },
   {
+    "key": "acceptance.evaluationWindowSeconds",
+    "source": "default",
+    "unit": "seconds",
+    "value": 7200,
+  },
+  {
     "key": "acceptance.evaluatorPollSeconds",
     "source": "default",
     "unit": "s",
@@ -57,6 +69,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 5242880,
   },
   {
+    "key": "acceptance.maxUploadsPerJob",
+    "source": "default",
+    "unit": "count",
+    "value": 10,
+  },
+  {
     "key": "acceptance.sandboxTimeoutMs",
     "source": "default",
     "unit": "ms",
@@ -67,6 +85,18 @@ exports[`registry > matches the dump snapshot 1`] = `
     "source": "default",
     "unit": "bytes",
     "value": 8192,
+  },
+  {
+    "key": "acceptance.txMarginSeconds",
+    "source": "default",
+    "unit": "seconds",
+    "value": 300,
+  },
+  {
+    "key": "acceptance.uploadRetentionHours",
+    "source": "default",
+    "unit": "hours",
+    "value": 24,
   },
   {
     "key": "api.approvalWaitMinutes",
@@ -290,6 +320,35 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": "~/Library/Application Support/Czar/czar.sock",
   },
   {
+    "key": "drives.capabilityTaxonomy",
+    "source": "default",
+    "unit": "taxonomy",
+    "value": {
+      "tags": [
+        "web-search",
+        "page-extract",
+        "table-build",
+        "summarize",
+        "translate",
+        "data-lookup",
+        "price-lookup",
+        "email-lookup",
+        "company-lookup",
+        "image-generate",
+        "transcribe",
+        "code-review",
+        "chart-build",
+      ],
+      "version": 1,
+    },
+  },
+  {
+    "key": "drives.contextLines",
+    "source": "default",
+    "unit": "lines",
+    "value": 3,
+  },
+  {
     "key": "drives.dedupeWindowDays",
     "source": "default",
     "unit": "days",
@@ -314,6 +373,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 30,
   },
   {
+    "key": "drives.fileReadMaxBytes",
+    "source": "default",
+    "unit": "bytes",
+    "value": null,
+  },
+  {
     "key": "drives.maxCandidatesPerDay",
     "source": "default",
     "unit": "count",
@@ -324,6 +389,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "source": "default",
     "unit": "count",
     "value": 2,
+  },
+  {
+    "key": "drives.maxSubjects",
+    "source": "default",
+    "unit": "count",
+    "value": 50,
   },
   {
     "key": "drives.minutes.agent-refusal",
@@ -369,6 +440,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "source": "default",
     "unit": "count",
     "value": 2,
+  },
+  {
+    "key": "drives.placeholderRescanHours",
+    "source": "default",
+    "unit": "hours",
+    "value": 24,
   },
   {
     "key": "drives.quoteWaitHours",
@@ -846,6 +923,30 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 10000,
   },
   {
+    "key": "merchants.lab.enabled",
+    "source": "default",
+    "unit": "",
+    "value": true,
+  },
+  {
+    "key": "merchants.lab.priceAtomic",
+    "source": "default",
+    "unit": "atomic",
+    "value": null,
+  },
+  {
+    "key": "merchants.lab.seed",
+    "source": "default",
+    "unit": "",
+    "value": null,
+  },
+  {
+    "key": "merchants.labSources",
+    "source": "default",
+    "unit": "",
+    "value": null,
+  },
+  {
     "key": "merchants.maxTimeoutSeconds",
     "source": "default",
     "unit": "s",
@@ -870,10 +971,22 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 600,
   },
   {
+    "key": "merchants.provider.enabled",
+    "source": "default",
+    "unit": "",
+    "value": true,
+  },
+  {
     "key": "merchants.refundDailyAtomic",
     "source": "default",
     "unit": "atomic",
     "value": 5000000,
+  },
+  {
+    "key": "merchants.searchBackend",
+    "source": "default",
+    "unit": "",
+    "value": "live",
   },
   {
     "key": "merchants.searchPriceAtomic",
@@ -978,6 +1091,18 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 720000,
   },
   {
+    "key": "models.sourceExtractor.timeoutMs",
+    "source": "default",
+    "unit": "ms",
+    "value": 10000,
+  },
+  {
+    "key": "models.sourceExtractorMonthlyTokens",
+    "source": "default",
+    "unit": "tokens",
+    "value": 180000,
+  },
+  {
     "key": "models.userMonthlyTokens",
     "source": "default",
     "unit": "tokens",
@@ -1066,6 +1191,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "source": "default",
     "unit": "hours",
     "value": 24,
+  },
+  {
+    "key": "payer.jobDurationHoursByCapability",
+    "source": "default",
+    "unit": "hours",
+    "value": null,
   },
   {
     "key": "payer.leaseSeconds",
@@ -1164,6 +1295,17 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 60000,
   },
   {
+    "key": "planner.agentAssistCapabilities",
+    "source": "default",
+    "unit": "",
+    "value": [
+      "summarize",
+      "chart-build",
+      "translate",
+      "compare",
+    ],
+  },
+  {
     "key": "planner.capabilityToTaskClass",
     "source": "default",
     "unit": "",
@@ -1191,6 +1333,22 @@ exports[`registry > matches the dump snapshot 1`] = `
     "source": "default",
     "unit": "atomic",
     "value": 1000000,
+  },
+  {
+    "key": "planner.jobSlackBps",
+    "source": "default",
+    "unit": "bps",
+    "value": 1000,
+  },
+  {
+    "key": "planner.localTemplates",
+    "source": "default",
+    "unit": "",
+    "value": [
+      "table-build",
+      "list-build",
+      "merge-dedupe",
+    ],
   },
   {
     "key": "planner.maxAlternates",
@@ -1230,6 +1388,12 @@ exports[`registry > matches the dump snapshot 1`] = `
   },
   {
     "key": "planner.probeTopK",
+    "source": "default",
+    "unit": "count",
+    "value": 3,
+  },
+  {
+    "key": "planner.shadowUntestedK",
     "source": "default",
     "unit": "count",
     "value": 3,
@@ -1433,6 +1597,18 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 20000,
   },
   {
+    "key": "selection.bm25B",
+    "source": "default",
+    "unit": "coefficient",
+    "value": 0.75,
+  },
+  {
+    "key": "selection.bm25K1",
+    "source": "default",
+    "unit": "coefficient",
+    "value": 1.2,
+  },
+  {
     "key": "selection.catalogTtlSeconds",
     "source": "default",
     "unit": "s",
@@ -1451,6 +1627,78 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 14,
   },
   {
+    "key": "selection.marketMaxListings",
+    "source": "default",
+    "unit": "count",
+    "value": 200,
+  },
+  {
+    "key": "selection.marketNetwork",
+    "source": "default",
+    "unit": "chain-namespace-key",
+    "value": "eip155:5042",
+  },
+  {
+    "key": "selection.marketProbeBackoffMinutes",
+    "source": "default",
+    "unit": "minutes",
+    "value": 60,
+  },
+  {
+    "key": "selection.marketProbeConcurrency",
+    "source": "default",
+    "unit": "count",
+    "value": 8,
+  },
+  {
+    "key": "selection.marketProbeFreshMinutes",
+    "source": "default",
+    "unit": "minutes",
+    "value": 60,
+  },
+  {
+    "key": "selection.marketProbeRetentionDays",
+    "source": "default",
+    "unit": "days",
+    "value": 30,
+  },
+  {
+    "key": "selection.marketProbesPerDayGlobal",
+    "source": "default",
+    "unit": "count",
+    "value": 5000,
+  },
+  {
+    "key": "selection.marketProbesPerOriginPerDay",
+    "source": "default",
+    "unit": "count",
+    "value": 24,
+  },
+  {
+    "key": "selection.marketRefreshTopN",
+    "source": "default",
+    "unit": "count",
+    "value": 20,
+  },
+  {
+    "key": "selection.matchEval.maxPrecisionLoss",
+    "source": "default",
+    "unit": "absolute-points",
+    "value": 0.02,
+  },
+  {
+    "key": "selection.matchEval.minNeeds",
+    "source": "default",
+    "unit": "count",
+    "value": 50,
+  },
+  {
+    "key": "selection.matchEval.minRecallGain",
+    "source": "default",
+    "unit": "absolute-points",
+    "value": 0.1,
+  },
+  {
     "key": "selection.maxProbesPerQuery",
     "source": "default",
     "unit": "count",
@@ -1461,6 +1709,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "source": "default",
     "unit": "count",
     "value": 5,
+  },
+  {
+    "key": "selection.paymentNetwork",
+    "source": "default",
+    "unit": "chain-namespace-key",
+    "value": "eip155:5042002",
   },
   {
     "key": "selection.plannerUnknownPolicy",
@@ -1475,6 +1729,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 2000,
   },
   {
+    "key": "selection.retrievalMode",
+    "source": "default",
+    "unit": "mode",
+    "value": "tags+bm25",
+  },
+  {
     "key": "selection.retrieveK",
     "source": "default",
     "unit": "count",
@@ -1487,6 +1747,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 0.2,
   },
   {
+    "key": "selection.seedJobRuns",
+    "source": "default",
+    "unit": "count",
+    "value": 6,
+  },
+  {
     "key": "selection.snapshotRefreshSeconds",
     "source": "default",
     "unit": "s",
@@ -1497,6 +1763,67 @@ exports[`registry > matches the dump snapshot 1`] = `
     "source": "default",
     "unit": "minutes",
     "value": 30,
+  },
+  {
+    "key": "selection.testBuyer.callsPerService",
+    "source": "default",
+    "unit": "count",
+    "value": 6,
+  },
+  {
+    "key": "selection.testBuyer.category",
+    "source": "default",
+    "unit": "category-name",
+    "value": "test-buy",
+  },
+  {
+    "key": "selection.testBuyer.enabled",
+    "source": "default",
+    "unit": "",
+    "value": true,
+  },
+  {
+    "key": "selection.testBuyer.inputsByTaskClass",
+    "source": "default",
+    "unit": "test-input-map",
+    "value": {
+      "data-json.extract": {
+        "url": "https://www.circle.com/usdc",
+      },
+      "data-json.search": {
+        "q": "usdc price",
+      },
+    },
+  },
+  {
+    "key": "selection.testBuyer.maxUnitAtomic",
+    "source": "default",
+    "unit": "USDC-6",
+    "value": 100000,
+  },
+  {
+    "key": "selection.testBuyer.newServicesPerWeek",
+    "source": "default",
+    "unit": "count",
+    "value": 20,
+  },
+  {
+    "key": "selection.testBuyer.stopAfterFails",
+    "source": "default",
+    "unit": "count",
+    "value": 3,
+  },
+  {
+    "key": "selection.testBuyer.weeklyBudgetAtomic",
+    "source": "default",
+    "unit": "USDC-6",
+    "value": 20000000,
+  },
+  {
+    "key": "selection.unverifiedWithApproval",
+    "source": "default",
+    "unit": "flag",
+    "value": true,
   },
   {
     "key": "selection.wCost",
@@ -1797,10 +2124,40 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": ".czar/results",
   },
   {
+    "key": "writeback.fillLineDrift",
+    "source": "default",
+    "unit": "lines",
+    "value": 20,
+  },
+  {
+    "key": "writeback.fillMaxCellChars",
+    "source": "default",
+    "unit": "chars",
+    "value": 200,
+  },
+  {
+    "key": "writeback.heldDir",
+    "source": "default",
+    "unit": "path",
+    "value": "~/Library/Application Support/Czar/held",
+  },
+  {
     "key": "writeback.heldReminderDays",
     "source": "default",
     "unit": "days",
     "value": 3,
+  },
+  {
+    "key": "writeback.markerMapRetentionDays",
+    "source": "default",
+    "unit": "days",
+    "value": 30,
+  },
+  {
+    "key": "writeback.maxArtifactBytes",
+    "source": "default",
+    "unit": "bytes",
+    "value": 20971520,
   },
   {
     "key": "writeback.maxBodyBytes",
@@ -1819,6 +2176,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "source": "default",
     "unit": "ms",
     "value": 300,
+  },
+  {
+    "key": "writeback.undoRetentionDays",
+    "source": "default",
+    "unit": "days",
+    "value": 30,
   },
 ]
 `;
