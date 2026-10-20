@@ -208,6 +208,7 @@
   - `pnpm --filter @czar/hashing test` reproduces all type hashes, domain separators, the six digests, `transferSpecHash` and the derived nonce in `eip712-vectors.json` byte for byte.
   - A property test builds random trees and verifies every proof with the same rules as OpenZeppelin `MerkleProof.verify`.
 - **Review fixes (2026-10-19):** Adds `inputCommit`, `descriptionHash` from a `JobBrief`, `soulVersionCommit`/`demandSalt` (RV-025, RV-026), the kind-4 pocket leaf (D71), and reproduces all eight vectors including `receiptAttestation` and `briefRequest` (RV-013, RV-025).
+- **D87 (2026-10-20):** reproduce the new `DeliverableUpload` vector.
 
 ### T-008 @czar/redaction layer 1 (vendored gitleaks v8.30.1 rules) and marker format
 - **Milestone / group / who:** M0 / M0-b / agent. **Size:** M. **Deps:** T-001.
@@ -387,6 +388,7 @@
 - **Acceptance tests:**
   - `arc-forge test --match-path 'test/fork/*' --fork-url $ARC_TESTNET_RPC --fork-block-number $PINNED` passes.
   - Assertions include `AuthorizationUsed`, `authorizationState == true`, `Deposited`, `DelegateAdded`, `JobFunded`, `Refunded`.
+- **D87 / M7 (2026-10-20):** fork test against the real Circle proxy: an `Upgraded` event raises the CZ-19 alert and the `openJob` halt flag (the mock is not UUPS).
 
 ### T-023 On-chain reproduction of spec 02 §6.4 vectors
 - **Milestone / group / who:** M1 / M1-e / agent. **Size:** S. **Deps:** T-020, T-007.
@@ -552,6 +554,7 @@
   - `pnpm --filter @czar/server test signer` passes: a USDC digest whose `to` is outside the reservation is denied before the KMS call; a `withdraw` call is denied; rate limit enforced; the audit row has no raw text.
   - Against the KMS test key from G0-13, a signature over a known digest recovers to the key's address.
 - **Review fixes (2026-10-19):** Policies exactly CZ-27 §5.2, including the full never-signable list for K3 (`withdraw`, `unfreeze`, `rotateSigners`, `setCategoryLimits`, `setPasskey`, `recordManualReturn`, `forceCloseEnvelope`, `setMaxPullbackFee`, `raiseAutoLimit`, `executeOwnerAction`, factory selectors) (RV-055); plan-checked `openEnvelope`/`reserve`/`openJob`/`registerPocket` args (RV-032); freeze/pause checks failing closed for `gateway-nano` and evaluator `complete` (D72); vault-bound `sl-receipt` (RV-013); K5 never sends a transaction (RV-017); keystore outside the repository, passphrase only from the keychain, refuse to start otherwise (D78); interactive confirmation for K6/K20 (D80); record whether the keychain item's ACL names the signer binary (RV-045). Named tests in CZ-27 §14 and `S03/security-and-testing.md` §3.8 pass.
+- **N8 (2026-10-20):** K7 `reject` is signed whatever the vault's freeze or pause state; test it.
 
 ### T-036 Signer policies tested on testnet, rate limits, relayer gas key in the `local-keystore` backend (D62, D70)
 - **Milestone / group / who:** M2 / M2-c / agent, after Zaryab approves funds. **Size:** M. **Deps:** T-035, T-027.
@@ -676,6 +679,7 @@
 - **D82 (2026-10-20):** unpaid steps per CZ-13 step 1: `planner.localTemplates`, `planner.agentAssistCapabilities`, the no-agent drop into `Plan.droppedSteps`, `unitAmount = stepCap = "0"`, no payee leaf. Test: a plan with an `agent-assist` step for a device whose latest `IngestReport.hosts` is empty drops it with `reason: no-agent`.
 - **D83 (2026-10-20):** candidates only on `selection.paymentNetwork`; drop a live 402 without a payment-network entry (`gate: network`); shadow plans carry `marketReference` once T-107 exists (until then, absent).
 - **D84 (2026-10-20):** P-03 receives `TaskSpec`; CZ-13 step 4a renders `callInputs` (fan-out per subject); `planHash` includes `taskSpecHash` and `callInputsHash`; rule-based fallback fans out. Test: a 5-subject `TaskSpec` yields 5 `callInputs` per paid step with each subject in its input.
+- **D86, D87 (2026-10-20):** job steps: `stepCap` from the provider's listed price (`planner.jobSlackBps`), envelope long enough for `jobDuration` + evaluation window + budget wait, `contextNotice = task-description-only`; no job-type list. Tests: a job step for any capability a listed provider claims is planned; the approval payload carries the context notice.
 
 ### T-046 Injection boundary: P-01 screen, P-02 reader, StepResult pipeline, eval suites
 - **Milestone / group / who:** M3 / M3-b / agent. **Size:** L. **Deps:** T-006, T-005, G0-16 (RV-062).
@@ -818,6 +822,7 @@
 - **Review fixes (2026-10-19):** Builds and serves the `JobBrief` at `getJobBrief` with `BriefRequest` auth; `descriptionHash` from `inputCommit` (RV-025); duplicate jobs released by `syncJob` (RV-009).
 - **D84 (2026-10-20):** `JobBrief.inputs` come from the step's `callInputs`.
 - **Job-path review (2026-10-20):** budget wait 2 h; `cancelJob` then alternate provider; front-run fallback (N7); `fundJob` with `expectedBudget`. Tests: timeout → cancel → alternate opens; `JobNotCancellable` → `syncJob` releases.
+- **D86, D87 (2026-10-20):** brief v2 (`taskSpec`, `targetBudget`, `submitBy`, `decisionCutoff`, `terms`, no `attachments`); job duration from `payer.jobDurationHoursByCapability` or the 24 h default; `claimJobRefund` never while a decision is pending. Serve `uploadJobDeliverable` (append-only by `contentHash`, limits, purge).
 
 ### T-055 ERC-8183 evaluator service with K7 and the .well-known deliverable (D53)
 - **Milestone / group / who:** M4 / M4-c / agent. **Size:** M. **Deps:** T-054, T-056.
@@ -834,6 +839,7 @@
   - K3 is never used for `complete`/`reject` (signer audit log).
 - **Review fixes (2026-10-19):** A deliverable whose fetched bytes do not hash to `deliverable` (after `acceptance.deliverableRefetchTries` re-fetches) → `fail` → `reject` (D77, RV-024; this matches CZ-16 as amended). The signer refuses `complete` while the client vault is frozen or paused (D72). Quarantine → `inconclusive`, never `reject` (RV-042). Fetches through `safeFetch` (RV-022).
 - **Job-path review (2026-10-20):** evaluator step 1a (H1, N6): decide only for vault jobs `Funded`/`Submitted` with matching budget; reject unfunded submits. Tests: a legitimate job after `syncJob` (vault `Submitted`) is evaluated; an unfunded submit is rejected and never completed.
+- **D87 (2026-10-20):** push-model lookup by `contentHash` and `decisionCutoff` (N5); fee and implementation check before `complete` (M2); timing rule (M4); freeze rule (M3). Tests: upload A, submit hash(A), upload B → A matched (N4); no upload by the cutoff → reject mined before `expiredAt`; fees raised after funding → reject; freeze with one funded and one submitted job → refund now, hold, then complete on unfreeze.
 
 ### T-056 Acceptance profiles complete: requirement check, D55 inconclusive rule, report vocabulary
 - **Milestone / group / who:** M4 / M4-a / agent. **Size:** M. **Deps:** T-047.
@@ -1114,6 +1120,7 @@
   - Extra acceptance tests: every assembler test in CZ-11 §14; a Phase 1 scenario run where `table-build` after `web-search` and `page-extract` writes a table with restored names and reports `assembled` with `structuralPass = true`; no model call and no network call happen during assembly (asserted by a network-deny test).
 - **D84 (2026-10-20):** `table-build` lays out one row per `TaskSpec` subject under the person's own header, filled by `subjectIndex`.
 - **D85 (2026-10-20):** in-place fill (CZ-11 §5.2b): clash check, atomic write, `fill_undo`, `czar undo-fill`, `ackResult.fill`. Acceptance: CZ-11 §14 in-place fill tests.
+- **N11 (2026-10-20):** create `.czar/.gitignore` (`*`) on the first write in a project.
 
 ---
 
@@ -1193,6 +1200,7 @@
 - **Review fixes (2026-10-19):** The approval screen recomputes `payeeRoot` and `planHash` on the device from the displayed leaves and refuses on mismatch with the calldata (RV-044); test: a server fixture showing three payees while the calldata commits a fourth is refused.
 - **D84 (2026-10-20):** approval screen shows the subject list and supports `revisePlanSubjects`; test that the app recomputes the new `planHash` before approve.
 - **D85 (2026-10-20):** "Fill {fileName} when done" checkbox sent as `ApprovalIntentRequest.fillInPlace`.
+- **D86, D87 (2026-10-20):** job context notice and job-paid wording (H5).
 
 ### T-085 Freeze and unfreeze (createFreezeIntent) and D60 agent lowering of limits
 - **Layout:** desktop browser only (D69). Lowering is a follow-up agent step after `Frozen`, not atomic (D63).
@@ -1482,3 +1490,4 @@
 | 2026-10-20 | D84 | Notes on T-043, T-045, T-048, T-051, T-054, T-063, T-068, T-069, T-073, T-084, T-101 for carrying the task's subject end to end. |
 | 2026-10-20 | D85 | Notes on T-068, T-073, T-084 for the in-place fill. |
 | 2026-10-20 | Job-path review PR 1 | Notes on T-018, T-019, T-021, T-026, T-054, T-055 for H1, H2, M1-b, N6, N7. |
+| 2026-10-20 | Job-path review PR 2 (D86, D87) | Notes on T-007, T-022, T-035, T-045, T-054, T-055, T-073, T-084. |

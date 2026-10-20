@@ -259,6 +259,7 @@
 - **Decided:** Shown as a separate "Network fee reserve" balance until Circle gas sponsorship on Arc is confirmed (A6-08, A6-19 GAP).
 
 ### D53. ERC-8183 deliverables use a `.well-known` path on the provider host (OD-25)
+- **Replaced by D87:** deliverables are pushed to Czar's server and matched by content hash; the `.well-known` path survives only as the stage-2 signed-pull fallback.
 - **Amended by D77:** fetched bytes that do not hash to the on-chain deliverable are a reject.
 - **Decided:** Defines amendment AM-08.
 
@@ -349,6 +350,7 @@ Approved by Zaryab. Each entry cites the review finding it resolves.
 - **Amends:** D22, D48.
 
 ### D72. Freeze is enforced off-vault too (RV-007)
+- **Amended by D87:** the signer always allows the evaluator's `reject` (it only refunds); on freeze, funded jobs not yet submitted are rejected at once and submitted jobs are held (M3, N8).
 - **Decided:** the signer refuses pocket nanopayments and evaluator payouts while the vault is frozen or the guardian has paused, and the agent starts pocket pullbacks immediately on freeze.
 - **Why:** pocket money is already outside the vault, so the vault's freeze cannot stop it; the product promises that freeze stops spending.
 - **Amends:** D22, D60.
@@ -369,6 +371,7 @@ Approved by Zaryab. Each entry cites the review finding it resolves.
 - **Amends:** D55 (applies to screening, not to structural checks).
 
 ### D77. A deliverable hash mismatch is a reject (RV-024)
+- **Amended by D87:** under the push model a hash mismatch cannot occur (the hash is checked at upload); a deliverable still missing at `decisionCutoff` is a reject.
 - **Decided:** in ERC-8183 jobs, a deliverable whose fetched bytes do not hash to the on-chain deliverable is rejected, not recorded as inconclusive.
 - **Amends:** D53.
 
@@ -453,6 +456,16 @@ Approved by Zaryab. Each entry cites the review finding it resolves.
 - **Why:** the task is complete only when the person's own file is filled; their notes and formatting are kept.
 - **Amends:** CZ-11 "Does not: modify user files" (now: only the recorded placeholder spans, under these guards); D82 point 6; spec 02 `Plan`, `Result`, `ResultAck`, `createApprovalIntent`.
 
+### D86. No file sharing in Phase 1; the job path and brief stay type-agnostic; Phase 1 job types for the acceptance run decided later
+- **Decided:**
+  1. **No file sharing in Phase 1.** Approved file attachments for jobs (C1-b) are a stage-2 item, specified in full in `stage-2-backlog.md` (P2-17) so they can be built without redesign.
+  2. **C1-a.** The job brief carries the approved `TaskSpec` (topic, subjects, fields, columns, context). `JobBrief.inputs` come from the step's `callInputs`; "never free user text" is removed from spec 02 §4.21.
+  3. **Type-agnostic.** There is no job-kind allowlist in `JobBrief`, CZ-13, CZ-14, CZ-15 or CZ-16. The capability taxonomy and `TaskSpec.kind` say what a job is about. A job is planned only when a listed provider claims the capability. Nothing in the specs limits the job path to research, report, summary or non-code work.
+  4. **The limit is shown, not enforced by type.** Each Phase 1 job step carries `contextNotice = task-description-only`, and the approval screen says "This job gets only the task description and up to 2,000 characters of context, no files." The person decides.
+  5. **Ready for attachments.** `JobBrief` is version 2, with an optional `attachments[]` field reserved and absent in Phase 1; providers ignore optional fields they don't use, so adding it later is backward-compatible.
+  6. **Phase 1 acceptance-run job types are open (OD-41).** The Czar test provider (T-108, CZ-20 §5.11) implements whichever modes are chosen; the acceptance scenario names modes, not job types.
+- **Referenced from:** CZ-20 §5.11, CZ-13 step 6b, spec 02 §4.21.
+
 ## 12d. ERC-8183 job path (2026-10-20, from the Flow 6 review)
 
 ### D87. ERC-8183 job-path fixes
@@ -479,6 +492,8 @@ Approved by Zaryab. Each entry cites the review finding it resolves.
 ---
 
 ## 13. Open items (deferred)
+
+- **OD-41 Phase 1 acceptance-run job types:** to be chosen later from the I-R-2 findings (agent job market landscape); not constrained by the architecture (D86). T-108 implements the chosen modes; scenario steps 6.2–6.7 name the mode.
 
 - **Tool manipulation:** tools that try to get agents to call them more often. To be researched.
 - **Conflict of interest:** Czar both recommends tools and routes money to them. An AI dispute judge may be added later.

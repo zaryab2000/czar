@@ -243,6 +243,9 @@ Idempotency: every creating call sends `Idempotency-Key`; `notifySubmitted` with
 | `failed` | "Failed, not charged" |
 | x402 step failed after payment | "Paid {amount}; the result failed Czar's check. This merchant was rated down. Third-party calls are not refundable." (D35) |
 | job rejected | "Rejected by Czar's check. {amount} returned to your vault." |
+| job paid (H5) | "Paid {amount} after the work arrived in the agreed form. Czar checked the form, not whether it's correct." plus the existing "This was wrong" action |
+| job step on the approval screen (D86) | "This job gets only the task description and up to 2,000 characters of context, no files." |
+| freeze with jobs (M3) | "Unstarted specialist jobs were cancelled and refunded. {n} submitted job(s) on hold until you unfreeze." |
 | monthly statement | "Czar saved you {hours} hours for {totalSpentDisplay} in {month}." |
 | decline | "Declined. Czar won't spend on this." |
 | plan expired | "This plan expired. Czar will re-price it if the need is still open." |
@@ -364,3 +367,4 @@ K17 VAPID private key in the secret store; a leak lets an attacker spam notifica
 | 2026-10-20 | D83 | Wording: Czar test merchant badge; real-market panel (read-only). |
 | 2026-10-20 | D84 | Approval shows the subjects Czar will look up and lets the person edit them (`revisePlanSubjects`). |
 | 2026-10-20 | D85 | Approval screen fill-in-place checkbox; delivered wording. |
+| 2026-10-20 | D86, D87 | Wording: job paid (form, not correctness), job context notice, freeze with jobs. |
