@@ -31,7 +31,9 @@
 | Griefing `confirmPullback` | `CzarVault` | confirm a non-minted hash | `isTransferSpecHashUsed` must be true |
 | Replay of signed messages | `CzarVault` | reuse an `AutonomyRaise` or `OwnerAction` | nonces + deadlines; chainId and vault address in the domain (02 §6.1) |
 | Signature malleability | `CzarVault` | high-s variants | low-s rule, `v ∈ {27,28}` |
-| Front-running `fund` with a raised budget | adapter | provider raises the budget after the vault read it | read and `fund` in one transaction (JOB-1); Czar instance has `expectedBudget` |
+| Front-running `fund` with a raised budget | adapter | provider raises the budget after the agent decided to fund | `fundJob(jobKey, expectedBudget)` reverts `BudgetChanged` (M1-b); read and `fund` in one transaction (JOB-1) |
+| Zero-budget submit (H1) | vault | provider submits while `Open` with budget 0, so the job can never be funded | `syncJob` releases `Opened` jobs whose escrow is `Submitted`/`Completed` (INV-16); the evaluator never completes an unfunded job |
+| Unresponsive or overpriced provider (H2) | vault | the job blocks its step cap until expiry | `cancelJob` (client reject while `Open`); front-run by a zero-budget submit falls back to `syncJob` (N7) |
 | Bytecode substitution for new users | factory | admin swaps vault code | impossible: a factory deploys only the bytecode compiled into it; a new version is a new factory (D73); existing vaults unaffected (FAC-4) |
 | Default-signer swap for new users (K20 leak) | factory | admin sets attacker K3/K5/K7 for every new vault | `queueDefaults` is timelocked 48 h and alerted on (FAC-3, RV-015); predicted addresses do not move (FAC-5) |
 | Re-committed probe intent | `OpenEvidenceLog` | reveal a second batch after seeing results | `AlreadyCommitted` (OEL-6, RV-014) |
@@ -42,7 +44,7 @@
 |---|---|
 | INV-1 … INV-15 | `czar-vault.md` §11 |
 | FAC-1 … FAC-5 | `czar-vault-factory.md` §9 |
-| JOB-1 … JOB-4 | `job-escrow-adapter.md` §8 |
+| JOB-1 … JOB-5 | `job-escrow-adapter.md` §8 (JOB-5 = INV-16, H1/H2) |
 | OEL-1 … OEL-6 | `open-evidence-log.md` |
 | CJE-1 … CJE-3 | `czar-job-escrow.md` §9 |
 | BE-1 … BE-5, RS-1 … RS-3 | `builder-escrow-and-recipe-splits.md` |
@@ -141,6 +143,24 @@ Each row is a Foundry test the builder writes first (builder rules: tests first 
 | `test_abi_matchesICzarVaultSol` | RV-060 | every event topic and error selector the vault emits equals `ICzarVault.sol`; the indexer decoders are generated from the `.sol` ABI | — | T-014, T-031 |
 | `test_vectors_reproducedOnChain` | RV-061, RV-013 | all seven 02 §6.4 entries reproduce; the `AutonomyRaise` vector executes on-chain at its `deadline` | INV-11 | T-023 |
 
+### 3.7a Named regression tests: ERC-8183 job-path review (H1, H2, M1-b, N7)
+
+All on the Circle-instance mock, whose zero-budget submit, client reject, fee-at-complete and refund rules match the deployed source (job-path review R1–R5), and repeated in the T-022 fork tests against the real proxy.
+
+| Test | Finding | Asserts | Inv | Task |
+|---|---|---|---|---|
+| `test_syncJob_zeroBudgetSubmit_releases` | H1 | `openJob`; provider `submit` while `Open` with budget 0; `syncJob` → `Released`, `reserved` and `stepUsed` drop by `reservedCap`, `openJobs` drops, `closeEnvelope` succeeds | INV-8, INV-12, INV-16 | T-018 |
+| `test_syncJob_unfundedCompleted_releases` | H1 | as above, then evaluator `complete` (budget 0, no transfer); `syncJob` → `Released`; vault balance unchanged | INV-2, INV-16 | T-018 |
+| `test_fundJob_afterEarlySubmit_revertsJobNotOpen` | H1 | `fundJob` on a job the provider already submitted reverts `JobNotOpen` | INV-16 | T-018 |
+| `test_cancelJob_open_releasesAndAlternateOpens` | H2 | `cancelJob` → escrow `Rejected` (client), `JobCancelled`, `Released`; an `openJob` for the alternate payee on the same step succeeds | INV-12, INV-16 | T-018 |
+| `test_cancelJob_funded_reverts` | H2 | `cancelJob` on a funded job reverts `JobWrongState` | — | T-018 |
+| `test_cancelJob_frozen_allowed` | H2 | `cancelJob` succeeds while `frozen` and while the guardian has paused | INV-4 | T-018 |
+| `test_cancelJob_frontRunBySubmit_fallsBackToSync` | N7 | provider zero-budget `submit` in the same block before `cancelJob` → `JobNotCancellable(Submitted)`; `syncJob` then releases | INV-16 | T-018 |
+| `test_ownerAction_cancelJob` | H2 | `executeOwnerAction(CANCEL_JOB, abi.encode(jobKey))` cancels | — | T-019 |
+| `test_fundJob_budgetChanged_reverts` | M1-b | provider raises the budget after `BudgetSet`; `fundJob(jobKey, oldBudget)` reverts `BudgetChanged(old, new)` | JOB-1 | T-018 |
+| `test_fundJob_zeroBudget_reverts` | R2 | `fundJob(jobKey, 0)` reverts (`0 < b` required; Circle's `fund` would accept 0) | JOB-1 | T-018 |
+| `invariant_unfundedJobsAlwaysRelease` | H1, H2 | fuzz provider actions (`setBudget` any value, `submit` any time, nothing) and evaluator actions; every unfunded job reaches `Released` without `forceCloseEnvelope` | INV-16 | T-021 |
+
 ### 3.8 Named regression tests: off-chain fixes from the G0-01 review
 
 The off-chain fixes are proven by tests named in their component specs; this index lists them so every review finding maps to at least one test or invariant.
@@ -193,3 +213,4 @@ Constructor arguments are recorded per network in the build plan; `maxFeePerGas 
 | Date | ID | Change |
 |---|---|---|
 | 2026-10-19 | G0-01 review | Threat model rows for RV-002/003/013/014/015/063; invariant ranges INV-1…15, FAC-1…5, OEL-1…6; §3.1–§3.3 updated; §3.7 named contract regression tests; §3.8 off-chain regression tests; deployment steps 2–3 (D73, T-105, D78); pre-mainnet checklist (D80, RV-038). |
+| 2026-10-20 | H1, H2, M1-b, N7 | Threat rows; JOB-5 / INV-16; tests in §3.8. |

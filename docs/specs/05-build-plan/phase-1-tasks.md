@@ -338,6 +338,7 @@
 - **Acceptance tests:**
   - `arc-forge test --match-contract JobTest` passes on both mock ABIs, including a provider front-running `setBudget` in the same block (rejected) and a refund after the envelope closed (`creditedToEnvelope = false`).
   - **Review fixes (2026-10-19):** the named tests in `S03/security-and-testing.md` §3.7 for RV-002 (`test_openJob_afterReserveOnSameStep_reverts`), RV-006 (`test_fundJob_whileFrozenOrPaused_reverts`) and RV-009 pass.
+- **Job-path review (2026-10-20):** `syncJob` releases unfunded `Submitted`/`Completed` jobs (H1); `cancelJob` and adapter `cancel` (H2); `fundJob(jobKey, expectedBudget)` (M1-b). Acceptance: the tests in `S03/security-and-testing.md` §3.7a.
 
 ### T-019 Earned autonomy (raiseAutoLimit/lowerAutoLimit, AutonomyRaise) and executeOwnerAction with WebAuthn/P-256
 - **Milestone / group / who:** M1 / M1-d / agent. **Size:** L. **Deps:** T-014.
@@ -350,6 +351,7 @@
   - `arc-forge test --match-contract OwnerActionTest` passes on `arc-anvil --network arc` (real P-256 precompile, A9-14), including wrong `rpIdHash`, missing UV and wrong challenge → `InvalidPasskeyAssertion`.
   - The `autonomyRaise_5042002` and `ownerAction_5042002` digests reproduce on-chain, and the `autonomyRaise` vector executes at its `deadline` (RV-061).
   - **Review fixes (2026-10-19):** the named tests in `S03/security-and-testing.md` §3.7 for RV-008, RV-030, RV-031, RV-033 and RV-034 pass.
+- **Job-path review (2026-10-20):** owner action 17 `CANCEL_JOB` (`test_ownerAction_cancelJob`).
 
 ### T-020 Size build and D42 library split decision
 - **Milestone / group / who:** M1 / M1-e / agent. **Size:** S. **Deps:** T-017, T-018, T-019, G0-08.
@@ -371,6 +373,7 @@
   - `arc-forge test --match-contract InvariantVault -vv` passes with `invariant.runs ≥ 256` and `depth ≥ 64`.
   - `arc-forge test --match-path 'test/fuzz/*'` passes with `fuzz.runs ≥ 10000`.
   - Mutation check: deleting the `payeeRoot` proof check makes INV-3 fail; deleting the `stepUsed` check makes INV-12 fail; deleting the pocket-leaf proof makes INV-14 fail (recorded in the task report, changes reverted).
+- **Job-path review (2026-10-20):** `invariant_unfundedJobsAlwaysRelease` (INV-16 / JOB-5).
 
 ### T-022 Fork tests on arc-anvil testnet fork: USDC bytes overload, authorizationState, GatewayWallet depositFor/addDelegate, Circle ERC-8183
 - **Milestone / group / who:** M1 / M1-e / agent. **Size:** L. **Deps:** T-020.
@@ -432,6 +435,7 @@
 - **Acceptance tests:**
   - `pnpm --filter @czar/vault-client test` passes; an `arc-anvil` integration test calls every `ICzarVault` function once and decodes every custom error by name.
   - The encoder's `USDC_3009` bytes are exactly 416 bytes and accepted by the T-016 contract.
+- **Job-path review (2026-10-20):** `fundJob(jobKey, expectedBudget)`, `cancelJob`, errors `JobNotCancellable` and `BudgetChanged`, event `JobCancelled`.
 
 ### T-027 Testnet deployment via Arachnid CREATE2, bytecode hash publication, verified sources
 - **Milestone / group / who:** M1 / M1-f / agent, after Zaryab approves funds. **Size:** M. **Deps:** T-021..T-026, T-105 (RV-016).
@@ -813,6 +817,7 @@
   - Kill-and-resume at each step re-reads `getJob` and ends in the right state.
 - **Review fixes (2026-10-19):** Builds and serves the `JobBrief` at `getJobBrief` with `BriefRequest` auth; `descriptionHash` from `inputCommit` (RV-025); duplicate jobs released by `syncJob` (RV-009).
 - **D84 (2026-10-20):** `JobBrief.inputs` come from the step's `callInputs`.
+- **Job-path review (2026-10-20):** budget wait 2 h; `cancelJob` then alternate provider; front-run fallback (N7); `fundJob` with `expectedBudget`. Tests: timeout → cancel → alternate opens; `JobNotCancellable` → `syncJob` releases.
 
 ### T-055 ERC-8183 evaluator service with K7 and the .well-known deliverable (D53)
 - **Milestone / group / who:** M4 / M4-c / agent. **Size:** M. **Deps:** T-054, T-056.
@@ -828,6 +833,7 @@
   - An unreachable deliverable stays `inconclusive` until `expiredAt`, then the job is refunded via `claimJobRefund`.
   - K3 is never used for `complete`/`reject` (signer audit log).
 - **Review fixes (2026-10-19):** A deliverable whose fetched bytes do not hash to `deliverable` (after `acceptance.deliverableRefetchTries` re-fetches) → `fail` → `reject` (D77, RV-024; this matches CZ-16 as amended). The signer refuses `complete` while the client vault is frozen or paused (D72). Quarantine → `inconclusive`, never `reject` (RV-042). Fetches through `safeFetch` (RV-022).
+- **Job-path review (2026-10-20):** evaluator step 1a (H1, N6): decide only for vault jobs `Funded`/`Submitted` with matching budget; reject unfunded submits. Tests: a legitimate job after `syncJob` (vault `Submitted`) is evaluated; an unfunded submit is rejected and never completed.
 
 ### T-056 Acceptance profiles complete: requirement check, D55 inconclusive rule, report vocabulary
 - **Milestone / group / who:** M4 / M4-a / agent. **Size:** M. **Deps:** T-047.
@@ -1475,3 +1481,4 @@
 | 2026-10-20 | D83 | New T-106 (test-merchant lab) and T-107 (market view); notes on T-042, T-045, T-091, T-105. |
 | 2026-10-20 | D84 | Notes on T-043, T-045, T-048, T-051, T-054, T-063, T-068, T-069, T-073, T-084, T-101 for carrying the task's subject end to end. |
 | 2026-10-20 | D85 | Notes on T-068, T-073, T-084 for the in-place fill. |
+| 2026-10-20 | Job-path review PR 1 | Notes on T-018, T-019, T-021, T-026, T-054, T-055 for H1, H2, M1-b, N6, N7. |

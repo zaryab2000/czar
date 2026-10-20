@@ -29,6 +29,10 @@ interface IJobEscrowAdapter {
         external
         view
         returns (EscrowStatus status, uint256 budget, uint256 settledAmount, uint64 expiredAt);
+
+    /// @notice Client reject while the job is Open (H2). Called with the vault as msg.sender, which is job.client.
+    ///         Circle's instance: reject(jobId, reason, "") requires msg.sender == job.client while Open (R5).
+    function cancel(JobEscrowKind kind, address escrow, uint256 jobId, bytes32 reason) external;
 }
 
 /// @title ICircleTestnetAgenticCommerce
