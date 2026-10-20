@@ -1,4 +1,4 @@
-// Backtick tokens in specs/04-components that look like `section.name` but are not parameters
+// Backtick tokens in docs/specs/04-components that look like `section.name` but are not parameters
 // (socket methods, step-log and event names, file names, hosts, object field paths). Used by the
 // spec-coverage test so every other such token must exist in the registry.
 export const NON_PARAMETERS: readonly { readonly token: string; readonly reason: string }[] = [

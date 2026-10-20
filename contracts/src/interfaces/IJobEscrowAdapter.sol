@@ -4,7 +4,7 @@ pragma solidity 0.8.30;
 /// @title IJobEscrowAdapter
 /// @notice The vault-internal adapter surface over two ERC-8183 instances:
 ///         Circle's Arc testnet instance (EIP-reference ABI) and CzarJobEscrow (erc-8183/base-contracts).
-/// @dev Specification: specs/03-smart-contracts/job-escrow-adapter.md. Implemented as an internal library
+/// @dev Specification: docs/specs/03-smart-contracts/job-escrow-adapter.md. Implemented as an internal library
 ///      selected by the vault's immutable `jobEscrowKind`; this interface documents the surface and the
 ///      two external ABIs it targets. No implementation code here.
 interface IJobEscrowAdapter {

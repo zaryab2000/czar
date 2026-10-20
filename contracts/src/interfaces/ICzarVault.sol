@@ -4,7 +4,7 @@ pragma solidity 0.8.30;
 /// @title ICzarVault
 /// @notice Interface of the per-user Czar vault: envelopes, reservations, pocket wallets,
 ///         ERC-8183 jobs, earned autonomy, freeze, and the ERC-1271 dispatcher.
-/// @dev Specification: specs/03-smart-contracts/czar-vault.md. Shared types: specs/02 §5–§7.
+/// @dev Specification: docs/specs/03-smart-contracts/czar-vault.md. Shared types: docs/specs/02 §5–§7.
 ///      Immutable per deployment (D33). Owner acts as msg.sender through a UserOp (D30).
 ///      This file is the canonical ABI: where a czar-vault.md table differs in a name, argument order or
 ///      event field, this file wins (RV-060). Amended 2026-10-19 for the G0-01 review fixes.

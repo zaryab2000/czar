@@ -1,4 +1,4 @@
-// Every `section.name` parameter named in specs/04-components exists in the registry (T-004).
+// Every `section.name` parameter named in docs/specs/04-components exists in the registry (T-004).
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { PARAMETERS } from "@czar/config";
 import { NON_PARAMETERS, WILDCARDS } from "@czar/config/non-parameters";
 
-const SPEC_DIR = fileURLToPath(new URL("../../../specs/04-components", import.meta.url));
+const SPEC_DIR = fileURLToPath(new URL("../../../docs/specs/04-components", import.meta.url));
 const SECTIONS = [...new Set(PARAMETERS.map((spec) => spec.key.split(".")[0]))];
 const TOKEN = new RegExp(
   `(?<![\\w.-])(?:${SECTIONS.join("|")})\\.[A-Za-z0-9*<>_-]+(?:\\.[A-Za-z0-9*<>_-]+)*`,
@@ -34,7 +34,7 @@ describe("spec coverage", () => {
     expect(specTokens().size).toBeGreaterThan(250);
   });
 
-  it("every parameter named in specs/04-components is in the registry (0 missing)", () => {
+  it("every parameter named in docs/specs/04-components is in the registry (0 missing)", () => {
     const keys = new Set<string>(PARAMETERS.map((spec) => spec.key));
     const excluded = new Set([
       ...NON_PARAMETERS.map((entry) => entry.token),

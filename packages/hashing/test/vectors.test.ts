@@ -1,4 +1,4 @@
-// T-007 acceptance: reproduce every entry of specs/02-data-and-protocol/vectors/eip712-vectors.json byte for byte.
+// T-007 acceptance: reproduce every entry of docs/specs/02-data-and-protocol/vectors/eip712-vectors.json byte for byte.
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -24,7 +24,7 @@ import {
 
 const fixture = fileURLToPath(new URL("../fixtures/eip712-vectors.json", import.meta.url));
 const spec = fileURLToPath(
-  new URL("../../../specs/02-data-and-protocol/vectors/eip712-vectors.json", import.meta.url),
+  new URL("../../../docs/specs/02-data-and-protocol/vectors/eip712-vectors.json", import.meta.url),
 );
 const v = JSON.parse(readFileSync(fixture, "utf8"));
 const VAULT = "0x00000000000000000000000000000000000c2a21";

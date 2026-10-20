@@ -3,7 +3,7 @@ pragma solidity 0.8.30;
 
 /// @title ICzarVaultFactory
 /// @notice Deploys immutable CzarVaults at CREATE2 addresses and holds the guardian pause flag.
-/// @dev Specification: specs/03-smart-contracts/czar-vault-factory.md. Amended 2026-10-19 (RV-015, D73):
+/// @dev Specification: docs/specs/03-smart-contracts/czar-vault-factory.md. Amended 2026-10-19 (RV-015, D73):
 ///      no version register (a new vault version is a new factory); the vault address depends only on the
 ///      factory and the owner; default signers change only through a 48 h timelock.
 interface ICzarVaultFactory {

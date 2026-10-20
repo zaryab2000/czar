@@ -77,7 +77,7 @@ jobs:
           scripts/install-arc-foundry.sh "$HOME/.local/bin"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - run: arc-anvil --version
-      - run: diff -r contracts/src/interfaces specs/03-smart-contracts/interfaces
+      - run: diff -r contracts/src/interfaces docs/specs/03-smart-contracts/interfaces
       - name: build
         working-directory: contracts
         env:

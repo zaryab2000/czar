@@ -6,7 +6,7 @@ import {IOpenEvidenceLog} from "./interfaces/IOpenEvidenceLog.sol";
 /// @title OpenEvidenceLog
 /// @notice Ownerless, append-only commitment log (Selection Layer §7.1, adopted verbatim; RV-014 amendment).
 ///         Anyone publishes under their own address; readers choose publishers.
-/// @dev Specification: specs/03-smart-contracts/open-evidence-log.md. No owner, no pause, no upgrade, no
+/// @dev Specification: docs/specs/03-smart-contracts/open-evidence-log.md. No owner, no pause, no upgrade, no
 ///      payable function, no external calls. Contents are never inspected; `uri` is event-only.
 contract OpenEvidenceLog is IOpenEvidenceLog {
     uint8 private constant INTENT_UNKNOWN = 0;

@@ -109,7 +109,7 @@ describe("registry", () => {
   it("every entry has a unit field, a reason and a spec source", () => {
     for (const spec of PARAMETERS) {
       expect(spec.reason.length, spec.key).toBeGreaterThan(0);
-      expect(spec.source, spec.key).toMatch(/^specs\/0[0-5][^:]*\.md:\d+$/);
+      expect(spec.source, spec.key).toMatch(/^docs\/specs\/0[0-5][^:]*\.md:\d+$/);
     }
   });
 

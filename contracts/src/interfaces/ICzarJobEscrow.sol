@@ -5,7 +5,7 @@ pragma solidity 0.8.30;
 /// @notice The Czar-owned ERC-8183 instance (erc-8183/base-contracts ERC8183.sol @ 142e669), deployed and
 ///         configured by Czar before mainnet (D32). This file lists the functions Czar's vault, providers and
 ///         evaluator rely on, with the base contract's signatures unchanged. Czar adds no functions.
-/// @dev Specification: specs/03-smart-contracts/czar-job-escrow.md. Line numbers refer to ERC8183.sol.
+/// @dev Specification: docs/specs/03-smart-contracts/czar-job-escrow.md. Line numbers refer to ERC8183.sol.
 interface ICzarJobEscrow {
     enum JobStatus { Open, Funded, Submitted, Completed, Rejected, Expired }
 

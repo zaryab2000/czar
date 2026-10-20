@@ -39,11 +39,15 @@ describe("redactSecrets", () => {
 
   it("finds no secret in the clean corpus (this repo's specs and product docs)", () => {
     const root = fileURLToPath(new URL("../../../", import.meta.url));
-    const files = ["product", "architecture", "specs/04-components", "specs/05-build-plan"].flatMap(
-      (dir) =>
-        readdirSync(join(root, dir))
-          .filter((name) => name.endsWith(".md"))
-          .map((name) => join(root, dir, name)),
+    const files = [
+      "docs/product",
+      "docs/architecture",
+      "docs/specs/04-components",
+      "docs/specs/05-build-plan",
+    ].flatMap((dir) =>
+      readdirSync(join(root, dir))
+        .filter((name) => name.endsWith(".md"))
+        .map((name) => join(root, dir, name)),
     );
     expect(files.length).toBeGreaterThan(10);
     const hits = files.flatMap((file) =>

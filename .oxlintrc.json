@@ -22,8 +22,7 @@
   "ignorePatterns": [
     "**/node_modules/**",
     "contracts/**",
-    "specs/**",
-    "research/**",
+    "docs/**",
     "**/.next/**",
     "**/.ponder/**",
     "**/generated/**",

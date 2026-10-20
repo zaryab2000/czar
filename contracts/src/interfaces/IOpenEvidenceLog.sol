@@ -3,7 +3,7 @@ pragma solidity 0.8.30;
 
 /// @title IOpenEvidenceLog
 /// @notice Ownerless, append-only commitment log on Arc. Adopted unchanged from
-///         `architecture/selection-layer-architecture.md` §7.1 (Selection Layer, 2026-10-17), plus the
+///         `docs/architecture/selection-layer-architecture.md` §7.1 (Selection Layer, 2026-10-17), plus the
 ///         AlreadyCommitted rule added 2026-10-19 (RV-014).
 ///         Anyone publishes under their own address; readers choose which publishers to trust.
 /// @dev No owner, no pause, no upgrade. A new version is a new deployment announced by a

@@ -22,7 +22,7 @@ const exact = {
   maxTimeoutSeconds: 300,
   extra: { name: "USDC", version: "2" },
 };
-// Live Gateway 402 from experiment A2 (research/evidence/experiments/a2-gateway-e2e/raw/pay.log).
+// Live Gateway 402 from experiment A2 (docs/research/evidence/experiments/a2-gateway-e2e/raw/pay.log).
 const gateway = {
   scheme: "exact",
   network: "eip155:5042002",
