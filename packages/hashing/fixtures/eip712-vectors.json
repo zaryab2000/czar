@@ -69,6 +69,10 @@
     "BriefRequest": {
       "typeString": "BriefRequest(bytes32 jobKey,uint64 issuedAt)",
       "typeHash": "0xe012200f525ff4d3cacf52809316e0f39197c977a4498fb16c875c1defcfc215"
+    },
+    "DeliverableUpload": {
+      "typeString": "DeliverableUpload(bytes32 jobKey,bytes32 contentHash,uint64 issuedAt)",
+      "typeHash": "0xc3502970d4522770633df92ed764e1a44e322e8df31d47650fac74329b8b70c7"
     }
   },
   "domains": {
@@ -170,6 +174,14 @@
         "issuedAt": "1792026000"
       },
       "digest": "0x991363ddab9205ec2a375be2469430bd8d1b2b9cb767f0e8f21218038a9954fe"
+    },
+    "deliverableUpload_5042002": {
+      "message": {
+        "jobKey": "0x6efe19b20afe9e34b362d2ee0fb069d50cc530e41ad2965472de264bbf7c0058",
+        "contentHash": "0xb7b6ae2e6ec2898fb9e865231eb55a7a2890318d141115f882dce2ef102db851",
+        "issuedAt": "1792026000"
+      },
+      "digest": "0x06c8119b7d785614f9888b91e84dfbcf9dba33622dc3f31a47e4d5468a7e2eb6"
     },
     "derivedNonce_example": {
       "nonceTag": "0x28f8dafc03e5ff5b4b3e5b50613f61c133f15f5a15b023ddecb25e6e9034577d",

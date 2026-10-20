@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   burnIntentDigest,
+  deliverableUploadDigest,
   derivedNonce,
   DOMAINS,
   domainSeparator,
@@ -117,6 +118,17 @@ describe("eip712-vectors.json", () => {
     ).not.toBe(r.digest);
   });
 
+  it("DeliverableUpload digest (D87)", () => {
+    const d = v.vectors.deliverableUpload_5042002;
+    expect(
+      deliverableUploadDigest(5042002, {
+        jobKey: d.message.jobKey,
+        contentHash: d.message.contentHash,
+        issuedAt: big(d.message.issuedAt),
+      }),
+    ).toBe(d.digest);
+  });
+
   it("AutonomyRaise, OwnerAction and BriefRequest digests", () => {
     const a = v.vectors.autonomyRaise_5042002;
     expect(
@@ -166,6 +178,7 @@ describe("eip712-vectors.json", () => {
       [
         "autonomyRaise_5042002",
         "briefRequest_5042002",
+        "deliverableUpload_5042002",
         "derivedNonce_example",
         "gatewayBurnIntent_sameChain",
         "kindTags",

@@ -115,7 +115,10 @@ describe("registry", () => {
 
   it("no registry key looks like a secret", () => {
     const fragments = ["passphrase", "secret", "private", "mnemonic", "seed"];
+    // merchants.lab.seed is a deterministic PRNG seed for lab test profiles, not key material.
+    const allowlist = new Set(["merchants.lab.seed", "selection.seedJobRuns"]);
     for (const spec of PARAMETERS) {
+      if (allowlist.has(spec.key)) continue;
       expect(
         fragments.some((fragment) => spec.key.toLowerCase().includes(fragment)),
         spec.key,
