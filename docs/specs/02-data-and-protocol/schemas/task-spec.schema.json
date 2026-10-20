@@ -74,6 +74,43 @@
             "type": "boolean",
             "description": "Added on the approval screen.",
             "x-privacyClass": "redacted-to-server"
+          },
+          "placeholders": {
+            "type": "array",
+            "maxItems": 20,
+            "description": "Exact placeholder spans for this subject, so CZ-11 can fill them in place (D85).",
+            "x-privacyClass": "redacted-to-server",
+            "items": {
+              "type": "object",
+              "description": "One placeholder span.",
+              "x-privacyClass": "redacted-to-server",
+              "additionalProperties": false,
+              "required": [
+                "field",
+                "token"
+              ],
+              "properties": {
+                "field": {
+                  "type": "string",
+                  "maxLength": 64,
+                  "description": "Which field the span is for.",
+                  "x-privacyClass": "redacted-to-server"
+                },
+                "token": {
+                  "type": "string",
+                  "maxLength": 80,
+                  "description": "The exact placeholder text, for example [Add price].",
+                  "x-privacyClass": "redacted-to-server"
+                },
+                "column": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 19,
+                  "description": "Table column index (table-fill).",
+                  "x-privacyClass": "redacted-to-server"
+                }
+              }
+            }
           }
         }
       }

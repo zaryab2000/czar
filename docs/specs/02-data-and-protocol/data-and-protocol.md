@@ -195,7 +195,7 @@ Each object: purpose, fields (name, type, required, privacy class, description, 
 | `kind` | enum `table-fill` \| `list-fill` \| `line-fill` \| `error-fix` \| `refused-task` | yes | RS | shape of the task |
 | `topic` | string ≤ 300 | yes | RS | nearest heading or caption; error class; prompt gist |
 | `fileName`, `fileExt` | string ≤ 255, ≤ 16 | no | RS | base name only, never a path |
-| `subjects` | array ≤ 50 of `{label ≤ 200, sourceLine?, addedByUser?}` | yes | RS | for a table, the row label of each row that has a placeholder |
+| `subjects` | array ≤ 50 of `{label ≤ 200, sourceLine?, addedByUser?, placeholders?: [{field, token, column?}] ≤ 20}` | yes | RS | for a table, the row label of each row that has a placeholder; `placeholders` are the exact spans CZ-11 fills in place (D85) |
 | `fields` | array ≤ 20 of string ≤ 64 | yes | RS | what to find per subject (placeholder column headers or placeholder text) |
 | `columns` | array ≤ 20 of string ≤ 64 | no | RS | the full header row, so the assembled table matches the person's table |
 | `context` | string ≤ 2,000 | no | RS | surrounding text, error text or the person's prompt, after layer 1 |
@@ -252,6 +252,7 @@ Each object: purpose, fields (name, type, required, privacy class, description, 
 | `shadow` | boolean | yes | SO | true for shadow-mode pricing (no envelope) |
 | `marketReference` | object `{network, perCapability[{capability, ready, low?, median?}]}` | no | SO | shadow plans only: real-market prices from the `MarketView` (D83 point 7); never used for payment |
 | `taskSpec` | `TaskSpec` | yes | SO | copy from the objective, including approval-screen edits (D84); `taskSpecHash` is in `planHash` |
+| `fillInPlace` | boolean, default `true` | no | SO | fill the person's file at the recorded placeholders when done (D85); set by `createApprovalIntent`'s `ApprovalIntentRequest`; not in `planHash` (it moves no money) |
 | `droppedSteps` | array of `{capability, reason: no-agent}` ≤ 64 | no | SO | steps removed before approval (D82); shown to the person with the plan |
 | `createdAt` | `Timestamp` | yes | SO | |
 
@@ -1282,3 +1283,4 @@ Agent-directed text met this session (not followed): the Circle and Arc doc head
 | 2026-10-20 | D82 | §4.6 kind `agent-assist`; §4.6.1 unpaid steps, `AssemblyRecord`, marker map; §5.3 empty-tree rule; OpenAPI `Result.assembly`, `ResultAck.assembly`. |
 | 2026-10-20 | D83 | §4.5 `marketReference`; §4.19 payment network only; new §4.22 `MarketView`; schema and example; OpenAPI `getMarketView`; `FindServiceRequest.network` must be the payment network. |
 | 2026-10-20 | D84 | §4.3 `taskSpec`; new §4.3.1 `TaskSpec`; §4.4 field and example; §4.5 `taskSpec`; §4.6 `fanOut`, `callInputs`, `inputTemplate` references ("never user text" superseded); §5.2 `taskSpecHash`, `objectiveHash`, `planHash`; §8.2 `file_paths` map; §9.7. |
+| 2026-10-20 | D85 | §4.3.1 `subjects[].placeholders`; §4.5 `fillInPlace`; OpenAPI `ApprovalIntentRequest`, `Result.fillInPlace`, `ResultAck.fill`. |

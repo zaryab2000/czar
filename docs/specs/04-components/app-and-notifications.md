@@ -104,8 +104,8 @@ sequenceDiagram
     A->>S: revisePlanSubjects → new Plan (old plan superseded)
     A->>A: re-render with the new cap and planHash
   end
-  U->>A: tap "Approve"
-  A->>S: createApprovalIntent → ApprovalIntent
+  U->>A: tap "Approve" (with the "Fill {fileName} when done" choice, D85)
+  A->>S: createApprovalIntent(ApprovalIntentRequest) → ApprovalIntent
   A->>A: rebuild payeeRoot from the payee leaves it displays and planHash from the displayed plan (@czar/hashing); re-encode with @czar/vault-client; refuse unless both equal the calldata's (RV-044)
   A->>B: UserOp {to: vault, data: calldata, value: 0} signed by the passkey
   B->>M: handleOps
@@ -221,6 +221,8 @@ Idempotency: every creating call sends `Idempotency-Key`; `notifySubmitted` with
 | approval card | "Spend up to {capDisplay} ({cap} USDC) on \"{goal}\"" |
 | subject list (D84) | "Czar will look up {fields} for: {subject 1}, {subject 2}, …" with "Edit list"; source line "From {fileName}, {topic}" |
 | subject edit saved | "List updated. New estimate: {capDisplay}." |
+| fill option (D85) | checkbox "Fill {fileName} when done", ticked by default; sent as `ApprovalIntentRequest.fillInPlace` |
+| delivered, filled | "Filled {cellsFilled} of {n} in {fileName}." plus "{cellsNotFound} not found" / "{cellsSkippedClash} skipped because the file changed" when non-zero; "Undo from the Czar viewer on your Mac." |
 | step, x402 or nanopayment | "Paid per call, checked before the next step" |
 | step, ERC-8183 job | "Held in escrow, money back if rejected" |
 | payee | "{host}" plus badge "New payee" when never paid before |
@@ -361,3 +363,4 @@ K17 VAPID private key in the secret store; a leak lets an attacker spam notifica
 | 2026-10-19 | RV-007 / D72 | freeze wording: payments cannot start; pockets pulled back. |
 | 2026-10-20 | D83 | Wording: Czar test merchant badge; real-market panel (read-only). |
 | 2026-10-20 | D84 | Approval shows the subjects Czar will look up and lets the person edit them (`revisePlanSubjects`). |
+| 2026-10-20 | D85 | Approval screen fill-in-place checkbox; delivered wording. |

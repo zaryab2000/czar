@@ -207,6 +207,12 @@
       "$ref": "task-spec.schema.json",
       "description": "The TaskSpec this plan was built from, including approval-screen edits (D84).",
       "x-privacyClass": "server-only"
+    },
+    "fillInPlace": {
+      "type": "boolean",
+      "default": true,
+      "description": "Write found values into the person's file in place of the recorded placeholders (D85); set on the approval screen.",
+      "x-privacyClass": "server-only"
     }
   },
   "required": [

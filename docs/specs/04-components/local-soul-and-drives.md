@@ -383,6 +383,7 @@ Every objective carries a `TaskSpec` (02 §4.3.1) with the task's real subject. 
 | `repeated-error` | error events (`tool-output`) | `error-fix` | one subject: the normalized `errorClass` | `[]` | `errorClass` | the latest error text after layer 1, plus `toolName` and file base name (≤ 2,000) |
 | `agent-refusal` | the person's last `prompt` event before the refusal (`user-prompt`) | `refused-task` | one subject: the prompt, ≤ 200 chars | `[]` | the refusal `reasonClass` | the full prompt after layer 1 (≤ 2,000) |
 
+- Every subject records its exact placeholder spans in `placeholders[] = {field, token, column?}` so CZ-11 can fill them in place (D85).
 - Limits: `drives.maxSubjects` 50 (extra rows are left out and counted in `context`); a subject that is empty after trimming is dropped.
 - Layer 1 runs on every string. Layer 2 does not replace `TaskSpec` values (D84 point 3).
 - `fileName` is the base name only; paths never leave the Mac.
@@ -654,3 +655,4 @@ CZ-06, CZ-07, server planner (CZ-13 in dry-run).
 | 2026-10-20 | D82 | Objective publisher stores the local marker map at layer 2. |
 | 2026-10-20 | D83 | CZ-08 shadow rows show the real-market price line from `Plan.marketReference`. |
 | 2026-10-20 | D84 | CZ-06 placeholder detector reads the file from disk; new §5.1a `TaskSpec` rules for all three detectors; §5.6 record carries `TaskSpec`; goal names subjects; security, wording and tests updated. |
+| 2026-10-20 | D85 | `TaskSpec` subjects record their placeholder spans. |

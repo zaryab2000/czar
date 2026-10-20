@@ -1106,6 +1106,8 @@
 - **D84 (2026-10-20):** placeholder detector reads the file from disk via `file_paths`; daily rescan; build `TaskSpec` per CZ-06 §5.1a for all three detectors. Acceptance: the CZ-06 §14 `TaskSpec` golden tests.
 - **D84 (2026-10-20):** `ObjectiveSubmission.taskSpec`; `objectiveHash` includes `taskSpecHash`; layer 2 allows `TaskSpec` values; P-05 goal names the subjects (eval 1 and 7).
 - **D84 (2026-10-20):** `table-build` lays out one row per `TaskSpec` subject under the person's own header, filled by `subjectIndex`.
+- **D85 (2026-10-20):** in-place fill (CZ-11 §5.2b): clash check, atomic write, `fill_undo`, `czar undo-fill`, `ackResult.fill`. Acceptance: CZ-11 §14 in-place fill tests.
+- **D85 (2026-10-20):** record `subjects[].placeholders` spans.
 
 ---
 
@@ -1225,6 +1227,7 @@
 - **Acceptance tests:**
   - With Circle's bundler mocked to reject, the app retries through the configured secondary bundler and the UserOp mines (testnet), or the test records the AR-26 failure and files an SCR.
 - **D84 (2026-10-20):** approval screen shows the subject list and supports `revisePlanSubjects`; test that the app recomputes the new `planHash` before approve.
+- **D85 (2026-10-20):** "Fill {fileName} when done" checkbox sent as `ApprovalIntentRequest.fillInPlace`.
 
 ---
 
@@ -1471,3 +1474,4 @@
 | 2026-10-20 | D82 | T-073 extended with the assembler (size L); notes on T-045, T-048, T-069. |
 | 2026-10-20 | D83 | New T-106 (test-merchant lab) and T-107 (market view); notes on T-042, T-045, T-091, T-105. |
 | 2026-10-20 | D84 | Notes on T-043, T-045, T-048, T-051, T-054, T-063, T-068, T-069, T-073, T-084, T-101 for carrying the task's subject end to end. |
+| 2026-10-20 | D85 | Notes on T-068, T-073, T-084 for the in-place fill. |

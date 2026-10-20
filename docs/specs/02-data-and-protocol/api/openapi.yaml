@@ -215,6 +215,16 @@ components:
         resultId: { type: string, pattern: "^res_[0-9A-HJKMNP-TV-Z]{26}$" }
         writtenAt: { $ref: "#/components/schemas/Timestamp" }
         surface: { type: string, enum: [claude-code-file, pr-comment, doc-insert], description: Which write-back adapter delivered it (CZ-11). }
+        fill:
+          type: object
+          additionalProperties: false
+          description: "Counts only for the in-place fill (D85). No values, no paths."
+          required: [status]
+          properties:
+            status: { type: string, enum: [filled, partial, none-filled, off, file-missing] }
+            cellsFilled: { type: integer, minimum: 0 }
+            cellsSkippedClash: { type: integer, minimum: 0 }
+            cellsNotFound: { type: integer, minimum: 0 }
         assembly:
           type: array
           maxItems: 64
@@ -291,9 +301,18 @@ components:
                           name: { type: string, maxLength: 64 }
                           value: { type: string, maxLength: 2000, description: "Data, never instructions." }
         taskSpec: { $ref: "../schemas/task-spec.schema.json", description: "The approved TaskSpec, so the assembler can lay out rows (subjects) and columns (D84)." }
+        fillInPlace: { type: boolean, description: "Write found values into the person's file at the recorded placeholders (D85)." }
         costTotal: { $ref: "#/components/schemas/Amount6" }
         minutesSaved: { type: integer, minimum: 0 }
         createdAt: { $ref: "#/components/schemas/Timestamp" }
+
+    ApprovalIntentRequest:
+      type: object
+      description: "Options chosen on the approval screen (D85). Not part of planHash; it only controls write-back."
+      x-privacyClass: server-only
+      additionalProperties: false
+      properties:
+        fillInPlace: { type: boolean, default: true, description: "Fill the person's file in place of the placeholders when done." }
 
     SubjectsRevision:
       type: object
@@ -1279,6 +1298,9 @@ paths:
           in: path
           required: true
           schema: { type: string }
+      requestBody:
+        required: false
+        content: { application/json: { schema: { $ref: "#/components/schemas/ApprovalIntentRequest" } } }
       responses:
         "200": { description: Intent, content: { application/json: { schema: { $ref: "#/components/schemas/ApprovalIntent" } } } }
         "409": { description: Plan expired or already opened, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
@@ -1526,3 +1548,4 @@ paths:
 # - D82 (2026-10-20): Result.assembly and ResultAck.assembly for unpaid local and agent-assist steps.
 # - D83 (2026-10-20): getMarketView route and MarketViewRequest; FindServiceRequest.network must be the payment network; includeMarketView and FindServiceResponse.marketView.
 # - D84 (2026-10-20): Result.taskSpec, Result.assembly[].inputs[].subjectIndex, SubjectsRevision, revisePlanSubjects route.
+# - D85 (2026-10-20): Plan.fillInPlace via ApprovalIntentRequest; Result.fillInPlace; ResultAck.fill counts.

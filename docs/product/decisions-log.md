@@ -442,6 +442,17 @@ Approved by Zaryab. Each entry cites the review finding it resolves.
 - **Accepted risk:** an injected file edit could make Czar look up the wrong things. Bounded by approval (the subjects are shown) and the money guards above.
 - **Amends:** spec 01 §11.2 layer 3 and §13 ASI06 row; spec 02 §4.3, §4.4, §4.5, §4.6, §5.2, §8.2, §9.7; CZ-02, CZ-06, CZ-11, CZ-12, CZ-13, CZ-15, CZ-20, CZ-22; P-03, P-05. Does not amend D74: merchant text still never reaches the planner.
 
+### D85. Czar fills the person's own file in place, with four guards
+- **Context:** under D82/D84 the finished table went only to `.czar/results/`, leaving the person to copy values into their own file and merge their own notes by hand. The objective is "fill the table", so that left the core task unfinished.
+- **Decided:**
+  1. **Fill in place.** For `table-fill`, `list-fill` and `line-fill` objectives, the CZ-11 write-back adapter writes the found values into the person's file, replacing **only** the exact placeholder spans the detector recorded (row `sourceLine`, column, token). No other cell, line or file is changed.
+  2. **Clash check.** Before writing, the adapter re-reads the file and fills a placeholder only if that exact token is still at that row and column. Anything that moved or was already filled is skipped and reported. The write is atomic (temp file, then rename).
+  3. **Receipt and undo.** The result file in `.czar/results/` stays as the receipt, with the source of each value. The daemon keeps a local undo record; "Undo fill" in the local viewer, or `czar undo-fill <objectiveId>`, restores the placeholders if those cells still hold Czar's values.
+  4. **The person chooses.** The approval screen has "Fill {fileName} when done", ticked by default (`Plan.fillInPlace`). Unticked, the person gets the result file only.
+  - A value Czar could not find leaves its placeholder in place, so the gap stays visible and the detector can try again.
+- **Why:** the task is complete only when the person's own file is filled; their notes and formatting are kept.
+- **Amends:** CZ-11 "Does not: modify user files" (now: only the recorded placeholder spans, under these guards); D82 point 6; spec 02 `Plan`, `Result`, `ResultAck`, `createApprovalIntent`.
+
 ---
 
 ## 13. Open items (deferred)

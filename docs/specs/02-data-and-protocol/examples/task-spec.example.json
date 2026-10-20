@@ -7,23 +7,58 @@
   "subjects": [
     {
       "label": "Billora",
-      "sourceLine": 12
+      "sourceLine": 12,
+      "placeholders": [
+        {
+          "field": "Starter price (USD/month)",
+          "token": "[Add price]",
+          "column": 1
+        }
+      ]
     },
     {
       "label": "InvoiceKite",
-      "sourceLine": 13
+      "sourceLine": 13,
+      "placeholders": [
+        {
+          "field": "Starter price (USD/month)",
+          "token": "[Add price]",
+          "column": 1
+        }
+      ]
     },
     {
       "label": "Ledgerline",
-      "sourceLine": 14
+      "sourceLine": 14,
+      "placeholders": [
+        {
+          "field": "Starter price (USD/month)",
+          "token": "[Add price]",
+          "column": 1
+        }
+      ]
     },
     {
       "label": "PayStub Pro",
-      "sourceLine": 15
+      "sourceLine": 15,
+      "placeholders": [
+        {
+          "field": "Starter price (USD/month)",
+          "token": "[Add price]",
+          "column": 1
+        }
+      ]
     },
     {
       "label": "Quillbill",
-      "sourceLine": 16
+      "sourceLine": 16,
+      "placeholders": [
+        {
+          "field": "Starter price (USD/month)",
+          "token": "[Add price]",
+          "column": 1
+        }
+      ]
     }
   ],
   "fields": [
