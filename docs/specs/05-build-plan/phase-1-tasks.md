@@ -372,7 +372,7 @@
 ### T-021 Fuzz and Foundry invariant suites (INV-1..16, FAC-1..5, JOB-1..5, OEL-1..6)
 - **Milestone / group / who:** M1 / M1-e / agent. **Size:** L. **Deps:** T-020, T-011.
 - **Spec refs:** `S03/security-and-testing.md` §2, §3.2, §3.3; `S03/czar-vault.md` §11.
-- **Outputs:** `contracts/test/invariant/InvariantVault.t.sol`, handlers per role, `contracts/test/fuzz/*.t.sol`.
+- **Outputs:** `contracts/test/invariant/InvariantVault.t.sol` (vault, both escrow kinds), `contracts/test/invariant/InvariantFactory.t.sol` (FAC-1 … FAC-5), handlers per role, `contracts/test/fuzz/*.t.sol` (07 PRD 12).
 - **Steps:** handlers for owner (including `withdraw`, `forceCloseEnvelope`, `recordManualReturn`), agent, autonomy, guardian, USDC mock (consumes nonces), Gateway mock, job mocks (partial claims); assert every invariant after each call, including the restated INV-2, INV-7 and INV-9 and the new INV-12 to INV-15 and OEL-6.
 - **Inputs:** all contracts from T-011 and T-020; mocks from T-010.
 - **Acceptance tests:**
@@ -416,7 +416,7 @@
 - **Inputs:** all contracts and tests from T-020; `packages/config` from T-004.
 - **Steps:**
   - Run `arc-forge snapshot` on all function tests.
-  - Write the measured values to `packages/config/gas-table.json` under `routing.gas.*`.
+  - Write the measured values to `packages/config/gas-table.json` under `routing.gas.*`: one flat JSON object whose keys are the seven `routing.gas.*` names (`reserve`, `settleBase`, `settleIdx`, `finalize`, `pocketSetup`, `pocketDrain`, `pocketSweep`) with integer gas values per whole transaction (07 PRD 12 §10).
   - Add the `--check` step to CI.
 - **Acceptance tests:**
   - `arc-forge snapshot --check` passes in CI (fails on > 5% regression).
@@ -428,7 +428,7 @@
 - **Outputs:** `contracts/slither.config.json`, `contracts/SLITHER-TRIAGE.md`, CI job.
 - **Inputs:** all contracts from T-020; CI from T-002.
 - **Steps:**
-  - Add a pinned Slither config and CI job.
+  - Add a pinned Slither config and CI job (Slither 0.11.3; the gate script and allowlist are in 07 PRD 13).
   - Triage every finding in `contracts/SLITHER-TRIAGE.md`.
   - Add the grep checks for banned constructs.
 - **Acceptance tests:**
@@ -470,7 +470,7 @@
 - **Steps:**
   - Use the T-035 signer CLI's `create-key` command if it exists; otherwise a minimal one-off script in `apps/signer/scripts/create-keys.ts` that uses the same keystore format (CZ-27 §3). T-035 later adopts the keystore unchanged.
   - The passphrase comes from the macOS keychain item CZ-27 names, read by the process itself; never from argv, environment variables or a file (D78).
-  - Print only addresses. Record them in `deployments/arc-testnet-keys.json`.
+  - Print only addresses. Record them in `deployments/arc-testnet-keys.json`: one object per key id with `address` (checksummed) and `ref` (the keystore's name for the key) only (07 PRD 13 §7.1; `Deploy.s.sol` reads `K3`, `K5`, `K6`, `K7`, `K20`).
 - **Inputs:** `@czar/config` from T-004 (`signer.backend = local-keystore`, `signer.keystorePath`); Zaryab's written approval.
 - **Acceptance tests:**
   - `git ls-files | grep -iE 'keystore|\.key$|\.env'` prints nothing; the keystore path resolves outside the repository root.
@@ -1530,3 +1530,5 @@
 | 2026-10-20 | 07 contract PRDs | M1 note: vault functions live in modules under `contracts/src/vault/`; T-018 adapter path `contracts/src/libraries/JobEscrowAdapter.sol`. |
 | 2026-10-20 | D89 | M1 note and T-018 outputs: vault logic in linked libraries under `contracts/src/vault/logic/`; T-020 output is the size record (the split is already in place); T-027 deploys the eight libraries first. |
 | 2026-10-20 | 07 PRD 09 pilot | T-018 acceptance command: `--match-path test/JobTest.t.sol` (the old `--match-contract JobTest` matched no test and passed silently). |
+| 2026-10-20 | 07 PRD 12 | T-021 outputs name `InvariantFactory.t.sol`; T-024 defines the `gas-table.json` shape. T-022 fork tests get their own PRD (the RPC is needed to verify them). |
+| 2026-10-20 | 07 PRD 13 | T-025 pins Slither 0.11.3; T-105 keys-file shape (`address`, `ref`). |
