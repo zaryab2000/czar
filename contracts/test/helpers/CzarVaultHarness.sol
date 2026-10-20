@@ -4,6 +4,8 @@ pragma solidity 0.8.30;
 import {CzarVault} from "../../src/CzarVault.sol";
 import {DigestSlot} from "../../src/vault/VaultState.sol";
 import {VaultGuards} from "../../src/vault/VaultGuards.sol";
+import {CzarHashing, TransferSpecFields} from "../../src/libraries/CzarHashing.sol";
+import {GATEWAY_DOMAIN_SEPARATOR} from "../../src/libraries/CzarConstants.sol";
 
 /// @title CzarVaultHarness
 /// @notice Test-only subclass that exposes internal values for vector and storage tests (security-and-testing.md
@@ -76,5 +78,28 @@ contract CzarVaultHarness is CzarVault {
     function exposed_usdcDigest(uint64 reservationId, uint32 i) external view returns (bytes32) {
         Reservation storage r = _s.reservations[reservationId];
         return VaultGuards.usdcDigest(_config(), r.payee, r.unitAmount, r.validBefore, reservationId, i);
+    }
+
+    /// @dev The burn-intent digest and transfer-spec replay hash the vault builds for a pullback record with this pocket,
+    ///      value and salt (VaultGuards.pullbackTransferSpec and the immutables), for the 02 §6.4 vector whose salt the
+    ///      public API cannot produce (07 PRD 12). Uses a scratch record that it deletes before returning.
+    function exposed_pullbackDigests(
+        address pocket,
+        uint256 value,
+        bytes32 salt,
+        uint256 maxFee,
+        uint256 maxBlockHeight
+    ) external returns (bytes32 burnDigest, bytes32 replayHash) {
+        Pullback storage p = _s.pullbacks[type(uint64).max];
+        p.pocket = pocket;
+        p.value = value;
+        p.salt = salt;
+        TransferSpecFields memory f = VaultGuards.pullbackTransferSpec(_config(), p);
+        replayHash = CzarHashing.transferSpecReplayHash(f);
+        burnDigest = CzarHashing.typedDataHash(
+            GATEWAY_DOMAIN_SEPARATOR,
+            CzarHashing.burnIntentStructHash(maxBlockHeight, maxFee, CzarHashing.transferSpecStructHash(f))
+        );
+        delete _s.pullbacks[type(uint64).max];
     }
 }

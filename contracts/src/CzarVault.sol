@@ -4,19 +4,20 @@ pragma solidity 0.8.30;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ICzarVault} from "./interfaces/ICzarVault.sol";
 import {VaultBase} from "./vault/VaultBase.sol";
-import {VaultStubs} from "./vault/VaultStubs.sol";
 import {CoreLogic} from "./vault/logic/CoreLogic.sol";
 import {EnvelopeLogic} from "./vault/logic/EnvelopeLogic.sol";
 import {ReservationLogic} from "./vault/logic/ReservationLogic.sol";
 import {SignatureLogic} from "./vault/logic/SignatureLogic.sol";
 import {PocketLogic} from "./vault/logic/PocketLogic.sol";
 import {JobLogic} from "./vault/logic/JobLogic.sol";
+import {AutonomyLogic} from "./vault/logic/AutonomyLogic.sol";
+import {OwnerActionLogic} from "./vault/logic/OwnerActionLogic.sol";
 
 /// @title CzarVault
 /// @notice The per-user vault (czar-vault.md). Immutable; no proxy (D33). Every state-changing function is a thin
 ///         wrapper: the reentrancy guard (§15.5) stays here, the logic runs in a linked library by DELEGATECALL on
 ///         this vault's storage (07 PRD 03). `msg.sender` is passed as `caller`, so the passkey path can pass the owner.
-contract CzarVault is VaultBase, VaultStubs {
+contract CzarVault is VaultBase {
     /// @dev czar-vault.md §15.8. Called by CzarVaultFactory.createVault through CREATE2.
     constructor(address ownerAccount) VaultBase(ownerAccount) {}
 
@@ -65,6 +66,14 @@ contract CzarVault is VaultBase, VaultStubs {
     /// @inheritdoc ICzarVault
     function setMaxPullbackFee(uint256 newMax) external {
         CoreLogic.setMaxPullbackFee(_s, _config(), msg.sender, newMax);
+    }
+
+    /// @inheritdoc ICzarVault
+    function executeOwnerAction(uint8 action, bytes calldata payload, uint256 deadline, WebAuthnAuth calldata auth)
+        external
+        nonReentrant
+    {
+        OwnerActionLogic.executeOwnerAction(_s, _config(), action, payload, deadline, auth);
     }
 
     // ───────────── Envelopes (§5.2) ─────────────
@@ -218,5 +227,19 @@ contract CzarVault is VaultBase, VaultStubs {
     /// @inheritdoc ICzarVault
     function claimJobRefund(bytes32 jobKey) external nonReentrant {
         JobLogic.claimJobRefund(_s, _config(), jobKey);
+    }
+
+    // ───────────── Earned autonomy (§5.6) ─────────────
+
+    /// @inheritdoc ICzarVault
+    function raiseAutoLimit(bytes32 categoryId, uint256 newLimit, uint64 periodId, uint256 deadline, bytes calldata sig)
+        external
+    {
+        AutonomyLogic.raiseAutoLimit(_s, _config(), msg.sender, categoryId, newLimit, periodId, deadline, sig);
+    }
+
+    /// @inheritdoc ICzarVault
+    function lowerAutoLimit(bytes32 categoryId, uint256 newLimit) external {
+        AutonomyLogic.lowerAutoLimit(_s, _config(), msg.sender, categoryId, newLimit);
     }
 }

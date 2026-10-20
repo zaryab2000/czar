@@ -14,6 +14,8 @@ remappings = [
   "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
   "forge-std/=lib/forge-std/src/",
 ]
+# VectorsTest reads the 02 §6.4 vectors (T-023, D88).
+fs_permissions = [{ access = "read", path = "../docs/specs/02-data-and-protocol/vectors" }]
 
 [profile.arc]
 network = "arc"
@@ -21,6 +23,11 @@ network = "arc"
 
 # forge-lint runs on production sources. Test mocks copy upstream code (block.timestamp checks,
 # string-to-bytes32 casts) on purpose and are excluded; compiler warnings still fail the build.
+# T-021 (D88): every fuzz test runs 10,000 cases; the seed is pinned so gas reports and failures reproduce.
+[fuzz]
+runs = 10000
+seed = "0x2a"
+
 # M1 exit gate: invariant suites run with runs >= 256 and depth >= 64 (build-plan §5 M1).
 [invariant]
 runs = 256
