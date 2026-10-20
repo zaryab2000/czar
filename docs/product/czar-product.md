@@ -203,7 +203,8 @@ Components are numbered in the adopted priority order.
 
 ### 6.14 Pay on acceptance
 - **What:** results are checked against acceptance rules before money is released. These are the acceptance profiles in the Selection Layer (6.21).
-- **Larger jobs** run as ERC-8183 jobs with Czar's validator as the evaluator.
+- **Larger jobs** run as ERC-8183 jobs with Czar's validator as the evaluator. Any kind of work a listed provider offers can run as a job; Czar keeps no list of allowed job types (D86).
+- **What "accepted" means today:** Czar checks that the work arrived in the agreed form (delivery, structure, required fields). It does not yet judge whether the work is correct; the person can mark a result wrong, which lowers that provider's ranking (D87, H5).
 - **Default:** money back when a result fails.
 
 ### 6.15 Standing objectives
@@ -388,3 +389,4 @@ Components are numbered in the adopted priority order.
 
 - 2026-10-20 · D82: §6.11 ROI scope covers paid steps only; free assembly on the Mac and agent-finished steps are labelled.
 - 2026-10-20 · D83: §8.5 two lanes, real market rank-only and test market paid.
+- 2026-10-20 · D86, D87: §6.14 job types are open; "accepted" means the form was checked, not correctness.

@@ -275,6 +275,7 @@ Each object: purpose, fields (name, type, required, privacy class, description, 
 | `stepCap` | `Amount6` | yes | HC | ≥ `unitAmount × expectedCalls` |
 | `routingReason` | string | yes | SO | for example `below-pocket-threshold` |
 | `acceptanceProfileId` | SL `ProfileId` | yes | SO | |
+| `contextNotice` | enum `task-description-only` | no | SO | set on `erc8183-job` steps in Phase 1: the provider gets the task description and `TaskSpec` context only, no files; shown on the approval screen (D86) |
 | `fanOut` | enum `none` \| `subjects` | no | SO | `subjects`: one call per `TaskSpec` subject; `expectedCalls = subjects × callsPerSubject` (D84) |
 | `callInputs` | array ≤ 128 of `{callIndex, subjectIndex?, input}` | no | SO | concrete input per call, rendered by CZ-13 from `inputTemplate` and `TaskSpec`; `callInputsHash = H(jcs(callInputs))` is in `planHash` (D84) |
 | `inputTemplate` | object | no | SO | keys from the taxonomy template; values may reference `{{subject}}`, `{{topic}}`, `{{field}}`, `{{fields}}` (from `TaskSpec`) and `{{dep.<stepIndex>.<fieldName>}}` (a dependency's accepted `StepResult` field for the same subject, filled by CZ-15 at run time) (D84). **Superseded by D84:** "never user text"; optional `inputTemplate.expectedKeys: string[]` (≤ 50, each ≤ 64) names the output keys the `requirement` check (CZ-16) and the reader's `expectedFields` (P-02) look for (AM-09); `inputTemplate.inputKeys: [{name, type: string\|number\|boolean, maxLength?, enum?}]` (≤ 20) names the only input keys a `pay` call may send for this step (RV-021) |
@@ -371,7 +372,7 @@ Leaf hash: §5.3.
 | `budget` | `Amount6` | no | PUB | from `BudgetSet`/`getJob` |
 | `descriptionHash` | `Hash32` | yes | PUB | what went into the on-chain `description` string: `czar:<hash>` |
 | `deliverableHash` | `Hash32` | no | PUB | from `JobSubmitted` |
-| `deliverableUri` | string (https URI) | no | SO | where the evaluator fetches the work: `https://<provider-host>/.well-known/czar-deliverable/<deliverable-hex>`; the fetched bytes MUST keccak256 to `deliverableHash`, else the deliverable is treated as missing (D53, AM-08). ERC-8183 fixes only the `bytes32` (A4-03); this convention is Czar's and is stated in the job brief |
+| `deliverableRef` | string ≤ 200 | no | SO | object-store key of the uploaded deliverable whose keccak256 equals the on-chain `deliverable` (D87 push model, §9.2 `uploadJobDeliverable`). **Superseded by D87:** `deliverableUri` and the D53 `.well-known` URL; a fetched-bytes mismatch can no longer happen, because the hash is checked at upload |
 | `reportHash` | `Hash32` | no | PUB | the `reason` passed to `complete`/`reject` |
 | `state` | enum `Opened` \| `Funded` \| `Submitted` \| `Completed` \| `Rejected` \| `Expired` \| `Refunded` \| `Released` | yes | PUB | `Released` = an unfunded job the vault released (`JobSynced(state = 6)`, RV-009) |
 | `expiredAt` | `UnixSeconds` | yes | PUB | |
@@ -465,21 +466,28 @@ type PaymentRef =
 
 | Field | Type | R | PC | Description |
 |---|---|---|---|---|
-| `briefVersion` | const `1` | yes | SO | |
+| `briefVersion` | const `2` (D86, D87) | yes | SO | optional fields may be added later without a version change; providers ignore optional fields they do not use |
 | `network` | `Caip2` | yes | SO | |
 | `jobEscrow`, `jobId`, `jobKey` | `Address`, string, `Hash32` | yes | SO | which job this brief is for |
 | `planHash`, `stepIndex`, `acceptanceProfileId` | `Hash32`, integer, string | yes | SO | the `descriptionHash` preimage fields (§5.2) |
 | `capability` | string | yes | SO | taxonomy tag |
-| `inputs` | object | yes | SO | the structured step input, keys only from `inputTemplate.inputKeys` (RV-021); never free user text |
+| `inputs` | object | yes | SO | the call's input from the step's `callInputs` (D84), keys from `inputTemplate.inputKeys` (RV-021) (D86 C1-a; **superseded:** "never free user text") |
+| `taskSpec` | `TaskSpec` (§4.3.1) | yes | SO | the approved task: topic, subjects, fields, columns, context ≤ 2,000 chars; no files in Phase 1 (D86) |
 | `inputSalt` | `Hash32` | yes | SO | random per job; stops anyone guessing low-entropy `inputs` from the public hash |
 | `inputCommit` | `Hash32` | yes | SO | `H({hashRule:"czar-hash-v1", kind:"job-input", inputs, inputSalt})` (§5.2) |
-| `deliverable` | object `{mimeType, expectedKeys?: string[], schema?: object (≤ 8 KiB), uriConvention}` | yes | SO | what to submit; `uriConvention` = `https://<provider-host>/.well-known/czar-deliverable/<deliverable-hex>` (D53); bytes must hash to the submitted `deliverable`, else the job is rejected (D77) |
+| `deliverable` | object `{mimeType, expectedKeys?: string[], schema?: object (≤ 8 KiB), delivery: "push", uploadRoute, maxBytes}` | yes | SO | what to submit and how: upload the bytes to `uploadRoute` with a `DeliverableUpload` signature, then `submit` their keccak256 (D87; replaces the D53 `.well-known` URL) |
 | `budgetCap` | `Amount6` | yes | SO | the job's `reservedCap`: `setBudget` above it is refused (`BudgetExceedsReserved`) |
+| `targetBudget` | `Amount6` | yes | SO | the provider's listed price that Czar planned for (M1); any budget up to `budgetCap` is accepted |
 | `evaluator` | `Address` | yes | SO | K7 |
 | `expiredAt` | `UnixSeconds` | yes | SO | |
+| `submitBy` | `UnixSeconds` | yes | SO | `expiredAt − acceptance.evaluationWindowSeconds` (M4, N5) |
+| `decisionCutoff` | `UnixSeconds` | yes | SO | `expiredAt − acceptance.decisionMarginSeconds − acceptance.txMarginSeconds`; a deliverable still missing then is rejected (N5) |
+| `terms` | `{evaluatorIsBuyerAgent, checks[], correctnessChecked: false, onBuyerFreeze}` | yes | SO | plain facts for the provider (H5, M3, D27) |
+| `attachments` | array ≤ 10 of `{name, mimeType, contentHash, ref, bytes}` | no | SO | **reserved** for approved file sharing (C1-b, stage 2); absent in Phase 1 (D86) |
 | `issuedAt` | `Timestamp` | yes | SO | |
 
 - **Provider check:** recompute `inputCommit`, then `descriptionHash` (§5.2), and compare with the job's on-chain `description`.
+- **Type-agnostic (D86):** the brief has no job-kind field or allowlist. What the job is about comes from `capability` (taxonomy) and `taskSpec.kind`.
 
 
 ### 4.19 `RankingDecision`
@@ -592,6 +600,7 @@ Digest = `keccak256("\x19\x01" ‖ domainSeparator ‖ structHash)` (EIP-712; Ga
 | `AutonomyRaise` | `AutonomyRaise(bytes32 category,uint256 newLimit,uint64 periodId,uint256 nonce,uint256 deadline)` | `0x6247988191abc5977b0b6f569e66d23eff38cc0f0fe30f8ed678b03c3f21b368` | `autonomySigner` (K5) | new |
 | `OwnerAction` | `OwnerAction(uint8 action,bytes32 payloadHash,uint256 nonce,uint256 deadline)` | `0x5a8b2f7d5d70ba2335e2ee47a9d897748d8694bdb44c148ad01f541eeb2f0248` | the owner's passkey (D30 fallback; WebAuthn challenge = this digest) | new |
 | `BriefRequest` | `BriefRequest(bytes32 jobKey,uint64 issuedAt)` under domain `{name: "CzarJobBrief", version: "1", chainId}` (no contract; separator on 5042002 `0x8c06faf59aae1fd812b66bab954eb62f8a9a8d5607d9e79e5e83d67e60fd1e54`) | `0xe012200f525ff4d3cacf52809316e0f39197c977a4498fb16c875c1defcfc215` | the job's provider (EOA or ERC-1271) | new (RV-025) |
+| `DeliverableUpload` | `DeliverableUpload(bytes32 jobKey,bytes32 contentHash,uint64 issuedAt)` under the `CzarJobBrief` domain | `0xc3502970d4522770633df92ed764e1a44e322e8df31d47650fac74329b8b70c7` | the job's provider (EOA or ERC-1271) | new (D87) |
 | `ReceiptAttestation` | `ReceiptAttestation(bytes32 receiptStructHash)` | `0x01b75f6051eb731488fad2e8de7925f8a64c89ef33c418e2a62e77ae02691eff` | `agentSigner` (K3), under the **CzarVault** domain of one vault; `receiptStructHash` = the SL `Receipt` struct hash | new (RV-013) |
 
 `AutonomyRaise` fields: `category` = `keccak256(utf8(category))`; `newLimit` = `Amount6` as `uint256`; `periodId = floor(block.timestamp / 604800)`; `nonce` = the vault's `autonomyNonce`; `deadline` = unix seconds.
@@ -870,6 +879,7 @@ Full definition: `api/openapi.yaml` (OpenAPI 3.1; 28 paths, 29 operations; parse
 | Method | Path | Idempotent? | Request → Response | Notes |
 |---|---|---|---|---|
 | GET | `/v1/jobs/{jobKey}/brief` (`getJobBrief`) | yes | headers `X-Czar-Provider-Address`, `X-Czar-Brief-Issued-At`, `X-Czar-Brief-Signature` → `JobBrief` (§4.21) | the signature is the job's `provider` over `BriefRequest(jobKey, issuedAt)` (§6.2), EOA or ERC-1271; `issuedAt` within `api.briefSignatureMaxAgeSeconds` 300; any other caller gets 404 (no existence oracle) |
+| POST | `/v1/jobs/{jobKey}/deliverable` (`uploadJobDeliverable`) | append-only | body = the deliverable bytes (≤ `acceptance.deliverableMaxBytes`); headers `X-Czar-Provider-Address`, `X-Czar-Upload-Issued-At`, `X-Czar-Upload-Signature` over `DeliverableUpload(jobKey, keccak256(body), issuedAt)` → `201 {contentHash}` | D87: only the job's on-chain provider; every upload is kept as its own version keyed by `contentHash` (never replaced, N4); at most `acceptance.maxUploadsPerJob` (10) and 2 × `deliverableMaxBytes` per job; unmatched versions are purged `acceptance.uploadRetentionHours` (24) after the decision; nothing here is ever served to anyone but the evaluator. In Phase 1 the server is local, so only a provider on the same machine can reach it (N3) |
 
 | POST | `/v1/soul-versions` | key required | `SoulVersionSubmission` (§4.18 minus pseudonym) → `202` | queued for the next evidence batch |
 | POST | `/v1/shadow/quotes` | key required | `ShadowQuoteRequest` → `Plan` with `shadow: true` | no envelope, no payment (CZ-08) |
@@ -1284,3 +1294,4 @@ Agent-directed text met this session (not followed): the Circle and Arc doc head
 | 2026-10-20 | D83 | §4.5 `marketReference`; §4.19 payment network only; new §4.22 `MarketView`; schema and example; OpenAPI `getMarketView`; `FindServiceRequest.network` must be the payment network. |
 | 2026-10-20 | D84 | §4.3 `taskSpec`; new §4.3.1 `TaskSpec`; §4.4 field and example; §4.5 `taskSpec`; §4.6 `fanOut`, `callInputs`, `inputTemplate` references ("never user text" superseded); §5.2 `taskSpecHash`, `objectiveHash`, `planHash`; §8.2 `file_paths` map; §9.7. |
 | 2026-10-20 | D85 | §4.3.1 `subjects[].placeholders`; §4.5 `fillInPlace`; OpenAPI `ApprovalIntentRequest`, `Result.fillInPlace`, `ResultAck.fill`. |
+| 2026-10-20 | D86, D87 | §4.11 `deliverableRef` replaces `deliverableUri`; §4.21 `JobBrief` v2 (`taskSpec`, `inputs` from `callInputs`, push delivery, `targetBudget`, `submitBy`, `decisionCutoff`, `terms`, reserved `attachments`; type-agnostic); §6.2 `DeliverableUpload` type and vector; §9.2 `uploadJobDeliverable`. |

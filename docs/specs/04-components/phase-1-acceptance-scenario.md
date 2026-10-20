@@ -72,7 +72,7 @@
 | 6.1 | `openJob(envelopeId, 3, provider, 400,000, proof, expiredAt = now + 24 h, descriptionHash)` | `JobOpened`; on Circle's instance `JobCreated(jobId, client = vault, provider, evaluator = vault.evaluator, expiredAt, hook = 0)` (A4-06) |
 | 6.2 | Test provider `setBudget(jobId, 300,000, "")` | `BudgetSet(jobId, 300,000)` |
 | 6.3 | `fundJob(jobKey)` | the vault read `platformFeeBP == 0 && evaluatorFeeBP == 0` (A4-07); `JobFunded(jobId, vault, 300,000)`; `Envelope.jobEscrowed == 300,000`, `reserved` released by 400,000 |
-| 6.4 | Provider `submit(jobId, deliverable, "")`; deliverable fetched at `https://<provider-host>/.well-known/czar-deliverable/<deliverable-hex>` (D53, `JobRecord.deliverableUri`, AM-08) | `JobSubmitted`; CZ-16 runs `delivery` + `structural` in the sandbox |
+| 6.4 | Provider uploads the deliverable to `uploadJobDeliverable` (signed `DeliverableUpload`), then `submit(jobId, keccak256(bytes), "")` before `submitBy` (D87) | `201 {contentHash}`; `JobSubmitted`; CZ-16 finds the upload by `contentHash` and runs `delivery` + `structural` in the sandbox; the bytes are not reachable by any unauthenticated request |
 | 6.5 | Evaluator (K7) calls `complete(jobId, reportHash, "")` | `JobCompleted(jobId, evaluator, reason == reportHash)`; `PaymentReleased(jobId, provider, 300,000)`; `syncJob` → `Envelope.spent += 300,000`; ledger "Paid $0.30 after acceptance" |
 | 6.6 | Negative run (second job): provider submits junk → `reject` | `JobRejected`, `Refunded(jobId, vault, budget)`; `syncJob` un-spends; ledger "Money back: $0.30" |
 | 6.7 | Negative run (third job): provider never submits; after `expiredAt`, `claimJobRefund(jobKey)` by an unrelated address | `Refunded`; `JobRefunded(creditedToEnvelope = true)` |
@@ -126,3 +126,4 @@
 | 2026-10-20 | D83 | Stage 8 rows 8.6 (two lanes) and 8.7 (test-merchant lab). |
 | 2026-10-20 | D84 | Stage 2.1 realistic table with named rows; 2.3 checks `TaskSpec`; new 7.2a outcome check. |
 | 2026-10-20 | D85 | 7.2a checks the in-place fill of `pricing.md` and undo. |
+| 2026-10-20 | D87 | 6.4 uses the push model. |

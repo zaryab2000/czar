@@ -52,6 +52,11 @@ components:
       in: header
       name: X-Czar-Brief-Signature
       description: "EIP-712 BriefRequest(jobKey, issuedAt) signature by the job's provider address (EOA or ERC-1271), sent with X-Czar-Provider-Address and X-Czar-Brief-Issued-At (spec 02 §6.2, §9.2; RV-025). issuedAt must be within api.briefSignatureMaxAgeSeconds (300)."
+    ProviderUploadSignature:
+      type: apiKey
+      in: header
+      name: X-Czar-Upload-Signature
+      description: "EIP-712 DeliverableUpload(jobKey, contentHash, issuedAt) signature by the job's provider (EOA or ERC-1271), sent with X-Czar-Provider-Address and X-Czar-Upload-Issued-At; contentHash = keccak256 of the request body (spec 02 §6.2, D87)."
     GitHubOAuth:
       type: oauth2
       description: Builder sign-in (D23). Phase 2. Scope read-only on repository administration.
@@ -1144,6 +1149,28 @@ paths:
         "404": { $ref: "#/components/responses/Problem" }
         "429": { $ref: "#/components/responses/RateLimited" }
 
+  /v1/jobs/{jobKey}/deliverable:
+    post:
+      tags: [provider]
+      summary: Upload an ERC-8183 deliverable before submitting its hash (D87 push model).
+      description: "Only the job's on-chain provider. Append-only: each upload is a version keyed by contentHash, never replaced (N4). Limits: acceptance.maxUploadsPerJob 10, total 2 x acceptance.deliverableMaxBytes. In Phase 1 the server is local, so only a provider on the same machine can reach it (N3)."
+      operationId: uploadJobDeliverable
+      security: [ { ProviderUploadSignature: [] } ]
+      parameters:
+        - { name: jobKey, in: path, required: true, schema: { $ref: "#/components/schemas/Hash32" } }
+        - { name: X-Czar-Provider-Address, in: header, required: true, schema: { $ref: "#/components/schemas/Address" } }
+        - { name: X-Czar-Upload-Issued-At, in: header, required: true, schema: { type: integer, minimum: 0 } }
+      requestBody:
+        required: true
+        content: { application/octet-stream: { schema: { type: string, format: binary } } }
+      responses:
+        "201":
+          description: Stored
+          content: { application/json: { schema: { type: object, additionalProperties: false, required: [contentHash], properties: { contentHash: { $ref: "#/components/schemas/Hash32" } } } } }
+        "404": { $ref: "#/components/responses/Problem" }
+        "413": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
   # ---------------- public ----------------
   /v2/x402/discovery/resources:
     get:
@@ -1549,3 +1576,4 @@ paths:
 # - D83 (2026-10-20): getMarketView route and MarketViewRequest; FindServiceRequest.network must be the payment network; includeMarketView and FindServiceResponse.marketView.
 # - D84 (2026-10-20): Result.taskSpec, Result.assembly[].inputs[].subjectIndex, SubjectsRevision, revisePlanSubjects route.
 # - D85 (2026-10-20): Plan.fillInPlace via ApprovalIntentRequest; Result.fillInPlace; ResultAck.fill counts.
+# - D86/D87 (2026-10-20): uploadJobDeliverable route and ProviderUploadSignature scheme; JobBrief v2.

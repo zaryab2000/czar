@@ -482,6 +482,14 @@
               }
             }
           }
+        },
+        "contextNotice": {
+          "type": "string",
+          "enum": [
+            "task-description-only"
+          ],
+          "description": "Shown on the approval screen for a job step whose provider gets only the task description and TaskSpec context, no files (D86; Phase 1 has no file sharing).",
+          "x-privacyClass": "server-only"
         }
       },
       "additionalProperties": false,

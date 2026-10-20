@@ -100,11 +100,10 @@
       "description": "Job expiry.",
       "x-privacyClass": "public"
     },
-    "deliverableUri": {
+    "deliverableRef": {
       "type": "string",
-      "format": "uri",
-      "maxLength": 2048,
-      "description": "Where the evaluator fetches the deliverable: https://<provider-host>/.well-known/czar-deliverable/<deliverable-hex>. The fetched bytes must keccak256 to deliverableHash (D53).",
+      "maxLength": 200,
+      "description": "Object-store key of the uploaded deliverable whose keccak256 equals the on-chain deliverable (D87 push model; replaces deliverableUri and the D53 .well-known URL).",
       "x-privacyClass": "server-only"
     }
   },
@@ -123,5 +122,5 @@
     "state",
     "expiredAt"
   ],
-  "$comment": "Change log: 2026-10-18 AM-08/D53 added deliverableUri (.well-known convention)."
+  "$comment": "Change log: 2026-10-18 AM-08/D53 added deliverableUri (.well-known convention). 2026-10-20 D87: deliverableUri replaced by deliverableRef (push model)."
 }

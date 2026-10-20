@@ -277,10 +277,11 @@ stateDiagram-v2
 |---|---|---|
 | 1 | CZ-19 reports `JobSubmitted(jobId, provider, deliverable)` for a vault-client job | 03 `job-escrow-adapter.md` §2 |
 | 1a | **Funded check (H1, N6).** Read the vault job (`jobs(jobKey)`) and the escrow job. Evaluate only when the vault job is `Funded` or `Submitted` **and** the escrow budget equals the vault's recorded `budget`. If the vault job is `Opened` (the provider submitted before any funding, R1), `reject(jobId, keccak256("czar:unfunded-submit"), "")` and raise `job-unfunded-submit`; never `complete` it. Any other mismatch → no decision, alert `job-state-mismatch` | 03 `czar-vault.md` §5.5, INV-16 |
-| 2 | CZ-15's fetcher resolves the deliverable: `deliverable` is a `bytes32`; the provider publishes the content at the URI agreed in the job's off-chain brief (convention `https://<provider-host>/.well-known/czar-deliverable/<deliverable-hex>`, D53; stored as `JobRecord.deliverableUri`, 02 §4.11, AM-08; the EIP fixes only the `bytes32`, A4-03); the fetch goes through the shared SSRF-safe fetcher in `@czar/x402` (`server-supply-side.md` CZ-20 §5, RV-022); the fetched bytes must hash (keccak256) to `deliverable`, **else the decision is `fail` with `detail.hashMismatch` and the evaluator calls `reject`** (D77, RV-024). A fetch that fails (network, timeout, size) is not a mismatch: it stays `inconclusive` and is retried until `expiredAt` (the CDN-stale-copy case: Czar re-fetches `acceptance.deliverableRefetchTries` 3 times, `acceptance.deliverableRefetchDelayMs` 60,000 apart, before deciding a mismatch) | A4-03, D77 |
+| 2 | **Deliverable lookup (D87 push model; replaces the D53 `.well-known` fetch).** The provider uploads the bytes to `uploadJobDeliverable` (spec 02 §9.2) before it submits. The evaluator looks for an upload version whose `contentHash` equals the on-chain `deliverable` (versions are append-only, N4). Found → step 3. Not found → `inconclusive`; check again every `acceptance.evaluatorPollSeconds`; still missing at `decisionCutoff` (= `expiredAt − acceptance.decisionMarginSeconds − acceptance.txMarginSeconds`, N5) → `reject(jobId, keccak256("czar:deliverable-missing"), "")`. A hash mismatch cannot occur: the hash is checked at upload (L1; D77 amended) | spec 02 §4.21, §9.2; D87 |
 | 3 | P-01 screen on the bytes (chunked over everything P-02 reads, RV-041; quarantine → `inconclusive`, never `reject`, RV-042); CZ-16 runs the job's profile in the sandbox | §5.2 |
-| 4 | `Pass` → `complete(jobId, reportHash, "")`; `Fail` → `reject(jobId, reportHash, "")`; both signed by K7 through the KMS policy that allows only these two selectors on the pinned escrow address | K7 (spec 01 §7.2); 03 `job-escrow-adapter.md` §5 |
-| 5 | `Inconclusive` → wait and retry every `acceptance.evaluatorPollSeconds` until `expiredAt`; after expiry CZ-15 calls the vault's `claimJobRefund(jobKey)` (anyone may call it, 03 `czar-vault.md` §5.5; Circle's instance has no caller check, EIP reference line 690; the Czar instance adds a 1 h grace when `Submitted`) | 03 `job-escrow-adapter.md` §2 |
+| 4 | **Before `complete` (M2, M7):** re-read `platformFeeBP`, `evaluatorFeeBP` and the escrow's implementation address through the adapter; if either fee is non-zero or the implementation differs from the pinned one → `reject(jobId, keccak256("czar:fees-changed"), "")` (full refund), raise `job-fees-changed` / `job-escrow-upgraded`, and set the halt flag that stops new `openJob` (CZ-19). The read and the `complete` are two transactions, so the admin could still change fees in between; accepted on testnet, made atomic before mainnet (N9, MN-10). Then `Pass` → `complete(jobId, reportHash, "")`; `Fail` → `reject(jobId, reportHash, "")`; both signed by K7 through the policy that allows only these two selectors on the pinned escrow address; `reject` is always signable, even while the vault is frozen or paused (N8) | K7 (spec 01 §7.2); 03 `job-escrow-adapter.md` §5; CZ-27 `evaluator-call` |
+| 5 | **Timing (M4, N5).** Submissions received by `submitBy` (= `expiredAt − acceptance.evaluationWindowSeconds`) are decided by `decisionCutoff`. A submission after `submitBy` is evaluated only if a decision can still be sent by `decisionCutoff`; otherwise `reject(… "czar:late" …)`. `Inconclusive` (screen unavailable, sandbox timeout, deliverable not yet uploaded) is retried until `decisionCutoff`, then rejected, so the decision is always mined before `expiredAt` and the escrow's refund (open to anyone at `expiredAt`, no grace on Circle's instance, R4) never races honest work. CZ-15 never calls `claimJobRefund` on a `Submitted` job while a decision is pending | 03 `czar-vault.md` §5.5 |
+| 5a | **Buyer freeze (M3, N8).** On `Frozen` for the client vault: every `Funded` job not yet submitted → `reject(… "czar:owner-froze" …)` at once (refund now). A `Submitted` job is evaluated as usual; a `Pass` is held (the signer refuses `complete` while frozen); unfreeze → `complete`; still frozen at `decisionCutoff` → `reject(… "czar:owner-froze" …)`. The brief's `terms.onBuyerFreeze` tells providers this rule | D72 (amended by D87) |
 | 6 | After the tx: CZ-15 `syncJob(jobKey)` mirrors the state into the vault; CZ-17 gets the `report` row | 03 `czar-vault.md` §5.5 |
 
 - `optParams` is always empty; the `reason` is only the hash (p1-E7: calldata is public).
@@ -313,6 +314,11 @@ Czar judges work it planned and paid for. Mitigations in Phase 1, all visible:
 | `acceptance.evaluatorPollSeconds` | 15 | jobs are minutes-scale; no need for sub-second |
 | `acceptance.deliverableMaxBytes` | 20,971,520 | job deliverables are larger than API bodies; bounded for the sandbox |
 | `acceptance.deliverableFetchTimeoutMs` | 30,000 | matches delivery |
+| `acceptance.evaluationWindowSeconds` | 7,200 | `submitBy = expiredAt − 7,200` (M4) |
+| `acceptance.decisionMarginSeconds` | 900 | decision sent at least 15 min before expiry (N5) |
+| `acceptance.txMarginSeconds` | 300 | time for the decision tx to be mined (N5) |
+| `acceptance.maxUploadsPerJob` | 10 | append-only upload versions per job (N4) |
+| `acceptance.uploadRetentionHours` | 24 | unmatched upload versions purged after the decision (N4) |
 | `acceptance.deliverableRefetchTries` | 3 | a stale CDN copy should not cost an honest provider the job (D77 reject only after re-fetches) |
 | `acceptance.deliverableRefetchDelayMs` | 60,000 | spaced re-fetches |
 
@@ -383,7 +389,7 @@ Never used: "verified correct", "guaranteed", "refund" for third-party x402 (D35
 
 ### 15. Dependencies
 
-Ajv 8 (2020-12), Node `vm` sandbox (or a Wasm runtime, SL-C7), viem 2.57.x, KMS client (AR-1). Deliverable URI convention: D53, `JobRecord.deliverableUri` (AM-08).
+Ajv 8 (2020-12), Node `vm` sandbox (or a Wasm runtime, SL-C7), viem 2.57.x, KMS client (AR-1). Deliverables: D87 push model, `JobRecord.deliverableRef` (replaces D53 and `deliverableUri`).
 
 **Mainnet differences:** evaluator targets `CzarJobEscrow` (D32) with the 1 h `EVALUATION_GRACE_PERIOD`; fees may be non-zero (≤ 500 bps) and are shown in the job wording as "after fees".
 
@@ -800,3 +806,4 @@ Postgres 16 (pgvector only in Phase 2, C1-13), `@czar/x402` for probes, `@x402/e
 | 2026-10-20 | D82 | `local-template-v1` profile for unpaid local steps, checked on the Mac; no evidence for unpaid steps. |
 | 2026-10-20 | D83 | CZ-18 two lanes: §5.3a market view with unpaid probes, three payment guards, network-scoped evidence; tables `market_probes`, `market_origin_state`; parameters; wording; tests. |
 | 2026-10-20 | H1, N6 | Evaluator step 1a: decide only for vault jobs `Funded`/`Submitted` with matching budget; reject unfunded submits. |
+| 2026-10-20 | D87 (H3, M2, M3, M4, N3–N5, N8, N9) | Evaluator: push-model deliverable lookup and `decisionCutoff`; fee and implementation check before `complete`; timing rule; freeze rule; new parameters. Refetch parameters now unused (kept for the stage-2 signed-pull fallback). |

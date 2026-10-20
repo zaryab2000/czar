@@ -58,6 +58,9 @@
 | P2-13 | Daemon on Linux and Windows | OD-39, D67 |
 | P2-14 | Snapshot routes (`/v1/snapshots`) | AM-07 |
 | P2-15 | Atomic freeze-lowers-limits in the contract | OD-35, D63 |
+| P2-17 | **Approved file sharing for jobs (C1-b, ready to build, D86).** (1) Detection: `TaskSpec.files[]` suggestions, base names only (from `error-fix`: files in the failing events' `fileRefs`; from `refused-task`: files named in the prompt; from placeholder tasks: none by default). (2) Approval screen: "This job shares: {name} ({size})" with a checkbox per file, unticked by default above 100 KB. (3) Upload after approval only: daemon route `uploadJobAttachment` (device token), layer 1 secrets redaction first; limits 1 MB per file, 5 MB total, 10 files. (4) Brief: fill the reserved `JobBrief.attachments[] {name, mimeType, contentHash, ref, bytes}`; download through the brief route with the provider's signature only. (5) Order: CZ-15 opens the job only after every ticked file has arrived. (6) Tests: unticked file never leaves the Mac; a planted secret is redacted; only the job's provider can download. (7) Remove `contextNotice = task-description-only` for jobs that carry files. | D86 |
+| P2-18 | **Provider recourse for ERC-8183 jobs (H4).** Reject-and-keep risk with Czar as evaluator. Candidates: a Czar-owned escrow on `erc-8183/base-contracts` (its claim flow `submitClaim`/`settleClaim`/`rejectClaim`, A4-11; a dispute interface is **unconfirmed**, research R11); an independent evaluator; partial payment on upload; publish the evaluator's reject rate. Revisit D27 before outside providers. | D87 |
+| P2-19 | **Signed-pull deliverable fallback (D87).** For providers that cannot push: `.well-known/czar-deliverable/<hex>` served only for an evaluator-signed `DeliverableRequest`, host from the provider's CZ-18 service `origin`. Needs the public host (GC-9). | D87 |
 | P2-16 | Manual task entry: a "New task" box in the web app that creates an `ObjectiveSubmission` without an observer (layers 1–2 still run locally); results shown in the browser with names restored client-side; `agent-assist` steps dropped for such users unless a paid merchant can do the step | D82 |
 
 ---
@@ -86,6 +89,7 @@
 | MN-5 | Deploy Czar-owned ERC-8183 instance (`CzarJobEscrow`) | D27, D32 |
 | MN-6 | Re-pin all external addresses and implementations | spec 01 §6.2 |
 | MN-7 | Remove the test-keystore vault owner used in M3–M4 | OD-36, D64 |
+| MN-10 | **Atomic fee check on `complete` (N9).** The Phase 1 evaluator reads fees and then sends `complete` in a second transaction, so an admin can change fees in between. Before mainnet: an evaluator contract that checks fees and calls `complete` in one transaction, or a Czar-owned escrow that fixes fees per job at funding time. | D87 |
 | MN-8 | Merge the two lanes: switch `selection.paymentNetwork` to Arc mainnet and fund a small, capped real budget to pay real merchants and build mainnet posteriors; needs Zaryab's explicit multi-step confirmation; turn the test-merchant lab off | D83 |
 
 ---
@@ -103,6 +107,7 @@
 | GC-7 | Uptime alerts, backups, secret store for API keys (K11, K12, K17–K19) | |
 | GC-8 | **Dual control for K6 (guardian) and K20 (factory admin)** (D80, RV-045): move both off the Mac into Cloud KMS (or a hardware wallet each) with two approver identities and `kms.dualControlWindowMinutes` 30; run the pause drill. Until then single-Mac custody is an accepted testnet exception | confirms D80 |
 | GC-9 | Stable public origin for the app and the archive host (D78): the public host serves every Phase 1 archive by its root; testnet owners register a new passkey on the new RP ID and call `setPasskey` | RV-028 |
+| GC-9a | **Required before any outside ERC-8183 provider (N3):** the public host is what lets providers off Czar's Mac reach `getJobBrief` and `uploadJobDeliverable`. | D87 |
 
 ---
 
@@ -125,3 +130,4 @@
 | 2026-10-19 | D80, D78 | GC-8 dual control for K6/K20; GC-9 public origin and archive host. |
 | 2026-10-20 | D82 | P2-16 manual task entry added. |
 | 2026-10-20 | D83 | MN-8 merge of the two lanes at the mainnet gate. |
+| 2026-10-20 | D86, D87 | P2-17 C1-b ready to build; P2-18 provider recourse; P2-19 signed-pull fallback; MN-10 atomic fee check; GC-9a outside providers need the public host. |

@@ -3,7 +3,7 @@
 // `npm install viem@2.57.2`, then: node <scratch>/compute-eip712-vectors.mjs > eip712-vectors.json
 // Check: node compute-eip712-vectors.mjs | diff - eip712-vectors.json  (must print nothing)
 // Changed 2026-10-19: ReceiptAttestation type and vector, SL_RECEIPT kind tag v2 (RV-013); autonomyRaise deadline
-// moved inside its period (RV-061); BriefRequest type, domain and vector (RV-025). Output is fully deterministic (`generatedAt` is the spec date).
+// moved inside its period (RV-061); BriefRequest type, domain and vector (RV-025). Changed 2026-10-20: DeliverableUpload type and vector (D87). Output is fully deterministic (`generatedAt` is the spec date).
 import { keccak256, toHex, hashTypedData, hashDomain, hashStruct, encodeAbiParameters, parseAbiParameters, pad } from "viem";
 const th = (s) => keccak256(toHex(s));
 // generatedAt is the spec date, not the wall clock, so a rerun reproduces the file byte for byte
@@ -32,6 +32,7 @@ const TYPES = {
   ReceiptAttestation: "ReceiptAttestation(bytes32 receiptStructHash)",
   // Provider authentication for GET /v1/jobs/{jobKey}/brief (RV-025), domain CzarJobBrief v1 with chainId, no contract
   BriefRequest: "BriefRequest(bytes32 jobKey,uint64 issuedAt)",
+  DeliverableUpload: "DeliverableUpload(bytes32 jobKey,bytes32 contentHash,uint64 issuedAt)",
 };
 for (const [k, s] of Object.entries(TYPES)) out.typeHashes[k] = { typeString: s, typeHash: th(s) };
 // Domains
@@ -74,6 +75,9 @@ out.vectors.ownerAction_5042002 = { message: oa, digest: hashTypedData({ domain:
 const briefJobKey = keccak256(encodeAbiParameters(parseAbiParameters("address,uint256"), ["0x0747EEf0706327138c69792bF28Cd525089e4583", 42n]));
 const br = { jobKey: briefJobKey, issuedAt: 1792026000n };
 out.vectors.briefRequest_5042002 = { message: br, digest: hashTypedData({ domain: { name: "CzarJobBrief", version: "1", chainId: 5042002 }, types: { BriefRequest: [{ name: "jobKey", type: "bytes32" }, { name: "issuedAt", type: "uint64" }] }, primaryType: "BriefRequest", message: br }) };
+// DeliverableUpload example (D87, H3): the provider signs the upload of the deliverable bytes before submit
+const du = { jobKey: briefJobKey, contentHash: keccak256(toHex("example deliverable bytes")), issuedAt: 1792026000n };
+out.vectors.deliverableUpload_5042002 = { message: du, digest: hashTypedData({ domain: { name: "CzarJobBrief", version: "1", chainId: 5042002 }, types: { DeliverableUpload: [{ name: "jobKey", type: "bytes32" }, { name: "contentHash", type: "bytes32" }, { name: "issuedAt", type: "uint64" }] }, primaryType: "DeliverableUpload", message: du }) };
 // Derived nonce example (spec 02 §7): keccak256(abi.encode(NONCE_TAG, vault, reservationId, index))
 const NONCE_TAG = keccak256(toHex("czar.vault.nonce.v1"));
 out.vectors.derivedNonce_example = { nonceTag: NONCE_TAG, vault: VAULT, reservationId: 12n, index: 3, nonce: keccak256(encodeAbiParameters(parseAbiParameters("bytes32,address,uint64,uint32"), [NONCE_TAG, VAULT, 12n, 3])) };

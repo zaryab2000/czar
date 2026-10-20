@@ -1,23 +1,117 @@
 {
   "schemaVersion": "1.0",
-  "briefVersion": 1,
-  "network": "eip155:40",
+  "briefVersion": 2,
+  "network": "eip155:5042002",
   "jobEscrow": "0xAa93b4F8fe4C0CBEdEfB6Fa6d1948e48a9DbCfCd",
   "jobId": "1",
   "jobKey": "0xc9c9da45ee0e4d6da5d5286fe8e8d1fc90dc5d29a26ec94e4ae00956ad45912a",
   "planHash": "0x47276f88384c3c20e289987517e76a96186008fc9c5a4965d79af516f5014574",
   "stepIndex": 0,
   "acceptanceProfileId": "example",
-  "capability": "example",
-  "inputs": {},
+  "capability": "web-search",
+  "inputs": {
+    "q": "Billora starter price pricing"
+  },
+  "taskSpec": {
+    "schemaVersion": "1.0",
+    "kind": "table-fill",
+    "topic": "Competitor pricing",
+    "fileName": "pricing.md",
+    "fileExt": "md",
+    "subjects": [
+      {
+        "label": "Billora",
+        "sourceLine": 12,
+        "placeholders": [
+          {
+            "field": "Starter price (USD/month)",
+            "token": "[Add price]",
+            "column": 1
+          }
+        ]
+      },
+      {
+        "label": "InvoiceKite",
+        "sourceLine": 13,
+        "placeholders": [
+          {
+            "field": "Starter price (USD/month)",
+            "token": "[Add price]",
+            "column": 1
+          }
+        ]
+      },
+      {
+        "label": "Ledgerline",
+        "sourceLine": 14,
+        "placeholders": [
+          {
+            "field": "Starter price (USD/month)",
+            "token": "[Add price]",
+            "column": 1
+          }
+        ]
+      },
+      {
+        "label": "PayStub Pro",
+        "sourceLine": 15,
+        "placeholders": [
+          {
+            "field": "Starter price (USD/month)",
+            "token": "[Add price]",
+            "column": 1
+          }
+        ]
+      },
+      {
+        "label": "Quillbill",
+        "sourceLine": 16,
+        "placeholders": [
+          {
+            "field": "Starter price (USD/month)",
+            "token": "[Add price]",
+            "column": 1
+          }
+        ]
+      }
+    ],
+    "fields": [
+      "Starter price (USD/month)"
+    ],
+    "columns": [
+      "Competitor",
+      "Starter price (USD/month)",
+      "Notes"
+    ],
+    "context": "## Competitor pricing\n| Competitor | Starter price (USD/month) | Notes |",
+    "sourceTrust": "user-file"
+  },
   "inputSalt": "0x7f516224be179d240b646c04161940c9e8460ef525651b9209ab1921a989dcf4",
   "inputCommit": "0xbb0c7cb67a2939bc2387608c3bd5f55fedb6067e0bcf2633a49dd46a8e1a0d7e",
   "deliverable": {
-    "mimeType": "example",
-    "uriConvention": "https://<provider-host>/.well-known/czar-deliverable/<deliverable-hex>"
+    "mimeType": "application/json",
+    "expectedKeys": [
+      "price"
+    ],
+    "delivery": "push",
+    "uploadRoute": "POST /v1/jobs/{jobKey}/deliverable",
+    "maxBytes": 20971520
   },
   "budgetCap": "23",
+  "targetBudget": "20",
   "evaluator": "0xBbEFFB00aBBF18C2C9E72aeb90De002e10c7Bef6",
-  "expiredAt": 0,
-  "issuedAt": "2026-10-19T12:00:00.000Z"
+  "expiredAt": 1792112400,
+  "submitBy": 1792105200,
+  "decisionCutoff": 1792111200,
+  "issuedAt": "2026-10-19T12:00:00.000Z",
+  "terms": {
+    "evaluatorIsBuyerAgent": true,
+    "checks": [
+      "delivery",
+      "structural",
+      "requirement"
+    ],
+    "correctnessChecked": false,
+    "onBuyerFreeze": "reject-unsubmitted-hold-submitted"
+  }
 }
