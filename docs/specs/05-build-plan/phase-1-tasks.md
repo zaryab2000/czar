@@ -271,7 +271,7 @@
 - **Milestone / group / who:** M1 / M1-a / agent. **Size:** M. **Deps:** T-003.
 - **Spec refs:** `S03/czar-vault-factory.md` §2–§10; `S03/interfaces/ICzarVaultFactory.sol`; FAC-1..5; A9-15; D73.
 - **Outputs:** `contracts/src/CzarVaultFactory.sol`, `contracts/test/FactoryTest.t.sol`.
-- **Steps:** tests first for `createVault(owner)`, `predictVault(owner)`, `pause`/`unpause`, guardian and defaults timelocks (48 h, `queueDefaults`/`applyDefaults`), `networkConfig()`, Ownable2Step; no version register (D73, RV-015); the vault constructor is a stub that reads `networkConfig()` and `defaults()` from `msg.sender` until T-013.
+- **Steps:** tests first for `createVault(owner)`, `predictVault(owner)`, `pause`/`unpause`, guardian and defaults timelocks (48 h, `queueDefaults`/`applyDefaults`, `queueGuardian`/`applyGuardian(changeId, newGuardian)`, `cancelChange`), `guardian()`, `networkConfig()`, the constructor checks (`ZeroAddress`, `BadParams`; admin set by `Ownable(_nonZero(admin_))`), Ownable2Step for later transfers; no version register (D73, RV-015); D88. The vault side is the deployable vault skeleton from 07 PRD 03 (storage, constructor, temporary stubs) until T-013.
 - **Inputs:** `contracts/` project and `contracts/src/interfaces/ICzarVaultFactory.sol` from T-003.
 - **Acceptance tests:**
   - `arc-forge test --match-contract FactoryTest` passes, including: second `createVault` for one owner reverts `VaultExists`; `applyDefaults` before the eta reverts `TooEarly`; only the guardian can pause.
@@ -288,7 +288,7 @@
 - **Inputs:** mocks in `contracts/test/mocks/` from T-010; `contracts/src/CzarVaultFactory.sol` from T-012; `contracts/src/interfaces/ICzarVault.sol`.
 - **Acceptance tests:**
   - `arc-forge test --match-contract VaultCoreTest` passes, including a role-matrix test that tries every (role × function) cell from §2 and expects success or the exact error.
-  - `USDC_DOMAIN_SEPARATOR` equals `0x3611…c6b0` on chain id 5042002 (`S02/data-and-protocol.md` §6.1).
+  - `USDC_DOMAIN_SEPARATOR` equals `0x361191522483d32a83e70ae7183b4b9629442c13a78bc9921d6f707911c8c6b0` on chain id 5042002 (`S02/data-and-protocol.md` §6.1), read through `CzarVaultHarness`.
   - **Review fixes (2026-10-19):** the named tests in `S03/security-and-testing.md` §3.7 for RV-011 (`test_freeBalance_saturatesInSettleWindow`) and RV-037 (`test_setMaxPullbackFee_aboveCeiling_reverts`) pass.
 
 ### T-014 Envelopes: openEnvelope (owner/agent allowance), closeEnvelope, forceCloseEnvelope
@@ -309,7 +309,7 @@
 - **Inputs:** `contracts/src/CzarVault.sol` with envelopes from T-014.
 - **Acceptance tests:**
   - `arc-forge test --match-contract ReserveTest` passes, including `PayeeNotInPlan`, `StepCapExceeded`, `CapExceeded`, `BadTtl`, `BadCount`, `NotUsed`, `AlreadyDone`, `NotExpired`.
-  - `derivedNonce(12, 3)` for the example vault equals `0x1f7eb762…fd59f` from the vectors file.
+  - `derivedNonce(12, 3)` for the example vault equals `0x1f7eb762975d3148f76637d5498c320aa01d5daa71be09a5e6ca4947371fd59f` from the vectors file.
   - **Review fixes (2026-10-19):** the named tests in `S03/security-and-testing.md` §3.7 for RV-001, RV-002 and RV-056 pass.
 
 ### T-016 isValidSignature: USDC_3009, 65-byte fallback, SL_RECEIPT; exposure-bound tests
@@ -349,7 +349,7 @@
 - **Milestone / group / who:** M1 / M1-d / agent. **Size:** L. **Deps:** T-014.
 - **Spec refs:** `S03/czar-vault.md` §5.6 (empty `sig` for the owner, AM-20; D60 note), §7; `S02/data-and-protocol.md` §6.2 (`AutonomyRaise`, `OwnerAction`); D30, D40; A6-01 to A6-03.
 - **Outputs:** autonomy and owner-action functions; `contracts/test/AutonomyTest.t.sol`, `contracts/test/OwnerActionTest.t.sol`, a captured WebAuthn fixture in `contracts/test/fixtures/`.
-- **Steps:** tests first: raises spaced by `PERIOD_LENGTH` from `lastRaiseAt` (RV-031), ≤ 20% of `userMax`, `newLimit > autoLimit` (RV-008), refused while frozen or paused and invalidated by a freeze or lowering (RV-030), signer recovery, nonce and deadline; `lowerAutoLimit` allows equal; WebAuthn with UV required, `rpIdHash` check (RP ID `localhost`, D78), `P256.verify` with low-s normalisation by the client (RV-034), 6,900 gas per precompile call; `OwnerActionKind` 1–16 (RV-033).
+- **Steps:** tests first: raises spaced by `PERIOD_LENGTH` from `lastRaiseAt` (RV-031), ≤ 20% of `userMax`, `newLimit > autoLimit` (RV-008), refused while frozen or paused and invalidated by a freeze or lowering (RV-030), signer recovery, nonce and deadline; `lowerAutoLimit` allows equal; WebAuthn with UV required, `rpIdHash` check (RP ID `localhost`, D78), `P256.verify` with low-s normalisation by the client (RV-034), 6,900 gas per precompile call; `OwnerActionKind` 1–17 (RV-033, H2).
 - **Inputs:** `contracts/src/CzarVault.sol` with envelopes from T-014; a captured WebAuthn assertion fixture.
 - **Acceptance tests:**
   - `arc-forge test --match-contract AutonomyTest` passes, including `RaiseTooLarge`, `RaiseAlreadyThisPeriod`, `BadSigner`, `Expired`.
@@ -452,7 +452,8 @@
 - **Steps:**
   - Deploy `OpenEvidenceLog` and `CzarVaultFactory` through `0x4e59b44847b379578588920cA78FbF26c0B4956C` with fixed salts.
   - Constructor `defaults` (K3, K5, K7), guardian (K6) and admin (K20) are the addresses T-105 recorded in `deployments/arc-testnet-keys.json`; never placeholders (RV-016).
-  - Admin accepts ownership. (Superseded by D73 / RV-015: "register vault version 1"; there is no version register.)
+  - No ownership step: the factory constructor sets the admin directly (`Ownable(_nonZero(admin_))`, D88), and `acceptOwnership` would revert with no pending owner. (Superseded: "Admin accepts ownership" (D88) and "register vault version 1" (D73 / RV-015).)
+  - If 07 PRD 11 introduced linked libraries, deploy them first through the same deployer with salts `keccak256("czar.lib.<LibraryName>.v1")` (`S03/security-and-testing.md` §4 step 1a).
   - Verify sources on the testnet explorer (keyless, rate-limited).
 - **Inputs:** tested contracts from T-021..T-025; `packages/vault-client` from T-026; Zaryab's written funds approval.
 - **Acceptance tests:**
@@ -1524,4 +1525,4 @@
 | 2026-10-20 | Job-path review PR 1 | Notes on T-018, T-019, T-021, T-026, T-054, T-055 for H1, H2, M1-b, N6, N7. |
 | 2026-10-20 | Job-path review PR 2 (D86, D87) | Notes on T-007, T-022, T-035, T-045, T-054, T-055, T-073, T-084. |
 | 2026-10-20 | Job-path review PR 3 (D87: N1, N2, H6, H7, N12) | New T-108 (two-instance test provider); T-059 depends on it; notes on T-035, T-045, T-046, T-055, T-073, T-084, T-091, T-101, T-105. |
-| 2026-10-20 | D88 (contract build readiness) | M1 note pointing at `docs/specs/07-contract-build/`; T-017 vector reproduced as a digest through `CzarVaultHarness`; T-018 JOB-1..5 and §15; T-020 also measures the factory; T-021 ranges, fuzz runs and handlers; T-023 six on-chain digests and `fs_permissions`; T-105 key count; T-011 OEL test follow-up (G-61). |
+| 2026-10-20 | D88 (contract build readiness, plus its independent review) | T-012 steps (guardian apply, cancel, constructor checks); T-013/T-015 full vector values; T-019 owner actions 1–17; T-027 no ownership step, linked-library deployment; M1 note pointing at `docs/specs/07-contract-build/`; T-017 vector reproduced as a digest through `CzarVaultHarness`; T-018 JOB-1..5 and §15; T-020 also measures the factory; T-021 ranges, fuzz runs and handlers; T-023 six on-chain digests and `fs_permissions`; T-105 key count; T-011 OEL test follow-up (G-61). |

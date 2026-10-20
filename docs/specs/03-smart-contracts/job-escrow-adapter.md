@@ -96,7 +96,7 @@ See `czar-vault.md` §9: `JobOpened`, `JobFunded`, `JobSynced`, `JobRefunded`, `
 
 ## 10. Gas budget
 
-See `czar-vault.md` §13 (`openJob` ≈ 252k, `fundJob` ≈ 150k, `syncJob` ≈ 55k, `claimJobRefund` ≈ 95k; D88 aligned these with §5.5).
+See `czar-vault.md` §5.5 and §13 (`openJob` ≈ 252k, `fundJob` ≈ 150k, `syncJob` ≈ 55k; `claimJobRefund` ≈ 95k is in §5.5 only; D88 aligned these).
 
 ## 11. Mainnet differences
 

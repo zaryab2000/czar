@@ -118,7 +118,7 @@ Task details are in `phase-1-tasks.md`. "Exit gate" commands run in CI unless ma
 - **Specs:** 03 `czar-vault.md` §2–§14, `czar-vault-factory.md`, `job-escrow-adapter.md`, `open-evidence-log.md`, `security-and-testing.md`; 02 §5–§7.
 - **Entry:** M0 exit; G0-08, G0-09, G0-10 recorded.
 - **Exit gate:**
-  - `arc-forge test` passes all unit tests, with one test per row of the role table (`czar-vault.md` §2) and one per custom error
+  - `arc-forge test` passes all unit tests, with one test per row of the role table (`czar-vault.md` §2 and the binding caller list §15.1) and one per custom error
   - `arc-forge test --match-path 'test/invariant/*'` passes INV-1 to INV-16, FAC-1 to FAC-5, JOB-1 to JOB-5, OEL-1 to OEL-6 with `runs ≥ 256`, `depth ≥ 64`
   - `arc-forge test --match-path 'test/fork/*' --fork-url https://rpc.testnet.arc.io --fork-block-number <pinned>` passes (USDC bytes overload, `authorizationState`, `depositFor`, `addDelegate`, Circle ERC-8183)
   - the spec 02 §6.4 vectors are reproduced on-chain (T-023)

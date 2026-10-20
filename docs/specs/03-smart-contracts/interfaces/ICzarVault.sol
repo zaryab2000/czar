@@ -90,8 +90,8 @@ interface ICzarVault {
 
     // Storage records (czar-vault.md §4; D88). Field order is the storage packing order and is binding.
 
-    /// @notice One envelope (02 §4.8). Last slot packs pocket, expiresAt, pocketCapBps, state, approverIsOwner;
-    ///         the three counters share the next slot.
+    /// @notice One envelope (02 §4.8). `pocket`, `expiresAt`, `pocketCapBps`, `state` and `approverIsOwner` share one
+    ///         slot (32 bytes); the three counters share the final slot.
     struct Envelope {
         uint256 cap;
         uint256 maxStepAmount;
@@ -154,12 +154,13 @@ interface ICzarVault {
         bytes32 transferSpecHash;
     }
 
-    /// @notice One ERC-8183 job as the vault mirrors it (02 §4.11).
+    /// @notice One ERC-8183 job as the vault mirrors it (02 §4.11). `expiredAt` is stored at openJob (D88).
     struct Job {
         address provider;
         uint64 envelopeId;
         uint32 stepIndex;
         JobState state;
+        uint64 expiredAt;
         uint256 jobId;
         uint256 reservedCap;
         uint256 budget;
