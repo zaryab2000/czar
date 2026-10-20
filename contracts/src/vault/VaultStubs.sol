@@ -12,19 +12,7 @@ abstract contract VaultStubs is VaultBase {
     /// @dev Placeholder error; removed with this file.
     error NotBuilt();
 
-    function cancelJob(bytes32) external pure {
-        revert NotBuilt();
-    }
-
-    function claimJobRefund(bytes32) external pure {
-        revert NotBuilt();
-    }
-
     function executeOwnerAction(uint8, bytes calldata, uint256, WebAuthnAuth calldata) external pure {
-        revert NotBuilt();
-    }
-
-    function fundJob(bytes32, uint256) external pure {
         revert NotBuilt();
     }
 
@@ -32,19 +20,7 @@ abstract contract VaultStubs is VaultBase {
         revert NotBuilt();
     }
 
-    function openJob(uint64, uint32, address, uint256, bytes32[] calldata, uint64, bytes32)
-        external
-        pure
-        returns (bytes32)
-    {
-        revert NotBuilt();
-    }
-
     function raiseAutoLimit(bytes32, uint256, uint64, uint256, bytes calldata) external pure {
-        revert NotBuilt();
-    }
-
-    function syncJob(bytes32) external pure {
         revert NotBuilt();
     }
 }

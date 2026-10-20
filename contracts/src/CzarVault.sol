@@ -10,6 +10,7 @@ import {EnvelopeLogic} from "./vault/logic/EnvelopeLogic.sol";
 import {ReservationLogic} from "./vault/logic/ReservationLogic.sol";
 import {SignatureLogic} from "./vault/logic/SignatureLogic.sol";
 import {PocketLogic} from "./vault/logic/PocketLogic.sol";
+import {JobLogic} from "./vault/logic/JobLogic.sol";
 
 /// @title CzarVault
 /// @notice The per-user vault (czar-vault.md). Immutable; no proxy (D33). Every state-changing function is a thin
@@ -179,5 +180,43 @@ contract CzarVault is VaultBase, VaultStubs {
     /// @inheritdoc ICzarVault
     function recordManualReturn(address pocket, uint256 amount) external nonReentrant {
         PocketLogic.recordManualReturn(_s, _config(), msg.sender, pocket, amount);
+    }
+
+    // ───────────── Jobs (§5.5) ─────────────
+
+    /// @inheritdoc ICzarVault
+    function openJob(
+        uint64 envelopeId,
+        uint32 stepIndex,
+        address provider,
+        uint256 stepCap,
+        bytes32[] calldata proof,
+        uint64 expiredAt,
+        bytes32 descriptionHash
+    ) external nonReentrant returns (bytes32) {
+        JobLogic.OpenJobRequest memory q = JobLogic.OpenJobRequest(
+            envelopeId, stepIndex, provider, stepCap, expiredAt, descriptionHash
+        );
+        return JobLogic.openJob(_s, _config(), msg.sender, q, proof);
+    }
+
+    /// @inheritdoc ICzarVault
+    function fundJob(bytes32 jobKey, uint256 expectedBudget) external nonReentrant {
+        JobLogic.fundJob(_s, _config(), msg.sender, jobKey, expectedBudget);
+    }
+
+    /// @inheritdoc ICzarVault
+    function cancelJob(bytes32 jobKey) external nonReentrant {
+        JobLogic.cancelJob(_s, _config(), msg.sender, jobKey);
+    }
+
+    /// @inheritdoc ICzarVault
+    function syncJob(bytes32 jobKey) external nonReentrant {
+        JobLogic.syncJob(_s, _config(), jobKey);
+    }
+
+    /// @inheritdoc ICzarVault
+    function claimJobRefund(bytes32 jobKey) external nonReentrant {
+        JobLogic.claimJobRefund(_s, _config(), jobKey);
     }
 }
