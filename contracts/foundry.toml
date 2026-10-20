@@ -29,6 +29,9 @@ fail_on_revert = false
 
 [lint]
 ignore = ["test/**/*.sol"]
+# block-timestamp: every time comparison in the vault and factory is a spec rule (czar-vault.md §15.7,
+# czar-vault-factory.md §5) on windows of seconds to days; Arc validator skew cannot change an outcome (D88).
+exclude_lints = ["block-timestamp"]
 
 [fmt]
 line_length = 120
