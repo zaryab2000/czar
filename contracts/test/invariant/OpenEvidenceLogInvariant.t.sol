@@ -22,6 +22,8 @@ contract OpenEvidenceLogHandler is Test {
     mapping(address => mapping(bytes32 => bytes32)) public ghostBatch;
     uint256 public alreadyCommittedReverts;
     uint256 public wrongPublisherWrites;
+    /// ghost: total mock USDC sent to the log (OEL-5 is checked against it; G-61 moved it here from the invariant).
+    uint256 public ghostDonated;
 
     uint256 internal constant KIND_COUNT = 6;
 
@@ -57,11 +59,23 @@ contract OpenEvidenceLogHandler is Test {
         }
     }
 
-    function _checkOthersUnchanged(address actor, uint256[18] memory before) internal {
+    /// @dev One hash over every other publisher's intent status and batch root for every known root (G-61).
+    function _intentsOfOthers(address actor) internal view returns (bytes32 h) {
+        for (uint256 p = 0; p < publishers.length; p++) {
+            if (publishers[p] == actor) continue;
+            for (uint256 r = 0; r < roots.length; r++) {
+                (bool committed, bool revealed, bytes32 batchRoot) = oel.intentStatus(publishers[p], roots[r]);
+                h = keccak256(abi.encode(h, committed, revealed, batchRoot));
+            }
+        }
+    }
+
+    function _checkOthersUnchanged(address actor, uint256[18] memory before, bytes32 intentsBefore) internal {
         uint256[18] memory afterCounts = _snapshotOthers(actor);
         for (uint256 i = 0; i < before.length; i++) {
             if (before[i] != afterCounts[i]) wrongPublisherWrites++;
         }
+        if (_intentsOfOthers(actor) != intentsBefore) wrongPublisherWrites++;
     }
 
     function commit(uint256 actorSeed, uint8 kindSeed, uint256 rootSeed, bool usePrev) external {
@@ -70,6 +84,7 @@ contract OpenEvidenceLogHandler is Test {
         bytes32 root = roots[rootSeed % roots.length];
         bytes32 prev = usePrev ? oel.latest(actor, kind).root : bytes32(0);
         uint256[18] memory before = _snapshotOthers(actor);
+        bytes32 intentsBefore = _intentsOfOthers(actor);
         vm.prank(actor);
         try oel.commit(kind, root, prev, keccak256(abi.encode(root)), "czar-archive:x") {
             ghostCount[actor][uint8(kind)]++;
@@ -77,7 +92,7 @@ contract OpenEvidenceLogHandler is Test {
         } catch (bytes memory reason) {
             if (bytes4(reason) == IOpenEvidenceLog.AlreadyCommitted.selector) alreadyCommittedReverts++;
         }
-        _checkOthersUnchanged(actor, before);
+        _checkOthersUnchanged(actor, before, intentsBefore);
     }
 
     function reveal(uint256 actorSeed, uint256 rootSeed, uint256 batchSeed) external {
@@ -85,27 +100,28 @@ contract OpenEvidenceLogHandler is Test {
         bytes32 root = roots[rootSeed % roots.length];
         bytes32 batch = keccak256(abi.encode("batch", batchSeed));
         uint256[18] memory before = _snapshotOthers(actor);
+        bytes32 intentsBefore = _intentsOfOthers(actor);
         vm.prank(actor);
         try oel.reveal(root, batch, keccak256(abi.encode(batch)), "czar-archive:y") {
             ghostStatus[actor][root] = 2;
             ghostBatch[actor][root] = batch;
         } catch {}
-        _checkOthersUnchanged(actor, before);
+        _checkOthersUnchanged(actor, before, intentsBefore);
     }
 
     /// Anyone may send the oel mock USDC; it can never move it out (OEL-5).
     function donate(uint256 amount) external {
         amount = bound(amount, 1, 1_000_000);
         usdc.mint(address(oel), amount);
+        ghostDonated += amount;
     }
 }
 
-/// @notice OEL-1 to OEL-6 (03 open-evidence-oel.md §10) as Foundry invariants.
+/// @notice OEL-1 to OEL-6 (03 open-evidence-log.md §10) as Foundry invariants.
 contract OpenEvidenceLogInvariant is Test {
     OpenEvidenceLog internal oel;
     MockUSDC3009 internal usdc;
     OpenEvidenceLogHandler internal handler;
-    uint256 internal lastUsdcBalance;
 
     function setUp() public {
         oel = new OpenEvidenceLog();
@@ -162,12 +178,11 @@ contract OpenEvidenceLogInvariant is Test {
         assertEq(handler.wrongPublisherWrites(), 0, "OEL-4");
     }
 
-    /// OEL-5: no payable function and no way to move value: native balance stays 0, USDC never leaves.
-    function invariant_OEL5_noValueMovement() public {
+    /// OEL-5: no payable function and no way to move value: native balance stays 0, and the log holds exactly the
+    ///        USDC sent to it (the ghost lives in the handler: state an invariant function writes is not kept, G-61).
+    function invariant_OEL5_noValueMovement() public view {
         assertEq(address(oel).balance, 0, "OEL-5 native");
-        uint256 balance = usdc.balanceOf(address(oel));
-        assertGe(balance, lastUsdcBalance, "OEL-5 usdc never decreases");
-        lastUsdcBalance = balance;
+        assertEq(usdc.balanceOf(address(oel)), handler.ghostDonated(), "OEL-5 usdc never leaves");
     }
 
     /// OEL-6: a PROBE_INTENT root is committed at most once per publisher.

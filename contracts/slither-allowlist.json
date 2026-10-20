@@ -1,0 +1,239 @@
+{
+  "slither": "0.11.3",
+  "findings": [
+    {
+      "check": "arbitrary-send-eth",
+      "element": "PocketLogic.grantPocketGas",
+      "impact": "High",
+      "reason": "Not arbitrary: the recipient is a registered pocket (proven as a kind-4 leaf of the envelope's payeeRoot, INV-14), the caller is the agent, the amount is capped by MAX_GAS_GRANT_PER_POCKET and the envelope cap, and the send is the native gas grant the spec requires (czar-vault.md §5.4, RV-004)."
+    },
+    {
+      "check": "uninitialized-state",
+      "element": "OpenEvidenceLog._log",
+      "impact": "High",
+      "reason": "False positive: `_log` is a mapping; mappings need no initialisation, and every slot starts empty by design (open-evidence-log.md §6)."
+    },
+    {
+      "check": "divide-before-multiply",
+      "element": "SignatureLogic._slLayoutOk",
+      "impact": "Medium",
+      "reason": "Intended rounding: `(l + 31) / 32 * 32` pads the string length to a whole ABI word, exactly as the czar-vault.md §6 layout table defines (672 + 32 × ⌈L / 32⌉)."
+    },
+    {
+      "check": "incorrect-equality",
+      "element": "EnvelopeLogic.openEnvelope",
+      "impact": "Medium",
+      "reason": "`l.periodId == periodId` compares two period numbers (block.timestamp / PERIOD_LENGTH), not balances; equality is the intended test of whether the allowance belongs to the current period (czar-vault.md §5.6)."
+    },
+    {
+      "check": "uninitialized-local",
+      "element": "isValidSignature.ok",
+      "impact": "Medium",
+      "reason": "Intended default: `ok` starts false, so an unknown kind or a short signature returns EIP1271_INVALID (czar-vault.md §6, never revert)."
+    },
+    {
+      "check": "unused-return",
+      "element": "AutonomyLogic.raiseAutoLimit",
+      "impact": "Medium",
+      "reason": "The ignored values are fields this function does not need from a multi-value return (escrow tuple fields, tryRecover's error value checked through the recovered address, or a dispatched function's id the owner action does not use); every value that drives a decision is read and checked."
+    },
+    {
+      "check": "unused-return",
+      "element": "JobEscrowAdapter.readBudget",
+      "impact": "Medium",
+      "reason": "The ignored values are fields this function does not need from a multi-value return (escrow tuple fields, tryRecover's error value checked through the recovered address, or a dispatched function's id the owner action does not use); every value that drives a decision is read and checked."
+    },
+    {
+      "check": "unused-return",
+      "element": "JobEscrowAdapter.readOutcome",
+      "impact": "Medium",
+      "reason": "The ignored values are fields this function does not need from a multi-value return (escrow tuple fields, tryRecover's error value checked through the recovered address, or a dispatched function's id the owner action does not use); every value that drives a decision is read and checked."
+    },
+    {
+      "check": "unused-return",
+      "element": "JobLogic.cancelJob",
+      "impact": "Medium",
+      "reason": "The ignored values are fields this function does not need from a multi-value return (escrow tuple fields, tryRecover's error value checked through the recovered address, or a dispatched function's id the owner action does not use); every value that drives a decision is read and checked."
+    },
+    {
+      "check": "unused-return",
+      "element": "JobLogic.claimJobRefund",
+      "impact": "Medium",
+      "reason": "The ignored values are fields this function does not need from a multi-value return (escrow tuple fields, tryRecover's error value checked through the recovered address, or a dispatched function's id the owner action does not use); every value that drives a decision is read and checked."
+    },
+    {
+      "check": "unused-return",
+      "element": "JobLogic.syncJob",
+      "impact": "Medium",
+      "reason": "The ignored values are fields this function does not need from a multi-value return (escrow tuple fields, tryRecover's error value checked through the recovered address, or a dispatched function's id the owner action does not use); every value that drives a decision is read and checked."
+    },
+    {
+      "check": "unused-return",
+      "element": "OwnerActionLogic._dispatch",
+      "impact": "Medium",
+      "reason": "The ignored values are fields this function does not need from a multi-value return (escrow tuple fields, tryRecover's error value checked through the recovered address, or a dispatched function's id the owner action does not use); every value that drives a decision is read and checked."
+    },
+    {
+      "check": "unused-return",
+      "element": "VaultGuards.agentSigned",
+      "impact": "Medium",
+      "reason": "The ignored values are fields this function does not need from a multi-value return (escrow tuple fields, tryRecover's error value checked through the recovered address, or a dispatched function's id the owner action does not use); every value that drives a decision is read and checked."
+    },
+    {
+      "check": "calls-loop",
+      "element": "ReservationLogic._authorizationUsed",
+      "impact": "Low",
+      "reason": "Bounded: settle and finalize take at most FINALIZE_CHUNK (32) indices per call, and the call is a view read of USDC's authorizationState (czar-vault.md §5.3)."
+    },
+    {
+      "check": "missing-zero-check",
+      "element": "grantPocketGas.pocket",
+      "impact": "Low",
+      "reason": "A pocket must be registered first, and registerPocket rejects address(0) (ZeroAddress); the same reason as the forge-lint comment on grantPocketGas (07 PRD 08 §7.3)."
+    },
+    {
+      "check": "reentrancy-events",
+      "element": "JobLogic._storeJob",
+      "impact": "Low",
+      "reason": "The event comes after the external call on purpose: czar-vault.md §15.5 fixes the order checks, effects, external call, event. The wrapper is nonReentrant (§15.5), all state is written before the call, and the escrow, Gateway and USDC addresses are immutables."
+    },
+    {
+      "check": "reentrancy-events",
+      "element": "JobLogic.cancelJob",
+      "impact": "Low",
+      "reason": "The event comes after the external call on purpose: czar-vault.md §15.5 fixes the order checks, effects, external call, event. The wrapper is nonReentrant (§15.5), all state is written before the call, and the escrow, Gateway and USDC addresses are immutables."
+    },
+    {
+      "check": "reentrancy-events",
+      "element": "JobLogic.claimJobRefund",
+      "impact": "Low",
+      "reason": "The event comes after the external call on purpose: czar-vault.md §15.5 fixes the order checks, effects, external call, event. The wrapper is nonReentrant (§15.5), all state is written before the call, and the escrow, Gateway and USDC addresses are immutables."
+    },
+    {
+      "check": "reentrancy-events",
+      "element": "JobLogic.fundJob",
+      "impact": "Low",
+      "reason": "The event comes after the external call on purpose: czar-vault.md §15.5 fixes the order checks, effects, external call, event. The wrapper is nonReentrant (§15.5), all state is written before the call, and the escrow, Gateway and USDC addresses are immutables."
+    },
+    {
+      "check": "reentrancy-events",
+      "element": "OwnerActionLogic.executeOwnerAction",
+      "impact": "Low",
+      "reason": "The event comes after the external call on purpose: czar-vault.md §15.5 fixes the order checks, effects, external call, event. The wrapper is nonReentrant (§15.5), all state is written before the call, and the escrow, Gateway and USDC addresses are immutables."
+    },
+    {
+      "check": "reentrancy-events",
+      "element": "PocketLogic.fundPocket",
+      "impact": "Low",
+      "reason": "The event comes after the external call on purpose: czar-vault.md §15.5 fixes the order checks, effects, external call, event. The wrapper is nonReentrant (§15.5), all state is written before the call, and the escrow, Gateway and USDC addresses are immutables."
+    },
+    {
+      "check": "reentrancy-events",
+      "element": "PocketLogic.grantPocketGas",
+      "impact": "Low",
+      "reason": "The event comes after the external call on purpose: czar-vault.md §15.5 fixes the order checks, effects, external call, event. The wrapper is nonReentrant (§15.5), all state is written before the call, and the escrow, Gateway and USDC addresses are immutables."
+    },
+    {
+      "check": "timestamp",
+      "element": "AutonomyLogic.raiseAutoLimit",
+      "impact": "Low",
+      "reason": "Every time comparison is a spec rule on windows of seconds to days (czar-vault.md §15.7, czar-vault-factory.md §5); validator timestamp skew on Arc cannot change an outcome (D88; the same reason forge-lint's block-timestamp is excluded)."
+    },
+    {
+      "check": "timestamp",
+      "element": "CzarVaultFactory._consume",
+      "impact": "Low",
+      "reason": "Every time comparison is a spec rule on windows of seconds to days (czar-vault.md §15.7, czar-vault-factory.md §5); validator timestamp skew on Arc cannot change an outcome (D88; the same reason forge-lint's block-timestamp is excluded)."
+    },
+    {
+      "check": "timestamp",
+      "element": "EnvelopeLogic.closeEnvelope",
+      "impact": "Low",
+      "reason": "Every time comparison is a spec rule on windows of seconds to days (czar-vault.md §15.7, czar-vault-factory.md §5); validator timestamp skew on Arc cannot change an outcome (D88; the same reason forge-lint's block-timestamp is excluded)."
+    },
+    {
+      "check": "timestamp",
+      "element": "EnvelopeLogic.forceCloseEnvelope",
+      "impact": "Low",
+      "reason": "Every time comparison is a spec rule on windows of seconds to days (czar-vault.md §15.7, czar-vault-factory.md §5); validator timestamp skew on Arc cannot change an outcome (D88; the same reason forge-lint's block-timestamp is excluded)."
+    },
+    {
+      "check": "timestamp",
+      "element": "EnvelopeLogic.openEnvelope",
+      "impact": "Low",
+      "reason": "Every time comparison is a spec rule on windows of seconds to days (czar-vault.md §15.7, czar-vault-factory.md §5); validator timestamp skew on Arc cannot change an outcome (D88; the same reason forge-lint's block-timestamp is excluded)."
+    },
+    {
+      "check": "timestamp",
+      "element": "JobLogic._checkFundJob",
+      "impact": "Low",
+      "reason": "Every time comparison is a spec rule on windows of seconds to days (czar-vault.md §15.7, czar-vault-factory.md §5); validator timestamp skew on Arc cannot change an outcome (D88; the same reason forge-lint's block-timestamp is excluded)."
+    },
+    {
+      "check": "timestamp",
+      "element": "JobLogic._checkOpenJob",
+      "impact": "Low",
+      "reason": "Every time comparison is a spec rule on windows of seconds to days (czar-vault.md §15.7, czar-vault-factory.md §5); validator timestamp skew on Arc cannot change an outcome (D88; the same reason forge-lint's block-timestamp is excluded)."
+    },
+    {
+      "check": "timestamp",
+      "element": "JobLogic._syncOpened",
+      "impact": "Low",
+      "reason": "Every time comparison is a spec rule on windows of seconds to days (czar-vault.md §15.7, czar-vault-factory.md §5); validator timestamp skew on Arc cannot change an outcome (D88; the same reason forge-lint's block-timestamp is excluded)."
+    },
+    {
+      "check": "timestamp",
+      "element": "JobLogic.claimJobRefund",
+      "impact": "Low",
+      "reason": "Every time comparison is a spec rule on windows of seconds to days (czar-vault.md §15.7, czar-vault-factory.md §5); validator timestamp skew on Arc cannot change an outcome (D88; the same reason forge-lint's block-timestamp is excluded)."
+    },
+    {
+      "check": "timestamp",
+      "element": "OwnerActionLogic.executeOwnerAction",
+      "impact": "Low",
+      "reason": "Every time comparison is a spec rule on windows of seconds to days (czar-vault.md §15.7, czar-vault-factory.md §5); validator timestamp skew on Arc cannot change an outcome (D88; the same reason forge-lint's block-timestamp is excluded)."
+    },
+    {
+      "check": "timestamp",
+      "element": "PocketLogic.fundPocket",
+      "impact": "Low",
+      "reason": "Every time comparison is a spec rule on windows of seconds to days (czar-vault.md §15.7, czar-vault-factory.md §5); validator timestamp skew on Arc cannot change an outcome (D88; the same reason forge-lint's block-timestamp is excluded)."
+    },
+    {
+      "check": "timestamp",
+      "element": "PocketLogic.grantPocketGas",
+      "impact": "Low",
+      "reason": "Every time comparison is a spec rule on windows of seconds to days (czar-vault.md §15.7, czar-vault-factory.md §5); validator timestamp skew on Arc cannot change an outcome (D88; the same reason forge-lint's block-timestamp is excluded)."
+    },
+    {
+      "check": "timestamp",
+      "element": "PocketLogic.registerPocket",
+      "impact": "Low",
+      "reason": "Every time comparison is a spec rule on windows of seconds to days (czar-vault.md §15.7, czar-vault-factory.md §5); validator timestamp skew on Arc cannot change an outcome (D88; the same reason forge-lint's block-timestamp is excluded)."
+    },
+    {
+      "check": "timestamp",
+      "element": "ReservationLogic._checkReserve",
+      "impact": "Low",
+      "reason": "Every time comparison is a spec rule on windows of seconds to days (czar-vault.md §15.7, czar-vault-factory.md §5); validator timestamp skew on Arc cannot change an outcome (D88; the same reason forge-lint's block-timestamp is excluded)."
+    },
+    {
+      "check": "timestamp",
+      "element": "ReservationLogic.finalize",
+      "impact": "Low",
+      "reason": "Every time comparison is a spec rule on windows of seconds to days (czar-vault.md §15.7, czar-vault-factory.md §5); validator timestamp skew on Arc cannot change an outcome (D88; the same reason forge-lint's block-timestamp is excluded)."
+    },
+    {
+      "check": "timestamp",
+      "element": "SignatureLogic._checkFallback",
+      "impact": "Low",
+      "reason": "Every time comparison is a spec rule on windows of seconds to days (czar-vault.md §15.7, czar-vault-factory.md §5); validator timestamp skew on Arc cannot change an outcome (D88; the same reason forge-lint's block-timestamp is excluded)."
+    },
+    {
+      "check": "timestamp",
+      "element": "SignatureLogic._checkUsdc3009",
+      "impact": "Low",
+      "reason": "Every time comparison is a spec rule on windows of seconds to days (czar-vault.md §15.7, czar-vault-factory.md §5); validator timestamp skew on Arc cannot change an outcome (D88; the same reason forge-lint's block-timestamp is excluded)."
+    }
+  ]
+}

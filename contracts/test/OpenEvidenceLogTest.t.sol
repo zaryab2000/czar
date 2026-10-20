@@ -5,7 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {IOpenEvidenceLog} from "../src/interfaces/IOpenEvidenceLog.sol";
 import {OpenEvidenceLog} from "../src/OpenEvidenceLog.sol";
 
-/// @notice T-011: one test per function and per error of `OpenEvidenceLog` (03 open-evidence-oel.md §6, §8),
+/// @notice T-011: one test per function and per error of `OpenEvidenceLog` (03 open-evidence-log.md §6, §8),
 ///         plus the RV-014 named tests from 03 security-and-testing.md §3.7.
 contract OpenEvidenceLogTest is Test {
     OpenEvidenceLog internal oel;
@@ -18,6 +18,8 @@ contract OpenEvidenceLogTest is Test {
     bytes32 internal constant B2 = keccak256("batch-2");
     bytes32 internal constant U1 = keccak256("czar-archive:1");
     string internal constant URI = "czar-archive:0x0000000000000000000000000000000000000000000000000000000000000001";
+    uint256 internal constant TX_BASE_GAS = 21_000; // intrinsic gas of every transaction
+    uint256 internal constant COMMIT_GAS_ESTIMATE_MAX = 135_000; // open-evidence-log.md §6 table
 
     function setUp() public {
         oel = new OpenEvidenceLog();
@@ -90,6 +92,15 @@ contract OpenEvidenceLogTest is Test {
     }
 
     /// @notice RV-014 named test: commit R, reveal B1, commit R again, reveal B2 must be impossible.
+    /// @dev G-61: the prev check comes first, so a repeat PROBE_INTENT commit with a stale prev is PrevMismatch.
+    function test_commitProbeIntent_stalePrev_revertsPrevMismatch() public {
+        vm.prank(alice);
+        oel.commit(IOpenEvidenceLog.Kind.PROBE_INTENT, R1, bytes32(0), U1, URI);
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(IOpenEvidenceLog.PrevMismatch.selector, R1, bytes32(0)));
+        oel.commit(IOpenEvidenceLog.Kind.PROBE_INTENT, R1, bytes32(0), U1, URI);
+    }
+
     function test_recommitAfterReveal_reverts() public {
         vm.startPrank(alice);
         oel.commit(IOpenEvidenceLog.Kind.PROBE_INTENT, R1, bytes32(0), U1, URI);
@@ -148,6 +159,15 @@ contract OpenEvidenceLogTest is Test {
         oel.reveal(R1, B1, U1, URI);
     }
 
+    /// @dev G-61: a root committed under another kind is not an intent.
+    function test_reveal_rootCommittedUnderOtherKind_revertsUnknownIntent() public {
+        vm.prank(alice);
+        oel.commit(IOpenEvidenceLog.Kind.EVIDENCE_BATCH, R1, bytes32(0), U1, URI);
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(IOpenEvidenceLog.UnknownIntent.selector, R1));
+        oel.reveal(R1, B1, U1, URI);
+    }
+
     function test_reveal_revertsAlreadyRevealed() public {
         vm.startPrank(alice);
         oel.commit(IOpenEvidenceLog.Kind.PROBE_INTENT, R1, bytes32(0), U1, URI);
@@ -196,13 +216,14 @@ contract OpenEvidenceLogTest is Test {
         assertEq(address(oel).balance, 0);
     }
 
-    /// @notice 03 open-evidence-oel.md §13 estimates 120–135k for `commit`; the measured value is logged.
+    /// @notice 03 open-evidence-log.md §13 estimates 120–135k for `commit`, including the 21k transaction base;
+    ///         the measured value plus the base is logged and checked against the upper estimate (G-61).
     function test_gas_commitEvidenceBatch() public {
         vm.prank(alice);
         uint256 before = gasleft();
         oel.commit(IOpenEvidenceLog.Kind.EVIDENCE_BATCH, R1, bytes32(0), U1, URI);
-        uint256 used = before - gasleft();
-        emit log_named_uint("commit EVIDENCE_BATCH gas (first, excluding the 21k base)", used);
-        assertLt(used, 135_000);
+        uint256 used = before - gasleft() + TX_BASE_GAS;
+        emit log_named_uint("commit EVIDENCE_BATCH gas (first, including the 21k base)", used);
+        assertLe(used, COMMIT_GAS_ESTIMATE_MAX);
     }
 }
