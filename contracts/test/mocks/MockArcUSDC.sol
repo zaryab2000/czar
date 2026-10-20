@@ -84,6 +84,19 @@ contract MockArcUSDC {
         emit Transfer(address(0), to, value);
     }
 
+    /// @notice Test control (07 PRD 06): consumes `from`'s authorization `nonce` and moves `value` to `to`, exactly as a
+    ///         settled transferWithAuthorization does, without a signature. Lets reservation tests run before the vault's
+    ///         isValidSignature exists (PRD 07 then repeats the key cases through the real ERC-1271 path).
+    function consumeAuthorizationForTest(address from, address to, uint256 value, bytes32 nonce)
+        external
+        onlyController
+    {
+        require(!_authorizationStates[from][nonce], "FiatTokenV2: authorization is used or canceled");
+        _authorizationStates[from][nonce] = true;
+        emit AuthorizationUsed(from, nonce);
+        _transfer(from, to, value);
+    }
+
     function pause() external onlyController {
         paused = true;
         emit Pause();
