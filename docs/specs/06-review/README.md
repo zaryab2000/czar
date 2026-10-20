@@ -45,6 +45,13 @@
 | [`SCR-028`](change-requests/SCR-028-d70-not-applied.md) | RV-028 | High | Gate 0, M0, M2, M3, M4, M6 | D70 (everything runs locally on Zaryab's Mac with a local keystore) is only partly applied; hosting, keys, app origin and archive URLs still assume the cloud. |
 | [`SCR-029`](change-requests/SCR-029-acceptance-scenario-numbers.md) | RV-029 | High | M4, M8 | The Phase 1 acceptance scenario cannot pass under the routing rules and vault invariants it is meant to test. |
 
+### Later requests (not from G0-01)
+
+| SCR | Source | Status | Milestone | Title |
+|---|---|---|---|---|
+| [`SCR-030`](change-requests/SCR-030-confirmed-demand-and-soul-v2-evidence.md) | D90 | Open, held for the Flow 7 review | M5, Flow 7 | Confirmed-demand objectives (`demandEvidence`, `czar-objective-v2`, demand-proof leaf v3) and versioned soul evidence (`czar-soul-v2`, soul leaf v2). |
+| [`SCR-031`](change-requests/SCR-031-chat-export-formats.md) | D90 | Open (research) | stage 2 | Ground truth for ChatGPT and Claude export formats before any archive import. |
+
 ## How to use
 
 - Zaryab rules on each SCR (Accepted or Rejected) in its Decision section.

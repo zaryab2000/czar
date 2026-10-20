@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://czar.dev/schemas/common.schema.json",
   "title": "Czar common primitives",
-  "description": "Shared primitive formats referenced by every Czar schema (spec 02 \u00a72.1).",
+  "description": "Shared primitive formats referenced by every Czar schema (spec 02 §2.1).",
   "$defs": {
     "Amount6": {
       "type": "string",
@@ -65,6 +65,61 @@
       "pattern": "^blf_[0-9A-HJKMNP-TV-Z]{26}$",
       "description": "Soul belief id."
     },
+    "SourceReceiptId": {
+      "type": "string",
+      "pattern": "^src_[0-9A-HJKMNP-TV-Z]{26}$",
+      "description": "Soul source receipt id (D90): interview answer, selected file, git item, paste or agent summary."
+    },
+    "ProposalId": {
+      "type": "string",
+      "pattern": "^prop_[0-9A-HJKMNP-TV-Z]{26}$",
+      "description": "Proposed belief id (D90); local only."
+    },
+    "SourceScanId": {
+      "type": "string",
+      "pattern": "^scan_[0-9A-HJKMNP-TV-Z]{26}$",
+      "description": "Soul source scan id (D90); local only."
+    },
+    "ConsentId": {
+      "type": "string",
+      "pattern": "^cns_[0-9A-HJKMNP-TV-Z]{26}$",
+      "description": "Local consent record id for a source scope (D90)."
+    },
+    "ReceiptRef": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/EventId"
+        },
+        {
+          "$ref": "#/$defs/SourceReceiptId"
+        }
+      ],
+      "description": "A belief receipt (D90): an ActivityEvent id (observed) or a SourceReceipt id (declared, local-file, imported). The prefix names the type."
+    },
+    "SoulSection": {
+      "type": "string",
+      "enum": [
+        "place",
+        "mission",
+        "rituals",
+        "friction",
+        "drives",
+        "taste",
+        "constraints",
+        "spendingPosture"
+      ],
+      "description": "Work Soul section name (spec 02 §4.2)."
+    },
+    "SourceClass": {
+      "type": "string",
+      "enum": [
+        "observed",
+        "declared",
+        "local-file",
+        "imported"
+      ],
+      "description": "Where a belief or receipt came from (D90)."
+    },
     "ObjectiveId": {
       "type": "string",
       "pattern": "^obj_[0-9A-HJKMNP-TV-Z]{26}$",
@@ -93,7 +148,7 @@
     "PaymentId": {
       "type": "string",
       "pattern": "^pay_[0-9a-f]{32}$",
-      "description": "x402 payment-identifier id (spec 02 \u00a77.4; F1-06)."
+      "description": "x402 payment-identifier id (spec 02 §7.4; F1-06)."
     },
     "EnvelopeRef": {
       "type": "string",
@@ -126,32 +181,32 @@
     "SlServiceId": {
       "type": "string",
       "pattern": "^svc_[0-9a-f]{32}$",
-      "description": "Selection Layer ServiceId (SL \u00a75.1)."
+      "description": "Selection Layer ServiceId (SL §5.1)."
     },
     "SlProfileId": {
       "type": "string",
       "pattern": "^prof_[0-9a-f]{32}$",
-      "description": "Selection Layer ProfileId (SL \u00a75.1)."
+      "description": "Selection Layer ProfileId (SL §5.1)."
     },
     "SlObsId": {
       "type": "string",
       "pattern": "^obs_[0-9a-f]{32}$",
-      "description": "Selection Layer ObsId (SL \u00a75.1)."
+      "description": "Selection Layer ObsId (SL §5.1)."
     },
     "SlReportId": {
       "type": "string",
       "pattern": "^rep_[0-9a-f]{32}$",
-      "description": "Selection Layer ReportId (SL \u00a75.1)."
+      "description": "Selection Layer ReportId (SL §5.1)."
     },
     "SlVersionId": {
       "type": "string",
       "pattern": "^ver_[0-9a-f]{32}$",
-      "description": "Selection Layer VersionId (SL \u00a75.1)."
+      "description": "Selection Layer VersionId (SL §5.1)."
     },
     "SlPolicyVersion": {
       "type": "string",
       "pattern": "^pol_[0-9a-f]{16}$",
-      "description": "Selection Layer PolicyVersion (SL \u00a75.1)."
+      "description": "Selection Layer PolicyVersion (SL §5.1)."
     }
   }
 }

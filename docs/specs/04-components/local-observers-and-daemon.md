@@ -192,11 +192,11 @@ Claude Code ≥ the version with `http` hooks and `onFailure` (v2.1.295+, B1-11)
 | ID, name | CZ-02, local daemon `czard` |
 | Phase | 1, **macOS only** (D67); Linux and Windows are stage 2 |
 | Product / roadmap | product §6.2 (host), §9.2 step 2; roadmap 1.1 |
-| Decisions | D7, D25, D31, D34, FD-27 |
+| Decisions | D7, D25, D31, D34, FD-27, D90 |
 
 ### 2. Responsibilities and non-responsibilities
 
-- **Does:** receive hook payloads; run redaction layer 1 and the write gate; store events in encrypted memory; schedule the soul compiler, drives engine and shadow reporter; publish objectives through the outbox; serve the local socket for the MCP server and the desktop viewer; run the write-back adapter; drain the observer queue; keep the local audit of what left the machine.
+- **Does:** receive hook payloads; run redaction layer 1 and the write gate; store events in encrypted memory; read soul sources the person selected and turn them into proposals (§5.6, D90); schedule the soul compiler, drives engine and shadow reporter; publish objectives through the outbox; serve the local socket for the MCP server and the desktop viewer; run the write-back adapter; drain the observer queue; keep the local audit of what left the machine.
 - **Does not:** hold any spending key; talk to Arc; call merchants; send events, soul text, file paths or emails to the server (02 §9.7).
 
 ### 3. Runtime
@@ -222,7 +222,7 @@ Claude Code ≥ the version with `http` hooks and `onFailure` (v2.1.295+, B1-11)
 | server API (client) | HTTPS with K15 | `DeviceToken` | `submitObjective`, `listObjectives`, `getObjective`, `getResult`, `ackResult`, `submitSoulVersion`, `shadowQuote`, `ingestReport`, `pairDevice` |
 | sidecar | the same Unix socket namespace, `czar-redact.sock`, mode 0600 | file permissions | CZ-26 layer 2 |
 
-Socket methods (local only, not an OpenAPI surface): `memory.query`, `objectives.list`, `objectives.get`, `soul.get`, `soul.editBelief`, `soul.deleteBelief`, `shadow.report`, `writeback.deliver`, `audit.whatLeft`, `status.get`. Their payloads are the 02 objects (`ActivityEvent`, `Objective`, `soul.json`) and never leave the machine.
+Socket methods (local only, not an OpenAPI surface): `memory.query`, `objectives.list`, `objectives.get`, `soul.get`, `soul.editBelief`, `soul.deleteBelief`, `soul.propose` (D90: CZ-09 `propose_soul_context` input → `{proposalCount}`; proposals only, rate cap `soulInput.mcpProposalsPerDay`; the canonical shape is `czar-mcp-tools.md` §2.6), `shadow.report`, `writeback.deliver`, `audit.whatLeft`, `status.get`. Their payloads are the 02 objects (`ActivityEvent`, `Objective`, `soul.json`) and never leave the machine.
 
 ### 5. Internal design
 
@@ -277,8 +277,12 @@ stateDiagram-v2
 |---|---|---|
 | `events` | `event_id` TEXT PK, `host`, `host_version`, `session_ref` BLOB(32), `project_ref` BLOB(32), `event_type`, `occurred_at` INTEGER (ms), `tool_name`, `mcp_server`, `mcp_tool`, `mcp_plugin`, `summary` TEXT, `file_refs` BLOB (packed 32-byte hashes), `error_class`, `duration_ms` INTEGER, `agent_ref` BLOB(32), `provenance_json` TEXT, `redaction_hits` INTEGER, `content_hash` BLOB(32) UNIQUE, `observation_hash` BLOB(32) | = `ActivityEvent` (02 §4.1) plus `observation_hash` (02 §5.2); indexes on `(project_ref, occurred_at)`, `(event_type, occurred_at)`, `(session_ref)`, `(error_class)` |
 | `sessions` | `session_ref` BLOB(32) PK, `host`, `started_at`, `ended_at`, `end_reason`, `event_count`, `project_ref` | from `session-start`/`session-end` |
-| `soul_versions` | `version` INTEGER PK, `compiled_at`, `previous_hash` BLOB(32), `soul_version_hash` BLOB(32), `soul_json` TEXT, `excerpt_chars` INTEGER, `model_prompt_hash` BLOB(32), `submitted_at` | `soul.json` (02 §4.2) |
-| `beliefs` | `belief_id` TEXT PK, `section`, `text`, `confidence` REAL, `first_seen`, `last_seen`, `user_edited` INTEGER, `pinned` INTEGER, `deleted_at`, `current_version` INTEGER | denormalized current beliefs for the viewer; `belief_receipts(belief_id, event_id)` join table |
+| `soul_versions` | `version` INTEGER PK, `compiled_at`, `previous_hash` BLOB(32), `soul_version_hash` BLOB(32), `soul_hash_rule` TEXT (`czar-hash-v1` until SCR-030, D90), `soul_json` TEXT, `excerpt_chars` INTEGER, `model_prompt_hash` BLOB(32), `submitted_at` | `soul.json` (02 §4.2) |
+| `beliefs` | `belief_id` TEXT PK, `section`, `text`, `confidence` REAL, `first_seen`, `last_seen`, `user_edited` INTEGER, `pinned` INTEGER, `deleted_at`, `current_version` INTEGER, `source_class` TEXT, `confidence_basis` TEXT, `user_confirmed` INTEGER, `confirmed_at` INTEGER | denormalized current beliefs for the viewer; `belief_receipts(belief_id, receipt_type, receipt_id, added_version)` join table, `receipt_type` ∈ `event`, `source`, with an integrity check to `events` or `source_receipts` (D90; was `(belief_id, event_id)`) |
+| `source_receipts` (D90) | `receipt_id` TEXT PK, `source_class`, `kind`, `origin`, `question_id`, `captured_at`, `excerpt` TEXT ≤ 500, `source_digest` BLOB(32), `locator` TEXT, `consent_id`, `redaction_json`, `screen_flags_json` | spec 02 §4.23; `local-only` |
+| `proposed_beliefs` (D90) | `proposal_id` TEXT PK, `section`, `key`, `text`, `source_class`, `receipt_ids_json`, `bundle_id`, `status`, `created_at`, `decided_at`, `belief_id`, `screen_flags_json` | spec 02 §4.24; rejected text is cleared at decision time; pending rows expire after `soulInput.pendingRetentionDays` |
+| `interview_answers` (D90) | `question_id` TEXT PK, `value_json`, `receipt_id`, `belief_id`, `answered_at` | the typed current answer per question (spec 02 §4.25); read by CZ-06 (mission deadline, hourly value) and CZ-07 (constraints); deleting the belief deletes the answer |
+| `source_scans`, `source_consents` (D90) | scans: spec 02 §4.26; consents: `consent_id` PK, `root_id`, `scope_json` (source types, global file yes/no, egress yes/no), `granted_at`, `revoked_at` | a changed scope needs a new consent |
 | `objectives` | `objective_id` TEXT PK, `soul_version`, `detector`, `goal`, `capabilities_json`, `deadline`, `minutes_saved`, `roi_band`, `roi_ratio` REAL, `status`, `objective_hash` BLOB(32), `created_at`, `published_at`, `server_status`, `result_id` | `Objective` (02 §4.3) plus server mirror fields |
 | `objective_evidence` | `objective_id`, `event_id`, `belief_id` | evidence links |
 | `outbox` | `id` INTEGER PK, `kind` (`objective`, `soul-version`, `ingest-report`, `result-ack`), `payload_json`, `idempotency_key`, `attempts`, `next_attempt_at`, `last_error_code` | durable queue to the server |
@@ -289,6 +293,7 @@ stateDiagram-v2
 | `fill_undo` (D85) | `objective_id` TEXT, `file_ref` BLOB(32), `spans_json` TEXT, `file_hash_after` BLOB(32), `filled_at` INTEGER | undo record for an in-place fill; `local-only`; kept `writeback.undoRetentionDays` |
 | `file_paths` (D84) | `file_ref` BLOB(32) PK, `project_ref` BLOB(32), `abs_path` TEXT, `last_seen_at` INTEGER, `placeholder_seen_json` TEXT | from `tool_input.file_path` (02 §8.2) and Cursor `afterFileEdit`; read by the placeholder detector (CZ-06) to open the current file from disk; `local-only`, never sent |
 
+- **Migration (D90):** one transaction adds the new columns and tables, rewrites `belief_receipts` rows as `receipt_type = event`, sets every existing belief to `observed` / `observation-score` / not confirmed, and sets `soul_hash_rule = czar-hash-v1` on existing versions. Stored versions and hashes are not rewritten.
 - Retention: `memory.retentionDays` = 90 (user setting 30–365); a nightly job deletes `events` older than that unless referenced by a current belief or an open objective (receipts stay until the belief fades).
 - Vectors (Phase 2): `sqlite-vec` 0.1.9 `vec0` table with ≤ 1,024 dims, model id stored with each vector (C1-12, FD-30).
 - The DB file: `~/Library/Application Support/Czar/memory.db`, mode 0600; cipher: the binding's default SQLCipher-compatible AES-256 (B6-11); raw 64-hex key from the keychain.
@@ -321,6 +326,38 @@ stateDiagram-v2
 | `memory.maxSummaryChars` | 2,000 | 02 §4.1 |
 | `memory.dedupeWindowS` | 300 | identical `content_hash` within 5 min is counted, not stored |
 
+#### 5.6 Soul source intake (D90)
+
+Reads only what the person selected in the viewer (CZ-05) and turns it into proposals (spec 02 §4.24). Nothing here creates a belief, an observation or an objective.
+
+| Source | What is read | Rules |
+|---|---|---|
+| Agent files | `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md` at the selected root; `~/.claude/CLAUDE.md` only when selected on its own | the root must be a known root (`file_paths`, §5.3); a named agent file is read even when untracked or ignored, because the person chose it by name |
+| Git | tracked files' TODO markers (the CZ-06 placeholder tokens) and commit subjects, at most `soulInput.gitMaxCommits` within `soulInput.gitLookbackDays` | `git ls-files` and `git log` run with no shell, no pager and no hooks, in the root only; untracked and ignored files are skipped; on git failure the git part is skipped with a count |
+| Paste | the text from `proposeLocalSoulImportText`, ≤ `soulInput.importTextMaxChars` | the raw paste is deleted when processing ends |
+| Agent summary or interview bundle | `soul.propose` from CZ-09, ≤ `soulInput.agentSummaryMaxChars` | `origin = agent-host` on every receipt |
+
+- **Never read:** `.env*`, `*.key`, `*.key.json`, `*.pem`, keystores, wallet and credential files, anything matching a layer-1 path rule, `transcript_path`, files outside the root (symlinks are resolved and refused when they leave the root), binary or non-UTF-8 files. Each skip is counted in `SourceScan.skipped`.
+- **Bounds:** `soulInput.scanMaxFiles` per scan; files over `soulInput.scanMaxBytesPerFile` are skipped with a visible reason, never cut; at most `soulInput.maxModelExcerptsPerScan` excerpts go to a model per scan; at most `soulInput.maxProposalsPerSource` proposals per source and `soulInput.maxPendingProposals` pending in total.
+- **Pipeline per excerpt:** layer 1 before anything is stored → `SourceReceipt` (`sourceDigest` over the exact bytes) → if the person gave egress consent for this scope: layer 2 (CZ-26) → unsupported-language check (no model call for non-English text) → P-01 screen; flagged paragraphs are removed and counted → P-07 on the remaining paragraphs → post-validation (`ai-prompts.md` P-07) → `proposed_beliefs`. Without egress consent, or when any step fails, the source is kept for review and produces **no** automatic proposal.
+- **Audit:** every excerpt sent writes an `audit_local` row (`kind = source-excerpt`, payload hash, bytes, `model-proxy`). Consent and revocation write `audit_local` rows too.
+- **Previews (held):** current-file open-loop previews and **Do this** come with SCR-030; until then a scan only proposes beliefs.
+
+| Parameter | Default | Reason |
+|---|---|---|
+| `soulInput.interviewMaxAnswerChars` | 500 | matches `Belief.text` (02 §4.2) |
+| `soulInput.scanMaxFiles` | 40 per root | bounds CPU and model exposure |
+| `soulInput.scanMaxBytesPerFile` | 20,000 | fits one P-01 chunk; larger files are skipped, not cut |
+| `soulInput.maxModelExcerptsPerScan` | 10 | bounds model cost per scan |
+| `soulInput.gitMaxCommits` | 50 | recent focus only |
+| `soulInput.gitLookbackDays` | 30 | stale commits must not shape a day-one mission |
+| `soulInput.importTextMaxChars` | 12,000 | useful paste without archive handling (SCR-031) |
+| `soulInput.agentSummaryMaxChars` | 4,000 | bounds a host submission |
+| `soulInput.maxProposalsPerSource` | 10 | one source cannot flood review |
+| `soulInput.maxPendingProposals` | 100 | bounds storage and the review list |
+| `soulInput.pendingRetentionDays` | 30 | pending text does not pile up |
+| `soulInput.mcpProposalsPerDay` | 3 | bounds agent-driven review spam; not a money cap |
+
 ### 6. Behaviour
 
 **Start.** Spawn → read K14 → open DB (migrate schema) → start hook server and socket → start sidecar lazily → heartbeat loop.
@@ -350,9 +387,10 @@ The daemon hosts P-04 (soul compiler), P-05 (drives helper) and P-06 (refusal cl
 | objectives (local) | `local-only`; the submission fields `redacted-to-server` | encrypted DB; outbox | 1 year |
 | outbox payloads | `redacted-to-server` / `hash-on-chain` | encrypted DB | deleted after `2xx` |
 | audit_local | `local-only` | encrypted DB | 1 year |
+| source receipts, proposals, interview answers, scans, consents (D90) | `local-only` | encrypted DB | accepted receipts with their belief; pending `soulInput.pendingRetentionDays`; rejected text removed at decision; pastes deleted at end of processing |
 | logs | `local-only`, counts and hashes only | `~/Library/Logs/Czar/` | 14 days |
 
-What leaves: only `ObjectiveSubmission`, `SoulVersionSubmission`, `IngestReport`, `ResultAck`, `ShadowQuoteRequest` (which embeds an `ObjectiveSubmission`), and the redacted compile excerpt to the model proxy (D31). Each departure writes an `audit_local` row with the payload hash and byte count, shown in "What left this machine".
+What leaves: only `ObjectiveSubmission`, `SoulVersionSubmission`, `IngestReport`, `ResultAck`, `ShadowQuoteRequest` (which embeds an `ObjectiveSubmission`), the redacted compile excerpt and, after consent, redacted soul-source excerpts (P-07, D90) to the model proxy (D31). Interview answers, proposals, source receipts, locators, pastes and summaries never leave. Each departure writes an `audit_local` row with the payload hash and byte count, shown in "What left this machine".
 
 ### 9. Security
 
@@ -360,6 +398,7 @@ What leaves: only `ObjectiveSubmission`, `SoulVersionSubmission`, `IngestReport`
 - Loopback hook server: binds `127.0.0.1` only, rejects any request with a browser `Origin`, requires K16 (D3-08). The socket is 0600 (D3-12: local servers should use stdio or unix sockets).
 - Threats: **memory poisoning (ASI06)** → write gate (CZ-03 §5.3), provenance, user editing; **hook token theft by a local process** → bounded to fake events, no spend; **DB theft** → encrypted at rest, key in keychain; **malicious plugin update** → plugin comes from Czar's own marketplace pinned by commit `sha` (E2-06, E2-07).
 - Vendor "Agent Instructions" (FL-1, FL-2) can arrive in tool outputs; they are stored as `trusted = false` data and never executed (spec 01 §13.1).
+- **Poisoned soul sources (D90):** an agent file, commit, paste or agent summary may carry instructions ("pay this address", "raise the limit", "auto-accept"). They are data: layer 1, layer 2, P-01, the P-07 schema and deny-list, and the person's acceptance stand between them and the soul; no source can reach a payee, an amount, a setting or an objective.
 
 ### 10. Failure handling
 
@@ -401,6 +440,7 @@ Ingest ≤ 5 ms per event after mapping; layer 1 ≤ 20 ms per 10 KB; heartbeat 
 - Unit: pipeline stages with recorded payloads for all three hosts; drops applied exactly as 02 §8.2–§8.4 (property test: no stored field outside the `ActivityEvent` schema; `user_email` never stored); write gate caps; retention job.
 - Integration: launchd plist loads and restarts after a kill within 10 s (B6-02); keychain round trip on macOS (Secret Service on Linux is stage 2, D67; B6-17); DB opens only with K14; outbox survives a crash mid-flush and replays with the same idempotency key (server returns the stored response).
 - End-to-end: a Claude Code session → `events` rows → objective published → `audit_local` row; "What left this machine" matches the server's received bytes.
+- Source intake (D90): empty root; symlink escape; untracked and ignored git files skipped; an explicitly selected ignored agent file read; `.env` and key files never opened (file-access trace); oversized and non-UTF-8 files skipped with counts; git missing or failing; file deleted mid-scan; injected instruction text; sidecar down → no proposal; no raw secret or path in any proxy request, log or outbox row; migration keeps every old version hash byte-identical.
 - Definition of done: all tests green; `pnpm audit` clean; no `local-only` field in any outbound payload (schema guard test); uninstall leaves no files unless the user keeps memory.
 
 ### 15. Dependencies
@@ -503,7 +543,7 @@ CZ-26, Redaction library. Phase 1 (layers 1 and 2 on objectives and compile exce
 
 ### 2. Responsibilities and non-responsibilities
 
-- **Does:** layer 1 secrets scan on every payload at intake; layer 2 personal-data scan on objective text and compile excerpts before they leave; the marker format (02 §3.1); the allow/deny review hooks; counts for `redaction` fields.
+- **Does:** layer 1 secrets scan on every payload at intake and on every soul source before it is stored (D90); layer 2 personal-data scan on objective text, compile excerpts and soul-source excerpts (D90) before they leave; the marker format (02 §3.1); the allow/deny review hooks; counts for `redaction` fields.
 - **Does not:** promise completeness (C2-03); run trufflehog live verification (C2-07); reverse markers.
 
 ### 3. Runtime and runtime choice
@@ -511,7 +551,7 @@ CZ-26, Redaction library. Phase 1 (layers 1 and 2 on objectives and compile exce
 | Layer | Runtime | Where | When |
 |---|---|---|---|
 | 1 (secrets) | TypeScript, in-process in `czard` and in `@czar/server` (for defence in depth on anything the server stores) | `@czar/redaction` | every payload, every text field, synchronous |
-| 2 (personal data) | Python 3.13 sidecar `czar-redact` with `presidio-analyzer` and `presidio-anonymizer` 2.2.364 (C2-01), packaged with `uv` into a frozen virtual environment shipped inside the daemon installer, so users never install Python (D45); spaCy English model bundled | child process of `czard`, Unix socket `czar-redact.sock` (0600), JSON-RPC | objective publish, compile excerpt, viewer preview |
+| 2 (personal data) | Python 3.13 sidecar `czar-redact` with `presidio-analyzer` and `presidio-anonymizer` 2.2.364 (C2-01), packaged with `uv` into a frozen virtual environment shipped inside the daemon installer, so users never install Python (D45); spaCy English model bundled | child process of `czard`, Unix socket `czar-redact.sock` (0600), JSON-RPC | objective publish, compile excerpt, soul-source excerpt (D90), viewer preview |
 
 - **Why a sidecar (confidence: moderate):** Presidio has no Node port and is the ground-truth choice (FD-29, C2-01); layer 2 runs only a few times a day on short texts, so process cost is small; the sidecar has no network and no keys. **Node-only fallback (rejected for Phase 1):** regex-only PII (emails, phones, IBANs) misses names and locations, the two most common leaks in work text; it is kept as `redaction.layer2Fallback = "regex"` for machines where the sidecar cannot start, and the UI then forces "always review" (C2-03; the forced-review fallback of D45).
 - Languages: English out of the box (C2-04); other languages need per-language models and recognizers → `redaction.languages` default `["en"]`; non-English text gets the regex fallback plus mandatory review (gap noted in 02 §15.3).
@@ -542,6 +582,7 @@ Marker format: exactly 02 §3.1 (`[[R:S:<rule>]]`, `[[R:P:<ENTITY>#n]]`). Marker
 
 - **Layer 1 at intake:** run on `summary` sources (`tool_input`, `tool_response`, `prompt`, `last_assistant_message`, `error`), replace matches, count by rule, then truncate.
 - **Layer 2 at publish:** run on `Objective.goal` (and on the compile excerpt), replace entities, count; if `reviewMode` requires it, hand the preview to the viewer and wait for "Send" / "Edit" / "Don't send".
+- **Soul sources (D90):** layer 1 runs before a source receipt is stored; layer 2 runs on each excerpt before P-01 and P-07. If the sidecar is down, or the text is not in `redaction.languages`, the regex fallback is **not** enough for these sources: no excerpt is sent and no automatic proposal is made; the person can still answer the interview.
 - **Review step:** the viewer shows the exact outbound text with markers highlighted; the person can edit it; the edited text is what is hashed into `objectiveHash` (02 §5.2) and sent.
 - **Layer 3 (Phase 2):** before each merchant call, only the structured `Step.inputTemplate` fields leave; free text is never a merchant input in Phase 1 (02 §4.6), so layer 3 is a no-op until Phase 2.
 
@@ -585,6 +626,7 @@ Layer 1 ≤ 20 ms per 10 KB; layer 2 ≤ 1 s for a 1,000-char goal on a laptop; 
 
 - Layer 1: gitleaks test corpus at v8.30.1 (every rule has a positive fixture) → markers present, no secret substring remains; idempotence; marker integrity after truncation.
 - Layer 2: Presidio sample set for the English entities (C2-05) → markers; allowlist honoured; fallback path forces review.
+- Soul sources (D90): seeded Spanish, Hindi and mixed-language names, contacts and instructions → no excerpt leaves and no proposal is made; sidecar down → same.
 - Mutation tests on the marker parser.
 - Done when: no fixture secret leaks in any outbound payload across the daemon test suite; the review UI shows the exact bytes that are sent (byte-equality test).
 
@@ -605,3 +647,4 @@ gitleaks rules v8.30.1 (C2-06); Presidio 2.2.364 at `data-privacy-stack/presidio
 | 2026-10-20 | D84 | Local `file_paths` table so the placeholder detector can read the person's file. |
 | 2026-10-20 | D85 | Local `fill_undo` table. |
 | 2026-10-20 | N2 | Local `held_artifacts` table. |
+| 2026-10-20 | D90 | CZ-02 §5.6 soul source intake and `soulInput.*` parameters; `soul.propose` socket method; tables `source_receipts`, `proposed_beliefs`, `interview_answers`, `source_scans`, `source_consents`; typed `belief_receipts`; `soul_versions.soul_hash_rule`; migration; privacy, security and test lines. CZ-26 runs on soul-source excerpts. |

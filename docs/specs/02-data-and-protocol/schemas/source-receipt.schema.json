@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://czar.dev/schemas/source-receipt.schema.json",
+  "title": "SourceReceipt",
+  "description": "Evidence for a non-observed belief or proposal (spec 02 §4.23, D90). Local only; never egresses.",
+  "type": "object",
+  "x-privacyClass": "local-only",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "1.0",
+      "description": "Schema version, major.minor; this file is 1.0.",
+      "x-privacyClass": "local-only"
+    },
+    "receiptId": {
+      "$ref": "common.schema.json#/$defs/SourceReceiptId",
+      "description": "Receipt id.",
+      "x-privacyClass": "local-only"
+    },
+    "sourceClass": {
+      "type": "string",
+      "enum": [
+        "declared",
+        "local-file",
+        "imported"
+      ],
+      "description": "declared, local-file or imported; never observed.",
+      "x-privacyClass": "local-only"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "interview",
+        "agent-file",
+        "git-commit",
+        "git-marker",
+        "import-paste",
+        "agent-summary"
+      ],
+      "description": "What the receipt points at.",
+      "x-privacyClass": "local-only"
+    },
+    "origin": {
+      "type": "string",
+      "enum": [
+        "viewer",
+        "agent-host"
+      ],
+      "description": "Who entered it: the local viewer, or an agent host through propose_soul_context. Kept so an agent-mediated interview stays visible (D90 item 5).",
+      "x-privacyClass": "local-only"
+    },
+    "questionId": {
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^[a-zA-Z][a-zA-Z0-9.]{0,63}$",
+      "description": "For kind interview: the fixed interview question id (InterviewSubmission field path).",
+      "x-privacyClass": "local-only"
+    },
+    "capturedAt": {
+      "$ref": "common.schema.json#/$defs/Timestamp",
+      "description": "When the source was read or the answer given.",
+      "x-privacyClass": "local-only"
+    },
+    "excerpt": {
+      "type": "string",
+      "maxLength": 500,
+      "description": "Redacted excerpt shown in the viewer, at most 500 characters; layer 1 applied before storage.",
+      "x-privacyClass": "local-only"
+    },
+    "sourceDigest": {
+      "$ref": "common.schema.json#/$defs/Hash32",
+      "description": "keccak256 of the exact source bytes read at capture time (file, commit subject, paste or summary).",
+      "x-privacyClass": "local-only"
+    },
+    "locator": {
+      "type": "string",
+      "maxLength": 1024,
+      "description": "File path relative to the selected root, or commit id. Viewer display only; never egresses, never in a model excerpt.",
+      "x-privacyClass": "local-only"
+    },
+    "consentId": {
+      "$ref": "common.schema.json#/$defs/ConsentId",
+      "description": "Consent record for the scope that allowed the read.",
+      "x-privacyClass": "local-only"
+    },
+    "redactionCounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "layer1": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Layer 1 (secrets) marker count.",
+          "x-privacyClass": "local-only"
+        },
+        "layer2": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Layer 2 (PII) marker count; 0 when layer 2 has not run.",
+          "x-privacyClass": "local-only"
+        }
+      },
+      "required": [
+        "layer1",
+        "layer2"
+      ],
+      "description": "Redaction counts applied before storage.",
+      "x-privacyClass": "local-only"
+    },
+    "screenFlags": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "string",
+        "enum": [
+          "p01-flagged",
+          "deny-list",
+          "skipped-suspicious",
+          "unsupported-language",
+          "oversized",
+          "truncated-span",
+          "stale-source"
+        ],
+        "description": "Flag.",
+        "x-privacyClass": "local-only"
+      },
+      "description": "Screening results for this source.",
+      "x-privacyClass": "local-only"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "receiptId",
+    "sourceClass",
+    "kind",
+    "origin",
+    "capturedAt",
+    "excerpt",
+    "sourceDigest",
+    "redactionCounts",
+    "screenFlags"
+  ],
+  "$comment": "2026-10-20: created for D90 (soul inputs beyond observation)."
+}

@@ -155,15 +155,20 @@ Each object: purpose, fields (name, type, required, privacy class, description, 
 | `Belief.text` | string ≤ 500 | yes | L (RS when selected as an excerpt for compilation, D31) | the belief in plain words; markers allowed |
 | `Belief.confidence` | number 0–1 | yes | L | |
 | `Belief.firstSeen`, `Belief.lastSeen` | `Timestamp` | yes | L | fade when not seen |
-| `Belief.receipts` | array of `eventId` ≤ 50 | yes | L | observations behind it |
+| `Belief.receipts` | array of `ReceiptRef` ≤ 50 (`evt_…` or `src_…`, D90) | yes | L | observations (`evt_`) or source receipts (`src_`, §4.23) behind it; the prefix names the type |
 | `Belief.userEdited` | boolean | yes | L | true after the person edits or pins it |
 | `Belief.state` | enum `candidate` \| `active` \| `faded` \| `archived` | no | L | belief lifecycle (CZ-04); only `active` and `faded` render to `SOUL.md` (AM-13) |
 | `Belief.key` | string ≤ 256 | no | L | normalized dedupe key that merges repeated observations into one belief (AM-13) |
+| `Belief.sourceClass` | enum `observed` \| `declared` \| `local-file` \| `imported` | yes | L | the class that created the belief (D90); a supporting receipt never changes it |
+| `Belief.confidenceBasis` | enum `observation-score` \| `user-confirmed` | yes | L | `user-confirmed` for every non-observed belief (D90) |
+| `Belief.userConfirmed` | boolean | yes | L | the person declared or accepted it in the local viewer |
+| `Belief.confirmedAt` | `Timestamp` | when `user-confirmed` | L | |
 | `hourlyValue` | object `{amount: Amount6, currency: string, setByUser: boolean}` | no | L | the band, not the amount, leaves the machine (§4.4) |
 | `excerptPolicy` | object `{maxChars: integer, allowSections: string[]}` | yes | L | what may be sent to the hosted model (D31); default `maxChars` 20,000 |
 
-- **Invariants:** `version` strictly increases; every belief has ≥ 1 receipt or `userEdited = true`; the compile input sent to the hosted model is a redacted excerpt ≤ `excerptPolicy.maxChars` and contains only `RS`-eligible text.
-- **Example (invented):** `{"schemaVersion":"1.0","version":12,"compiledAt":"2026-10-18T02:00:00.000Z","sections":{"mission":[{"beliefId":"blf_01K7…","text":"Pricing refresh due Friday","confidence":0.82,"firstSeen":"2026-10-16T08:00:00.000Z","lastSeen":"2026-10-18T09:12:03.420Z","receipts":["evt_01K7ZT9P4N5Q6R7S8T9V0W1X2Y"],"userEdited":false}],"place":[],"rituals":[],"friction":[],"drives":[],"taste":[],"constraints":[],"spendingPosture":[]},"excerptPolicy":{"maxChars":20000,"allowSections":["mission","friction","drives"]}}`
+- **Invariants:** `version` strictly increases; every belief has ≥ 1 receipt or `userEdited = true`; a `user-confirmed` belief has `confidence = 1` (the person's attestation, not statistical certainty) and `confirmedAt`; a non-observed belief is always `user-confirmed`; `soul.json` never contains a proposal (§4.24) (D90); the compile input sent to the hosted model is a redacted excerpt ≤ `excerptPolicy.maxChars` and contains only `RS`-eligible text.
+- **Schema version:** 1.2 (D90). A 1.1 file migrates by setting every belief to `sourceClass = observed`, `confidenceBasis = observation-score`, `userConfirmed = false`; stored versions and their hashes are not rewritten.
+- **Example (invented, schema 1.0 shape):** `{"schemaVersion":"1.0","version":12,"compiledAt":"2026-10-18T02:00:00.000Z","sections":{"mission":[{"beliefId":"blf_01K7…","text":"Pricing refresh due Friday","confidence":0.82,"firstSeen":"2026-10-16T08:00:00.000Z","lastSeen":"2026-10-18T09:12:03.420Z","receipts":["evt_01K7ZT9P4N5Q6R7S8T9V0W1X2Y"],"userEdited":false}],"place":[],"rituals":[],"friction":[],"drives":[],"taste":[],"constraints":[],"spendingPosture":[]},"excerptPolicy":{"maxChars":20000,"allowSections":["mission","friction","drives"]}}`
 
 ### 4.3 `Objective` (local)
 
@@ -523,6 +528,67 @@ type PaymentRef =
 - **Phase 2:** archives are also pinned to IPFS; `cid` is set and `uriHash = keccak256(CID)` (SL §7.1). Pin providers are chosen in Phase 2.
 - Leaves are `demand-proof`, `soul-version`, or SL rows (`observation`, `report`, `assessment`, `correction`, `exposure`, `submission-log`). Schema `schemas/evidence-batch.schema.json`.
 
+### 4.23 `SourceReceipt` (D90)
+
+- **Purpose:** the evidence behind a non-observed belief or proposal: an interview answer, a selected agent file, a git item, a paste or an agent summary. Local only.
+- **Schema:** `schemas/source-receipt.schema.json`. Example: `examples/source-receipt.example.json`.
+
+| Field | Type | R | PC | Description |
+|---|---|---|---|---|
+| `receiptId` | `src_<Ulid>` | yes | L | |
+| `sourceClass` | enum `declared` \| `local-file` \| `imported` | yes | L | never `observed` |
+| `kind` | enum `interview` \| `agent-file` \| `git-commit` \| `git-marker` \| `import-paste` \| `agent-summary` | yes | L | |
+| `origin` | enum `viewer` \| `agent-host` | yes | L | `agent-host` when it arrived through `propose_soul_context` |
+| `questionId` | string ≤ 64 | for `interview` | L | the fixed `InterviewSubmission` field path |
+| `capturedAt` | `Timestamp` | yes | L | |
+| `excerpt` | string ≤ 500 | yes | L (RS only inside one P-07 call, D31) | redacted; layer 1 before storage |
+| `sourceDigest` | `Hash32` | yes | L | `keccak256` of the exact bytes read |
+| `locator` | string ≤ 1,024 | no | L | path relative to the root, or commit id; never egresses, never in a model excerpt |
+| `consentId` | `cns_<Ulid>` | no | L | the consent that allowed the read |
+| `redactionCounts`, `screenFlags` | object, array | yes | L | counts and flags only |
+
+### 4.24 `ProposedBelief` (D90)
+
+- **Purpose:** a suggested belief waiting for the person. It is not a belief: it is absent from `soul.json`, CZ-06, the P-04 excerpt of current beliefs and every export until accepted in the local viewer.
+- **Schema:** `schemas/proposed-belief.schema.json`. Example: `examples/proposed-belief.example.json`.
+
+| Field | Type | R | PC | Description |
+|---|---|---|---|---|
+| `proposalId` | `prop_<Ulid>` | yes | L | |
+| `section`, `key`, `text` | section enum, string ≤ 256, string ≤ 500 | yes | L | a tombstoned `key` (CZ-04 §5.7) blocks the proposal |
+| `sourceClass` | enum `declared` \| `local-file` \| `imported` | yes | L | the class the belief would get |
+| `sourceReceiptIds` | array of `src_` 1–10 | yes | L | |
+| `bundleId` | `prop_<Ulid>` | no | L | one agent-mediated interview bundle (D90 item 5) |
+| `status` | enum `pending` \| `accepted` \| `rejected` \| `expired` | yes | L | `pending` expires after `soulInput.pendingRetentionDays` |
+| `createdAt`, `decidedAt` | `Timestamp` | yes / no | L | |
+| `beliefId` | `blf_<Ulid>` | on accept | L | |
+| `screenFlags` | array | yes | L | a flagged proposal cannot be accepted in a batch |
+
+- **Lifecycle:** `pending → accepted` (creates or updates one belief and one soul version, atomically) · `pending → rejected` (text removed at once; audit metadata kept) · `pending → expired`. Only the local viewer (CZ-05) can accept.
+
+### 4.25 `InterviewSubmission` (D90)
+
+- **Purpose:** typed answers from the optional interview. The fixed question ids are `place`, `mission`, `constraints.maxTotalPerObjective`, `constraints.noNewPayees`, `constraints.categoriesAllowed`, `constraints.offLimitsTools`, `constraints.privacyRule`, `taste.preferredFormat`, `taste.preferredSources`, `spendingPosture.riskPreference`, `spendingPosture.note`, `hourlyValue`; `place` and `mission` are one question each with several fields. Deterministic templates in CZ-04 §5.11 turn each answered question into one belief; `hourlyValue` makes none. No model call. Nothing here writes a vault or limit setting.
+- **Schema:** `schemas/interview-submission.schema.json`. Example: `examples/interview-submission.example.json`. All fields `L`.
+
+| Group | Fields | Used by Czar in Phase 1 |
+|---|---|---|
+| `place` | `locale`, `timeZone`, `displayCurrencyPreference` | no (saved context; Phase 1 shows USD, D51) |
+| `mission` | `projectRootId`, `projectName`, `goal`, `deadline` | `deadline` becomes `Objective.deadline` for an objective in the same project root (CZ-06 §5.6) |
+| `constraints` | `maxTotalPerObjective`, `noNewPayees`, `categoriesAllowed` | yes: `ObjectiveSubmission.constraints.maxTotal`, `.noNewPayees`, `.categoriesAllowed` (§4.4) |
+| `constraints` | `offLimitsTools`, `privacyRule` | no (saved context) |
+| `taste` | `preferredFormat`, `preferredSources` | no (saved context) |
+| `spendingPosture` | `riskPreference`, `note` | no (saved context; a real limit change is a CZ-22 owner action) |
+| `hourlyValue` | `Amount6` (USD) | yes: `soul.json.hourlyValue` with `setByUser = true`, so the ROI filter and `hourlyBand` (§4.4) |
+
+### 4.26 `SourceScan` (D90)
+
+- **Purpose:** one bounded, consented read of a known project root (CZ-02 §5.6). Local only.
+- **Schema:** `schemas/source-scan.schema.json`. Example: `examples/source-scan.example.json`.
+- **`rootId`:** the lowercase hex of the root's `projectRef` (32 bytes, no `0x`; `projectRef` is defined in §4.1). The same value is `InterviewSubmission.mission.projectRootId`. It is local only.
+- **Fields:** `scanId` (`scan_<Ulid>`), `rootId`, `includeAgentFiles`, `includeGlobalAgentFile`, `includeGit`, `consentId`, `status` (`running` \| `done` \| `failed` \| `cancelled`), `fileCount`, `byteCount`, `skipped` counts (`sensitivePath`, `outsideRoot`, `oversized`, `untracked`, `nonText`), `proposalCount`, `suspiciousSkipped`, `startedAt`, `endedAt`.
+- **Held (SCR-030):** `OpenLoopPreview` and `DemandConfirmationReceipt` for user-confirmed open loops are defined in SCR-030 and added with the Flow 7 review.
+
 ---
 ## 5. Canonical hashing and Merkle rules
 
@@ -547,6 +613,8 @@ type PaymentRef =
 | `descriptionHash` | `H({hashRule:"czar-hash-v1", kind:"job-description", planHash, stepIndex, acceptanceProfileId, inputCommit})` | the ERC-8183 `description` string is `"czar:"` followed by the 64 lowercase hex characters of `descriptionHash`, with no `0x` (69 characters; `czar-vault.md` §15.6, D88) |
 | `inputCommit` | `H({hashRule:"czar-hash-v1", kind:"job-input", inputs, inputSalt})` with `inputs` and `inputSalt` from the `JobBrief` (§4.21) | RV-025: previously used but never defined |
 | `soulVersionCommit` | `keccak256(abi.encode(bytes32 soulVersionHash, bytes32 demandSalt))`, `demandSalt = keccak256(abi.encode(bytes32 userDemandSecret, address vault, uint64 envelopeId))` | RV-026: the only soul reference in a public demand-proof leaf |
+
+- **Soul hash with non-observed beliefs (D90 item 12, interim):** `soulVersionHash` keeps the `czar-hash-v1` preimage in the table above. A belief's `receipts` may hold `src_` ids; they are sorted and committed as opaque strings exactly like `evt_` ids, and a `user-confirmed` belief commits `confidence = 1`. `sourceClass`, `confidenceBasis`, `userConfirmed` and `confirmedAt` are **not** in the v1 preimage; the receipt prefix shows the type on any later reveal. The daemon records the rule used for each version (`soul_versions.soulHashRule`, CZ-04 §5.9). The successor rule `czar-soul-v2`, the `SoulVersionLeaf` v2, `czar-objective-v2` and the demand-proof leaf v3 are held in SCR-030 for the Flow 7 review; until then no builder implements them and every published leaf stays v1 (soul) or v2 (demand).
 
 ### 5.3 Merkle rules (`czar-merkle-v1`)
 
@@ -700,6 +768,10 @@ Spec 03's Foundry tests MUST reproduce the seven on-chain entries (all but `brie
 | `quoteId` | `qte_<Ulid>` | server | global | `createQuote` results (each names a `planId` and `stepIndex`) and shadow-mode quotes (RV-020) |
 | `payRequestId` | `prq_` + 32 lowercase hex | client (MCP `pay`) | per device | one id per `createPayRequest` call, reused on retry; maps to the per-index `paymentId`s the server mints (RV-050) |
 | `claimId` (P2) | `clm_<Ulid>` | claim server | global | |
+| `sourceReceiptId` | `src_<Ulid>` | daemon | local only | D90; also appears as a belief receipt |
+| `proposalId` | `prop_<Ulid>` | daemon | local only | D90; also used as an interview `bundleId` |
+| `scanId` | `scan_<Ulid>` | daemon | local only | D90 |
+| `consentId` | `cns_<Ulid>` | daemon | local only | D90 |
 | `candidateId` | `cand_<Ulid>` | daemon | local only (belief candidate passed between the rules and P-04; never leaves the machine) | AM-15 |
 | `userPseudonym` | `keccak256(abi.encode(userSecret, epoch))` | server, rotating per 90-day epoch | soul-version leaves only (RV-026) | `userSecret` is `SO` |
 | `demandSalt` | `keccak256(abi.encode(userDemandSecret, vault, envelopeId))` | server | one per envelope; `SO`; revealed to the user on request | `userDemandSecret` is `SO` and separate from `userSecret` (RV-026) |
@@ -920,7 +992,7 @@ Full definition: `api/openapi.yaml` (OpenAPI 3.1; 28 paths, 29 operations; parse
 | GET | `/v2/x402/discovery/search` (`searchIndexResources`) | yes | → `IndexSearchResponse` | spec search shape (A3-34) |
 | GET | `/v1/snapshots`, `/v1/snapshots/{id}` (`listSnapshots`, `getSnapshot`) | yes | → snapshot list / JSON Lines | Phase 2 (`x-phase: 2`, SL-C11) |
 
-**Local viewer surface (loopback only; AM-16):** `api/local-openapi.yaml` defines `getLocalSoul`, `editLocalBelief`, `getLocalSoulDiff`, `getLocalBeliefReceipts`, `getLocalShadowReport`, `getLocalEgress` on the daemon's Unix socket or `127.0.0.1`, with a local token and an `Origin` check (D3-08). Everything there is `local-only`.
+**Local viewer surface (loopback only; AM-16):** `api/local-openapi.yaml` defines `getLocalSoul`, `editLocalBelief`, `getLocalSoulDiff`, `getLocalBeliefReceipts`, `getLocalShadowReport`, `getLocalEgress`, and for soul inputs (D90) `submitLocalSoulInterview`, `listLocalSoulSourceRoots`, `startLocalSoulSourceScan`, `getLocalSoulSourceScan`, `proposeLocalSoulImportText`, `listLocalSoulProposals`, `decideLocalSoulProposal`, `confirmLocalSoulBundle`, on the daemon's Unix socket or `127.0.0.1`, with a local token and an `Origin` check (D3-08). Everything there is `local-only`.
 
 **Claim surface (Phase 2, D23, D29)**
 
@@ -959,9 +1031,10 @@ Full definition: `api/openapi.yaml` (OpenAPI 3.1; 28 paths, 29 operations; parse
 
 | Link | Never sent | Why |
 |---|---|---|
-| Daemon → server | raw hook payloads, `ActivityEvent`s, soul text, `transcript_path` contents, file paths, `user_email`, the hourly value amount (band only). **Sent (D84):** `TaskSpec` (subjects, fields, topic, base file name, context) inside `ObjectiveSubmission` | D25, D31, B1-30, B3-04, D84; schemas carry no `local-only` field |
+| Daemon → server | raw hook payloads, `ActivityEvent`s, soul text, `transcript_path` contents, file paths, `user_email`, the hourly value amount (band only), interview answers, proposals, source receipts and their locators, scanned file or git contents, pasted text, agent summaries (D90; only a redacted P-07 excerpt crosses, inside one `completeModelCall`, and the proxy stores nothing, D31). **Sent (D84):** `TaskSpec` (subjects, fields, topic, base file name, context) inside `ObjectiveSubmission` | D25, D31, B1-30, B3-04, D84; schemas carry no `local-only` field |
 | Server → daemon | other users' data, merchant bodies beyond the labelled `Result`, keys | spec 01 §11.1 |
-| App ↔ server | passkey private material (assertions only), soul contents (D34), merchant raw bodies | D26, D34 |
+| App ↔ server | passkey private material (assertions only), soul contents (D34), interview answers (D90), merchant raw bodies | D26, D34, D90 |
+| MCP host → CZ-09 → daemon (`propose_soul_context`) | nothing goes to the server; the tool result carries counts only, never belief text | D90 |
 | Server → push (stage 2) | anything beyond title, amount and a navigate URL | D2-06, §9.6 |
 | Claim server → GitHub | nothing beyond the OAuth exchange and one file read | E1-12 |
 
@@ -978,6 +1051,7 @@ Full definition: `mcp/czar-mcp-tools.md`. The local Czar MCP server (CZ-09) runs
 | `quote` | prices and routes a step through `createQuote` (`POST /v1/quotes`, AM-01) (live 402, D37 routing); moves no money | true | false | false | true | URL mode to the approval page when a new envelope would be needed (D3-11) |
 | `pay` | forwards `POST /v1/pay/requests` with exactly its shape (D75): one `(planId, stepIndex)` of an approved plan; the server reserves, signs, settles, screens, accepts and returns a `StepResult` (§4.15) | false | true | false | true | URL mode when the server answers `approval-required` (D3-04, D3-11); retry with the same `payRequestId` after approval |
 | `report_outcome` | records useful / not useful / wrong / unused for a payment through `reportOutcome` (`POST /v1/outcomes`, AM-01); feeds receipts and earned autonomy | false | false | true | false | none |
+| `propose_soul_context` | sends an agent summary or an exact interview bundle to the **local daemon** (control socket `soul.propose`, not the server) as pending proposals for review in the viewer; never saves a belief, never spends (D90) | false | false | false | false | none |
 
 - Every `pay` call carries a client-chosen `payRequestId` (`prq_` + 32 hex, §7.4, RV-050) and an `idempotencyKey`; retries reuse both.
 - Form-mode elicitation is never used for spending or credentials (D3-11). URL mode points at `http://localhost/approve/<planId>` in Phase 1 (D78); the client must show the server name and target host before navigating.
@@ -1155,9 +1229,9 @@ Phase 2 (component CZ-10, spec 01 §4.1). Every export file is written on the us
 | Rule | Detail | Facts |
 |---|---|---|
 | Section order | `place`, `mission`, `rituals`, `friction`, `drives`, `taste`, `constraints`, `spendingPosture`; a section with no beliefs is omitted | product §6.3 |
-| Header | one line: `# Work Soul (version <n>, compiled <date>)`, then one line stating that this file is written by Czar from observed work and that the person can edit any line in the Czar viewer | product §6.3 |
-| Belief line | `- <text> (confidence <0.00–1.00>, last seen <YYYY-MM-DD>)`; one belief per line; beliefs sorted by confidence descending within a section | §4.2 |
-| Receipts | omitted; event ids never appear in exports | §4.2, D25 |
+| Header | one line: `# Work Soul (version <n>, compiled <date>)`, then one line stating that this file is written by Czar from observed work and what the person confirmed, and that the person can edit any line in the Czar viewer | product §6.3, D90 |
+| Belief line | `- <text> (confidence <0.00–1.00>, last seen <YYYY-MM-DD>)`; a `user-confirmed` belief renders `- <text> (confirmed by you <YYYY-MM-DD>)` (D90); one belief per line; beliefs sorted by confidence descending within a section, confirmed beliefs first | §4.2 |
+| Receipts | omitted; event and source receipt ids never appear in exports; proposals are never exported | §4.2, D25, D90 |
 | Redaction markers | kept verbatim (`[[R:…]]`, §3.1); never expanded | §3.1 |
 | Size | total ≤ 20,000 characters including the header; when over, beliefs are dropped lowest-confidence first and a final line `- (truncated: <k> beliefs omitted)` is added | B5-05, B5-12 |
 | Injection hygiene | no imperative instructions to the agent, no quoted attack phrases ("ignore previous instructions", role-play framing, tool-install commands); the renderer rejects a belief whose text matches the daemon's injection screen and keeps the previous rendering | B5-06, C3-04 |
@@ -1246,6 +1320,10 @@ No locked decision is changed. Tensions noted: spec 01 §19 asked for a `sync()`
 | GAP: Presidio non-English models | redaction quality for non-English users | Phase 2 |
 | ~~GAP: `Me.displayCurrency` conversion source~~ | closed by D51: Phase 1 shows USD only (USDC 1:1); local currency is a later option | — |
 | GAP: `ActivityEvent.host` enum lacks Hermes/OpenClaw observers | Phase 2 minor schema bump | CZ-10 |
+| GAP: ChatGPT and Claude export formats (saved memory, custom instructions, archives) (D90) | no archive import in Phase 1; paste only | SCR-031 research, then a parser SCR |
+| GAP: native folder picker from the loopback viewer (D90) | Phase 1 scans only CZ-02 known roots | separate UX and permission decision |
+| GAP: trusted "the user started this MCP call" evidence (D90) | `propose_soul_context` can only propose | research only if a later feature needs MCP declaration |
+| GAP: `czar-soul-v2` and public soul-leaf compatibility (D90) | non-observed beliefs committed under v1 meanwhile | SCR-030 in the Flow 7 review |
 
 ### 15.4 Flags
 
@@ -1298,3 +1376,4 @@ Agent-directed text met this session (not followed): the Circle and Arc doc head
 | 2026-10-20 | D86, D87 | §4.11 `deliverableRef` replaces `deliverableUri`; §4.21 `JobBrief` v2 (`taskSpec`, `inputs` from `callInputs`, push delivery, `targetBudget`, `submitBy`, `decisionCutoff`, `terms`, reserved `attachments`; type-agnostic); §6.2 `DeliverableUpload` type and vector; §9.2 `uploadJobDeliverable`. |
 | 2026-10-20 | D87 (H6, N2) | `Result.artifacts`, `ResultAck.artifacts` counts, `getResultArtifact`. |
 | 2026-10-20 | D88 | §6.2 `OwnerAction` action list adds `17 CANCEL_JOB` (H2); job `description` format stated exactly (69 characters, no `0x`). |
+| 2026-10-20 | D90 | §4.2 `Belief` source fields and typed receipts (schema 1.2); new §4.23 `SourceReceipt`, §4.24 `ProposedBelief`, §4.25 `InterviewSubmission`, §4.26 `SourceScan`; §5.2 interim soul-hash note (v2 rules held in SCR-030); §7.1 `src_`, `prop_`, `scan_`, `cns_`; §9.2 local soul-input routes; §9.7; §10 `propose_soul_context`; §13.1 confirmed lines; §15.3 gaps. |

@@ -51,7 +51,7 @@
 ### 3.2 Czar is not
 - Not just a recommendation engine.
 - Not a paid-placement or advertising system. Ranking position is never for sale.
-- Not an invented persona. The soul comes from observed work, never from fiction.
+- Not an invented persona. The soul comes from observed work and from what the person confirms about themselves, never from fiction (D90).
 
 ### 3.3 The origin idea
 - Czar began as "Onda for the builders behind people's work." Onda is a browser extension that detects which artist you're listening to and pays them small amounts of USDC on Arc, with escrow for artists who haven't joined yet.
@@ -108,6 +108,11 @@ Components are numbered in the adopted priority order.
 
 ### 6.3 The Work Soul
 - **What:** a living document per person, `SOUL.md` plus a machine-readable `soul.json`. Czar writes it; the person never has to.
+- **Day one, optional (D90):** the person can answer a five-minute interview on their computer, or let Czar suggest lines from files and text they choose: project instruction files, recent tracked git work, pasted saved memory, or a summary their agent sends.
+  - Nothing from a file, a paste or an agent becomes part of the soul until the person accepts it line by line.
+  - Each line says where it came from: observed, declared by the person, from a file, or imported.
+  - In Phase 1 only three answers change what Czar does: confirmed constraints, a mission deadline for the same project, and the hourly value. Taste, place and spending posture are saved context.
+  - Confirming an answer never approves spending and never changes a spending limit.
 - **Sections:**
   - **Place:** locale, language, time zone, currency, and the rules that apply where they work
   - **Mission:** active projects, each with its goal and deadline
@@ -118,8 +123,8 @@ Components are numbered in the adopted priority order.
   - **Constraints:** budget, tools they can't use, privacy limits
   - **Spending posture:** past approvals and rejections, how much risk they accept
 - **Every belief carries receipts:**
-  - links to the observations behind it
-  - a confidence score
+  - links to the observations behind it, or to the answer, file or text it came from (D90)
+  - a confidence score; a line the person confirmed shows "Confirmed by you" instead
   - a "last seen" date
   - beliefs fade if they aren't seen again
 - **The person can read, edit or delete any line.**
@@ -272,7 +277,7 @@ Components are numbered in the adopted priority order.
 - Source surface, timestamp, event type (tool call, file read or write, command, search, error, agent refusal, page visit), redacted content summary, project reference.
 
 ### 7.2 `soul.json`
-- The eight sections in 6.3. Each belief holds its value, evidence links, confidence, last-seen date and version.
+- The eight sections in 6.3. Each belief holds its value, evidence links, confidence, last-seen date and version, and where it came from (observed, declared, file or imported; D90).
 
 ### 7.3 `Objective`
 - Goal, evidence links, deadline, estimated minutes saved, capabilities needed, priced plan, status.
@@ -390,3 +395,4 @@ Components are numbered in the adopted priority order.
 - 2026-10-20 · D82: §6.11 ROI scope covers paid steps only; free assembly on the Mac and agent-finished steps are labelled.
 - 2026-10-20 · D83: §8.5 two lanes, real market rank-only and test market paid.
 - 2026-10-20 · D86, D87: §6.14 job types are open; "accepted" means the form was checked, not correctness.
+- 2026-10-20 · D90: §3.2, §6.3, §7.2 optional interview and reviewed soul inputs; source labels; only constraints, a matching deadline and hourly value are used in Phase 1.

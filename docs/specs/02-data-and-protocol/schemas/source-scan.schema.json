@@ -1,0 +1,154 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://czar.dev/schemas/source-scan.schema.json",
+  "title": "SourceScan",
+  "description": "One bounded, consented read of a selected project root (spec 02 §4.26, D90). Local only.",
+  "type": "object",
+  "x-privacyClass": "local-only",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "1.0",
+      "description": "Schema version, major.minor; this file is 1.0.",
+      "x-privacyClass": "local-only"
+    },
+    "scanId": {
+      "$ref": "common.schema.json#/$defs/SourceScanId",
+      "description": "Scan id.",
+      "x-privacyClass": "local-only"
+    },
+    "rootId": {
+      "type": "string",
+      "description": "Lowercase hex of the root projectRef (spec 02 §4.26); local only.",
+      "x-privacyClass": "local-only",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "includeAgentFiles": {
+      "type": "boolean",
+      "description": "Read CLAUDE.md, CLAUDE.local.md and AGENTS.md in the root.",
+      "x-privacyClass": "local-only"
+    },
+    "includeGlobalAgentFile": {
+      "type": "boolean",
+      "description": "Also read the person's global ~/.claude/CLAUDE.md; only on its own selection.",
+      "x-privacyClass": "local-only"
+    },
+    "includeGit": {
+      "type": "boolean",
+      "description": "Read tracked TODO markers and recent commit subjects.",
+      "x-privacyClass": "local-only"
+    },
+    "consentId": {
+      "$ref": "common.schema.json#/$defs/ConsentId",
+      "description": "Consent record for this scope.",
+      "x-privacyClass": "local-only"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "running",
+        "done",
+        "failed",
+        "cancelled"
+      ],
+      "description": "Scan state.",
+      "x-privacyClass": "local-only"
+    },
+    "fileCount": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Files read.",
+      "x-privacyClass": "local-only"
+    },
+    "byteCount": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Bytes read.",
+      "x-privacyClass": "local-only"
+    },
+    "skipped": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sensitivePath": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Sensitive or denied paths.",
+          "x-privacyClass": "local-only"
+        },
+        "outsideRoot": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Symlinks or paths outside the root.",
+          "x-privacyClass": "local-only"
+        },
+        "oversized": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Files above soulInput.scanMaxBytesPerFile.",
+          "x-privacyClass": "local-only"
+        },
+        "untracked": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Untracked or ignored files not selected by name.",
+          "x-privacyClass": "local-only"
+        },
+        "nonText": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Binary or non-UTF-8 files.",
+          "x-privacyClass": "local-only"
+        }
+      },
+      "required": [
+        "sensitivePath",
+        "outsideRoot",
+        "oversized",
+        "untracked",
+        "nonText"
+      ],
+      "description": "Skipped items by reason (counts only).",
+      "x-privacyClass": "local-only"
+    },
+    "proposalCount": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Proposals created.",
+      "x-privacyClass": "local-only"
+    },
+    "suspiciousSkipped": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Paragraphs P-01 flagged and removed before P-07.",
+      "x-privacyClass": "local-only"
+    },
+    "startedAt": {
+      "$ref": "common.schema.json#/$defs/Timestamp",
+      "description": "Start time.",
+      "x-privacyClass": "local-only"
+    },
+    "endedAt": {
+      "$ref": "common.schema.json#/$defs/Timestamp",
+      "description": "End time.",
+      "x-privacyClass": "local-only"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "scanId",
+    "rootId",
+    "includeAgentFiles",
+    "includeGit",
+    "consentId",
+    "status",
+    "fileCount",
+    "byteCount",
+    "skipped",
+    "proposalCount",
+    "suspiciousSkipped",
+    "startedAt"
+  ],
+  "$comment": "2026-10-20: created for D90 (soul inputs beyond observation)."
+}

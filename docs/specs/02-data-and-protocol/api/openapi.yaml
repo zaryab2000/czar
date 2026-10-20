@@ -846,7 +846,7 @@ components:
       additionalProperties: false
       required: [prompt, promptHash, input, schema]
       properties:
-        prompt: { type: string, enum: [P-01, P-04, P-05, P-06] }
+        prompt: { type: string, enum: [P-01, P-04, P-05, P-06, P-07] }
         promptHash: { $ref: "#/components/schemas/Hash32", description: Hash of the prompt file the daemon used. }
         input: { type: object, description: "Redacted and screened input as defined for that prompt in spec 04 ai-prompts.md." }
         schema: { type: object, description: Output JSON Schema the model must follow. }
@@ -1154,7 +1154,7 @@ paths:
   /v1/models/complete:
     post:
       tags: [daemon]
-      summary: Model proxy for P-01, P-04, P-05, P-06. Stores only token counts (D31, AM-02).
+      summary: Model proxy for P-01, P-04, P-05, P-06, P-07 (D90). Stores only token counts (D31, AM-02).
       description: "Exempt from idempotent response replay (RV-043). The proxy keeps the Idempotency-Key, a body fingerprint and token counts only, so a second request with the same key gets 409 replay-not-stored whatever its body. The daemon then decides whether to call again with a new key."
       operationId: completeModelCall
       security: [ { DeviceToken: [] } ]
@@ -1615,3 +1615,4 @@ paths:
 # - D85 (2026-10-20): Plan.fillInPlace via ApprovalIntentRequest; Result.fillInPlace; ResultAck.fill counts.
 # - D86/D87 (2026-10-20): uploadJobDeliverable route and ProviderUploadSignature scheme; JobBrief v2.
 # - D87 (2026-10-20): Result.artifacts, ResultAck.artifacts counts, getResultArtifact route (H6, N2).
+# - D90 (2026-10-20): completeModelCall accepts P-07 (source-belief-extractor). Nothing else changes here; demandEvidence and the server approval policy for confirmed objectives are held in SCR-030.

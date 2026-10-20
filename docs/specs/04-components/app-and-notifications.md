@@ -266,7 +266,7 @@ Idempotency: every creating call sends `Idempotency-Key`; `notifySubmitted` with
 | Pending approvals | "Czar needs your approval for these. Nothing is spent until you approve." |
 | Stage 2 (D69) | Home Screen install, notifications and the native-app notice keep their wording for stage 2: "Add Czar to your Home Screen to get approval requests as notifications."; "Turn on notifications"; "Passkeys did not work in the installed app on this phone…" (D28) |
 | Privacy | "Raw work data stays on your computer. Only redacted excerpts are sent to compile your Work Soul, through a Czar relay that stores nothing. Objectives sent to Czar's server are redacted first." (D31 wording rule; never "never leaves") |
-| Work Soul | "Your Work Soul is viewable on your computer. Open the Czar viewer there to read, edit or delete any line." (D34) |
+| Work Soul | "Your Work Soul is viewable on your computer. Open the Czar viewer there to read, edit or delete any line." (D34) Before the first soul version, the pointer message is: "Open the Czar viewer on your computer to tell Czar about your work (about five minutes, optional)." (D90; text only, ≤ 200 characters, no soul content in the app) |
 | Devices | "Pair your computer: enter this code in the Czar daemon within 5 minutes: {code}" |
 
 ### 13. Performance and cost budgets
@@ -371,3 +371,4 @@ K17 VAPID private key in the secret store; a leak lets an attacker spam notifica
 | 2026-10-20 | D85 | Approval screen fill-in-place checkbox; delivered wording. |
 | 2026-10-20 | D86, D87 | Wording: job paid (form, not correctness), job context notice, freeze with jobs. |
 | 2026-10-20 | N1, N2 | Wording: unverified provider badge; files held for review. |
+| 2026-10-20 | D90 | `getSoulPointer` message before the first soul version points to the optional desktop interview; no soul data in the app. Approval display for confirmed objectives is held in SCR-030. |
