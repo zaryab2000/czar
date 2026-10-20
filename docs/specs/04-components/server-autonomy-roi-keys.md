@@ -379,6 +379,7 @@ CZ-19 projections, CZ-12 outcome intake, OpenAPI schemas. No FX source in Phase 
 | K11 Facilitator Console key | secret | CZ-20 | HTTPS header only | — |
 | K21a, K21b test-provider keys (H7, N12) | secp256k1 ECDSA, one per instance | CZ-20 §5.11 | `provider-call`: `setBudget`/`submit` on the configured escrow; `BriefRequest` and `DeliverableUpload` signatures for its own jobs | testnet only; never a vault role |
 | K12 Gateway API key (mainnet slot) | secret | CZ-15, CZ-20 | HTTPS header only | — |
+| K22 test-buyer owner (D91) | secp256k1 ECDSA; testnet only | CZ-18 §5.3d | `test-buyer-owner`: owner calls on the one test-buyer vault | yes (funded by hand after Zaryab's approval) |
 | K13 GitHub OAuth secret (P2) | secret | CZ-21 | OAuth exchange only | — |
 | K17 VAPID key | secret | CZ-23 (stage 2, D69) | push signing only; not created in Phase 1 | — |
 | K18 model API keys | secret | CZ-13, CZ-16, Czar proxy for the daemon | model HTTPS only | — |
@@ -410,6 +411,7 @@ A key store signs any 32-byte digest it is asked to sign; it cannot see that a d
 | `pocket-slow-withdraw` (K4) | no | `{pocket, step: initiate \| withdraw, value?}` | `GatewayWallet.initiateWithdrawal(USDC, value)` or `withdraw(USDC)` only, and only after the Gateway API has been unreachable for `payer.pullbackApiDownHours` (CZ-15) or the owner asked for it in the app; `withdraw` pays the pocket EOA, so a `pocket-return` transfer follows at once |
 | `relayer-tx` (relayer) | no | `{to, selector, args}` | `(to, selector)` in the relayer allowlist (§5.1 row); value 0 |
 | `provider-call` (K21a/K21b) | no | `{escrow, jobId, action: setBudget \| submit \| brief-request \| deliverable-upload, args}` | `escrow` is the configured instance; the job's `provider` is this key; `submit` only with a `contentHash` already accepted by `uploadJobDeliverable`; never signs for a job whose evaluator is not K7 |
+| `test-buyer-owner` (K22) | yes (opens a test-buy envelope) | `{vault, call: openEnvelope \| setCategoryLimits \| withdraw, args, planId?}` | `vault` is the one test-buyer vault on `selection.paymentNetwork`; `openEnvelope` only for a stored test-buyer plan (CZ-18 §5.3d) with one step, `cap ≤ selection.testBuyer.maxUnitAtomic × selection.testBuyer.callsPerService × (1 + planner.stepSlackBps/10000) × (1 + Plan.slackBps/10000)`, and the week's spend under `selection.testBuyer.weeklyBudgetAtomic`; `setCategoryLimits` only to lower limits; `withdraw` only to K22's own address; refused on any mainnet chain id |
 | `gas-refill` (relayer) | no | `{target, amount}` | `target ∈ {K3, K7, K8}` addresses; `amount ≤ signer.gas.<key>.maxAtomic − balance(target)` (§5.5) |
 
 - Per-key rate limits: `kms.maxSignaturesPerMin` per key (K3 600, K4 120 per pocket, K5 10, K7 60, K8 10, K10 300, relayer 120); excess is denied and alerted.
@@ -586,3 +588,4 @@ Phase 1: the local keystore and the macOS keychain through `@napi-rs/keyring` (D
 | 2026-10-19 | RV-047 | CZ-25 leftover local-currency and FX text removed (D51). |
 | 2026-10-20 | N8, D87 | K7 `reject` always signable; reason tags listed. |
 | 2026-10-20 | H7, N12 | K21a/K21b test-provider keys and the `provider-call` policy. |
+| 2026-10-20 | D91 | K22 test-buyer owner key (testnet only) and the `test-buyer-owner` policy. |

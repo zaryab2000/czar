@@ -114,6 +114,11 @@
 | T-112 | Viewer: interview, sources, review, bundle confirm (D90) | M5 | M | T-067, T-111 |
 | T-113 | MCP `propose_soul_context` (D90) | M5 | S | T-072, T-111 |
 | T-114 | User-confirmed open loops (D90) — **blocked on SCR-030 / Flow 7** | M5 | L | T-068, T-069, T-070, T-112, SCR-030 accepted |
+| T-115 | Capability cards, Czar index and tags+BM25 retrieval (D91) | M4 | L | T-041, T-042, T-051, T-106 |
+| T-116 | `TaskSpec.output`, versioned taxonomy and the no-capability path (D91) | M5 | M | T-068, T-109 |
+| T-117 | Match set on Lane A cards; embeddings gate (D91; embeddings held in SCR-032) | M7 | M | T-115, T-107 |
+| T-118 | Testnet test-buyer with the K22 vault (D91) | M4 | M | T-115, T-105 (procedure; K22 added when T-118 starts), T-035, T-048 |
+| T-119 | Plan reasons, shadow comparison, format checks and display (D91) | M7 | M | T-045, T-056, T-070, T-073, T-084, T-115, T-116 |
 
 ---
 
@@ -489,6 +494,7 @@
 ---
 
 ## M2 Indexer and key management
+- **D91 (2026-10-20):** K22 test-buyer owner (testnet only) is created here when T-118 starts, after Zaryab approves; `deployments/arc-testnet-keys.json` gains a `K22` entry (address and reference only).
 
 ### T-030 Indexer: Ponder project, chains config, ≤9,999-block paging, -32012/-32014 retry
 - **Milestone / group / who:** M2 / M2-a / agent. **Size:** M. **Deps:** T-027.
@@ -946,6 +952,29 @@
   - With `merchants.lab.enabled = false`, every lab route returns 404; on a mainnet payment network the flag is forced off.
   - Lab services never vary behaviour by buyer (test with two buyer vaults).
 
+### T-115 Capability cards, Czar index and tags+BM25 retrieval (D91)
+- **Milestone / group / who:** M4 / M4-a / agent. **Size:** L. **Deps:** T-041, T-042, T-051, T-106.
+- **Spec refs:** `S04/server-acceptance-evidence-selection.md` CZ-18 §5.1 (C2, C3, C4), §5.3, §5.3b, §5.3c, §5.5, §5.6, §14; `S02/data-and-protocol.md` §4.27, §11.3, §12.2, §12.3; A3-35, A3-36, p1-D8; D91 items 1–3.
+- **Outputs:** `apps/server/src/selection/cards/`, `apps/server/src/selection/retrieval/` (BM25 in code), `capability_cards` and `card_terms` tables, `extensions.czar.card` on index items.
+- **Inputs:** server (T-041), `@czar/x402` 402 parsing and sanitizing (T-042), merchants (T-051) and the lab (T-106).
+- **Steps:**
+  - Load Czar-registered and lab merchants into the index (moved here from T-090).
+  - Build cards from each live 402 `extensions.bazaar` and Czar's probes; drop descriptions.
+  - Fetch Circle's catalog live as a lead list only.
+  - Implement tags ∪ BM25 retrieval and the `output-format` gate.
+- **Acceptance tests:** every CZ-18 §14 "Cards and retrieval (D91)" test; `catalog_cache` still holds only the allowed fields; `extensions.czar.card` never contains `solvedNeeds`; card fill rate is reported as a metric.
+
+### T-118 Testnet test-buyer with the K22 vault (D91)
+- **Milestone / group / who:** M4 / M4-b / agent, after Zaryab approves creating K22 and funding it. **Size:** M. **Deps:** T-115, T-105 (its key-creation procedure; K22 is added when this task starts), T-035, T-048.
+- **Spec refs:** CZ-18 §5.3d, §5.6, §14; `S04/server-autonomy-roi-keys.md` CZ-27 §5.1 (K22), §5.2 (`test-buyer-owner`); D91 items 7–8.
+- **Outputs:** `apps/server/src/selection/test-buyer/`, the signer policy kind, `test_buyer_runs` table.
+- **Inputs:** cards (T-115), keystore with K22 (T-105), signer (T-035), paying agent (T-048).
+- **Steps:**
+  - Write the failing tests first: testnet only, owner-opened envelopes, budget and fail stops (money path, CLAUDE.md).
+  - Create the test-buyer vault through the factory with K22 as owner.
+  - Implement selection, one-step plans, the K22 `openEnvelope` and the receipt flag `czar-test-buyer`.
+- **Acceptance tests:** every CZ-18 §14 "Test-buyer (D91)" test, on `arc-anvil --network arc` first and then on testnet after funding approval; the signer refuses a `test-buyer-owner` request on any chain id other than 5042002.
+
 ---
 
 ## M5 Local side
@@ -1244,6 +1273,17 @@
   - Passive two-read / 24-hour and shadow behaviour is unchanged; a changed file needs reconfirmation; confirmed objectives count toward the drives caps.
   - The v3 demand leaf verifies without claiming observation; G0-18 names reach the merchant and the write-back.
 
+### T-116 `TaskSpec.output`, versioned taxonomy and the no-capability path (D91)
+- **Milestone / group / who:** M5 / M5-c / agent. **Size:** M. **Deps:** T-068, T-109.
+- **Spec refs:** `S04/local-soul-and-drives.md` CZ-06 §5.1a (`output`), §5.3; CZ-04 §5.11; `S02/data-and-protocol.md` §4.3.1, §4.25; `S02/schemas/task-spec.schema.json` 1.1, `interview-submission.schema.json` 1.1; `S04/ai-prompts.md` P-05; D91 items 5–6.
+- **Outputs:** `drives.capabilityTaxonomy` in `@czar/config`; `TaskSpec.output` builder; no-capability handling and counter.
+- **Inputs:** drives engine (T-068), soul-input schemas (T-109).
+- **Steps:**
+  - Move the 13 tags into the versioned config; build P-05's enum from it.
+  - Build `TaskSpec.output` with the file → interview → default order.
+  - Add the no-capability path and its viewer line.
+- **Acceptance tests:** a `.md` table gives `markdown-table` from `file`; a refused task with interview `csv` gives `csv` from `interview`; with no interview answer the default applies; an objective whose tags all drop is not published and the counter rises; the server rejects a tag outside the configured version.
+
 ---
 
 ## M6 App and notifications
@@ -1382,6 +1422,7 @@
 - **Acceptance tests:**
   - A `circle-live` cache row holds only `resource`, `payTo`, `network`, `fetchedAt`, `expiresAt`, `etag`; after `expiresAt` it is re-fetched or dropped, never served (clock-mocked test).
   - Descriptions are never written to the database (schema and grep test).
+- **D91 (2026-10-20):** loading Czar-registered merchants into the index and the live Circle lead fetch are built earlier in T-115 (M4); T-090 keeps attribution (CZ-18 §5.4) and builds on T-115's tables.
 
 ### T-091 Reputation posteriors, pol_default_v1 ranking, RankingDecision, findService, listIndexResources, searchIndexResources
 - **Milestone / group / who:** M7 / M7-b / agent. **Size:** L. **Deps:** T-090, T-049.
@@ -1411,6 +1452,7 @@
 - **Acceptance tests:**
   - P-03 eval suite passes, including the injection cases (no address, URL or price in output; payees and caps unchanged).
   - With the model disabled, the rule-based plan is produced and marked.
+- **D91 (2026-10-20):** P-03 candidates carry code-computed `covers`, `outputFormats` and solved kinds (no seller strings), plus `TaskSpec.output` (`ai-prompts.md` P-03); test `planner_p03Input_noSellerText`.
 
 ### T-093 MCP find_service wiring
 - **Milestone / group / who:** M7 / M7-c / agent. **Size:** S. **Deps:** T-091, T-072.
@@ -1471,6 +1513,24 @@
   - Property test: no market probe changes any posterior or `RankingDecision`.
   - A market `serviceId` passed to `createQuote` or `createPayRequest` returns 422 `network-not-payable`.
   - Live read-only check on testnet hosting (no funds): one real `getMarketView(web-search)` against Circle's catalog returns tiered rows with the fixed labels.
+
+### T-117 Match set on Lane A cards; embeddings gate (D91; embeddings held in SCR-032)
+- **Milestone / group / who:** M7 / M7-a / agent, labels reviewed by Zaryab. **Size:** M. **Deps:** T-115, T-107.
+- **Spec refs:** CZ-18 §5.3b, §5.3c step 6, §5.6 `selection.matchEval.*`, `selection.retrievalMode`; SCR-032, SCR-033; D91 items 3–4.
+- **Outputs:** `apps/server/test/fixtures/match-set/` (≥ `selection.matchEval.minNeeds` `TaskSpec` needs with labelled Lane A cards and their `schemaHash`es), `match_eval_runs`, a report comparing tags only and tags+BM25.
+- **Inputs:** cards (T-115), market view probes (T-107).
+- **Steps:**
+  - Build mainnet cards through unpaid probes only; never pay a mainnet service.
+  - Label the set; run both modes; record metrics.
+  - Embeddings: do not start until SCR-032 is accepted; then add the mode and apply the gate.
+- **Acceptance tests:** tags+BM25 recall@10 ≥ tags-only recall@10 on the set; the run is reproducible from the fixture; no mainnet payment header is ever sent (network trace).
+
+### T-119 Plan reasons, shadow comparison, format checks and display (D91)
+- **Milestone / group / who:** M7 / M7-c / agent. **Size:** M. **Deps:** T-045, T-056, T-070, T-073, T-084, T-115, T-116.
+- **Spec refs:** CZ-13 step 3 (shadow comparison), step 7a, §12, §14; CZ-16 §5.2 output format; CZ-11 §5.2a format; CZ-08 §12; CZ-22 §12; `S02/schemas/plan.schema.json` 1.2; D91 items 5, 9, 10.
+- **Outputs:** `Step.why` builder, `Plan.untestedOptions`, the CZ-16 format check, CZ-11 format rendering, viewer and app wording.
+- **Inputs:** planner (T-045), acceptance profiles (T-056), shadow (T-070), write-back (T-073), approvals (T-084), cards (T-115), `TaskSpec.output` (T-116).
+- **Acceptance tests:** every CZ-13 §14 D91 test; two users with different `taste.outputFormat` get different `TaskSpec.output`, acceptance checks and result files for the same refused task; an as-is job output in the wrong format fails `structural`; an untested option never appears in `payeeLeaves`.
 
 ---
 
@@ -1553,18 +1613,18 @@
 | CZ-03 | Shared memory | T-063 |
 | CZ-04 | Soul compiler | T-065, T-066, T-109, T-111 |
 | CZ-05 | Soul store and viewer | T-067, T-112 |
-| CZ-06 | Drives engine | T-068, T-111, T-114 (blocked, SCR-030) |
+| CZ-06 | Drives engine | T-068, T-111, T-114 (blocked, SCR-030), T-116 |
 | CZ-07 | Objective publisher | T-069, T-111 |
 | CZ-08 | Shadow mode | T-070, T-114 (blocked, SCR-030) |
 | CZ-09 | MCP server | T-071, T-072, T-093, T-113 |
 | CZ-11 | Write-back adapter | T-073 |
 | CZ-12 | Server API | T-041, T-071, T-081 |
-| CZ-13 | Planner | T-045, T-092 |
+| CZ-13 | Planner | T-045, T-092, T-119 |
 | CZ-14 | Payment router | T-044 |
 | CZ-15 | Paying agent | T-046, T-048, T-052, T-053, T-054 |
 | CZ-16 | Acceptance and evaluator | T-047, T-055, T-056 |
 | CZ-17 | Evidence publisher | T-049, T-057, T-058 |
-| CZ-18 | Selection Layer lite | T-090, T-091 |
+| CZ-18 | Selection Layer lite | T-090, T-091, T-115, T-117, T-118 |
 | CZ-19 | Indexer | T-030, T-031, T-032, T-033, T-034 |
 | CZ-20 | Czar merchants | T-043, T-051 |
 | CZ-22 | App | T-080, T-081, T-082, T-084, T-085, T-086, T-087 |
@@ -1597,6 +1657,8 @@
 - **T-070 depends on T-045 (planner) for `shadowQuote`;** the dependency is in the skeleton.
 - **T-102 is the only task with a joint owner;** Stage 0 must be performed by Zaryab in desktop Safari, the rest by the agent after approval.
 - **T-083 is moved to stage 2 (D69);** Phase 1 counted 87 tasks before D90.
+- **D91 adds T-115 to T-119.** T-115 and T-118 sit in M4 so evidence for new testnet services can build before M7; T-118 needs Zaryab's approval to create and fund K22. T-117's embedding part waits for SCR-032.
+- **T-118 runs before reputation (T-091):** it counts accepted Czar receipts directly instead of reading `n_eff`.
 - **D90 adds T-109 to T-114.** T-109 to T-113 can start now. T-114 is blocked until SCR-030 is decided in the Flow 7 review; M5 can exit without it, but then the product must not claim a day-one action from a scan (D90 item 10).
 
 ## Change log
@@ -1625,3 +1687,4 @@
 | 2026-10-20 | 07 PRD 12 | T-021 outputs name `InvariantFactory.t.sol`; T-024 defines the `gas-table.json` shape. T-022 fork tests get their own PRD (the RPC is needed to verify them). |
 | 2026-10-20 | 07 PRD 13 | T-025 pins Slither 0.11.3; T-105 keys-file shape (`address`, `ref`). |
 | 2026-10-20 | D90 | New M5 tasks T-109 to T-114 (T-114 blocked on SCR-030); notes on T-065 (P-07 allowlist) and T-067; coverage rows. |
+| 2026-10-20 | D91 | New T-115 to T-119; T-090 hands index loading and the live lead fetch to T-115; T-092 note; coverage and notes. |

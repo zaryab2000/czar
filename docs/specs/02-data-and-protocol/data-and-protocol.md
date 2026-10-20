@@ -189,6 +189,7 @@ Each object: purpose, fields (name, type, required, privacy class, description, 
 | `taskSpec` | `TaskSpec` (§4.3.1) | yes | RS | the task's real subject, built by code (D84) |
 | `roi` | object `{hourlyBand: enum A..E, ratio: number}` | yes | RS (band only) | value-of-time filter output |
 | `status` | enum `candidate` \| `dismissed` \| `shadowed` \| `published` | yes | L | `shadowed` = priced in shadow mode only, never sent for payment (AM-14) |
+| `dismissReason` | enum `user` \| `roi-filter` \| `no-capability` | no | L | D91; schema 1.1 |
 
 #### 4.3.1 `TaskSpec` (D84)
 
@@ -206,6 +207,7 @@ Each object: purpose, fields (name, type, required, privacy class, description, 
 | `context` | string ≤ 2,000 | no | RS | surrounding text, error text or the person's prompt, after layer 1 |
 | `sourceTrust` | enum `user-file` \| `user-prompt` \| `tool-output` | yes | RS | `tool-output` only for `error-fix` |
 | `editedByUser` | boolean | no | RS | subjects changed on the approval screen |
+| `output` | object `{format: markdown-table \| csv \| json \| markdown-list \| prose, formatSource: file \| interview \| default}` | no | RS | result format (D91); built by code: the person's file first, then interview `taste.outputFormat`, then the default for `kind`; in `taskSpecHash` when present |
 
 - **Redaction:** layer 1 (secrets) runs on every string. Layer 2 (PII) runs on `goal` but treats every value present in `TaskSpec` as allowed, so it never replaces a subject with a marker (D84 point 3). The person sees `TaskSpec` on the approval screen.
 - **Invariant:** `taskSpecHash = H({hashRule:"czar-hash-v1", kind:"task-spec", …TaskSpec})` (§5.2) is part of `objectiveHash` and `planHash`.
@@ -259,6 +261,8 @@ Each object: purpose, fields (name, type, required, privacy class, description, 
 | `taskSpec` | `TaskSpec` | yes | SO | copy from the objective, including approval-screen edits (D84); `taskSpecHash` is in `planHash` |
 | `fillInPlace` | boolean, default `true` | no | SO | fill the person's file at the recorded placeholders when done (D85); set by `createApprovalIntent`'s `ApprovalIntentRequest`; not in `planHash` (it moves no money) |
 | `droppedSteps` | array of `{capability, reason: no-agent}` ≤ 64 | no | SO | steps removed before approval (D82); shown to the person with the plan |
+| `steps[].why` | `{fills[], summary, alternativesLost[{serviceId, reason}] ≤ 10, othersNotShown}` | no | SO | templated reason for each paid step's supplier (D91); not in `planHash` |
+| `untestedOptions` | array ≤ 20 of `{capability, serviceId, livePrice, nEff}` | no | SO | shadow plans only: untested candidates quoted for comparison (D91); never payable from the plan; not in `planHash` |
 | `createdAt` | `Timestamp` | yes | SO | |
 
 - **Invariants:** `cap ≥ Σ steps[].stepCap`; every step's `payee` and `alternates[]` appear in `payeeLeaves` with that step's `stepIndex` and `stepCap`; `maxStepAmount = max(steps[].stepCap)`; `payeeRoot` recomputes; `pocketCapBps = 0` and no kind-4 leaf when no step is `gateway-nano`, otherwise exactly one kind-4 leaf `{payee: pocket, kind: 4, stepIndex: 4294967295, stepCap: "0"}` (D71).
@@ -577,6 +581,7 @@ type PaymentRef =
 | `mission` | `projectRootId`, `projectName`, `goal`, `deadline` | `deadline` becomes `Objective.deadline` for an objective in the same project root (CZ-06 §5.6) |
 | `constraints` | `maxTotalPerObjective`, `noNewPayees`, `categoriesAllowed` | yes: `ObjectiveSubmission.constraints.maxTotal`, `.noNewPayees`, `.categoriesAllowed` (§4.4) |
 | `constraints` | `offLimitsTools`, `privacyRule` | no (saved context) |
+| `taste` | `outputFormat` (D91) | yes: `TaskSpec.output.format` when the person's file does not decide it (§4.3.1) |
 | `taste` | `preferredFormat`, `preferredSources` | no (saved context) |
 | `spendingPosture` | `riskPreference`, `note` | no (saved context; a real limit change is a CZ-22 owner action) |
 | `hourlyValue` | `Amount6` (USD) | yes: `soul.json.hourlyValue` with `setByUser = true`, so the ROI filter and `hourlyBand` (§4.4) |
@@ -588,6 +593,26 @@ type PaymentRef =
 - **`rootId`:** the lowercase hex of the root's `projectRef` (32 bytes, no `0x`; `projectRef` is defined in §4.1). The same value is `InterviewSubmission.mission.projectRootId`. It is local only.
 - **Fields:** `scanId` (`scan_<Ulid>`), `rootId`, `includeAgentFiles`, `includeGlobalAgentFile`, `includeGit`, `consentId`, `status` (`running` \| `done` \| `failed` \| `cancelled`), `fileCount`, `byteCount`, `skipped` counts (`sensitivePath`, `outsideRoot`, `oversized`, `untracked`, `nonText`), `proposalCount`, `suspiciousSkipped`, `startedAt`, `endedAt`.
 - **Held (SCR-030):** `OpenLoopPreview` and `DemandConfirmationReceipt` for user-confirmed open loops are defined in SCR-030 and added with the Flow 7 review.
+
+### 4.27 `CapabilityCard` (D91)
+
+- **Purpose:** what a service or ERC-8183 provider really does, so the planner matches a need against outputs, not only tags. One shape for every rail.
+- **Schema:** `schemas/capability-card.schema.json`. Example: `examples/capability-card.example.json`. All fields `SO`. A public subset without `solvedNeeds` and `observed` is served as `extensions.czar.card` (§12.2).
+
+| Field | Type | R | Description |
+|---|---|---|---|
+| `serviceId`, `network`, `rail` | `svc_…`, `Caip2`, enum | yes | one card per service and network; testnet and mainnet cards never mix |
+| `serviceName` | string ≤ 120 | no | seller-declared, sanitized (A3-36); retrieval text only |
+| `inputFields`, `outputFields` | arrays ≤ 50 of `{name ≤ 64, type}` | yes | from the sanitized `extensions.bazaar` schema; descriptions dropped |
+| `mimeType`, `outputFormats[]` | string, enum array | no | `outputFormats` only for outputs delivered as-is (jobs, `agent-assist`) |
+| `taskClasses[]`, `capabilities[]` | strings, `CapabilityTag[]` | yes | retrieval keys |
+| `observed` | `{livePrice, latencyP50Ms, lastProbedAt}` | no | Czar's own probes and calls |
+| `solvedNeeds[]` | `{kind, capability, count}` ≤ 20 | no | accepted deliveries by `TaskSpec` kind and capability; no field names, subjects or other user text |
+| `bazaarDeclared`, `schemaHash` | boolean, `Hash32` | yes / no | a schema change makes a new service version (SL-C1) |
+| `sources[]` | `seller-402` \| `czar-probe` \| `czar-receipt` \| `registration` | yes | never Circle's catalog (D91 item 2, p1-D8) |
+| `updatedAt` | `Timestamp` | yes | |
+
+- **Invariants:** a card never feeds a score, a posterior or the planner as free text; the planner sees only its structured fields (P-03). A Circle listing is only a lead to probe.
 
 ---
 ## 5. Canonical hashing and Merkle rules
@@ -1194,6 +1219,7 @@ Czar's index (CZ-18, SL-C2 lite) serves one item shape that both the Circle CLI 
 | `extensions.czar.source` | `czar-registered \| circle-live \| onchain-lead` | Czar | SL-C2 sources |
 | `extensions.czar.cache` | `{fetchedAt, expiresAt, etag?}` present only for `circle-live` | Czar | §12.3 |
 | `extensions.czar.rail` | `x402-exact` \| `gateway-batched` (optional) on `czar-registered` items, so the two routes of one Czar service are told apart without parsing `accepts[]` | Czar | AM-17 |
+| `extensions.czar.card` | `CapabilityCard` (§4.27) **without `solvedNeeds`** (usage counts stay on the server) and without `observed`; only for services on the payment network | Czar | D91 |
 
 ### 12.3 Cache rules ("query live, don't mirror", D15, p1-D8)
 
@@ -1324,6 +1350,8 @@ No locked decision is changed. Tensions noted: spec 01 §19 asked for a `sync()`
 | GAP: native folder picker from the loopback viewer (D90) | Phase 1 scans only CZ-02 known roots | separate UX and permission decision |
 | GAP: trusted "the user started this MCP call" evidence (D90) | `propose_soul_context` can only propose | research only if a later feature needs MCP declaration |
 | GAP: `czar-soul-v2` and public soul-leaf compatibility (D90) | non-observed beliefs committed under v1 meanwhile | SCR-030 in the Flow 7 review |
+| GAP: share of real 402s that declare `extensions.bazaar` (D91) | card richness on mainnet | SCR-033 measurement |
+| GAP: embedding model and its privacy impact (D91) | retrieval stays tags + BM25 | SCR-032 |
 
 ### 15.4 Flags
 
@@ -1377,3 +1405,4 @@ Agent-directed text met this session (not followed): the Circle and Arc doc head
 | 2026-10-20 | D87 (H6, N2) | `Result.artifacts`, `ResultAck.artifacts` counts, `getResultArtifact`. |
 | 2026-10-20 | D88 | §6.2 `OwnerAction` action list adds `17 CANCEL_JOB` (H2); job `description` format stated exactly (69 characters, no `0x`). |
 | 2026-10-20 | D90 | §4.2 `Belief` source fields and typed receipts (schema 1.2); new §4.23 `SourceReceipt`, §4.24 `ProposedBelief`, §4.25 `InterviewSubmission`, §4.26 `SourceScan`; §5.2 interim soul-hash note (v2 rules held in SCR-030); §7.1 `src_`, `prop_`, `scan_`, `cns_`; §9.2 local soul-input routes; §9.7; §10 `propose_soul_context`; §13.1 confirmed lines; §15.3 gaps. |
+| 2026-10-20 | D91 | §4.3.1 `TaskSpec.output` (schema 1.1); §4.3 `dismissReason` (objective schema 1.1); §4.5 `steps[].why`, `untestedOptions` (schema 1.2); §4.14 conflict flag `czar-test-buyer`; §4.25 `taste.outputFormat` (schema 1.1); new §4.27 `CapabilityCard`; §12.2 `extensions.czar.card`; §15.3 gaps. |

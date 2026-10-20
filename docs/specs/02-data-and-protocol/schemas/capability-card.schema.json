@@ -1,0 +1,273 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://czar.dev/schemas/capability-card.schema.json",
+  "title": "CapabilityCard",
+  "description": "What a service or job provider really does (spec 02 §4.27, D91). Built by Czar from the seller's own 402 (extensions.bazaar), Czar's probes, Czar's receipts and registrations. Never copied from Circle's catalog. Retrieval-only: a card never changes a score.",
+  "type": "object",
+  "x-privacyClass": "server-only",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "1.0",
+      "description": "Schema version, major.minor; this file is 1.0.",
+      "x-privacyClass": "server-only"
+    },
+    "serviceId": {
+      "$ref": "common.schema.json#/$defs/SlServiceId",
+      "description": "Service.",
+      "x-privacyClass": "server-only"
+    },
+    "network": {
+      "$ref": "common.schema.json#/$defs/Caip2",
+      "description": "Network the card was observed on; payment-network and market-network cards are separate.",
+      "x-privacyClass": "server-only"
+    },
+    "rail": {
+      "type": "string",
+      "enum": [
+        "x402-exact",
+        "gateway-batched",
+        "erc8183-job"
+      ],
+      "description": "Payment path the card describes.",
+      "x-privacyClass": "server-only"
+    },
+    "serviceName": {
+      "type": "string",
+      "maxLength": 120,
+      "description": "Seller-declared name, sanitized (A3-36); retrieval text only.",
+      "x-privacyClass": "server-only"
+    },
+    "inputFields": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "type"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "Name.",
+            "x-privacyClass": "server-only"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "string",
+              "number",
+              "integer",
+              "boolean",
+              "object",
+              "array",
+              "null"
+            ],
+            "description": "JSON type.",
+            "x-privacyClass": "server-only"
+          }
+        },
+        "description": "Field.",
+        "x-privacyClass": "server-only"
+      },
+      "description": "Input field names and types from the sanitized bazaar schema; descriptions dropped.",
+      "x-privacyClass": "server-only"
+    },
+    "outputFields": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "type"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "Name.",
+            "x-privacyClass": "server-only"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "string",
+              "number",
+              "integer",
+              "boolean",
+              "object",
+              "array",
+              "null"
+            ],
+            "description": "JSON type.",
+            "x-privacyClass": "server-only"
+          }
+        },
+        "description": "Field.",
+        "x-privacyClass": "server-only"
+      },
+      "description": "Output field names and types; same rules.",
+      "x-privacyClass": "server-only"
+    },
+    "mimeType": {
+      "type": "string",
+      "maxLength": 100,
+      "description": "Declared output media type.",
+      "x-privacyClass": "server-only"
+    },
+    "outputFormats": {
+      "type": "array",
+      "maxItems": 5,
+      "items": {
+        "type": "string",
+        "enum": [
+          "markdown-table",
+          "csv",
+          "json",
+          "markdown-list",
+          "prose"
+        ],
+        "description": "Format.",
+        "x-privacyClass": "server-only"
+      },
+      "description": "Result formats the service itself returns, when its output is delivered as-is (jobs, agent-assist); empty for JSON data services whose output Czar assembles locally.",
+      "x-privacyClass": "server-only"
+    },
+    "taskClasses": {
+      "type": "array",
+      "maxItems": 10,
+      "items": {
+        "type": "string",
+        "maxLength": 64,
+        "description": "Task class.",
+        "x-privacyClass": "server-only"
+      },
+      "description": "Task classes the service is retrievable for.",
+      "x-privacyClass": "server-only"
+    },
+    "capabilities": {
+      "type": "array",
+      "maxItems": 10,
+      "items": {
+        "$ref": "common.schema.json#/$defs/CapabilityTag",
+        "description": "Tag.",
+        "x-privacyClass": "server-only"
+      },
+      "description": "Capability tags it matched or was registered with.",
+      "x-privacyClass": "server-only"
+    },
+    "observed": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "livePrice": {
+          "$ref": "common.schema.json#/$defs/Amount6",
+          "description": "Last live 402 price.",
+          "x-privacyClass": "server-only"
+        },
+        "latencyP50Ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Median probe or call latency.",
+          "x-privacyClass": "server-only"
+        },
+        "lastProbedAt": {
+          "$ref": "common.schema.json#/$defs/Timestamp",
+          "description": "Last probe.",
+          "x-privacyClass": "server-only"
+        }
+      },
+      "description": "Czar's own measurements.",
+      "x-privacyClass": "server-only"
+    },
+    "solvedNeeds": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "capability",
+          "count"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "maxLength": 32,
+            "description": "TaskSpec kind.",
+            "x-privacyClass": "server-only"
+          },
+          "capability": {
+            "$ref": "common.schema.json#/$defs/CapabilityTag",
+            "description": "Capability the step served.",
+            "x-privacyClass": "server-only"
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Accepted deliveries.",
+            "x-privacyClass": "server-only"
+          }
+        },
+        "description": "Need.",
+        "x-privacyClass": "server-only"
+      },
+      "description": "Needs it delivered before, as counts by TaskSpec kind and capability. No field names, subjects or other user text (they would move one user's task text into a shared record).",
+      "x-privacyClass": "server-only"
+    },
+    "bazaarDeclared": {
+      "type": "boolean",
+      "description": "True when the live 402 carried extensions.bazaar.",
+      "x-privacyClass": "server-only"
+    },
+    "schemaHash": {
+      "$ref": "common.schema.json#/$defs/Hash32",
+      "description": "keccak256 of the sanitized bazaar schema (jcs); a change makes a new service version (SL-C1).",
+      "x-privacyClass": "server-only"
+    },
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 4,
+      "items": {
+        "type": "string",
+        "enum": [
+          "seller-402",
+          "czar-probe",
+          "czar-receipt",
+          "registration"
+        ],
+        "description": "Source.",
+        "x-privacyClass": "server-only"
+      },
+      "description": "Where the card's data came from.",
+      "x-privacyClass": "server-only"
+    },
+    "updatedAt": {
+      "$ref": "common.schema.json#/$defs/Timestamp",
+      "description": "Last update.",
+      "x-privacyClass": "server-only"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "serviceId",
+    "network",
+    "rail",
+    "inputFields",
+    "outputFields",
+    "taskClasses",
+    "capabilities",
+    "bazaarDeclared",
+    "sources",
+    "updatedAt"
+  ],
+  "$comment": "2026-10-20: created for D91 (supplier matching)."
+}

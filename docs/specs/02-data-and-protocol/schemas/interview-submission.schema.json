@@ -9,8 +9,8 @@
   "properties": {
     "schemaVersion": {
       "type": "string",
-      "const": "1.0",
-      "description": "Schema version, major.minor; this file is 1.0.",
+      "const": "1.1",
+      "description": "Schema version, major.minor; this file is 1.1 (2026-10-20: taste.outputFormat, D91).",
       "x-privacyClass": "local-only"
     },
     "idempotencyKey": {
@@ -140,9 +140,21 @@
           "maxLength": 500,
           "description": "Preferred or trusted sources.",
           "x-privacyClass": "local-only"
+        },
+        "outputFormat": {
+          "type": "string",
+          "enum": [
+            "markdown-table",
+            "csv",
+            "json",
+            "markdown-list",
+            "prose"
+          ],
+          "description": "Preferred result format when the person's file does not decide it; becomes TaskSpec.output.format (D91). Typed, so it can reach the server.",
+          "x-privacyClass": "local-only"
         }
       },
-      "description": "Taste answers; saved context only in Phase 1.",
+      "description": "Taste answers. outputFormat is used (D91); the other taste answers are saved context only in Phase 1.",
       "x-privacyClass": "local-only"
     },
     "spendingPosture": {
@@ -179,5 +191,5 @@
     "schemaVersion",
     "idempotencyKey"
   ],
-  "$comment": "2026-10-20: created for D90 (soul inputs beyond observation)."
+  "$comment": "2026-10-20: created for D90 (soul inputs beyond observation). 2026-10-20 D91: taste.outputFormat; schemaVersion 1.1."
 }

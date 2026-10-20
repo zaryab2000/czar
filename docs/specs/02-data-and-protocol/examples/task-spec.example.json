@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "1.0",
+  "schemaVersion": "1.1",
   "kind": "table-fill",
   "topic": "Competitor pricing",
   "fileName": "pricing.md",
@@ -70,5 +70,9 @@
     "Notes"
   ],
   "context": "## Competitor pricing\n| Competitor | Starter price (USD/month) | Notes |",
-  "sourceTrust": "user-file"
+  "sourceTrust": "user-file",
+  "output": {
+    "format": "markdown-table",
+    "formatSource": "file"
+  }
 }

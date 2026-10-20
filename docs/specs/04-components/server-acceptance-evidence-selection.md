@@ -242,6 +242,7 @@ Ponder 0.18.x (A9-05), viem 2.57.x (A9-05), Postgres 16; hosted fallbacks Goldsk
 | `structural` | structural | body parses as the declared `mimeType` and validates (Ajv 8, 2020-12) against the merchant's sanitized `schema`; with no schema, the JSON key-tree matches the `shape_hash_advisory` from earlier observations of this service version (SL-C1) or, with no history, parse-only | parse error, schema violation | `inconclusive` when no schema and no history (parse-only pass is recorded as `structural: inconclusive` with `detail.parseOk = true`) | `acceptance.schemaMaxBytes` 8,192 (02 §11.3) |
 | `requirement` | requirement | every key named in `Step.inputTemplate.expectedKeys` is present and non-empty | a named key missing | `not_checked` when the step has no `expectedKeys` | — |
 
+- **Output format (D91):** when a step's output is delivered as-is (an ERC-8183 job or an `agent-assist` handoff) and the objective has `TaskSpec.output`, `structural` also requires the delivered text to match the format: `markdown-table` (a header row and a separator row), `csv` (parses with a header row), `json` (parses), `markdown-list` (at least one list item), `prose` (non-empty text). JSON data services assembled by CZ-11 are not checked for format here.
 - **`local-template-v1` (D82):** the profile for unpaid `local` steps. It runs on the Mac in the CZ-11 assembler, not here: pass when the output header equals `inputTemplate.expectedKeys` exactly and rows ≥ 1. Its result arrives only as counts in `ackResult.assembly[]`; it never creates a receipt, an `AcceptanceReport`, a demand-proof leaf or a reputation observation, because no payment and no merchant are involved. `agent-assist` steps have no profile.
 - `correctness` (reference, consensus) is structurally missing in Phase 1 and is listed in `missing_dimensions_for_class` (SL-C10 step 2). The user wording never claims correctness was checked.
 - Result semantics follow SL-C7 exactly: only `pass` and `fail` enter posteriors; `inconclusive` and `not_checked` do not.
@@ -590,12 +591,13 @@ None.
 | CZ ID, name | CZ-18, Selection Layer services |
 | Phase | 1 lite; 2 full; 3 probers, validators, exploration, fix-it feedback |
 | Product / roadmap | §6.21 Selection Layer, §6.18–§6.19 (Phase 3); roadmap 2.8–2.11 (later) |
-| Decisions | D2, D8, D15, D27 (evaluator-affiliated), D36, D83 (two lanes) |
+| Decisions | D2, D8, D15, D27 (evaluator-affiliated), D36, D83 (two lanes), D91 (cards, staged retrieval, test-buyer) |
 | Package | `apps/server` module `selection`; SL components C1, C3, C4, C8, C9, C10 (lite), C2, C11 (Phase 2), C6, C7 (Phase 3) |
 
 ### 2. Responsibilities and non-responsibilities
 
 - **Does (Phase 1 lite, spec 01 §15.2–§15.3):** keep Czar's index of registered merchants (Czar's own first); query Circle's catalog live without persisting it (02 §12.3); attribute observations to services by `(payTo, origin)` (SL-C1); verify settlement for Czar's own receipts (SL-C8 step 2); keep Beta posteriors (SL-C9); rank with `pol_default_v1` (SL-C10) and serve `RankingDecision` to the planner and `find_service`; serve the Czar index item shape (02 §12).
+- **Does (D91):** keep a capability card per service and network (§5.3b); retrieve by tags plus BM25 over cards (§5.3c); run the testnet test-buyer for untested services (§5.3d); build the labelled match set on Lane A cards.
 - **Does (D83):** serve two lanes: payable `RankingDecision`s on `selection.paymentNetwork` (Lane B), and rank-only `MarketView`s on `selection.marketNetwork` built from Circle's live catalog and Czar's own unpaid 402 probes (Lane A, §5.3a).
 - **Does not:** pay or let anyone plan a payment to a market-network service in Phase 1; let probe results enter quality posteriors; sell position (ever); score unverified services; ingest or mirror Circle's catalog (D15, p1-D8); run probes or independent validators before Phase 3; read ERC-8004 feedback except from trusted clients (FD-19, Phase 2).
 
@@ -623,11 +625,11 @@ None.
 | SL component | Phase 1 lite | Phase 2 full | Phase 3 |
 |---|---|---|---|
 | C1 identity and attribution | `(payTo, origin)` linking from Czar's own probes; claims ladder `unclaimed`/`wallet-verified` for Czar merchants | domain verification, ERC-8004 reads (identity only), operator clusters | — |
-| C2 indexer | Czar-registered merchants; live Circle query, no mirror | crawler, submissions, on-chain `payTo` leads, admission codes | — |
-| C3 retrieval | capability-tag match (exact tags from the planner's taxonomy) | BM25 + embeddings (≤ 1,024 dims, C1-13) with raw floors and RRF | — |
-| C4 eligibility | network, rail, price, `unknown_policy` | full gates incl. latency and data policy | — |
+| C2 indexer | Czar-registered merchants; live Circle query as a lead list, no mirror; capability cards from sellers' own 402s (D91, §5.3b) | crawler, submissions, on-chain `payTo` leads, admission codes | — |
+| C3 retrieval | exact tag match ∪ BM25 over Czar's cards (D91, §5.3c); embeddings only after SCR-032 and the match-set gate | embeddings (≤ 1,024 dims, C1-13) with raw floors and RRF, if not already on | — |
+| C4 eligibility | network, rail, price, `unknown_policy`, `output-format` for outputs delivered as-is (D91) | full gates incl. latency and data policy | — |
 | C5 receipts | CZ-17 signs Czar's own receipts | outside buyers (Receipt SDK) | — |
-| C6 probers | none | one Czar prober with commit/reveal on Czar's merchants | open prober set |
+| C6 probers | unpaid 402 probes (D83); the testnet test-buyer pays small calls to untested non-Czar services through a K22-owned vault (D91, §5.3d) | one Czar prober with commit/reveal on Czar's merchants | open prober set |
 | C7 validators | CZ-16 only (`buyer-local`) | — | independent validators by salt |
 | C8 evidence processor | settlement proof, dedup, attribution for Czar receipts; flags `self-reported-checks`, `evaluator-affiliated` | funding graph, corrections, inclusion tickets | — |
 | C9 reputation | Beta posteriors, half-life, `n_eff`, badges | carried priors, probe gap, calibration | — |
@@ -678,6 +680,34 @@ None.
 
 **Network-scoped evidence.** `reputation`, `observations` and `assessments` rows carry `network`; posteriors are computed per `(service, version, task_class, dimension, network)`. Nothing from testnet is shown as mainnet quality, and nothing from a market probe enters a posterior.
 
+#### 5.3b Capability cards (D91)
+
+- **What:** one `CapabilityCard` (02 §4.27) per `(serviceId, network)`. It records what the service accepts and returns, its observed price and latency, and which needs it has solved.
+- **Sources, in order:** the seller's live 402 `extensions.bazaar` (`info`, `schema`), sanitized per 02 §11.3 and A3-36 (no external `$ref`, invalid names soft-dropped); Czar's unpaid probes; Czar's receipts and CZ-16 results (`solvedNeeds`, counts only); registration data for Czar's own and registered merchants. **Never** Circle's catalog text: a Circle listing is only a lead whose URL Czar probes (D91 item 2).
+- **What is kept:** field names and JSON types, `mimeType`, `serviceName` (sanitized). Free-text descriptions in the schema or `info` are dropped before storage.
+- **Refresh:** on every probe-before-plan, on every unpaid market probe (§5.3a), and when a receipt is accepted. A changed `schemaHash` starts a new service version (SL-C1).
+- **Separation:** cards for `selection.marketNetwork` exist for retrieval and the match set only; they never enter `services` with `probe_eligible` for payment, `reputation` or `RankingDecision` (§5.3a guards unchanged).
+- **Fill rate:** the share of services with `bazaarDeclared = true` is a metric; SCR-033 measures it on the real market.
+
+#### 5.3c Retrieval (D91)
+
+1. **Query, built by code:** `TaskSpec.kind`, `TaskSpec.topic`, `TaskSpec.fields`, the capability tags and their task classes. Never the free `goal` text, never soul text.
+2. **Candidates:** exact tag match ∪ the top `selection.retrieveK` (50) by BM25 over card text (`serviceName`, input and output field names, task classes, capabilities, `solvedNeeds` kinds), with `selection.bm25K1` and `selection.bm25B`. Implemented in code over the card table; no new dependency.
+3. **Eligibility (C4)** runs after retrieval and is unchanged except one gate: when the step's output is delivered as-is (an ERC-8183 job or an `agent-assist` handoff) and the card lists `outputFormats`, a card that does not include `TaskSpec.output.format` is excluded with `gate: output-format`. JSON data services whose output CZ-11 assembles are never excluded by format.
+4. **Score:** unchanged (§5.2). Retrieval only decides which candidates are considered; text can never raise a score (SL-C3).
+5. **Embeddings:** `selection.retrievalMode` is `tags+bm25` until SCR-032 is accepted and the match-set gate passes; then `tags+bm25+embeddings` with RRF (SL-C3).
+6. **Match set:** at least `selection.matchEval.minNeeds` needs, each a `TaskSpec` fixture with labelled relevant Lane A cards (mainnet, rank-only), stored as a test fixture with the card `schemaHash`es it was labelled against. Metrics: recall@10 and precision@5 for tags only, tags+BM25 and (later) embeddings.
+
+#### 5.3d Test-buyer for untested services (D91; testnet only)
+
+- **Purpose:** let an untested, non-Czar testnet service earn evidence without any user's money.
+- **Vault:** one `CzarVault` on `selection.paymentNetwork` owned by key K22 (CZ-27), created through the normal factory. Category `selection.testBuyer.category` (`test-buy`); test-buyer plans set it directly, not through `planner.categoryByCapability`.
+- **Selection:** services with a card on the payment network and fewer than `selection.nMin` accepted Czar receipts (a plain count from `observations`; it needs no posteriors, so it runs in M4 before T-091), whose `source` is not `czar-registered` or `czar-test-merchant`, with a live price ≤ `selection.testBuyer.maxUnitAtomic`, at most `selection.testBuyer.newServicesPerWeek` per week.
+- **Plan and approval:** the test-buyer builds a one-step plan per service with `expectedCalls = selection.testBuyer.callsPerService` and inputs from a fixed probe input per task class (`selection.testBuyer.inputsByTaskClass` in `@czar/config`, for example `{q: "usdc price"}` for `data-json.search`); never user data. **K22 opens the envelope as owner** (signer kind `test-buyer-owner`); earned allowance is never used, so N1's "untested only with owner approval" holds. K3 then reserves and pays as on any plan.
+- **Evidence:** receipts and CZ-16 results flow as usual and carry `conflict_flags += ["czar-test-buyer"]` (02 §4.14); they count toward `n_eff` like any Czar receipt. The weekly spend is capped by `selection.testBuyer.weeklyBudgetAtomic`.
+- **Never:** on `selection.marketNetwork`; on a service whose live 402 network differs; after a `fail` streak of `selection.testBuyer.stopAfterFails` for that service.
+- **Funding:** K22's gas and the vault's USDC need Zaryab's explicit approval (CLAUDE.md).
+
 #### 5.4 Attribution and settlement proof (Phase 1)
 
 - `attribute(core)`: `payTo ∈ service.pay_to[]` linked by Czar's own probe origin (`linked_by: probe-origin`) → confidence 1.0; else `payto-unlinked` (SL-C1).
@@ -696,6 +726,9 @@ None.
 | `catalog_cache` | `resource` PK, `payTo`, `network`, `fetchedAt`, `expiresAt`, `etag` (TTL-purged; nothing else from Circle) |
 | `market_probes` (D83) | `(resource, payTo, network, probedAt)` PK, `reachable`, `wellFormed`, `liveAmount`, `livePayTo`, `scheme`, `latencyMs`, `httpStatus`; Czar's own observations only; retained `selection.marketProbeRetentionDays` 30 |
 | `market_origin_state` (D83) | `origin` PK, `probesToday`, `pausedUntil`, `backoffMinutes` |
+| `capability_cards` (D91) | `(service_id, network)` PK, card JSON (02 §4.27), `schema_hash`, `bazaar_declared`, `updated_at`; BM25 term statistics in `card_terms` |
+| `test_buyer_runs` (D91) | `service_id`, `week`, `calls`, `spentAtomic`, `fails`, `status` |
+| `match_eval_runs` (D91) | `run_id`, `mode`, `recall_at_10`, `precision_at_5`, `fixture_hash`, `ran_at` |
 | `policy_releases` | `policy_version`, tarball hash, params (Phase 2 anchored as `POLICY_RELEASE`) |
 
 #### 5.6 Parameters
@@ -724,17 +757,31 @@ None.
 | `selection.marketProbeBackoffMinutes` | 60 | first pause after 429/5xx; doubles to 24 h |
 | `selection.marketRefreshTopN` | 20 | per capability tag, keeps views fast |
 | `selection.marketProbeRetentionDays` | 30 | enough for 7-day rates and audits |
+| `selection.retrievalMode` | `tags+bm25` | D91 item 3; embeddings only after SCR-032 and the gate |
+| `selection.bm25K1` | 1.2 | standard Okapi BM25 term-saturation default |
+| `selection.bm25B` | 0.75 | standard Okapi BM25 length-normalization default |
+| `selection.matchEval.minNeeds` | 50 | enough needs to compare modes across the main task kinds (design assumption) |
+| `selection.matchEval.minRecallGain` | 0.10 | embeddings must lift recall@10 by 10 points absolute to justify a new model (design assumption) |
+| `selection.matchEval.maxPrecisionLoss` | 0.02 | wider recall may not flood the planner with wrong candidates (design assumption) |
+| `selection.testBuyer.enabled` | `true` on testnet, `false` on mainnet | D91 item 7 |
+| `selection.testBuyer.callsPerService` | 6 | one more than `selection.nMin`, as `selection.seedJobRuns` |
+| `selection.testBuyer.maxUnitAtomic` | 100,000 (0.10 USDC) | small test calls only |
+| `selection.testBuyer.weeklyBudgetAtomic` | 20,000,000 (20 USDC, testnet) | bounds the test-buyer's spend per week |
+| `selection.testBuyer.newServicesPerWeek` | 20 | bounds load on new sellers and the budget |
+| `selection.testBuyer.stopAfterFails` | 3 | stop paying a service that keeps failing |
+| `selection.testBuyer.category` | `test-buy` | keeps test spend apart from user categories |
+| `selection.testBuyer.inputsByTaskClass` | `{"data-json.search": {"q": "usdc price"}, "data-json.extract": {"url": "https://www.circle.com/usdc"}}` | fixed, public, non-user inputs for test calls |
 
 ### 6. Behaviour
 
-1. Query (`task_class`, constraints) → retrieve candidates (Czar index + live Circle, in memory) → eligibility gates → load posteriors → unverified split → score → `RankingDecision` with explanations, `excluded[]`, `missing_dimensions_for_class`, `snapshotId`, `policy_version`.
+1. Query (`task_class`, constraints, `TaskSpec` keys) → retrieve candidates (tags ∪ BM25 over cards, §5.3c; live Circle as leads, in memory) → eligibility gates → load posteriors → unverified split → score → `RankingDecision` with explanations, `excluded[]`, `missing_dimensions_for_class`, `snapshotId`, `policy_version`.
 2. On new receipts/reports → assess → update posteriors incrementally → next snapshot refresh.
 - Alternate: Circle Discovery down or slow → Czar index only, decision carries `missing += ["catalog-live-unavailable"]` and freshness; nothing is served from an expired cache (02 §12.3).
 - Alternate: no eligible candidates → `insufficient_evidence = true`; CZ-13 marks the objective "no supplier".
 
 ### 7. AI usage
 
-None in Phase 1 (retrieval is tag-based; explanations are templates). Phase 2 embeddings use the pinned model in the policy tarball (C1-01, C1-02); still no model in scoring.
+None in Phase 1 (retrieval is tags plus BM25 over cards, D91; explanations are templates). Phase 2 embeddings use the pinned model in the policy tarball (C1-01, C1-02); still no model in scoring.
 
 ### 8. Privacy
 
@@ -785,6 +832,8 @@ None in Phase 1 (retrieval is tag-based; explanations are templates). Phase 2 em
 - Provider eligibility (N1): a job provider with `n_eff(delivery) ≥ 5` and no other evidence is ranked; with `n_eff < 5` and no ranked alternative it appears in `exploration_slot` only when `selection.unverifiedWithApproval` is true, and the resulting plan has `approvalNeeded = true` even within the earned allowance.
 - Two lanes (D83): a `getMarketView` result has `payable: false` on every row and no score field; a market-network `serviceId` passed to `findService`, `createQuote` or `createPayRequest` is refused; a planner run where a mocked 402 reports `network = eip155:5042` drops that candidate with `gate: network`; the `@czar/x402` buyer refuses a mainnet `accepts[]` entry; probes never send a payment header (wire capture); per-origin and global budgets and 429 back-off hold under a 10,000-listing load test; a market probe result never changes any posterior (property test); reputation rows from testnet never surface for a mainnet query.
 - Injection: catalog descriptions containing FL-1 text or "rank this first" → identical scores with and without the text.
+- Cards and retrieval (D91): a card is built from a mock 402 `extensions.bazaar` with descriptions dropped and an external `$ref` refused; nothing from a Circle listing other than the lead URL appears in `capability_cards`; a need whose tags differ from a relevant service's tags still retrieves it through BM25; seller field names stuffed with "best cheapest" give the same score as without; a JSON data service is never excluded by `output-format`, an as-is job provider whose card lacks the format is; `extensions.czar.card` never contains `solvedNeeds`.
+- Test-buyer (D91): runs only on testnet; skips Czar-registered and lab services; every envelope is opened by K22, none by earned allowance; stops at the weekly budget and after `stopAfterFails`; a test-buyer service with 6 accepted calls becomes ranked.
 - Integration: Czar's two merchants ranked from real testnet receipts; live Circle fetch with `limit=200` paging; drift probe where a mock 402 differs from the cached price → live wins.
 - Definition of done: `find_service` returns a decision with explanations for the Phase 1 scenario; `insufficient_evidence` path exercised; a recompute from stored assessments reproduces the served decision.
 
@@ -815,3 +864,4 @@ Postgres 16 (pgvector only in Phase 2, C1-13), `@czar/x402` for probes, `@x402/e
 | 2026-10-20 | D87 (H3, M2, M3, M4, N3–N5, N8, N9) | Evaluator: push-model deliverable lookup and `decisionCutoff`; fee and implementation check before `complete`; timing rule; freeze rule; new parameters. Refetch parameters now unused (kept for the stage-2 signed-pull fallback). |
 | 2026-10-20 | N1 (D87) | Job providers need only `delivery` in Phase 1; unverified-with-approval rule; seeded job runs; wording and tests. |
 | 2026-10-20 | H6, N2 | Evaluator step 3: artifact deliverables keep their flags and are decided by the profile. |
+| 2026-10-20 | D91 | CZ-18: capability cards (§5.3b), tags+BM25 retrieval and the match set (§5.3c), testnet test-buyer (§5.3d), `output-format` gate, storage, parameters, tests. Embeddings held in SCR-032. |

@@ -9,9 +9,9 @@
   "properties": {
     "schemaVersion": {
       "type": "string",
-      "description": "Schema version, major.minor; this file is 1.0.",
+      "description": "Schema version, major.minor; this file is 1.1 (2026-10-20: dismissReason, D91).",
       "x-privacyClass": "local-only",
-      "const": "1.0"
+      "const": "1.1"
     },
     "objectiveId": {
       "$ref": "common.schema.json#/$defs/ObjectiveId",
@@ -149,6 +149,16 @@
       "$ref": "task-spec.schema.json",
       "description": "The task's real subject (D84, §4.3.1).",
       "x-privacyClass": "redacted-to-server"
+    },
+    "dismissReason": {
+      "type": "string",
+      "enum": [
+        "user",
+        "roi-filter",
+        "no-capability"
+      ],
+      "description": "Why a dismissed objective was dismissed (D91: no-capability when no taxonomy tag fits).",
+      "x-privacyClass": "local-only"
     }
   },
   "required": [
@@ -165,5 +175,5 @@
     "status",
     "taskSpec"
   ],
-  "$comment": "Change log: 2026-10-18 AM-14 status enum now candidate|dismissed|shadowed|published."
+  "$comment": "Change log: 2026-10-18 AM-14 status enum now candidate|dismissed|shadowed|published. 2026-10-20 D91: dismissReason; schemaVersion 1.1."
 }

@@ -248,6 +248,9 @@ Components are numbered in the adopted priority order.
   - pre-committed probes by independent probers
   - ERC-8183 job outcomes
 - **Matching:** semantic matching of objectives to service capabilities, not spelling-based search.
+  - Phase 1 (D91): Czar keeps a capability card for each service, built from what the seller's own payment response says it accepts and returns, and finds candidates by tags plus keyword search over those cards. Embedding search follows once a test set proves it helps.
+  - Each plan step says which part of the task it fills, its record and price, and why the other options lost.
+  - On testnet, Czar itself pays small test calls to new services so they can earn a record without anyone else's money.
 - **Ranking rules:**
   - position is never for sale
   - "no history" is kept separate from "bad history"
@@ -396,3 +399,4 @@ Components are numbered in the adopted priority order.
 - 2026-10-20 · D83: §8.5 two lanes, real market rank-only and test market paid.
 - 2026-10-20 · D86, D87: §6.14 job types are open; "accepted" means the form was checked, not correctness.
 - 2026-10-20 · D90: §3.2, §6.3, §7.2 optional interview and reviewed soul inputs; source labels; only constraints, a matching deadline and hourly value are used in Phase 1.
+- 2026-10-20 · D91: §6.21 capability cards, staged matching, plan reasons and the testnet test-buyer.
