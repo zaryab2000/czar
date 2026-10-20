@@ -228,6 +228,7 @@ Each object: purpose, fields (name, type, required, privacy class, description, 
 | `payeeRoot` | `Hash32` | yes | PUB | Merkle root of `payeeLeaves` (§5.3) |
 | `rankingDecisionIds` | array of string | no | SO | SL `query_id`s used |
 | `shadow` | boolean | yes | SO | true for shadow-mode pricing (no envelope) |
+| `droppedSteps` | array of `{capability, reason: no-agent}` ≤ 64 | no | SO | steps removed before approval (D82); shown to the person with the plan |
 | `createdAt` | `Timestamp` | yes | SO | |
 
 - **Invariants:** `cap ≥ Σ steps[].stepCap`; every step's `payee` and `alternates[]` appear in `payeeLeaves` with that step's `stepIndex` and `stepCap`; `maxStepAmount = max(steps[].stepCap)`; `payeeRoot` recomputes; `pocketCapBps = 0` and no kind-4 leaf when no step is `gateway-nano`, otherwise exactly one kind-4 leaf `{payee: pocket, kind: 4, stepIndex: 4294967295, stepCap: "0"}` (D71).
@@ -238,11 +239,11 @@ Each object: purpose, fields (name, type, required, privacy class, description, 
 |---|---|---|---|---|
 | `stepIndex` | integer 0–63 | yes | HC | position; used in `PayeeLeaf` |
 | `stepId` | `Id(stp)` | yes | SO | |
-| `kind` | enum `x402-exact` \| `gateway-nano` \| `erc8183-job` \| `local` \| `tip` (P2) | yes | SO | from the router (spec 01 §8.7, D37) |
+| `kind` | enum `x402-exact` \| `gateway-nano` \| `erc8183-job` \| `local` \| `agent-assist` \| `tip` (P2) | yes | SO | from the router (spec 01 §8.7, D37); `local` and `agent-assist` are unpaid (D82, §4.6.1) |
 | `capability` | string | yes | SO | |
 | `serviceId` | SL `ServiceId` | no | SO | |
 | `resource` | object `{url, method}` | no | SO | the merchant endpoint |
-| `payee` | `Address` | no | HC | `payTo` or job provider; absent for `local` |
+| `payee` | `Address` | no | HC | `payTo` or job provider; absent for `local` and `agent-assist` |
 | `alternates` | array of `Address` ≤ 2 | no | HC | D36 |
 | `unitAmount` | `Amount6` | yes | HC | expected price per call (from the live 402, p1-D7) |
 | `expectedCalls` | integer ≥ 1 | yes | SO | `n` for batch sizing (D37) |
@@ -251,6 +252,14 @@ Each object: purpose, fields (name, type, required, privacy class, description, 
 | `acceptanceProfileId` | SL `ProfileId` | yes | SO | |
 | `inputTemplate` | object | no | SO | structured input only, never user text (spec 01 §11.2 layer 3); optional `inputTemplate.expectedKeys: string[]` (≤ 50, each ≤ 64) names the output keys the `requirement` check (CZ-16) and the reader's `expectedFields` (P-02) look for (AM-09); `inputTemplate.inputKeys: [{name, type: string\|number\|boolean, maxLength?, enum?}]` (≤ 20) names the only input keys a `pay` call may send for this step (RV-021) |
 | `dependsOn` | array of `stepIndex` | no | SO | |
+
+#### 4.6.1 Unpaid steps (`local`, `agent-assist`; D82)
+
+- **Fields:** `serviceId` is absent; `payee`, `alternates` and `resource` are absent; `unitAmount = "0"`, `stepCap = "0"`, `expectedCalls = 1`; no `PayeeLeaf`. `dependsOn` names the paid steps whose `StepResult.fields` are the inputs.
+- **`local`:** `capability` ∈ `planner.localTemplates` (Phase 1: `table-build`, `list-build`, `merge-dedupe`); `acceptanceProfileId` = the profile id of `local-template-v1`; `inputTemplate.expectedKeys` names the template's columns. Runs on the Mac in the CZ-11 assembler as plain code.
+- **`agent-assist`:** `capability` ∈ `planner.agentAssistCapabilities` (Phase 1: `summarize`, `chart-build`, `translate`, `compare`); no acceptance profile is checked. Czar writes the inputs; the person's agent does the work.
+- **`AssemblyRecord`** (`local-only`, daemon storage; never sent): `{objectiveId, stepIndex, kind, template, rows, columns, structuralPass, writtenPath, createdAt}`. Only `{stepIndex, kind, status, rows, columns, structuralPass}` crosses to the server, in `ackResult.assembly[]` (§9.2).
+- **Marker map** (`local-only`, daemon storage): `{objectiveId, marker → original value}`, written by redaction layer 2 when the objective is built, read only by the assembler, deleted `writeback.markerMapRetentionDays` (30) after the result is acked. It never leaves the machine, so §3.1's "not reversible from anything that leaves the machine" still holds.
 
 ### 4.7 `PayeeLeaf`
 
@@ -494,7 +503,7 @@ One rule for every tree Czar builds: evidence batches, feature snapshots and `pa
 - **Evidence leaf fields:** `abi.encode(EVIDENCE_LEAF, bytes32 leafTypeHash, bytes32 contentHash)` where `leafTypeHash = keccak256(utf8(leafType))` and `contentHash = H(leaf object)`.
 - **Node hash:** `node = keccak256(abi.encode(min(a,b), max(a,b)))` (OpenZeppelin `Hashes.commutativeKeccak256`, v5.7.0 lines 17–19). Pairs are sorted, so proofs need no left/right flags.
 - **Tree shape:** leaves are sorted ascending by leaf hash, then paired left to right level by level. A level with an odd count carries its last node up unchanged.
-- **Empty tree:** root = `bytes32(0)`. An empty batch is never anchored; an envelope MUST have ≥ 1 payee leaf unless every step is `local`.
+- **Empty tree:** root = `bytes32(0)`. An empty batch is never anchored; an envelope MUST have ≥ 1 payee leaf unless every step is unpaid (`local` or `agent-assist`, D82), in which case there is no envelope.
 - **Single leaf:** root = the leaf hash; proof = `[]`.
 - **Proof format:** `bytes32[]` of sibling hashes from the leaf up. Verified with `MerkleProof.verify(proof, root, leaf)`.
 - **Multiproofs:** not used.
@@ -1219,3 +1228,4 @@ Agent-directed text met this session (not followed): the Circle and Arc doc head
 | 2026-10-19 | RV-026 | §4.17 `DemandProofLeaf` v2 (no pseudonym, salted `soulVersionCommit`); `demandSalt`; v1 superseded. |
 | 2026-10-19 | RV-019, RV-020, RV-021, RV-027, RV-043, RV-050 / D75 | §4.6 `inputKeys`; §7.1 `quoteId`, `payRequestId`; §7.4; §9.2–§9.4; §10. |
 | 2026-10-19 | RV-018 / D74 | §4.15 `StepResult` never reaches the planner. |
+| 2026-10-20 | D82 | §4.6 kind `agent-assist`; §4.6.1 unpaid steps, `AssemblyRecord`, marker map; §5.3 empty-tree rule; OpenAPI `Result.assembly`, `ResultAck.assembly`. |

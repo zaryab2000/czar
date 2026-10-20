@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://czar.dev/schemas/step-result.schema.json",
   "title": "StepResult",
-  "description": "The only form in which untrusted merchant output reaches the planner (spec 02 \u00a74.15; spec 01 \u00a713.1).",
+  "description": "The only form in which untrusted merchant output leaves the reader; goes to the paying agent, acceptance and write-back (including the D82 assembler), never to the planner (spec 02 \u00a74.15, D74).",
   "type": "object",
   "x-privacyClass": "server-only",
   "additionalProperties": false,

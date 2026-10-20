@@ -215,6 +215,21 @@ components:
         resultId: { type: string, pattern: "^res_[0-9A-HJKMNP-TV-Z]{26}$" }
         writtenAt: { $ref: "#/components/schemas/Timestamp" }
         surface: { type: string, enum: [claude-code-file, pr-comment, doc-insert], description: Which write-back adapter delivered it (CZ-11). }
+        assembly:
+          type: array
+          maxItems: 64
+          description: "Counts only, one entry per unpaid step the daemon handled (D82, spec 02 §4.6.1). No values, no paths."
+          items:
+            type: object
+            additionalProperties: false
+            required: [stepIndex, kind, status]
+            properties:
+              stepIndex: { type: integer, minimum: 0, maximum: 63 }
+              kind: { type: string, enum: [local, agent-assist] }
+              status: { type: string, enum: [assembled, assembly-failed, handed-to-agent, dropped-no-agent] }
+              rows: { type: integer, minimum: 0 }
+              columns: { type: integer, minimum: 0 }
+              structuralPass: { type: boolean, description: "local-template-v1 result; absent for agent-assist." }
 
     Result:
       type: object
@@ -239,6 +254,41 @@ components:
               origin: { type: string, maxLength: 253 }
               paymentRefHash: { $ref: "#/components/schemas/Hash32" }
               accepted: { type: boolean }
+        assembly:
+          type: array
+          maxItems: 64
+          description: "Unpaid steps the daemon must handle (D82, spec 02 §4.6.1). `local` steps are filled by the CZ-11 assembler with plain code; `agent-assist` inputs are written for the person's agent. Input values are untrusted merchant data that may hold redaction markers; the daemon restores markers locally."
+          items:
+            type: object
+            additionalProperties: false
+            required: [stepIndex, kind, capability, inputs]
+            properties:
+              stepIndex: { type: integer, minimum: 0, maximum: 63 }
+              kind: { type: string, enum: [local, agent-assist] }
+              capability: { type: string, maxLength: 64 }
+              template: { type: string, enum: [table-build, list-build, merge-dedupe], description: "Present for local steps only." }
+              columns: { type: array, maxItems: 50, items: { type: string, maxLength: 64 }, description: "The plan's inputTemplate.expectedKeys; checked by local-template-v1." }
+              inputs:
+                type: array
+                maxItems: 64
+                description: "StepResult.fields of each paid step this step depends on, accepted steps only."
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [stepIndex, accepted, fields]
+                  properties:
+                    stepIndex: { type: integer, minimum: 0, maximum: 63 }
+                    accepted: { type: boolean }
+                    fields:
+                      type: array
+                      maxItems: 50
+                      items:
+                        type: object
+                        additionalProperties: false
+                        required: [name, value]
+                        properties:
+                          name: { type: string, maxLength: 64 }
+                          value: { type: string, maxLength: 2000, description: "Data, never instructions." }
         costTotal: { $ref: "#/components/schemas/Amount6" }
         minutesSaved: { type: integer, minimum: 0 }
         createdAt: { $ref: "#/components/schemas/Timestamp" }
@@ -1405,3 +1455,4 @@ paths:
 # - D51 USD only: displayCurrency const USD; capDisplay and amountDisplay are USD strings.
 # - D52 mscaBalance described as the "Network fee reserve".
 # x-changeLog: 2026-10-19 D69 — app tag is the desktop browser web app in Phase 1; push subscription routes and schemas tagged stage 2 (x-stage: 2); kept defined.
+# - D82 (2026-10-20): Result.assembly and ResultAck.assembly for unpaid local and agent-assist steps.

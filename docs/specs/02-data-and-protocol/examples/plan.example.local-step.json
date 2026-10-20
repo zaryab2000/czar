@@ -1,0 +1,59 @@
+{
+  "schemaVersion": "1.1",
+  "planId": "pln_1PJNDKTTYAJX1AHPGC7KQB6R7A",
+  "objectiveId": "obj_FD84CZT1BDHQ5VHVJW453S5675",
+  "objectiveHash": "0x85f7653b7de6fd3cf8bc85eef1bf095e4f0a3740b1e3f11a0a9341da74b1c396",
+  "planHash": "0xc1b75b8ac7a804a213942aaa9c7fa24586c66d0f75e13fa7699a6128b2e18ea4",
+  "network": "eip155:896",
+  "category": "dley-2e-6",
+  "cap": "0",
+  "slackBps": 0,
+  "maxStepAmount": "0",
+  "pocketCapBps": 0,
+  "expiresAt": "2026-10-19T12:00:00.000Z",
+  "steps": [
+    {
+      "stepIndex": 0,
+      "stepId": "stp_ZXKED5WDH92J10FPDV6S7KHF0A",
+      "kind": "x402-exact",
+      "capability": "web-search",
+      "unitAmount": "0",
+      "expectedCalls": 1,
+      "stepCap": "1562",
+      "routingReason": "example",
+      "acceptanceProfileId": "prof_32af6a33f99d43a8aee5fa5e2ec7637a"
+    },
+    {
+      "stepIndex": 1,
+      "stepId": "stp_ZXKED5WDH92J10FPDV6S7KHF0B",
+      "kind": "local",
+      "capability": "table-build",
+      "unitAmount": "0",
+      "expectedCalls": 1,
+      "stepCap": "0",
+      "routingReason": "unpaid-local-template",
+      "acceptanceProfileId": "prof_6c6f63616c2d74656d706c6174650001",
+      "inputTemplate": {
+        "expectedKeys": [
+          "competitor",
+          "plan",
+          "priceUsd"
+        ]
+      },
+      "dependsOn": [
+        0
+      ]
+    }
+  ],
+  "payeeLeaves": [
+    {
+      "payee": "0xfa908056d70097D2225ffd8dc7968b28a41C560c",
+      "kind": 1,
+      "stepIndex": 0,
+      "stepCap": "3343"
+    }
+  ],
+  "payeeRoot": "0xceb3e0baf0cf655935c5e311ffcaa01875fa3f75be45b7b2f79ba94848a8fc6d",
+  "shadow": false,
+  "createdAt": "2026-10-19T12:00:00.000Z"
+}

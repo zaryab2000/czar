@@ -192,6 +192,7 @@ Components are numbered in the adopted priority order.
 ### 6.11 ROI ledger
 - **What:** every receipt shows estimated minutes saved next to its cost.
 - **Monthly statement:** "Czar saved you 14 hours for $9."
+- **Scope (D82):** costs and quotes cover paid steps only. Work Czar does for free on your Mac is labelled "assembled on your Mac"; work left for your own agent is labelled "finished by your agent" and its model cost is yours, not Czar's.
 
 ### 6.12 Context minimization
 - **What:** before any call, Czar strips names, secrets and private details, and sends a merchant only what the task needs.
@@ -381,3 +382,5 @@ Components are numbered in the adopted priority order.
 - 2026-10-19 · D69: §9.1 surface renamed to the desktop web app; mobile is stage 2.
 
 - 2026-10-19 · D72 / RV-007: §6.6 freeze wording narrowed to what is enforced (new spending stops; pockets pulled back).
+
+- 2026-10-20 · D82: §6.11 ROI scope covers paid steps only; free assembly on the Mac and agent-finished steps are labelled.

@@ -401,7 +401,7 @@ The user can override the estimate per objective in the app; actual minutes come
 1. Collect the triggering events; `observationHashes = keccak256(jcs(preimage))` per 02 §5.2 for each (the daemon keeps the preimages).
 2. Build structured detector output: `{detector, keyKind, tokens[], counts, errorClass?, reasonClass?, fileExt?, capabilitiesDefault[]}` with no free text from untrusted events (placeholder tokens are allowlisted strings; the surrounding line is never included).
 3. P-05 writes `goal` (≤ 1,000 chars) and orders `capabilities`; fallback template without a model: "Fill the <token> placeholders in <ext> file" etc.
-4. Layer 2 redaction on `goal` (CZ-26) → `objective.goal`.
+4. Layer 2 redaction on `goal` (CZ-26) → `objective.goal`; the marker → value pairs for this objective are stored in the local marker map (02 §4.6.1, D82), never sent.
 5. `minutesSaved` from §5.4; `deadline` only from a `deadline`-type trusted match (Phase 2) or the mission belief's deadline if present.
 6. `roi` computed in §5.5; status `candidate`; row in `objectives`.
 7. Live mode → CZ-07 publishes when the filter passes; shadow mode → CZ-08.
@@ -634,3 +634,4 @@ CZ-06, CZ-07, server planner (CZ-13 in dry-run).
 | 2026-10-18 | AM-02 | model proxy is `completeModelCall` |
 | 2026-10-19 | D69 | soul pointer and shadow summary wording refer to the desktop web app; no push in Phase 1. |
 | 2026-10-19 | RV-027 | §5.7: local `status` and `serverStatus` are separate; `serverStatus` uses the one canonical enum. |
+| 2026-10-20 | D82 | Objective publisher stores the local marker map at layer 2. |

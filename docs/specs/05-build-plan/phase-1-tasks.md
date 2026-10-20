@@ -84,7 +84,7 @@
 | T-070 | Shadow mode | M5 | M | T-069, T-045 |
 | T-071 | Quote, outcome and pay routes | M5 | M | T-048, T-045 |
 | T-072 | MCP server | M5 | L | T-071, T-061 |
-| T-073 | Write-back adapter | M5 | M | T-062, T-061 |
+| T-073 | Write-back adapter (+ D82 assembler) | M5 | L | T-062, T-061 |
 | T-080 | Web app scaffold (desktop browser) | M6 | M | T-001 |
 | T-081 | Session and app read routes | M6 | M | T-041, T-034 |
 | T-082 | Onboarding | M6 | L | T-080, T-081, T-026, G0-03 |
@@ -737,6 +737,8 @@
 - **Acceptance tests:**
   - On testnet: `Reserved`, `AuthorizationUsed(vault, nonce_0)`, `Settled`, `ReservationFinal(1, 0)` all present (`arc-cast logs`).
   - The stored receipt verifies under `SL_RECEIPT` against the live vault (`arc-cast call <vault> "isValidSignature(bytes32,bytes)(bytes4)"` returns `0x1626ba7e`).
+- **D82 (2026-10-20):** unpaid steps per CZ-13 step 1: `planner.localTemplates`, `planner.agentAssistCapabilities`, the no-agent drop into `Plan.droppedSteps`, `unitAmount = stepCap = "0"`, no payee leaf. Test: a plan with an `agent-assist` step for a device whose latest `IngestReport.hosts` is empty drops it with `reason: no-agent`.
+- **D82 (2026-10-20):** CZ-15 `handed_off` for unpaid steps: build `Result.assembly[]` from accepted dependencies' `StepResult.fields`; mark the step `done` on `ackResult.assembly[]`. Test: an unpaid step never reserves, signs or calls a merchant.
 
 ---
 
@@ -1067,6 +1069,11 @@
   - A result is written atomically to `.czar/results/<objectiveId>-<slug>.md` with the `<!-- czar:result v=1 … -->` marker and provenance labels; an existing user file is never overwritten.
   - `ackResult` returns `204`; the next `SessionStart` prints the pointer line.
 - **Review fixes (2026-10-19):** Status filters use `ObjectiveStatusValue` only (RV-027).
+- **D82 extension (2026-10-20):** the adapter also builds the assembler (CZ-11 §5.2a). Size becomes L.
+  - Extra spec refs: `S02/data-and-protocol.md` §4.6.1; OpenAPI `Result.assembly`, `ResultAck.assembly`; `S04/server-acceptance-evidence-selection.md` `local-template-v1`.
+  - Extra outputs: `apps/daemon/src/writeback/assembler/` (templates `table-build`, `list-build`, `merge-dedupe`; marker restore; `local-template-v1` check); marker-map storage written by T-069.
+  - Extra acceptance tests: every assembler test in CZ-11 §14; a Phase 1 scenario run where `table-build` after `web-search` and `page-extract` writes a table with restored names and reports `assembled` with `structuralPass = true`; no model call and no network call happen during assembly (asserted by a network-deny test).
+- **D82 (2026-10-20):** store the per-objective marker map at layer 2 (`local-only`, 02 §4.6.1); test that it never appears in any outbound request (sender guard).
 
 ---
 
@@ -1406,3 +1413,4 @@
 | 2026-10-19 | D70 | Phase 1 runs on Zaryab's Mac with a local software signer (encrypted keystore); Google Cloud (KMS, Cloud Run, e2-micro VM) moves to stage 2. |
 | 2026-10-19 | G0-01 review (Pass A) | M1 acceptance criteria for RV-001…RV-015, RV-030…RV-037, RV-049, RV-056, RV-061 (named tests in `S03/security-and-testing.md` §3.7); T-105 key creation before T-027 (RV-016); T-027 no version registration (D73). |
 | 2026-10-19 | G0-01 review (Pass B/C) | T-036, T-040 rewritten for local hosting (RV-028); review-fix acceptance criteria on T-003…T-102; deps: T-035←T-105, T-046←G0-16, T-062←G0-17, T-086←T-095 and M5 exit (RV-053). |
+| 2026-10-20 | D82 | T-073 extended with the assembler (size L); notes on T-045, T-048, T-069. |
