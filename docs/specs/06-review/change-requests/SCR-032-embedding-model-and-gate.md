@@ -5,7 +5,7 @@
 | ID | SCR-032 |
 | Filed by | Architect (Claude), 2026-10-20, from D91 item 3 |
 | Spec and section | `docs/specs/04-components/server/server-acceptance-evidence-selection.md` CZ-18 §5.1 (C3), §5.3c, §5.6 `selection.retrievalMode`, `selection.embedding.*`; `docs/specs/01-system-architecture/system-architecture.md` §7.2 K18, §11.1; `docs/specs/04-components/cross-cutting.md` §6, §7 |
-| Status | Open, **held**: embeddings stay off until this is accepted and the match-set gate passes. Phase 1 retrieval is tags plus BM25. |
+| Status | Accepted (Zaryab, 2026-10-21). Embeddings stay off until the match-set gate passes. Phase 1 retrieval is tags plus BM25. |
 
 ## Problem
 - D91 brings meaning-based retrieval forward in stages. The embedding step needs a model, a vendor and a privacy decision that the specs do not yet contain.
@@ -26,4 +26,8 @@
 - T-117 (embedding part only).
 
 ## Decision
-- Pending.
+- Accepted by Zaryab, 2026-10-21, on research RS-032 (`docs-internal/research-output/reports/RS-032-embedding-options-2026-10-21.md`).
+- Gate-test model: OpenAI `text-embedding-3-small` at 1,024 dimensions (hosted; cheapest option; no training on API data). Self-hosted models are not used for the gate test: their CPU latency is unmeasured and the gate may fail.
+- No public benchmark covers short service cards, so the labelled match set is the only evidence. Embeddings turn on only if the gate passes.
+- Query side unchanged: embed only the code-built query (kind, topic, field names, tags), never free `goal` text. Store vectors only for Czar cards, with the model id per vector; never embed Circle text.
+- Phase 1 retrieval stays tags plus BM25. Adding the model to cross-cutting §7 pins and K18 happens only when the gate passes.
