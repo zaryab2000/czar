@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "1.0",
+  "scanId": "scan_2F4H6K8M4N6P8R0T2V4X6Z8B0D",
+  "rootId": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+  "includeAgentFiles": true,
+  "includeGlobalAgentFile": false,
+  "includeGit": true,
+  "consentId": "cns_8B0D2F4H6K8M4N6P8R0T2V4X6Z",
+  "status": "done",
+  "fileCount": 4,
+  "byteCount": 18230,
+  "skipped": {
+    "sensitivePath": 1,
+    "outsideRoot": 0,
+    "oversized": 0,
+    "untracked": 2,
+    "nonText": 0
+  },
+  "proposalCount": 3,
+  "suspiciousSkipped": 1,
+  "startedAt": "2026-10-20T09:04:58.000Z",
+  "endedAt": "2026-10-20T09:05:03.000Z"
+}

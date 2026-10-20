@@ -16,12 +16,12 @@
 | Phase | 1 (v0, Claude Code observations only) |
 | Product | §6.3 Work Soul; §7.2 `soul.json`; §10 trust |
 | Roadmap | 1.1 Work Soul file with receipts |
-| Decisions | D7, D25, D31, D34 |
+| Decisions | D7, D25, D31, D34, D90 |
 | Facts | C2-01 to C2-06 (redaction), C3-02 ASI06, C3-04, B5-06 (injection hygiene), B6-12 (storage) |
 
 ### 2. Responsibilities and non-responsibilities
 
-- **Does:** turn the shared memory (CZ-03) into a new `soul.json` version (02 §4.2) with beliefs in eight sections, each carrying receipts, confidence, first/last seen; fade and archive stale beliefs; keep user edits; produce the weekly diff; compute `soulVersionHash` (02 §5.2) and hand it to CZ-07 for `submitSoulVersion`.
+- **Does:** turn the shared memory (CZ-03), interview answers and accepted proposals (§5.11, D90) into a new `soul.json` version (02 §4.2) with beliefs in eight sections, each carrying receipts, confidence, first/last seen; fade and archive stale beliefs; keep user edits; produce the weekly diff; compute `soulVersionHash` (02 §5.2) and hand it to CZ-07 for `submitSoulVersion`.
 - **Does not:** send belief text anywhere except the redacted excerpt to the hosted model through the Czar proxy (D31); create objectives (CZ-06); render exports (CZ-10, Phase 2); decide spending.
 
 ### 3. Runtime
@@ -35,6 +35,7 @@
 |---|---|---|
 | in | shared memory query (CZ-03) | `ActivityEvent` rows (02 §4.1) since the previous compile's cursor, plus the current `soul.json` |
 | in | viewer edits (CZ-05) | belief operations on the local store |
+| in | interview answers, accepted proposals, bundle confirmations (CZ-05, D90) | `InterviewSubmission`, `ProposedBelief` (02 §4.24–§4.25) → §5.11 |
 | in | redaction layer 2 (CZ-26 sidecar) | excerpt text in → marked text out (02 §3.1) |
 | in | P-01 `screen` and P-04 `soul-compiler` via the Czar model proxy (`completeModelCall`, AM-02) | `ai-prompts.md` |
 | out | `soul_versions` row (new `soul.json`) | 02 §4.2 (`soul.schema.json`) |
@@ -50,17 +51,17 @@ Each compile runs **rules first, then the model**. Rules produce "belief candida
 
 | Section | Rule source (structured fields of `ActivityEvent`) | Example belief (invented) |
 |---|---|---|
-| `place` | OS locale, time zone, currency from daemon settings (not from events); working-hours histogram from `occurredAt` | "Works in Europe/Berlin, mostly 09:00–18:00" |
+| `place` | OS locale, time zone, currency from daemon settings (not from events); working-hours histogram from `occurredAt`; interview `place` answers (D90, `declared`) | "Works in Europe/Berlin, mostly 09:00–18:00" |
 | `mission` | `projectRef` activity volume over `soul.missionWindowDays`; file names in `summary` of `file-write` events with `provenance.trusted = true`; `deadline`-shaped dates found by the `placeholder`/deadline rule in trusted summaries | "Pricing refresh due Friday" |
 | `rituals` | recurring (`projectRef`, `eventType`, weekday, hour) patterns with ≥ `soul.ritualMinRepeats` occurrences at the same weekday/hour slot across ≥ `soul.ritualMinWeeks` weeks | "Monday morning pipeline review" |
 | `friction` | `repeated-error` and `agent-refusal` clusters (same inputs as CZ-06 detectors); repeated `search` events with the same normalized query; long `durationMs` on the same tool | "Manual competitor price checks repeat" |
 | `drives` | open loops: `placeholder` hits in trusted file-write summaries; `stale-work` (project untouched ≥ `soul.staleDays` after heavy activity) | "Competitor price table still has placeholders" |
 | `taste` | preferred formats from `file-write` extensions in `fileRefs` counts (hashed paths carry no names; the extension is kept as a separate field in `summary` prefix by CZ-01); tool preferences from `toolName` frequency | "Prefers Markdown tables" |
-| `constraints` | daemon settings (budget, tools the user marked off-limits, privacy limits); never inferred from text in Phase 1 | "Never send customer names to merchants" (user-set) |
-| `spendingPosture` | the app's approval/rejection history mirrored from `getObjective` statuses (counts only); hourly value setting | "Approved 4 of 5 research objectives under $1" |
+| `constraints` | daemon settings and interview `constraints` answers (D90, `declared`); accepted proposals (`local-file`, `imported`) are saved context only; never inferred from text in Phase 1 | "Never send customer names to merchants" (user-set) |
+| `spendingPosture` | the app's approval/rejection history mirrored from `getObjective` statuses (counts only); hourly value setting; interview `spendingPosture` answers (D90, saved context only) | "Approved 4 of 5 research objectives under $1" |
 
 - A belief candidate has `section`, a normalized `key` (for dedupe), `receipts[]` (event ids), and a `draftText` built from a template. P-04 may rewrite `draftText` into clearer wording; it may not change the key, section or receipts.
-- Phase 1 scope: `mission`, `friction`, `drives`, `rituals`, `taste` from events; `place`, `constraints`, `spendingPosture` from settings and app status only.
+- Phase 1 scope: `mission`, `friction`, `drives`, `rituals`, `taste` from events; `place`, `constraints`, `spendingPosture` from settings and app status; any section from the interview or an accepted proposal (§5.11, D90).
 
 #### 5.2 Confidence formula (`soul.*` parameters)
 
@@ -71,6 +72,7 @@ For a belief with receipts `r_1 … r_n` (event timestamps `t_i`, ages `a_i` day
 - `confidence = clamp(0, 1, (1 − 0.5^(evidence / soul.evidenceScale)) × (0.7 + 0.3 × diversity))` (default `evidenceScale` 3).
 - A belief becomes `Active` only when `n ≥ soul.minReceipts` (default 2) and `confidence ≥ soul.activeConfidence` (default 0.5). Below that it stays `Candidate` and is not rendered.
 - `userEdited = true` beliefs keep whatever confidence the user left and are never recomputed (§5.5).
+- **User-confirmed beliefs (D90):** `confidenceBasis = user-confirmed` beliefs have `confidence = 1`, meaning the person attested them, not statistical certainty. They skip `soul.minReceipts` and `soul.activeConfidence`, are never recomputed and never fade (§5.11).
 
 | Parameter | Default | Reason |
 |---|---|---|
@@ -110,7 +112,7 @@ For a belief with receipts `r_1 … r_n` (event timestamps `t_i`, ages `a_i` day
 
 #### 5.6 Versioning and the weekly diff
 
-- `version` increases by one per successful compile; `compiledAt`; `previousHash` = previous `soulVersionHash`. `soulVersionHash` per 02 §5.2 (section hashes over belief `text`, `confidence`, `firstSeen`, `lastSeen`, sorted receipts). The daemon stores every version row (`soul_versions`) and the current beliefs (`beliefs`).
+- `version` increases by one per successful compile or accepted soul input (§5.11); `compiledAt`; `previousHash` = previous `soulVersionHash`. `soulVersionHash` per 02 §5.2 (section hashes over belief `text`, `confidence`, `firstSeen`, `lastSeen`, sorted receipts). Receipts may be `evt_` or `src_` ids, committed as opaque ids; each version stores `soulHashRule` (`czar-hash-v1` until SCR-030 decides `czar-soul-v2`, D90 item 12). The daemon stores every version row (`soul_versions`) and the current beliefs (`beliefs`).
 - The weekly diff compares the newest version with the one closest to 7 days earlier: **added** (new `Active`), **strengthened** (confidence up ≥ `soul.diffDelta` 0.15), **faded** (state `Faded` or confidence down ≥ 0.15), **removed** (`Archived` or user-deleted). Rendered in the viewer under "What Czar learned about you this week"; stored locally; never sent.
 
 #### 5.7 User edits always win
@@ -153,9 +155,10 @@ stateDiagram-v2
 
 | Table | Fields | Notes |
 |---|---|---|
-| `beliefs` | `beliefId` PK, `section`, `key`, `text`, `confidence`, `state`, `firstSeen`, `lastSeen`, `userEdited`, `deletedAt`, `createdVersion`, `updatedVersion` | current beliefs; `key` unique per section |
-| `belief_receipts` | `beliefId`, `eventId`, `addedVersion` | many-to-many; `eventId` → `events` |
-| `soul_versions` | `version` PK, `compiledAt`, `previousHash`, `soulVersionHash`, `soulJson` (02 §4.2 blob), `modelUsed` (bool), `tokens`, `excerptChars` | full snapshot per compile |
+| `beliefs` | `beliefId` PK, `section`, `key`, `text`, `confidence`, `state`, `firstSeen`, `lastSeen`, `userEdited`, `deletedAt`, `createdVersion`, `updatedVersion`, `sourceClass`, `confidenceBasis`, `userConfirmed`, `confirmedAt` | current beliefs; `key` unique per section |
+| `belief_receipts` | `beliefId`, `receiptType` (`event` \| `source`), `receiptId`, `addedVersion` | many-to-many; `receiptId` → `events` or `source_receipts` (D90) |
+| `source_receipts`, `proposed_beliefs`, `interview_answers` | CZ-02 §5.3 | D90; local only |
+| `soul_versions` | `version` PK, `compiledAt`, `previousHash`, `soulVersionHash`, `soulHashRule`, `soulJson` (02 §4.2 blob), `modelUsed` (bool), `tokens`, `excerptChars` | full snapshot per compile or accepted input |
 | `soul_diffs` | `version`, `baseVersion`, `added`, `strengthened`, `faded`, `removed` (json of beliefIds) | weekly diff cache |
 | `compile_log` | `version`, `startedAt`, `endedAt`, `status`, `reason`, counts | local audit |
 
@@ -176,6 +179,22 @@ stateDiagram-v2
 | `soul.diffDelta` | 0.15 | visible change |
 | `excerptPolicy.maxChars` | 20,000 | 02 §4.2; keeps the call within 24,000 tokens |
 | `models.soul-compiler.timeoutMs` | 60,000 | `cross-cutting.md` §6.2 |
+
+#### 5.11 Non-observed inputs (D90)
+
+| Source class | May create | May support | Never |
+|---|---|---|---|
+| `observed` | candidates through §5.1 and §5.4 only (unchanged) | beliefs with event receipts | payee, cap, envelope; untrusted text never creates |
+| `declared` | an active belief from a direct viewer interview answer or edit, or from a confirmed interview bundle (CZ-05) | an existing belief after a confirmed merge | a limit or vault setting, `TaskSpec.sourceTrust`, an objective, a ritual |
+| `local-file` | a proposal; after acceptance, an active belief of the same class | another belief only as a labelled receipt after acceptance | an `ActivityEvent`, an `observationHash`, a detector count |
+| `imported` | a proposal (paste or agent summary); after acceptance, an active belief | as above | user-initiation proof, money fields, objectives |
+
+- **Interview mapping (deterministic templates, no model):** one belief per answered question (02 §4.25: `place`, `mission`, `constraints.maxTotalPerObjective`, `constraints.noNewPayees`, `constraints.categoriesAllowed`, `constraints.offLimitsTools`, `constraints.privacyRule`, `taste.preferredFormat`, `taste.preferredSources`, `spendingPosture.riskPreference`, `spendingPosture.note`, `hourlyValue`), each with its own `src_` receipt (`kind = interview`, `questionId`). `place` → "Works in {timeZone}; language {locale}"; `mission` → "{projectName}: {goal}, due {deadline}"; `constraints.maxTotalPerObjective` → "Keep each task under ${amount}"; `constraints.noNewPayees` → "Only pay services already used"; `constraints.categoriesAllowed` → "Spend only on {categories}"; `constraints.offLimitsTools` → "Do not use {names}"; `constraints.privacyRule` → the answer text; `taste.*` → "Prefers {preferredFormat}" / "Trusts {preferredSources}"; `spendingPosture.riskPreference` → "Wants Czar to be {careful|balanced|relaxed} with spending". `hourlyValue` sets `soul.json.hourlyValue` with `setByUser = true` and creates no belief. Keys are `<section>:interview:<questionId>` (for example `mission:interview:mission`), so a later answer replaces the older declared one only through the same explicit interview action.
+- **Promotion:** accepting a proposal (or a bundle) runs in one transaction: re-check `sourceDigest` against the stored receipt (`409 source-changed` on mismatch), re-run layer 1, the §5.4 deny-list and the tombstone check, write the belief (`userConfirmed = true`, `confirmedAt`, `confidence = 1`), its receipts, a new `soul_versions` row and an `audit_local` row. P-04, P-07 and MCP cannot call it.
+- **Bundles (D90 item 5):** a bundle from `soul.propose` becomes `declared` only through `confirmLocalSoulBundle` with the exact list of proposals the viewer displayed in full; any other list is refused (`409 bundle-mismatch`). Receipts keep `origin = agent-host`. A model paraphrase is never part of a bundle.
+- **Conflicts:** a contradicting observation never overwrites a confirmed belief; it raises a review flag in the viewer. A passed mission deadline raises a review flag. Edit, unpin and delete work as in §5.7; a delete tombstones the key for every source class.
+- **Separation from drives:** accepting a belief never creates an objective, and a proposal never reaches CZ-06. Only three inputs change behaviour in Phase 1 (D90 item 6): typed `constraints` answers (CZ-07), a mission deadline for the same project root (CZ-06 §5.6) and `hourlyValue` (CZ-06 §5.5). `taste`, `place` and `spendingPosture` beliefs from any source are saved context.
+- **P-04 input:** the excerpt of current beliefs may include confirmed beliefs (as trusted, redacted text) in `excerptPolicy.allowSections`; P-04 may not `fade` or rewrite a `user-confirmed` belief (any such operation is discarded by the §5.4 model output gate).
 
 ### 6. Behaviour
 
@@ -244,6 +263,7 @@ Shown with the version: "Version 12, compiled 18 Oct 02:00 · raw data stays on 
 - Unit: each §5.1 rule on fixtures; confidence formula properties (monotone in evidence; decays with age; edited beliefs untouched); state machine transitions; gate rules (untrusted text never creates; provenance outside allowlist dropped; per-session cap; deny-list).
 - Integration: full compile on a 30-day synthetic event set (invented data); hash reproduces 02 §5.2 from the stored version; `submitSoulVersion` payload validates against `SoulVersionSubmission`.
 - Injection: P-04 eval cases in `ai-prompts.md` (≥ 3) run against the gate; the mutation "model returns add for an unknown id" is rejected.
+- Soul inputs (D90): a zero-event fixture plus a full interview yields one active, source-labelled belief per answered question, covering all five interview sections, before any nightly compile, with no model call; an unknown receipt or a changed `sourceDigest` blocks acceptance; one acceptance writes exactly one version; observed confidence and tombstones are unchanged; P-04 `fade` on a confirmed belief is discarded; old version hashes are byte-identical after migration; property tests for receipt sorting with mixed `evt_`/`src_` ids and tombstone dedupe across classes.
 - Privacy: a test asserts the excerpt contains no unmarked secret from a seeded corpus and no `local-only` field names.
 - Definition of done: all above green; rules-only compile works with the model disabled; the weekly diff renders; a deleted belief never returns in 10 compiles.
 
@@ -257,11 +277,11 @@ Shown with the version: "Version 12, compiled 18 Oct 02:00 · raw data stays on 
 
 ### 1. Identity
 
-CZ-05 · Phase 1 (desktop viewer only, D34) · product §6.3 ("the person can read, edit or delete any line"), §9.1 · roadmap 1.1 · D25, D34 · facts D3-08 (local HTTP rules), B6-12.
+CZ-05 · Phase 1 (desktop viewer only, D34) · product §6.3 ("the person can read, edit or delete any line"), §9.1 · roadmap 1.1 · D25, D34, D90 · facts D3-08 (local HTTP rules), B6-12.
 
 ### 2. Responsibilities
 
-- **Does:** keep the belief and version tables (§5.9 above); serve a local web viewer on the daemon's Unix socket or `127.0.0.1:<port>` with an `Origin` check and the viewer token; show sections, receipts counts, confidence, last seen; allow edit, pin, delete, set confidence; show the weekly diff, the shadow report (CZ-08) and "What left this machine".
+- **Does:** keep the belief and version tables (§5.9 above); serve a local web viewer on the daemon's Unix socket or `127.0.0.1:<port>` with an `Origin` check and the viewer token; show sections, receipts counts, confidence, last seen; allow edit, pin, delete, set confidence; show the weekly diff, the shadow report (CZ-08) and "What left this machine"; run the optional interview, source selection and consent, the egress preview and the proposal review (D90). Acceptance is the only path from a proposal to a belief.
 - **Does not:** expose the soul to the web app (D34; `getSoulPointer` returns `available: false` and the desktop URL); send belief text anywhere.
 
 ### 3. Runtime
@@ -278,6 +298,12 @@ Static viewer assets served by the daemon; opened from the menu bar or `czar sou
 | `GET /local/soul/receipts/{beliefId}` | receipt summaries (local text) |
 | `GET /local/shadow/report` | CZ-08 report |
 | `GET /local/audit/egress` | counts and hashes of what left the machine |
+| `POST /local/soul/interview` | `InterviewSubmission` → `{version, beliefIds, ignoredFields}` (D90) |
+| `GET /local/soul/source-roots` | known roots only (CZ-02 `file_paths`) |
+| `POST /local/soul/source-scans`, `GET /local/soul/source-scans/{scanId}` | start and follow a consented scan (CZ-02 §5.6) |
+| `POST /local/soul/import-text` | paste → proposals |
+| `GET /local/soul/proposals`, `POST /local/soul/proposals/{proposalId}` | list; accept, edit-and-accept, reject |
+| `POST /local/soul/bundles/{bundleId}/confirm` | confirm an agent-mediated interview bundle (D90 item 5) |
 | server | `getSoulPointer` (app shows "Open on your computer") |
 
 These loopback routes are daemon-internal; their shapes live in `02-data-and-protocol/api/local-openapi.yaml` (AM-16), separate from `api/openapi.yaml`, which covers only daemon ↔ server and app ↔ server.
@@ -292,13 +318,20 @@ These loopback routes are daemon-internal; their shapes live in `02-data-and-pro
 
 Open → list sections → tap a belief → see "This belief came from N observations" with dates and hook events (never raw payloads) → edit/pin/delete → changes take effect immediately and are honoured by the next compile (§5.7 above).
 
+**Soul inputs (D90):**
+1. First open after pairing (from the web app's `getSoulPointer` message): offer the five-minute interview; "Skip" keeps observation-only behaviour. Each question shows the section it fills. After "Save", the person sees the resulting lines and can edit or delete each at once.
+2. Sources: pick a known project root, toggle "Instruction files" and "Recent git work" (and, separately, "My global CLAUDE.md"), see the exact files and counts before anything is read, then consent. Consent is remembered for the same root and source types only; a changed scope asks again; consent can be revoked.
+3. Egress preview: before the first model-assisted scan or paste, show the redacted excerpt and its destination; "Use the interview only" makes no model call.
+4. Review: proposals list with source label, date and excerpt; accept, edit and accept, or reject each; "Accept all visible" for one source, with undo, never for unseen or flagged lines.
+5. Agent bundle: every answer shown in full against its question; one "Confirm these answers" with edit and undo.
+
 ### 7. AI usage
 
 None.
 
 ### 8. Privacy
 
-All `local-only`. Receipt summaries shown are the redacted `summary` fields. Nothing in the viewer is sent to the server.
+All `local-only`. Receipt summaries shown are the redacted `summary` fields or source excerpts; file paths are shown on this Mac only. Nothing in the viewer is sent to the server; a model excerpt leaves only after the egress preview (D90).
 
 ### 9. Security
 
@@ -325,6 +358,16 @@ Local counts: views, edits, deletes. No belief text in logs.
 | Weekly diff | "What Czar learned about you this week" with lists "New", "Stronger", "Fading", "Removed" |
 | Egress panel | "What left this Mac: 1 redacted excerpt (7,400 characters) for soul compilation; 2 objectives; 0 raw observations." |
 | Web app (`getSoulPointer`) | "Your Work Soul is viewable in the Czar viewer on your computer only." |
+| Interview offer (D90) | "Tell Czar about your work. Your answers stay on this Mac. Czar can use confirmed constraints, a matching mission deadline, and your hourly value. Other answers are saved context you can edit or delete." |
+| File consent (D90) | "Scan the instruction files and tracked work you select in {project}. Czar will suggest beliefs for your review. No belief is saved from this scan alone." |
+| Model egress (D90) | "To find suggestions, Czar will send this redacted excerpt to its language-model service through a proxy that stores no text. Review the excerpt before sending. Your full file and path stay on this Mac." |
+| Pasted memory (D90) | "Paste text here. Czar will discard the paste after making review suggestions. Check the excerpt for other people's information before sending it for analysis." |
+| Agent summary (D90) | "Your agent sent a summary. It is a suggestion only. Review each line in the Czar viewer before it becomes part of your Work Soul." |
+| Agent bundle (D90) | "Your agent asked you these questions. Check every answer. Confirm to save them as your own answers." |
+| Display-only belief (D90) | "Saved context; Czar does not use this to make decisions yet." |
+| Confirmed line (D90) | "<text> · Confirmed by you · from {interview / file / imported text} · {date}" (never a percentage) |
+| Receipts, source (D90) | "From {CLAUDE.md in billdesk / your interview / pasted text / your agent} on {date}" |
+| Skipped suspicious text (D90) | "{n} paragraphs were skipped as suspicious and not analysed." |
 
 ### 13. Performance
 
@@ -332,7 +375,7 @@ Page load < 500 ms for 1,000 beliefs.
 
 ### 14. Tests and definition of done
 
-Origin/token negative tests; edit → next compile keeps text; delete → tombstone honoured; web-app pointer returns `available:false`. Done when all pass and a manual review confirms no raw payload text is reachable through any route.
+Origin/token negative tests; edit → next compile keeps text; delete → tombstone honoured; web-app pointer returns `available:false`; D90: proposals never appear in `getLocalSoul`; batch accept excludes flagged and unseen lines and undo restores the previous version; a bundle confirm with a different proposal list → `409`; revoked consent blocks the next scan; the interview works with the model proxy off; keyboard-only flow for interview and review; display-only sections promise no behaviour. Done when all pass and a manual review confirms no raw payload text is reachable through any route.
 
 ### 15. Dependencies
 
@@ -388,10 +431,18 @@ Every objective carries a `TaskSpec` (02 §4.3.1) with the task's real subject. 
 - Layer 1 runs on every string. Layer 2 does not replace `TaskSpec` values (D84 point 3).
 - `fileName` is the base name only; paths never leave the Mac.
 
+#### 5.1b User-confirmed eligibility (D90; built with SCR-030)
+
+- **Rule (detector-agnostic):** besides the passive thresholds above, an objective is eligible when `eligibility = user-confirmed`: a typed local source-evidence receipt and an authenticated confirmation receipt (CZ-05 **Do this**) exist for the **same** current `TaskSpec` (by `taskSpecHash`). The `TaskSpec` is built by code from the current source (§5.1a); a stale preview needs reconfirmation.
+- **Adapters:** Phase 1 has one: a placeholder in a current user file (`placeholder`, `sourceTrust = user-file`). Another detector may add an adapter later by defining its trust, freshness and confirmation rules; it never adds a receipt shape, a hash rule or a parameter.
+- **What it bypasses:** only the detector's time and count thresholds (`drives.placeholderMinSeen`, `drives.placeholderMinAgeHours`) and the shadow default (CZ-08). It does **not** bypass dedupe, `drives.maxCandidatesPerDay`, `drives.maxCandidatesPerProjectPerDay`, the ROI filter, redaction or approval.
+- **No fake observations:** a confirmed objective may have `observationHashes = []`; a preview, a scan or an accepted belief never increments a detector counter.
+- **Build status:** the wire field, `czar-objective-v2`, the confirm route and the previews are held in SCR-030 for the Flow 7 review. Until then CZ-06 builds passive objectives only.
+
 #### 5.2 Dedupe and rate limits
 
 - One candidate per normalized key within `drives.dedupeWindowDays` (7); a dismissed candidate's key is blocked for `drives.dismissBlockDays` (30); a delivered objective's key is blocked for `drives.deliveredBlockDays` (90).
-- At most `drives.maxCandidatesPerDay` (5) new candidates per day and `drives.maxCandidatesPerProjectPerDay` (2); overflow waits for the next day in priority order (ROI ratio descending).
+- At most `drives.maxCandidatesPerDay` (5) new candidates per day and `drives.maxCandidatesPerProjectPerDay` (2); overflow waits for the next day in priority order (ROI ratio descending). User-confirmed objectives (§5.1b) count toward both caps and the dedupe windows (D90).
 
 #### 5.3 Capability taxonomy (fixed tags; `capabilities` field, 02 §4.3)
 
@@ -409,7 +460,7 @@ The user can override the estimate per objective in the app; actual minutes come
 
 #### 5.5 Value-of-time filter and hourly bands
 
-- Hourly value from settings (`soul.json.hourlyValue`); default by role/locale template when unset (`drives.defaultHourlyValue`, e.g. $40/h), always editable.
+- Hourly value from settings (`soul.json.hourlyValue`, which the interview can set with `setByUser = true`, D90); default by role/locale template when unset (`drives.defaultHourlyValue`, e.g. $40/h), always editable.
 - Band (`hourlyBand`, 02 §4.4): A < $25/h, B $25–50, C $50–100, D $100–200, E > $200. Only the band leaves the machine.
 - Show a candidate only when `minutesSaved / 60 × hourlyValue ≥ drives.roiMultiple (5) × expectedPrice`, where `expectedPrice` is the `Plan.cap` returned by `shadowQuote` (shadow mode) or by the server's status after `submitObjective` (live mode; the server replies with a plan summary and the daemon applies the filter before the objective is shown as a candidate in the app). If no quote is available, the candidate waits.
 
@@ -419,7 +470,7 @@ The user can override the estimate per objective in the app; actual minutes come
 2. Build the detector output `{detector, keyKind, tokens[], counts, errorClass?, reasonClass?, fileExt?, capabilitiesDefault[], taskSpec}` with the `TaskSpec` from §5.1a (D84). **Superseded by D84:** "no free text … the surrounding line is never included": the subject is the point of the task.
 3. P-05 writes `goal` (≤ 1,000 chars) naming the topic and subjects, and orders `capabilities`; fallback template without a model: "Find {fields} for {n} {topic} rows ({first 5 subjects}…) and fill the table in {fileName}" for `table-fill`, and the matching templates in `ai-prompts.md` P-05.
 4. Layer 2 redaction on `goal` (CZ-26), with every `TaskSpec` value on the allow list (D84) → `objective.goal`; the marker → value pairs for this objective are stored in the local marker map (02 §4.6.1, D82), never sent.
-5. `minutesSaved` from §5.4; `deadline` only from a `deadline`-type trusted match (Phase 2) or the mission belief's deadline if present.
+5. `minutesSaved` from §5.4; `deadline` only from a `deadline`-type trusted match (Phase 2) or, when the objective has none, the confirmed interview mission deadline (`interview_answers` `mission.deadline`, D90) when its `projectRootId` equals the `projectRef` of the objective's source file or events and the date is not past. The date becomes a `Timestamp` at 23:59:59.999 on that date in the interview `place.timeZone`, or the Mac's time zone when none was given, converted to UTC. An unrelated project's deadline is never used.
 6. `roi` computed in §5.5; status `candidate`; row in `objectives`.
 7. Live mode → CZ-07 publishes when the filter passes; shadow mode → CZ-08.
 
@@ -488,7 +539,7 @@ Scan ≤ 1 s on 50,000 events; ≤ 2,000 tokens per P-05 call.
 
 ### 14. Tests and definition of done
 
-Each detector: fixtures that fire and near-misses that do not (thresholds ± 1); **`TaskSpec` golden tests (D84):** a Markdown table with 5 named rows and 5 `[Add price]` cells yields `kind = table-fill`, those 5 subjects in order, `fields = [the price column header]` and the full `columns`; a list file, a code `TODO`, a repeated error and a refusal each yield the §5.1a shape; a placeholder edited in an outside editor is found by the daily rescan; a path never appears in `TaskSpec`; dedupe windows; rate caps; untrusted placeholder never fires; P-05/P-06 injection evals (`ai-prompts.md`); `objectiveHash` matches the server's recomputation. Done when a 7-day synthetic corpus yields the expected candidate set exactly.
+Each detector: fixtures that fire and near-misses that do not (thresholds ± 1); D90: a matching mission deadline sets `deadline`, an unrelated one does not; an interview hourly value changes `hourlyBand` and the ROI result; a scan or an accepted belief never creates a candidate; **`TaskSpec` golden tests (D84):** a Markdown table with 5 named rows and 5 `[Add price]` cells yields `kind = table-fill`, those 5 subjects in order, `fields = [the price column header]` and the full `columns`; a list file, a code `TODO`, a repeated error and a refusal each yield the §5.1a shape; a placeholder edited in an outside editor is found by the daily rescan; a path never appears in `TaskSpec`; dedupe windows; rate caps; untrusted placeholder never fires; P-05/P-06 injection evals (`ai-prompts.md`); `objectiveHash` matches the server's recomputation. Done when a 7-day synthetic corpus yields the expected candidate set exactly.
 
 ### 15. Dependencies
 
@@ -524,6 +575,7 @@ In-process; outbox worker loop every `publisher.pollIntervalSec` (30); device to
 ### 5. Internal design
 
 - Outbox table `outbox`: `id`, `kind` (objective|soul-version|ack|report), `payload`, `idempotencyKey` (UUID, fixed at enqueue), `attempts`, `nextAt`, `lastError`, `state` (queued|sent|failed).
+- `constraints` (02 §4.4): built only from typed, confirmed interview answers (D90): `maxTotal` ← `constraints.maxTotalPerObjective`, `noNewPayees`, `categoriesAllowed`. Free-text constraint beliefs and accepted proposals never fill it. The field is not in the v1 `objectiveHash` preimage (02 §5.2).
 - Before enqueueing an objective: layer 2 on `goal` → markers; `redaction.layer2` counts; recompute `objectiveHash` over the 02 §5.2 preimage (with the redacted goal); schema validation; sender guard rejects any `local-only` key.
 - Retries: exponential backoff `publisher.retryBackoffMs` (base 5,000, factor 2, max 1 h), `publisher.maxAttempts` 50; `422 hash-mismatch` → recompute once from stored fields; if it persists, `failed` and shown in the viewer; `401 device-revoked` → stop and show re-pair; `429` → honour `RateLimit-Reset`.
 - Status sync: poll `listObjectives?status=` for non-terminal objectives every `publisher.statusPollSec` (60); store `serverStatus`, `planCap`; when `resultId` appears, fetch `getResult` and hand to CZ-11.
@@ -580,6 +632,8 @@ CZ-08 · Phase 1 · product §6.7 · roadmap 1.5 · D25, D31, D35 (no credits) �
 
 For the first `shadow.days` (7) of a user (or whenever the user chooses "watch only"): price every candidate with `shadowQuote` and show the local "what you missed" report; spend nothing; open no envelope. Does not: publish objectives for execution; send anything beyond the `ObjectiveSubmission` inside `ShadowQuoteRequest`.
 
+**Exception (D90 item 11; built with SCR-030):** an objective the person confirmed with **Do this** (CZ-06 §5.1b) skips the seven-day default for that objective only. It still needs the owner's approval of its plan; earned allowance never funds it; `Me.mode` is not switched; a deliberate "watch only" choice still applies to it.
+
 ### 3. Runtime
 
 In-process; uses CZ-07's outbox for `shadowQuote` calls (kind `shadow-quote`).
@@ -630,6 +684,7 @@ Rows, quotes, failures (counts).
 | Totals | "This week: 6h 20m of your time · Czar estimate $2.14 · nothing was spent" |
 | Transition | "Start Czar: approve objectives one tap at a time. Nothing is spent until you approve." |
 | D31 line | "Raw work data stays on this Mac. Only redacted goals were sent to price them." |
+| Shadow exception (D90, with SCR-030) | "Your Do this confirmation lets this task proceed during the first week. It does not approve payment. Czar will ask you to approve the plan." |
 
 ### 13. Performance
 
@@ -656,3 +711,4 @@ CZ-06, CZ-07, server planner (CZ-13 in dry-run).
 | 2026-10-20 | D83 | CZ-08 shadow rows show the real-market price line from `Plan.marketReference`. |
 | 2026-10-20 | D84 | CZ-06 placeholder detector reads the file from disk; new §5.1a `TaskSpec` rules for all three detectors; §5.6 record carries `TaskSpec`; goal names subjects; security, wording and tests updated. |
 | 2026-10-20 | D85 | `TaskSpec` subjects record their placeholder spans. |
+| 2026-10-20 | D90 | CZ-04 §5.1 interview sources, §5.2 user-confirmed beliefs, §5.6 typed receipts and `soulHashRule`, §5.9 tables, new §5.11 non-observed inputs, tests; CZ-05 soul-input routes, flow, wording, tests; CZ-06 new §5.1b user-confirmed eligibility (built with SCR-030), caps, hourly value, mission deadline rule, tests; CZ-07 `constraints` from typed answers only; CZ-08 per-objective shadow exception (built with SCR-030). |

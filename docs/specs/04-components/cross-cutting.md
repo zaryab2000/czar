@@ -27,7 +27,7 @@ One `pnpm` workspace (Node 22 LTS, ESM only, TypeScript strict; spec 01 §17). C
 | `packages/config` | `@czar/config` | the named-parameter registry (§3) with defaults, env overlay and a printable dump | all |
 | `packages/logging` | `@czar/logging` | JSON logs with the field allowlist (§4) | all |
 | `contracts/` | Foundry project (`arc-forge`) | `CzarVault`, `CzarVaultFactory`, `OpenEvidenceLog`, Phase 2 contracts, tests | Arc |
-| `models/` | prompt files for `ai-prompts.md` (`P-01` … `P-06`), versioned; prompt hash is logged with every call | server, daemon |
+| `models/` | prompt files for `ai-prompts.md` (`P-01` … `P-07`, D90), versioned; prompt hash is logged with every call | server, daemon |
 
 - Package boundaries follow privacy: `apps/daemon` depends on `@czar/schemas`, `@czar/hashing`, `@czar/redaction`; it never imports `@czar/vault-client` or `@czar/x402` (it holds no keys and pays nothing, D25).
 - Absolute imports only (`@czar/...`); no relative `..` paths.
@@ -93,10 +93,11 @@ Every outbound fetch of a URL that came from outside Czar's own code goes throug
 ## 4. Logging, metrics and audit (no personal data)
 
 - Format: one JSON object per line (pino-style), UTC timestamps, `service`, `component` (`CZ-nn`), `event` (snake_case), `traceId`, `spanId`.
-- **Field allowlist** (anything else is dropped by `@czar/logging`): ids with Czar prefixes (`obj_`, `pln_`, `stp_`, `pay_`, `res_`, `dev_`, `bat_`), `envelopeRef`, `reservationId`, `pullbackId`, `jobKey`, hashes (`Hash32`), addresses, amounts (`Amount6`), counts, durations, enum states, `czarCode`, HTTP status, chain block numbers and tx hashes, origin hosts (never full URLs with query strings), model name and prompt hash, token counts.
-- **Never logged:** objective `goal` text, soul text, merchant bodies, `StepResult.fields[].value`, hook payloads, file paths, emails, IPs beyond a /24 or /48 truncation (SL §11), push bodies (stage 2, D69).
+- **Field allowlist** (anything else is dropped by `@czar/logging`): ids with Czar prefixes (`obj_`, `pln_`, `stp_`, `pay_`, `res_`, `dev_`, `bat_`, and in daemon logs `src_`, `prop_`, `scan_`, `cns_` (D90)), `envelopeRef`, `reservationId`, `pullbackId`, `jobKey`, hashes (`Hash32`), addresses, amounts (`Amount6`), counts, durations, enum states, `czarCode`, HTTP status, chain block numbers and tx hashes, origin hosts (never full URLs with query strings), model name and prompt hash, token counts.
+- **Never logged:** objective `goal` text, soul text, interview answers, proposal text, source excerpts, pastes, agent summaries, source locators (D90), merchant bodies, `StepResult.fields[].value`, hook payloads, file paths, emails, IPs beyond a /24 or /48 truncation (SL §11), push bodies (stage 2, D69).
 - Daemon logs stay on the machine (`~/Library/Logs/Czar/` on macOS, rotated, 14 days) and are shown in the viewer's "What left this machine" panel as counts and hashes (spec 01 §16.3).
 - Metrics (server): Prometheus-style counters and histograms named `czar_<component>_<metric>`; labels limited to enums.
+- Daemon soul-input counters (D90, local): `soul_input_proposals{source_kind,status}`, `soul_input_skipped{reason}`, `soul_input_screen_flags{flag}`, `soul_input_model_calls{outcome}`, `soul_input_mcp_rate_limited`. Enum labels only.
 - Audit log (server, append-only table `audit`): actor key id (`K3`…), action, object ids, amounts, tx hashes, timestamp, outcome (spec 01 §16.3). Retained 1 year.
 
 ## 5. Error-code catalogue
@@ -104,6 +105,8 @@ Every outbound fetch of a URL that came from outside Czar's own code goes throug
 ### 5.1 API `czarCode` (02 §9.4)
 
 `validation`, `idempotency-conflict`, `replay-not-stored` (RV-043), `device-revoked`, `session-expired`, `hash-mismatch`, `plan-expired`, `envelope-not-open`, `approval-required`, `payment-id-conflict`, `plan-not-approved`, `step-not-in-plan`, `step-calls-exhausted`, `step-cap-exhausted`, `input-not-in-template`, `input-redaction-hit`, `resource-not-indexed` (RV-019, RV-021), `fetch-blocked` (RV-022), `network-not-payable` (D83), `rate-limited`, `upstream-unavailable` (retryable), `frozen`, `paused`.
+
+Local viewer API (`local-openapi.yaml`, D90): `bundle-mismatch` (the confirmed proposal list differs from the bundle), `source-changed` (the source digest no longer matches at acceptance; the proposal must be reviewed again), `consent-required` (the scan scope has no current consent).
 
 ### 5.2 `StepError.code` (02 §4.16; used by MCP tools and the paying agent)
 
@@ -129,6 +132,8 @@ Every outbound fetch of a URL that came from outside Czar's own code goes throug
 | `approval-required` | no open envelope covers the step | after approval |
 | `frozen` / `paused` | vault frozen or guardian pause | after unfreeze |
 | `upstream-unavailable` | RPC, Facilitator, Gateway or model down | automatic with backoff |
+| `rate-limited` | `propose_soul_context` over `soulInput.mcpProposalsPerDay` (D90) | next day |
+| `daemon-unavailable` | `propose_soul_context` cannot reach the daemon socket; nothing was sent (D90) | yes |
 
 ### 5.3 Contract errors
 
@@ -146,10 +151,11 @@ Decoded by `@czar/vault-client` to the names in 03 `czar-vault.md` §9.2 and `cz
 | P-04 `soul-compiler` | updates beliefs from redacted excerpts (D31) | mid-size model via the Czar proxy | quality; structured output | `ai-prompts.md` |
 | P-05 `drives-helper` | writes the plain-language goal and capability tags for a detected open loop | small model (local call via the proxy) | low stakes, cheap | `ai-prompts.md` |
 | P-06 `refusal-classifier` | labels `last_assistant_message` text as refusal / not (observer helper) | regex first; small model only when regex is inconclusive | keeps the daemon cheap | `ai-prompts.md` |
+| P-07 `source-belief-extractor` (D90) | turns a redacted, P-01-cleared soul-source excerpt into proposed statements for review | smallest current Claude model via the Czar proxy | extraction only; proposals never act on their own | `ai-prompts.md` |
 
 - Model ids above are the Claude platform ids current on 2026-10-18 (environment-provided; STRONG SIGNAL). Prices were not read this session: **GAP**. Model prices are read in build task T-046 (D68); until then every budget stays in tokens and request counts, and T-046 converts them to money from the platform pricing page.
 - All model calls use structured outputs (JSON schema) and the system prompts in `models/`; the prompt file hash is logged with every call.
-- No model ever receives: keys, raw hook payloads, soul text outside the redacted excerpt, merchant bodies (except P-01 and P-02), or user text outside the goal and the `TaskSpec` (D84).
+- No model ever receives: keys, raw hook payloads, soul text outside the redacted excerpt, merchant bodies (except P-01 and P-02), or user text outside the goal, the `TaskSpec` (D84) and the redacted, consented soul-source excerpt seen by P-01 and P-07 (D90).
 
 ### 6.2 Token budget per user per month (defaults, `models.*`)
 
@@ -161,10 +167,12 @@ Decoded by `@czar/vault-client` to the names in 03 `czar-vault.md` §9.2 and `cz
 | P-04 soul compiler | 30 (nightly) | 24,000 | 0.72 M | `models.soulMonthlyTokens` |
 | P-05 drives helper | 60 | 2,000 | 0.12 M | `models.drivesMonthlyTokens` |
 | P-06 refusal | 20 | 1,000 | 0.02 M | `models.refusalMonthlyTokens` |
-| **Total** | | | **≈ 4.4 M tokens** | `models.userMonthlyTokens` (hard cap 6 M) |
+| P-07 source extractor (D90) | 30 | 6,000 | 0.18 M | `models.sourceExtractorMonthlyTokens` |
+| **Total** | | | **≈ 4.6 M tokens** | `models.userMonthlyTokens` (hard cap 6 M, unchanged) |
 
 - When a cap is hit the component falls back per its "AI usage" section (no model); it never silently continues.
-- Latency budgets: P-01 ≤ 2 s, P-02 ≤ 8 s, P-03 ≤ 20 s, P-04 ≤ 60 s, P-05 ≤ 5 s, P-06 ≤ 2 s (`models.<name>.timeoutMs`).
+- Latency budgets: P-01 ≤ 2 s, P-02 ≤ 8 s, P-03 ≤ 20 s, P-04 ≤ 60 s, P-05 ≤ 5 s, P-06 ≤ 2 s, P-07 ≤ 10 s (`models.<name>.timeoutMs`; P-07 is `models.sourceExtractor.timeoutMs`, D90).
+- P-01 calls on soul-source excerpts draw from the existing P-01 allocation (`models.screenMonthlyTokens`); when it or the P-07 cap is reached, soul-source extraction stops with a visible local message and the interview keeps working (D90).
 
 ## 7. Dependency pinning list
 
@@ -222,3 +230,4 @@ Supply-chain rules (CLAUDE.md): `pnpm audit --audit-level=moderate`, `minimumRel
 | 2026-10-19 | D78, RV-028 | keystore outside the repository; no secret-like config keys or env vars. |
 | 2026-10-19 | RV-019, RV-021, RV-043, D76 | new `czarCode` and `StepError` codes. |
 | 2026-10-20 | D83 | `@czar/x402` buyer refuses networks outside `x402.allowedPaymentNetworks`. |
+| 2026-10-20 | D90 | §4 daemon id prefixes, never-logged soul-input text, local counters; §6.1 P-07; §6.2 P-07 budget row (total ≈ 4.6 M under the unchanged 6 M cap) and timeout. |

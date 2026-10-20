@@ -19,7 +19,7 @@
 | Inputs are validated against the schemas below before any network call. Unknown fields are rejected. | |
 | Untrusted text from merchants never appears raw in a result; results carry `StepResult` objects (spec 02 §4.15) with labelled, JSON-encoded fields. | C3-04, spec 01 §13.1 |
 | Amounts are `Amount6` strings (USDC atomic units). | spec 02 §2.1 |
-| **The HTTP API is canonical (D75).** Each tool's input and output schema is the request and response schema of its route in `api/openapi.yaml`, copied below; if the two ever differ, `openapi.yaml` wins and this file is corrected. The T-009 contract tests run every tool's schema against its route. | D75, RV-020 |
+| **The HTTP API is canonical (D75).** Each tool's input and output schema is the request and response schema of its route in `api/openapi.yaml`, copied below; if the two ever differ, `openapi.yaml` wins and this file is corrected. The T-009 contract tests run every tool's schema against its route. **Exception (D90):** `propose_soul_context` (§2.6) has no server route; its canonical shape is the daemon control-socket method `soul.propose` (CZ-02 §4), and the contract test runs against that method. | D75, RV-020, D90 |
 | **`pay` executes only steps of an approved plan (D75).** It names `(planId, stepIndex)`; it never carries a URL, a payee or a category. Each step has `expectedCalls`; when they are used up the server answers `rejected` with `step-calls-exhausted`, and more calls need a new plan the person approves. A coding agent looping `pay` therefore stops at the plan's call budget and the vault's per-step cap (RV-002, RV-019). | D75, RV-019 |
 | **`pay.input` is template-bound and redacted.** Keys must be in the step's `inputTemplate.inputKeys`; every string value goes through redaction layers 1 and 2 in `czar-mcp` before it leaves the machine, and the server rejects any key outside the template or any value with a redaction hit (`input-not-in-template`, `input-redaction-hit`). | RV-021 |
 | **Results are screened data.** `pay` returns a `StepResult` only after the P-01 screen ran over the whole body; if the screen was unavailable or flagged the body, the result is quarantined and carries no field values (D76, CZ-15). Field values are labelled untrusted merchant output; the person's agent must treat them as data. | D76, C3-04 |
@@ -281,6 +281,34 @@
 
 - **Output schema:** `{ "type": "object", "additionalProperties": false, "required": ["recorded"], "properties": { "recorded": { "type": "boolean" }, "receiptObsId": { "type": "string" } } }`
 
+### 2.6 `propose_soul_context` (D90)
+
+- **Title:** Suggest Work Soul context
+- **Transport:** CZ-09 → daemon control socket, method `soul.propose` (CZ-02 §4). **No server route, no network call, no key.** Rate cap `soulInput.mcpProposalsPerDay` (3); over the cap the tool returns `isError: true` with `StepError.code = rate-limited`.
+- **Description (shown to the host):** Sends a summary of what you learned about the person, or the exact answers of a Czar interview, to the Czar viewer on this computer as suggestions. The person reviews each line before it becomes part of their Work Soul. This tool cannot save a belief, change a setting or spend.
+- **Annotations:** `readOnlyHint: false`, `destructiveHint: false`, `idempotentHint: false`, `openWorldHint: false`. Hints only; the authority boundary is the local viewer's acceptance (CZ-05).
+- **Elicitation:** none.
+- **Authority:** every line becomes a `ProposedBelief` (spec 02 §4.24). A `summary` always yields `imported` proposals, whatever it claims about the person asking. An `interview` yields one bundle of `declared` proposals whose receipts say `origin = agent-host`; they become declared only through `confirmLocalSoulBundle` in the viewer after every answer is displayed in full (D90 item 5). There is no "user asked for this" field, because MCP gives no proof of it.
+- **Daemon handling:** layer 1 before storage; for a `summary`, layer 2, P-01 and P-07 (as for a paste, CZ-02 §5.6) when the person has given egress consent for agent summaries, otherwise the summary waits in the viewer as one unprocessed item; for an `interview`, the deterministic templates of CZ-04 §5.11, no model.
+- **Input schema:**
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "oneOf": [ { "required": ["summary"] }, { "required": ["interview"] } ],
+  "properties": {
+    "summary": { "type": "string", "minLength": 1, "maxLength": 4000, "description": "soulInput.agentSummaryMaxChars. Treated as untrusted imported text." },
+    "suggestedSections": { "type": "array", "maxItems": 8, "uniqueItems": true, "items": { "type": "string", "enum": ["place", "mission", "rituals", "friction", "drives", "taste", "constraints", "spendingPosture"] }, "description": "Hint only; P-07 still decides the section and the viewer shows it." },
+    "interview": { "$ref": "https://czar.dev/schemas/interview-submission.schema.json", "description": "Exact typed answers, one per fixed question id (spec 02 §4.25)." }
+  }
+}
+```
+
+- **Output schema:** `{ "type": "object", "additionalProperties": false, "required": ["resultType", "proposalCount", "reviewLocation"], "properties": { "resultType": { "const": "result" }, "proposalCount": { "type": "integer", "minimum": 0, "maximum": 30 }, "reviewLocation": { "const": "czar-viewer" } } }`. No belief text is returned.
+- **Skill wording (`skills/czar/SKILL.md`):** "Use propose_soul_context to suggest context about the person. It only sends suggestions to the Czar viewer for their review; it cannot save anything or spend. Never tell the person something was saved."
+
 ---
 
 ## 3. Annotation summary
@@ -292,6 +320,7 @@
 | `quote` | true | false | false | true | URL mode when a new envelope would be needed |
 | `pay` | false | true | false | true | URL mode when `approval-required` |
 | `report_outcome` | false | false | true | false | none |
+| `propose_soul_context` | false | false | false | false | none |
 
 Defaults per the schema are `readOnlyHint false`, `destructiveHint true`, `idempotentHint false`, `openWorldHint true` (D3-10); the table sets each explicitly.
 
@@ -405,3 +434,4 @@ Declarative Web Push JSON (iOS/iPadOS 18.4+, D2-06). Every push shows a visible 
 | 2026-10-19 | RV-050 | `payRequestId` (per call, client) vs `paymentId` (per index, server). |
 | 2026-10-19 | D76, D78 | Quarantined results carry no field values; Phase 1 URLs are `http://localhost`. |
 | 2026-10-20 | D83 | `find_service`: payment network only, `includeMarketView`, `marketView` output. |
+| 2026-10-20 | D90 | New §2.6 `propose_soul_context` (local daemon method `soul.propose`, proposals only); D75 rule gains its one exception; §3 row. |

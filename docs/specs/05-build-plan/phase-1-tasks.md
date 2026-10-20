@@ -108,6 +108,12 @@
 | T-106 | Czar test-merchant lab (D83) | M4 | M | T-051, T-105 |
 | T-107 | Market view: unpaid market probes, `getMarketView`, `marketReference` (D83) | M7 | M | T-090, T-042 |
 | T-108 | Czar test provider for ERC-8183 jobs, two instances (H7, N12, D86) | M4 | M | T-105, T-043, T-051, T-054 (brief and upload routes) |
+| T-109 | Soul-input schemas, local routes and MCP contract (D90) | M5 | M | T-006, T-007, T-009 |
+| T-110 | Soul source intake, migration and redaction (D90) | M5 | L | T-060, T-063, T-064, T-109 |
+| T-111 | P-07, belief promotion and the three Phase 1 consumers (D90) | M5 | M | T-065, T-066, T-068, T-069, T-110 |
+| T-112 | Viewer: interview, sources, review, bundle confirm (D90) | M5 | M | T-067, T-111 |
+| T-113 | MCP `propose_soul_context` (D90) | M5 | S | T-072, T-111 |
+| T-114 | User-confirmed open loops (D90) — **blocked on SCR-030 / Flow 7** | M5 | L | T-068, T-069, T-070, T-112, SCR-030 accepted |
 
 ---
 
@@ -1027,6 +1033,7 @@
 - **Acceptance tests:**
   - Contract test passes; only `P-01`, `P-04`, `P-05`, `P-06` are accepted; the request body is never persisted (DB and log scan); per-user token caps (`models.userMonthlyTokens`) enforced.
 - **Review fixes (2026-10-19):** `completeModelCall` stores no response; a repeated key → 409 `replay-not-stored` (RV-043).
+- **D90 (2026-10-20):** the allowlist also accepts `P-07` (`ModelCallRequest.prompt` enum), counted against `models.sourceExtractorMonthlyTokens` and `models.userMonthlyTokens`. If T-065 is already done, T-111 adds it.
 
 ### T-066 Soul compiler CZ-04 with P-04, D58 rules-only fallback, submitSoulVersion, weekly diff
 - **Milestone / group / who:** M5 / M5-d / agent. **Size:** L. **Deps:** T-063, T-064, T-065.
@@ -1058,6 +1065,7 @@
 - **Acceptance tests:**
   - T-009 contract tests pass for all six local routes.
   - A request with a foreign `Origin` → `403`; the "What left this machine" panel shows counts and hashes only.
+- **D90 (2026-10-20):** the soul-input routes and screens are T-112; `getLocalBeliefReceipts` returns the typed `ReceiptSummary` union from T-109 (observed receipts only until T-110 lands).
 
 ### T-068 Drives engine CZ-06: three detectors, P-05, P-06, ROI filter (D56, D57)
 - **Milestone / group / who:** M5 / M5-d / agent. **Size:** L. **Deps:** T-063, T-065.
@@ -1152,6 +1160,89 @@
 - **D85 (2026-10-20):** in-place fill (CZ-11 §5.2b): clash check, atomic write, `fill_undo`, `czar undo-fill`, `ackResult.fill`. Acceptance: CZ-11 §14 in-place fill tests.
 - **N11 (2026-10-20):** create `.czar/.gitignore` (`*`) on the first write in a project.
 - **H6, N2 (2026-10-20):** CZ-11 §5.2c: unflagged artifacts to the project with a header, flagged ones held under `writeback.heldDir`, viewer release or delete, `held_artifacts` table, counts in `ackResult.artifacts`.
+
+### T-109 Soul-input schemas, local routes and MCP contract (D90)
+- **Milestone / group / who:** M5 / M5-b / agent. **Size:** M. **Deps:** T-006, T-007, T-009.
+- **Spec refs:** `S02/data-and-protocol.md` §4.2 (Belief 1.2), §4.23–§4.26, §5.2 interim soul-hash note, §7.1; `S02/schemas/{soul,source-receipt,proposed-belief,interview-submission,source-scan,common}.schema.json`; `S02/api/local-openapi.yaml` 1.1; `S02/mcp/czar-mcp-tools.md` §2.6; D90 items 1–3, 12.
+- **Outputs:** `packages/schemas` (new types, soul 1.2 with the 1.1 migration function); `packages/hashing` test vectors for `soulVersionHash` with mixed `evt_`/`src_` receipts under `czar-hash-v1`; `packages/api-contract` local routes and the `soul.propose` socket contract.
+- **Inputs:** `packages/schemas` (T-006), `packages/hashing` (T-007), contract harness (T-009).
+- **Steps:**
+  - Add the schemas and examples; generate types.
+  - Add the 1.1 → 1.2 migration (`observed`, `observation-score`, `userConfirmed = false`).
+  - Add the local routes and the `soul.propose` contract to the harness.
+  - Add the mixed-receipt v1 hash vectors.
+- **Acceptance tests:**
+  - `python3 -I check-schemas.py` and `validate-schemas.mjs` pass; the four negative soul cases in `schemas/README.md` are rejected.
+  - Every stored 1.1 example hashes byte-identically before and after migration.
+  - A soul with mixed receipts hashes to the vector value; receipts sort as plain strings.
+  - T-009 contract tests cover every new local route and `propose_soul_context` ↔ `soul.propose`.
+- **Not in this task:** `czar-soul-v2`, `czar-objective-v2`, `demandEvidence`, the leaf v2/v3 schemas and `confirmLocalOpenLoop` (SCR-030, T-114).
+
+### T-110 Soul source intake, migration and redaction (D90)
+- **Milestone / group / who:** M5 / M5-c / agent. **Size:** L. **Deps:** T-060, T-063, T-064, T-109.
+- **Spec refs:** `S04/local-observers-and-daemon.md` CZ-02 §4 (`soul.propose`), §5.3 (new tables, migration), §5.6, §8, §9, §14; CZ-26 §2, §6, §14; `S02/data-and-protocol.md` §4.23, §4.26, §9.7; D90 item 8.
+- **Outputs:** `apps/daemon/src/soul-input/` (roots, consent, scanner, git reader, paste, socket method), SQLite migration.
+- **Inputs:** daemon (T-060), `file_paths` (T-063), sidecar (T-064), schemas (T-109).
+- **Steps:**
+  - Write the failing intake tests first (secret, path and egress assertions).
+  - Run the transactional migration.
+  - Build the bounded scanner, git reader, paste handler and `soul.propose`, with layer 1 before storage and the P-01/P-07 hand-off behind egress consent.
+- **Acceptance tests:**
+  - Empty root, symlink escape, untracked and ignored git files, an explicitly selected ignored agent file, `.env` and key files (never opened, file-access trace), oversized file, non-UTF-8 file, git missing, file deleted mid-scan, injected text, sidecar down: each gives the CZ-02 §5.6 outcome with counts.
+  - No raw secret or path appears in any proxy request, log line or outbox row (byte scan).
+  - Old `soul_versions` hashes are byte-identical after migration.
+  - Seeded Spanish, Hindi and mixed-language text makes no model call and no proposal.
+
+### T-111 P-07, belief promotion and the three Phase 1 consumers (D90)
+- **Milestone / group / who:** M5 / M5-d / agent. **Size:** M. **Deps:** T-065, T-066, T-068, T-069, T-110.
+- **Spec refs:** `S04/ai-prompts.md` P-01 (`soul-source`), P-07; `S04/local-soul-and-drives.md` CZ-04 §5.2, §5.6, §5.9, §5.11, §14; CZ-06 §5.5, §5.6 step 5; CZ-07 §5 (`constraints`); `S04/cross-cutting.md` §6; D90 items 3, 6, 9.
+- **Outputs:** `models/P-07.md`, `models/evals/P-07/`; `apps/daemon/src/soul/promotion.ts`; interview templates; consumer wiring in drives and publisher.
+- **Inputs:** proxy (T-065), compiler (T-066), drives (T-068), publisher (T-069), intake (T-110).
+- **Steps:**
+  - Add P-07 and its eval suite; add `P-07` to the proxy allowlist if T-065 is done.
+  - Implement interview mapping and atomic promotion (§5.11).
+  - Wire typed constraints into `ObjectiveSubmission.constraints`, the matching mission deadline and the interview hourly value.
+- **Acceptance tests:**
+  - P-07 evals 1–8 pass, including every injection case (no active belief, no objective or payment, no secret in proxy bytes).
+  - An unknown receipt, a bad span or a changed `sourceDigest` blocks acceptance; one acceptance writes exactly one version; P-04 `fade` on a confirmed belief is discarded; observed confidence and tombstones are unchanged.
+  - A zero-event fixture plus a full interview yields one active, source-labelled belief per answered question, covering all five interview sections, before any nightly compile, with the model proxy off.
+  - Typed constraints appear in the next `ObjectiveSubmission`; a matching mission deadline sets `deadline` (end of that day in the person's time zone, CZ-06 §5.6), an unrelated one does not; changing the hourly value changes `hourlyBand` and the ROI result.
+
+### T-112 Viewer: interview, sources, review, bundle confirm (D90)
+- **Milestone / group / who:** M5 / M5-e / agent. **Size:** M. **Deps:** T-067, T-111.
+- **Spec refs:** `S04/local-soul-and-drives.md` CZ-05 §2, §4, §6, §8, §12, §14; `S02/api/local-openapi.yaml` 1.1; `S04/app-and-notifications.md` §12 (`getSoulPointer` message); D90 items 2–6.
+- **Outputs:** `apps/daemon/src/viewer/` soul-input pages and routes; the server's `SoulPointer.message` rule.
+- **Inputs:** viewer (T-067), promotion (T-111).
+- **Steps:**
+  - Build the interview, source selection with consent, egress preview, proposal review and bundle confirmation.
+  - Use the exact CZ-05 §12 wording.
+- **Acceptance tests:**
+  - T-009 contract tests pass for every new route; foreign `Origin` → `403`.
+  - Proposals never appear in `getLocalSoul`; "Accept all visible" skips flagged and unseen lines and undo restores the previous version; a bundle confirm with a different proposal list → `409`; revoked consent blocks the next scan.
+  - The exact-answer agent bundle can become `declared` after full display; a summary cannot.
+  - Keyboard-only flow works; display-only sections show the saved-context line and promise no behaviour.
+
+### T-113 MCP `propose_soul_context` (D90)
+- **Milestone / group / who:** M5 / M5-d / agent. **Size:** S. **Deps:** T-072, T-111.
+- **Spec refs:** `S02/mcp/czar-mcp-tools.md` §2.6; `S04/local-agent-surfaces.md` CZ-09 §4, §6, §8, §9, §14; D90 items 5, 8.
+- **Outputs:** the tool in `apps/mcp/`; skill wording in `plugins/claude-code/skills/czar/SKILL.md`.
+- **Inputs:** MCP server (T-072), `soul.propose` (T-110, T-111).
+- **Steps:**
+  - Add the tool with the §2.6 schemas and annotations.
+  - Add the skill wording.
+- **Acceptance tests:**
+  - A summary creates proposals only and makes no server request (network trace); a summary claiming the person asked for it creates the same `imported` proposals.
+  - The fourth call in a day is refused; the result carries no belief text; with the daemon down nothing is sent anywhere.
+
+### T-114 User-confirmed open loops (D90) — blocked on SCR-030 / Flow 7
+- **Milestone / group / who:** M5 / M5-e / agent. **Size:** L. **Deps:** T-068, T-069, T-070, T-112, and SCR-030 accepted in the Flow 7 review.
+- **Status:** **do not start.** The wire field, hash rules, leaf versions, confirm route and server enforcement are not in the specs yet; building them now would invent them (CLAUDE.md). This task is rewritten from SCR-030's decision.
+- **Spec refs (current):** `S04/local-soul-and-drives.md` CZ-06 §5.1b, CZ-08 §2 exception; `S06/change-requests/SCR-030-confirmed-demand-and-soul-v2-evidence.md`; D90 items 10, 11, 13.
+- **Acceptance tests (expected, final after SCR-030):**
+  - A scan preview alone cannot publish; **Do this** on a current placeholder yields an objective with `observationHashes = []`, two typed commitments and the D84 subjects.
+  - Every confirmed objective skips the shadow default, but without the owner's UserOp no envelope opens and earned allowance cannot fund it.
+  - Passive two-read / 24-hour and shadow behaviour is unchanged; a changed file needs reconfirmation; confirmed objectives count toward the drives caps.
+  - The v3 demand leaf verifies without claiming observation; G0-18 names reach the merchant and the write-back.
 
 ---
 
@@ -1458,14 +1549,14 @@
 | CZ | Component | Tasks |
 |---|---|---|
 | CZ-01 | Observers (Claude Code) | T-062, T-063 |
-| CZ-02 | Daemon | T-060, T-061 |
+| CZ-02 | Daemon | T-060, T-061, T-110 |
 | CZ-03 | Shared memory | T-063 |
-| CZ-04 | Soul compiler | T-065, T-066 |
-| CZ-05 | Soul store and viewer | T-067 |
-| CZ-06 | Drives engine | T-068 |
-| CZ-07 | Objective publisher | T-069 |
-| CZ-08 | Shadow mode | T-070 |
-| CZ-09 | MCP server | T-071, T-072, T-093 |
+| CZ-04 | Soul compiler | T-065, T-066, T-109, T-111 |
+| CZ-05 | Soul store and viewer | T-067, T-112 |
+| CZ-06 | Drives engine | T-068, T-111, T-114 (blocked, SCR-030) |
+| CZ-07 | Objective publisher | T-069, T-111 |
+| CZ-08 | Shadow mode | T-070, T-114 (blocked, SCR-030) |
+| CZ-09 | MCP server | T-071, T-072, T-093, T-113 |
 | CZ-11 | Write-back adapter | T-073 |
 | CZ-12 | Server API | T-041, T-071, T-081 |
 | CZ-13 | Planner | T-045, T-092 |
@@ -1480,7 +1571,7 @@
 | CZ-23 | Notifications | moved to stage 2 (D69): T-083 |
 | CZ-24 | Earned autonomy | T-019, T-094 |
 | CZ-25 | ROI ledger | T-095 |
-| CZ-26 | Redaction library | T-008, T-064 |
+| CZ-26 | Redaction library | T-008, T-064, T-110 |
 | CZ-27 | Key management | T-035, T-036, T-037 |
 | contracts | `CzarVault`, factory, OEL, adapter | T-010 to T-027 |
 | shared | config, logging, schemas, hashing, API contract, x402, vault-client | T-004 to T-009, T-026, T-042 |
@@ -1505,7 +1596,8 @@
 - **T-055 depends on T-056, which is in group M4-a while T-055 is M4-c.** That order is consistent; no change.
 - **T-070 depends on T-045 (planner) for `shadowQuote`;** the dependency is in the skeleton.
 - **T-102 is the only task with a joint owner;** Stage 0 must be performed by Zaryab in desktop Safari, the rest by the agent after approval.
-- **T-083 is moved to stage 2 (D69);** Phase 1 counts 87 tasks.
+- **T-083 is moved to stage 2 (D69);** Phase 1 counted 87 tasks before D90.
+- **D90 adds T-109 to T-114.** T-109 to T-113 can start now. T-114 is blocked until SCR-030 is decided in the Flow 7 review; M5 can exit without it, but then the product must not claim a day-one action from a scan (D90 item 10).
 
 ## Change log
 
@@ -1532,3 +1624,4 @@
 | 2026-10-20 | 07 PRD 09 pilot | T-018 acceptance command: `--match-path test/JobTest.t.sol` (the old `--match-contract JobTest` matched no test and passed silently). |
 | 2026-10-20 | 07 PRD 12 | T-021 outputs name `InvariantFactory.t.sol`; T-024 defines the `gas-table.json` shape. T-022 fork tests get their own PRD (the RPC is needed to verify them). |
 | 2026-10-20 | 07 PRD 13 | T-025 pins Slither 0.11.3; T-105 keys-file shape (`address`, `ref`). |
+| 2026-10-20 | D90 | New M5 tasks T-109 to T-114 (T-114 blocked on SCR-030); notes on T-065 (P-07 allowlist) and T-067; coverage rows. |

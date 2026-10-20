@@ -28,7 +28,7 @@
 | G0-15 | ~~Declarative Web Push to the installed app~~ — **moved to stage 2 (D69)**; see `stage-2-backlog.md` §2 (M-4) | — | — | not part of Gate 0 | — |
 | G0-16 | AR-8: the chosen model provider's published data-retention and training terms (RV-062) | agent (read-only: public terms pages), then Zaryab approves opening the K18 account | none | the terms are recorded with date and URL; the D31 disclosure wording in CZ-04 and CZ-22 matches them; Zaryab's written approval of the account is recorded before T-046 | spec 04 D31 disclosure wording via SCR |
 | G0-17 | Live re-checks the review could not run (network blocked): B3-10 (Cursor runs Claude Code hooks from `~/.claude/settings.json`) and A9-06 (`eth_getLogs` range cap on `rpc.testnet.arc.io`) | agent (read-only: cursor.com docs, one Cursor run if installed; read-only RPC) | none | each fact recorded as confirmed or changed, with date and source; **B3-10 must pass before T-062 starts** | spec 02 §8.1, §8.4 and spec 04 `local-observers-and-daemon.md` (B3-10); CZ-19 paging (A9-06) via SCR |
-| G0-18 | Core-value walk-through (D84): trace the subject of each Phase 1 detector from its source to the merchant call and back, using spec 01 §11.0's lineage table, and confirm no rule drops it | agent (read-only: specs), then Zaryab | none | every row of §11.0 holds in the current specs; the scenario's 7.2a outcome check exists; repeated on every spec change that touches CZ-06, CZ-13, CZ-15, P-03, P-05, spec 02 §4.3–§4.6 or a privacy rule | the spec that broke the lineage, via SCR |
+| G0-18 | Core-value walk-through (D84): trace the subject of each Phase 1 detector from its source to the merchant call and back, using spec 01 §11.0's lineage table, and confirm no rule drops it | agent (read-only: specs), then Zaryab | none | every row of §11.0 holds in the current specs; the scenario's 7.2a outcome check exists; **(D90)** every soul-input class has a written trace to its Phase 1 consumer and none reaches a payee, amount, limit or objective by itself; repeated on every spec change that touches CZ-02 §5.6, CZ-04 §5.11, CZ-06, CZ-07 `constraints`, CZ-13, CZ-15, P-03, P-05, P-07, spec 02 §4.3–§4.6, §4.23–§4.26 or a privacy rule | the spec that broke the lineage, via SCR |
 
 ## Procedures
 
@@ -147,7 +147,8 @@
 ### G0-18 Core-value walk-through (D84)
 - **Why:** the G0-01 review checked money safety and consistency but not whether the flagship task could succeed; three privacy rules together removed the task's subject (D84).
 - **Steps:** (1) for each detector in spec 01 §11.0, follow the subject through CZ-06 §5.1a, spec 02 §4.3.1, CZ-13 step 4a, CZ-15 §5.2 step 4 and the CZ-11 assembler; (2) list every rule on that path that filters, redacts or drops text; (3) confirm none removes an approved subject.
-- **Pass:** written record per detector. Re-run on every spec change listed in the summary row, separately from the security review.
+- **D90 extension (soul inputs):** (4) for each source class (`declared` interview, `local-file` agent file and git, `imported` paste and agent summary), follow it from intake (CZ-02 §5.6) through redaction, P-01, P-07, the proposal queue and acceptance (CZ-04 §5.11) to its only Phase 1 consumers: `ObjectiveSubmission.constraints` (typed answers), `Objective.deadline` (matching project root) and `hourlyBand` / ROI; (5) confirm that no source creates an objective, increments a detector, or reaches a payee, an amount, a vault setting or the planner except through those three fields; (6) confirm the paid-task subject lineage of §11.0 is unchanged: the subject still comes from `TaskSpec` built by code from the current file. When SCR-030 lands, add the user-confirmed route: the subject still comes from the current file at the moment of **Do this**, and no rule on the path drops it.
+- **Pass:** written record per detector and per soul-input class. Re-run on every spec change listed in the summary row, separately from the security review.
 
 ### G0-14 Bundlers and sponsorship
 - `eth_supportedEntryPoints` on Circle's Modular Wallets endpoint and one secondary bundler (Pimlico, Alchemy or ZeroDev support Arc testnet, A6-15 to A6-17).
@@ -171,3 +172,4 @@
 | 2026-10-19 | RV-062 | G0-16 checks the model provider's retention terms and records approval for the K18 account. |
 | 2026-10-19 | review flags | G0-17 re-checks B3-10 (gates T-062) and A9-06 live. |
 | 2026-10-20 | D84 | New G0-18 core-value walk-through, repeated on every spec change on the subject's path. |
+| 2026-10-20 | D90 | G0-18 extended with the soul-input trace (steps 4–6) and the new trigger sections. |

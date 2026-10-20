@@ -43,7 +43,7 @@
 
 ### 1.1 The Work Soul file (structured, versioned, with receipts)
 
-- **What it is:** the shared memory compiled into one living document per person, `SOUL.md` plus a machine-readable `soul.json`. The person never writes it; Czar does.
+- **What it is:** the shared memory compiled into one living document per person, `SOUL.md` plus a machine-readable `soul.json`. The person never has to write it; Czar does. On day one the person may add to it (D90): an optional five-minute interview, or suggested lines from files, pastes or an agent summary they choose, each accepted line by line and labelled with its source.
 - **Sections, mapped from Cuy's soul elements to work:**
   - **Place** → locale, language, time zone, currency, and the rules that apply where they work
   - **Mission** → active projects, each with its goal and deadline
@@ -58,6 +58,7 @@
   - each has a confidence score and a "last seen" date
   - beliefs fade if they aren't seen again
 - **The person can read, edit or delete any line.** That builds consent, and it fixes wrong guesses.
+- **Phase 1 use of confirmed answers (D90):** constraints, a mission deadline for the same project, and the hourly value. Taste, place and spending posture are saved context until a later design uses them.
 - **Storage:** local-first and encrypted. Only a hash of each version is committed on Arc, so the soul can be proven without being revealed.
 - **How it's built:**
   1. Each observer (Claude Code, Codex, Cursor, Chrome) emits normalized `ActivityEvent` records.
@@ -109,6 +110,7 @@
 ### 1.5 Shadow mode: the "what you missed" report
 
 - **What it is:** for the first week, Czar only watches. It prices what it *would* have bought, then shows: "You spent 3h 10m on competitor research. Czar could have done it for $0.62 using [service]."
+- **Exception (D90):** when the person clicks **Do this** on an open task Czar found in a current file, that one task may go ahead during the first week. Do this is not spending approval: the person still approves the plan, and earned allowance never pays for it. The rest of the first week stays in shadow mode. (Built with the Flow 7 evidence review, SCR-030.)
 - **Why it matters:**
   - Proof of value comes before any request for money, which lifts conversion.
   - It's also the clearest way to show a new user Czar's value: replay a real day, then show the bill Czar would have run.
@@ -202,7 +204,8 @@
 
 ## 3. Phase 1 scope
 
-- **Soul and demand:** 1.1 (soul v0 from the Claude Code observer only), 1.2 (three detectors), 1.5 (shadow report as onboarding)
+- **Soul and demand:** 1.1 (soul v0 from the Claude Code observer, plus the optional interview and reviewed suggestions from selected agent files, tracked git work, pastes and agent summaries, D90), 1.2 (three detectors), 1.5 (shadow report as onboarding; per-task Do this exception after SCR-030)
+- **Not in Phase 1 (D90):** chat-archive import (SCR-031), a native folder picker, manual task entry (P2-16)
 - **Contracts core:** 2.1 envelopes with 1.4 earned autonomy in the vault, 2.5 one recipe with an on-chain split
 - **Proof:** 2.13 evidence chain anchored on Arc testnet
 - **Last mile:** 2.3 one write-back surface (e.g. a PR comment or doc insert)

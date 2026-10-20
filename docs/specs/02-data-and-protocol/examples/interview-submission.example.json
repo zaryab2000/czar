@@ -1,0 +1,29 @@
+{
+  "schemaVersion": "1.0",
+  "idempotencyKey": "3f2c7a8e-1b4d-4c9e-8a6f-0d2b5e7c9a11",
+  "place": {
+    "locale": "en-IN",
+    "timeZone": "Asia/Kolkata"
+  },
+  "mission": {
+    "projectRootId": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+    "projectName": "Billdesk pricing page",
+    "goal": "Refresh the pricing page with current competitor prices",
+    "deadline": "2026-10-30"
+  },
+  "constraints": {
+    "maxTotalPerObjective": "2000000",
+    "noNewPayees": false,
+    "offLimitsTools": [
+      "Example Scraper Pro"
+    ],
+    "privacyRule": "Never send customer names to merchants"
+  },
+  "taste": {
+    "preferredFormat": "Markdown tables"
+  },
+  "spendingPosture": {
+    "riskPreference": "careful"
+  },
+  "hourlyValue": "60000000"
+}

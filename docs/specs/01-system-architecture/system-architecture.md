@@ -176,8 +176,8 @@ Each entry: purpose, where it runs, inputs and outputs, state, dependencies, pha
 #### CZ-02 Local daemon (`czard`)
 - **Purpose:** the one local process: event intake, redaction, encrypted shared memory, soul compiler scheduling, drives engine, objective publishing, MCP server host, write-back adapter.
 - **Runs:** user machine as a login agent: macOS `SMAppService` or a `launchctl bootstrap` plist, Linux user unit with linger, Windows Task Scheduler (B6-02 to B6-09).
-- **Inputs:** observer events; server messages (objective status, results); user edits of the soul.
-- **Outputs:** redacted objectives to the server; results into the workflow.
+- **Inputs:** observer events; server messages (objective status, results); user edits of the soul; soul sources the person selects (agent files, tracked git work, pastes, agent summaries through CZ-09) (D90).
+- **Outputs:** redacted objectives to the server; results into the workflow; proposed beliefs for local review (D90).
 - **State:** encrypted SQLite (`better-sqlite3-multiple-ciphers`, B6-12) with the DB key in the OS keychain through `@napi-rs/keyring` pinned to Secret Service on Linux (B6-17).
 - **Dependencies:** OS keychain, server API, LLM access for the soul compiler (see open decision OD-3).
 - **Phase:** 1.
@@ -198,19 +198,21 @@ Each entry: purpose, where it runs, inputs and outputs, state, dependencies, pha
 #### CZ-04 Soul compiler
 - **Purpose:** turn memory into the Work Soul: `SOUL.md` and `soul.json` with receipts, confidence and last-seen dates (product §6.3).
 - **Runs:** `czard`, on a schedule (nightly) and on demand.
-- **Inputs:** shared memory events; previous soul version.
+- **Inputs:** shared memory events; previous soul version; interview answers and accepted proposals from CZ-05 (D90).
 - **Outputs:** new soul version; `soulVersionHash = keccak256(canonical soul.json)` sent to the server for anchoring; weekly diff for the user.
 - **State:** soul versions, local.
 - **Dependencies:** an LLM. Open decision OD-3 decides local model vs hosted model over redacted excerpts.
 - **Phase:** 1 (v0, Claude Code only).
 - **Failure:** compile fails → previous soul stands; beliefs fade on their own schedule.
-- **Rests on:** D25 (soul stays local), product §6.3, §10.
+- **Source classes (D90):** every belief records whether it was `observed`, `declared`, `local-file` or `imported`. Non-observed beliefs exist only after the person confirms them in CZ-05 and carry `confidence = 1` as the person's attestation.
+- **Rests on:** D25 (soul stays local), D90, product §6.3, §10.
 
 #### CZ-05 Work Soul store and viewer
 - **Purpose:** hold the soul; let the person read, edit or delete any line.
 - **Runs:** store in `czard`; viewer served by `czard` on `127.0.0.1` to the desktop browser in Phase 1. The web app shows objectives, not the soul, until a sync design exists (open decision OD-6, D34).
+- **Soul inputs (D90):** runs the optional interview, source selection and consent, the egress preview and the proposal review. Its authenticated acceptance is the only way a proposal becomes a belief.
 - **Phase:** 1 (desktop viewer), later (phone, stage 2).
-- **Rests on:** D25, D3-08 (local HTTP must validate `Origin` and bind to loopback).
+- **Rests on:** D25, D90, D3-08 (local HTTP must validate `Origin` and bind to loopback).
 
 #### CZ-06 Drives engine
 - **Purpose:** detect unfinished business and produce candidate objectives with goal, evidence links, deadline, minutes saved and capabilities needed; apply the value-of-time filter (product §6.4).
@@ -219,12 +221,13 @@ Each entry: purpose, where it runs, inputs and outputs, state, dependencies, pha
 - **Outputs:** candidate objectives (local), each with `observationHashes[]`.
 - **State:** candidate list; hourly-value setting.
 - **Phase:** 1 with three detectors: `TODO`/`FIXME`/placeholders, repeated errors, agent refusals.
+- **User-confirmed eligibility (D90, built with SCR-030):** one detector-agnostic branch lets a person's **Do this** on a current-file placeholder make an objective without a second observation; it never fakes an observation and still needs owner approval.
 - **Failure:** detector noise → the 5× ROI filter and user dismissals.
 
 #### CZ-07 Objective publisher
 - **Purpose:** the only path from laptop to server. Runs redaction layer 2 on the objective text, computes `objectiveHash`, attaches `soulVersionHash` and observation hashes, and sends.
 - **Runs:** `czard`.
-- **Outputs:** `ObjectiveSubmission` (defined in 02): goal text (redacted), capabilities, deadline, minutes-saved estimate, hourly value band, hashes.
+- **Outputs:** `ObjectiveSubmission` (defined in 02): goal text (redacted), capabilities, deadline, minutes-saved estimate, hourly value band, hashes, and `constraints` from typed, confirmed interview answers only (D90).
 - **State:** outbox with retries.
 - **Phase:** 1.
 - **Failure:** server down → objectives wait; shadow mode keeps working locally.
@@ -234,10 +237,11 @@ Each entry: purpose, where it runs, inputs and outputs, state, dependencies, pha
 - **Purpose:** first week: price what Czar would have bought and show the "what you missed" report (product §6.7).
 - **Runs:** `czard`, with price quotes from the server's planner in dry-run mode (no envelope, no payment).
 - **Phase:** 1.
+- **Exception (D90, built with SCR-030):** an objective confirmed with **Do this** skips the first-week default for itself only; owner approval is still required and earned allowance never funds it.
 - **Failure:** no quotes → report shows time only.
 
 #### CZ-09 Czar MCP server (local)
-- **Purpose:** expose `get_objectives`, `find_service`, `quote`, `pay`, `report_outcome` to the person's agents (product §6.5).
+- **Purpose:** expose `get_objectives`, `find_service`, `quote`, `pay`, `report_outcome` to the person's agents (product §6.5), plus `propose_soul_context`, which only sends suggestions to the local daemon for review (D90).
 - **Runs:** stdio child of the agent, started by the plugin's `.mcp.json`; credentials (a device token for the server) from the environment, no OAuth (D3-07, D3-12).
 - **Inputs:** tool calls from Claude Code (and later Codex, Cursor).
 - **Outputs:** `pay` never pays locally. It forwards a pay request to the server's paying agent, which applies envelope and earned-limit rules; if approval is needed, the tool returns a URL-mode elicitation to the Czar approval page (D3-11).
@@ -947,6 +951,7 @@ sequenceDiagram
 | Transcripts (`~/.claude/projects/...jsonl`) | Claude Code | Claude Code's own files | no (B1-30) | never read wholesale | n/a | Claude Code's `cleanupPeriodDays` |
 | `user_email` and other identity fields in hook payloads (Cursor) | observers | dropped at intake | n/a | never | nobody | 0 |
 | Soul (`SOUL.md`, `soul.json`, versions) | CZ-04 | local store | yes | never; only `soulVersionHash` | user | until deleted by user |
+| Soul inputs: interview answers, proposals, source receipts and locators, scans, consents (D90) | CZ-02, CZ-05 | local store | yes | never; a redacted source excerpt goes to the model proxy only after consent (D31) | user | pending 30 days; rejected text removed at once; pastes deleted after processing; accepted receipts live with their belief |
 | Observation hashes | CZ-06 | local; hash list sent with objectives | n/a | hashes only | server, chain (inside batches) | server: life of objective + 1 year audit; chain: forever |
 | Objective (goal text, `TaskSpec` subjects and fields (D84), capabilities, deadline, minutes saved, hourly-value band) | CZ-07 after layers 1–2 (layer 2 keeps `TaskSpec` values) | server Postgres | at rest (provider disk encryption) | yes | Czar server, planner LLM, user | 1 year, then goal text deleted, hashes kept |
 | Plan, payees, prices, step results metadata | CZ-13, CZ-15 | server | at rest | n/a | Czar, user | 1 year |
@@ -1026,6 +1031,7 @@ Scenario: Priya, a product manager, works in Claude Code on a pricing doc for tw
 | **Pocket key leaks (K4)** | Spend that pocket on any Gateway seller; sign a burn intent that sends the whole balance to any address; `removeDelegate` to block pullback | That pocket's balance plus gas dust | Per-pocket keys; drain at end; vault pulls back immediately on alert; cap 25%. On-chain, a revoked delegate's intents still pass, even ones signed after revocation; only Circle's API refuses them (A2-05, RV-063). |
 | **Malicious merchant or agent** | Take payment and deliver nothing or garbage; serve injection text; settle `upfront` flows early; for jobs, submit junk | One step per bad call (x402), bounded by `maxStepAmount`; zero for ERC-8183 (reject → refund) | Probe before paying (p1-D7); step caps; stop-on-fail; evidence and rank; refuse `upfront` from untrusted merchants; evaluator rejects jobs. |
 | **Poisoned catalog or seller text** (descriptions, bazaar schemas, `Agent Instructions` pages, FL-1, FL-2) | Steer the planner toward itself, embed instructions in `description`, oversize schemas | Same bound as "model hijacked" | Text affects retrieval only, never score (SL-C3); schemas validated and sanitized, no external `$ref` (A3-36); reader/planner split (§13.1); small-model screen (C3-04). |
+| **Poisoned soul source** (D90: a selected `CLAUDE.md`/`AGENTS.md`, commit subject, paste or agent summary tells a model to pay, raise a limit or auto-accept; an agent claims the person asked to save a belief) | Plant a plausible false belief that the person accepts; flood review | No spend: no soul source can reach a payee, an amount, a setting or an objective. Confirmed objectives (SCR-030) still need owner approval | Person-selected sources only; layer 1 before storage, layer 2, P-01, strict P-07 schema, span check and deny-list; proposals only, accepted one by one in the local viewer with source and excerpt shown; no MCP field grants authority; rate caps; delete and tombstone. Residual: the person may accept a convincing false line. |
 | **Malicious observer input** (memory poisoning, OWASP ASI06, C3-02) | A tool output or page plants fake "TODOs" or fake deadlines that become objectives; since D84, text an agent writes into a project file can also choose what Czar looks up | Spend within whatever the user approves, or within auto-allowance for the category | Every belief carries provenance and receipts; detectors weight repeated, multi-source signals; objectives show their evidence; the user edits or deletes any line; auto-approved objectives need positive history in that category; injection screen on observed text before it becomes a drive. |
 | **Circle or a dependency contract upgraded against Czar** (USDC, GatewayWallet, ERC-8183, ERC-8004; A1-02, A2-23, A4-08, A5-12) | Change signature checking, fees, delegate rules, or take funds in Gateway balances | Pocket balances (Gateway); job budgets (ERC-8183); vault-direct payments only if USDC's ERC-1271 check changed | Pin implementations and alert on `Upgraded` (FD-18); halt the affected path; keep pockets small; migrate jobs to `CzarJobEscrow`. The vault's own USDC balance is native USDC, so a USDC upgrade is a chain-level risk shared by everyone on Arc. |
 | **The claim server lies** (D17) | Approve a false builder claim | Unclaimed tips for that repo | Timelocked, public releases; admin cancel; small escrow by design (D24); GitHub admin check plus `FUNDING.json` fallback leaves an audit trail. |
@@ -1457,3 +1463,4 @@ No new agent-directed text was encountered in this session beyond what the groun
 - 2026-10-20 · D84: new §11.0 core-value rule and subject lineage table; §11.2 layer 3; §12 walkthrough step 4; §13 ASI06 row.
 - 2026-10-20 · D88: passkey path reaches actions 1–17 (H2 added `CANCEL_JOB`).
 - 2026-10-20 · D88 (review): §7.1 role rows match spec 03 `czar-vault.md` §2 and §15.1 (agent-only spending calls; `settle` and `finalize` open to anyone).
+- 2026-10-20 · D90: CZ-02, CZ-04, CZ-05, CZ-06, CZ-07, CZ-08, CZ-09 entries gain soul inputs, source classes and the user-confirmed route (held parts marked SCR-030); §11.1 soul-input row; §13 poisoned-soul-source row. §11.0 lineage is unchanged: the confirmed route keeps `TaskSpec` from the current file (re-checked by G0-18).

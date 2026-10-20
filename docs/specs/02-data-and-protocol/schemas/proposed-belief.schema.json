@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://czar.dev/schemas/proposed-belief.schema.json",
+  "title": "ProposedBelief",
+  "description": "A suggested belief waiting for the person's decision in the local viewer (spec 02 §4.24, D90). Never part of soul.json, drives, model soul excerpts or exports.",
+  "type": "object",
+  "x-privacyClass": "local-only",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "1.0",
+      "description": "Schema version, major.minor; this file is 1.0.",
+      "x-privacyClass": "local-only"
+    },
+    "proposalId": {
+      "$ref": "common.schema.json#/$defs/ProposalId",
+      "description": "Proposal id.",
+      "x-privacyClass": "local-only"
+    },
+    "section": {
+      "$ref": "common.schema.json#/$defs/SoulSection",
+      "description": "Target section.",
+      "x-privacyClass": "local-only"
+    },
+    "key": {
+      "type": "string",
+      "maxLength": 256,
+      "description": "Normalized dedupe key; a tombstoned key blocks the proposal.",
+      "x-privacyClass": "local-only"
+    },
+    "text": {
+      "type": "string",
+      "maxLength": 500,
+      "description": "Suggested belief text; markers allowed.",
+      "x-privacyClass": "local-only"
+    },
+    "sourceClass": {
+      "type": "string",
+      "enum": [
+        "declared",
+        "local-file",
+        "imported"
+      ],
+      "description": "Class the belief would have if accepted.",
+      "x-privacyClass": "local-only"
+    },
+    "sourceReceiptIds": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 10,
+      "items": {
+        "$ref": "common.schema.json#/$defs/SourceReceiptId",
+        "description": "Receipt.",
+        "x-privacyClass": "local-only"
+      },
+      "description": "Receipts behind the proposal.",
+      "x-privacyClass": "local-only"
+    },
+    "bundleId": {
+      "$ref": "common.schema.json#/$defs/ProposalId",
+      "description": "Set when the proposal belongs to one agent-mediated interview bundle accepted with a single confirmation (D90 item 5).",
+      "x-privacyClass": "local-only"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "accepted",
+        "rejected",
+        "expired"
+      ],
+      "description": "Lifecycle.",
+      "x-privacyClass": "local-only"
+    },
+    "createdAt": {
+      "$ref": "common.schema.json#/$defs/Timestamp",
+      "description": "When the proposal was made.",
+      "x-privacyClass": "local-only"
+    },
+    "decidedAt": {
+      "$ref": "common.schema.json#/$defs/Timestamp",
+      "description": "When the person accepted or rejected it, or it expired.",
+      "x-privacyClass": "local-only"
+    },
+    "beliefId": {
+      "$ref": "common.schema.json#/$defs/BeliefId",
+      "description": "The belief created on acceptance.",
+      "x-privacyClass": "local-only"
+    },
+    "screenFlags": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "string",
+        "enum": [
+          "p01-flagged",
+          "deny-list",
+          "skipped-suspicious",
+          "unsupported-language",
+          "oversized",
+          "truncated-span",
+          "stale-source"
+        ],
+        "description": "Flag.",
+        "x-privacyClass": "local-only"
+      },
+      "description": "Screening results; a flagged proposal cannot be batch-accepted.",
+      "x-privacyClass": "local-only"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "proposalId",
+    "section",
+    "key",
+    "text",
+    "sourceClass",
+    "sourceReceiptIds",
+    "status",
+    "createdAt",
+    "screenFlags"
+  ],
+  "$comment": "2026-10-20: created for D90 (soul inputs beyond observation)."
+}

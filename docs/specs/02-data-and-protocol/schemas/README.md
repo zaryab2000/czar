@@ -29,9 +29,15 @@
 | `ranking-decision.schema.json` | §4.19 |
 | `evidence-batch.schema.json` | §4.20 |
 | `job-brief.schema.json` | §4.21 (RV-025) |
+| `source-receipt.schema.json` | §4.23 (D90) |
+| `proposed-belief.schema.json` | §4.24 (D90) |
+| `interview-submission.schema.json` | §4.25 (D90) |
+| `source-scan.schema.json` | §4.26 (D90) |
 | `validate-schemas.mjs` | full Draft 2020-12 check of every schema and of `../examples/` |
 
 ## Checks run
+
+2026-10-20 (D90), from this directory: `python3 -I check-schemas.py` → `checked 27 files; problems: 0`; `node <scratch>/validate-schemas.mjs . ../examples` → `ALL PASS` (ajv 8.17.1, ajv-formats 3.0.1). Negative checks on `soul.schema.json` 1.2: a declared belief with `observation-score`, a user-confirmed belief with confidence 0.9 or without `confirmedAt`, and a receipt id that is neither `evt_` nor `src_` are all rejected.
 
 2026-10-19 (G0-01 review fixes), from this directory:
 

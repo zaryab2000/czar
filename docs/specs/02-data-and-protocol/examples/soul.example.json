@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "1.1",
+  "schemaVersion": "1.2",
   "version": 1,
   "compiledAt": "2026-10-19T12:00:00.000Z",
   "sections": {
@@ -13,7 +13,10 @@
         "receipts": [
           "evt_GMRG9CPT54YGEXE4GR29SBFC3Y"
         ],
-        "userEdited": false
+        "userEdited": false,
+        "sourceClass": "observed",
+        "confidenceBasis": "observation-score",
+        "userConfirmed": false
       }
     ],
     "mission": [
@@ -26,7 +29,27 @@
         "receipts": [
           "evt_P3F832H9Y7S2XN6NKGX66Y8TXW"
         ],
-        "userEdited": false
+        "userEdited": false,
+        "sourceClass": "observed",
+        "confidenceBasis": "observation-score",
+        "userConfirmed": false
+      },
+      {
+        "beliefId": "blf_7V1K3E9QW2M4R6T8Y0A2C4E6G8",
+        "text": "Pricing page refresh for Billdesk, due 30 Oct",
+        "confidence": 1,
+        "firstSeen": "2026-10-20T09:00:00.000Z",
+        "lastSeen": "2026-10-20T09:00:00.000Z",
+        "receipts": [
+          "src_9C1E3G5J7K9N1Q3S5V7W9Y1A3B"
+        ],
+        "userEdited": false,
+        "state": "active",
+        "key": "mission:interview:mission",
+        "sourceClass": "declared",
+        "confidenceBasis": "user-confirmed",
+        "userConfirmed": true,
+        "confirmedAt": "2026-10-20T09:00:00.000Z"
       }
     ],
     "rituals": [
@@ -39,7 +62,10 @@
         "receipts": [
           "evt_RQG5YSYX5HYBNM2JJGJWXVPMHN"
         ],
-        "userEdited": false
+        "userEdited": false,
+        "sourceClass": "observed",
+        "confidenceBasis": "observation-score",
+        "userConfirmed": false
       }
     ],
     "friction": [
@@ -52,7 +78,10 @@
         "receipts": [
           "evt_Q7VSZWTMD6BSRT2WRHH3XNP9VD"
         ],
-        "userEdited": false
+        "userEdited": false,
+        "sourceClass": "observed",
+        "confidenceBasis": "observation-score",
+        "userConfirmed": false
       }
     ],
     "drives": [
@@ -65,7 +94,10 @@
         "receipts": [
           "evt_YTD4CVYDMG74SMJC2TKFJT7NJB"
         ],
-        "userEdited": false
+        "userEdited": false,
+        "sourceClass": "observed",
+        "confidenceBasis": "observation-score",
+        "userConfirmed": false
       }
     ],
     "taste": [
@@ -78,7 +110,10 @@
         "receipts": [
           "evt_54ZRNKCKAMVHEBPVFB45Z3FZE1"
         ],
-        "userEdited": false
+        "userEdited": false,
+        "sourceClass": "observed",
+        "confidenceBasis": "observation-score",
+        "userConfirmed": false
       }
     ],
     "constraints": [
@@ -91,7 +126,10 @@
         "receipts": [
           "evt_3PY508C78WEBNJ1K988SFHT8MV"
         ],
-        "userEdited": false
+        "userEdited": false,
+        "sourceClass": "observed",
+        "confidenceBasis": "observation-score",
+        "userConfirmed": false
       }
     ],
     "spendingPosture": [
@@ -104,7 +142,10 @@
         "receipts": [
           "evt_KQ6YBG5W1A66PTCA1PZTQC7Y3Q"
         ],
-        "userEdited": false
+        "userEdited": false,
+        "sourceClass": "observed",
+        "confidenceBasis": "observation-score",
+        "userConfirmed": false
       }
     ]
   },
