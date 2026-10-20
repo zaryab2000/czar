@@ -7,7 +7,8 @@ pragma solidity 0.8.30;
 /// @dev Specification: docs/specs/03-smart-contracts/czar-vault.md. Shared types: docs/specs/02 §5–§7.
 ///      Immutable per deployment (D33). Owner acts as msg.sender through a UserOp (D30).
 ///      This file is the canonical ABI: where a czar-vault.md table differs in a name, argument order or
-///      event field, this file wins (RV-060). Amended 2026-10-19 for the G0-01 review fixes.
+///      event field, this file wins (RV-060). Amended 2026-10-19 for the G0-01 review fixes; 2026-10-20 (D88):
+///      typed storage records and their getters.
 interface ICzarVault {
     // ─────────────────────────────── Types ───────────────────────────────
 
@@ -75,7 +76,9 @@ interface ICzarVault {
         uint64 createdAt;
     }
 
-    /// @notice WebAuthn assertion for the D30 fallback (OpenZeppelin v5.7.0 WebAuthn.WebAuthnAuth shape).
+    /// @notice WebAuthn assertion for the D30 fallback. Same fields as OpenZeppelin v5.7.0 WebAuthn.WebAuthnAuth but
+    ///         in a different order (OZ: r, s, challengeIndex, typeIndex, authenticatorData, clientDataJSON), so the
+    ///         vault copies it field by field and never casts or abi-decodes one as the other (D88, G-04).
     struct WebAuthnAuth {
         uint256 challengeIndex;
         uint256 typeIndex;
@@ -83,6 +86,100 @@ interface ICzarVault {
         bytes32 s;
         bytes authenticatorData;
         string clientDataJSON;
+    }
+
+    // Storage records (czar-vault.md §4; D88). Field order is the storage packing order and is binding.
+
+    /// @notice One envelope (02 §4.8). Last slot packs pocket, expiresAt, pocketCapBps, state, approverIsOwner;
+    ///         the three counters share the next slot.
+    struct Envelope {
+        uint256 cap;
+        uint256 maxStepAmount;
+        uint256 spent;
+        uint256 reserved;
+        uint256 pocketOutstanding;
+        uint256 jobEscrowed;
+        uint256 shortfall;
+        bytes32 categoryId;
+        bytes32 objectiveHash;
+        bytes32 planHash;
+        bytes32 payeeRoot;
+        address pocket;
+        uint64 expiresAt;
+        uint16 pocketCapBps;
+        EnvelopeState state;
+        bool approverIsOwner;
+        uint32 openReservations;
+        uint32 openPockets;
+        uint32 openJobs;
+    }
+
+    /// @notice One reservation (02 §4.9). The two masks share the last slot, which is still zero when `reserve`
+    ///         stores the record, so `reserve` writes three new slots (czar-vault.md §6.6).
+    struct Reservation {
+        uint64 envelopeId;
+        uint32 stepIndex;
+        address payee;
+        uint256 unitAmount;
+        uint32 count;
+        uint64 validBefore;
+        ReservationMode mode;
+        ReservationState state;
+        uint32 settledCount;
+        uint32 releasedCount;
+        uint128 settledMask;
+        uint128 doneMask;
+    }
+
+    /// @notice One pocket wallet (02 §4.10).
+    struct Pocket {
+        uint64 envelopeId;
+        PocketState state;
+        uint256 funded;
+        uint256 gasGranted;
+        uint256 outstanding;
+        uint256 pendingPullback;
+    }
+
+    /// @notice One pullback record (02 §4.10). `recovery` is true for a pullback of a Closed pocket (RV-004).
+    struct Pullback {
+        address pocket;
+        uint64 requestedAtBlock;
+        PullbackState state;
+        bool recovery;
+        uint256 value;
+        uint256 maxFee;
+        uint256 maxBlockHeight;
+        bytes32 salt;
+        bytes32 transferSpecHash;
+    }
+
+    /// @notice One ERC-8183 job as the vault mirrors it (02 §4.11).
+    struct Job {
+        address provider;
+        uint64 envelopeId;
+        uint32 stepIndex;
+        JobState state;
+        uint256 jobId;
+        uint256 reservedCap;
+        uint256 budget;
+    }
+
+    /// @notice Earned-autonomy limits of one category (czar-vault.md §5.6).
+    struct CategoryLimits {
+        uint256 userMax;
+        uint256 autoLimit;
+        uint256 usedInPeriod;
+        uint64 periodId;
+        uint64 lastRaiseAt;
+    }
+
+    /// @notice The D30 passkey (czar-vault.md §7).
+    struct Passkey {
+        bytes32 qx;
+        bytes32 qy;
+        bytes32 rpIdHash;
+        bool set;
     }
 
     // ─────────────────────────────── Events ──────────────────────────────
@@ -367,6 +464,26 @@ interface ICzarVault {
     function envelopePocket(uint64 envelopeId) external view returns (address);
     /// @notice Money owed back to the envelope that was already withdrawn as free balance (RV-011).
     function envelopeShortfall(uint64 envelopeId) external view returns (uint256);
+    /// @notice Full envelope record (zero struct for an unknown id) (D88, G-07).
+    function getEnvelope(uint64 envelopeId) external view returns (Envelope memory);
+    /// @notice Full reservation record (zero struct for an unknown id).
+    function getReservation(uint64 reservationId) external view returns (Reservation memory);
+    /// @notice Full pocket record (zero struct for an unknown pocket).
+    function getPocket(address pocket) external view returns (Pocket memory);
+    /// @notice Full pullback record (zero struct for an unknown id).
+    function getPullback(uint64 pullbackId) external view returns (Pullback memory);
+    /// @notice Full job record (zero struct for an unknown key).
+    function getJob(bytes32 jobKey) external view returns (Job memory);
+    /// @notice Earned-autonomy limits of a category (zero struct if never set).
+    function getLimits(bytes32 categoryId) external view returns (CategoryLimits memory);
+    /// @notice The stored passkey (zero struct, `set == false`, if none).
+    function getPasskey() external view returns (Passkey memory);
+    /// @notice The factory that deployed this vault; read for guardianPaused() (immutable).
+    function factory() external view returns (address);
+    /// @notice The ERC-8183 job escrow this vault uses (immutable, from the factory's networkConfig).
+    function jobEscrow() external view returns (address);
+    /// @notice The adapter kind of jobEscrow: 0 CircleTestnet, 1 CzarBase (IJobEscrowAdapter.JobEscrowKind).
+    function jobEscrowKind() external view returns (uint8);
 
     // ───────────────────────────── Constants ─────────────────────────────
 

@@ -2,5 +2,5 @@
 # Each line is recorded from a verified download whose digest also matched the release .sha256 file.
 # aarch64-apple-darwin: matches the A9-13 fragment 90e3eefb…db87 (independent check).
 90e3eefbf7dd80652fd283a7562e9263301a48797bc2224cc21a3964e2d5db87  arc-foundry-v0.8.0-2-aarch64-apple-darwin.tar.gz
-# x86_64-unknown-linux-gnu: first observed in CI on 2026-10-19, matched the release .sha256; no ground-truth fragment (SCR-102).
+# x86_64-unknown-linux-gnu: first observed in CI on 2026-10-19; confirmed by an independent download on 2026-10-20 (SCR-102 accepted).
 088bdb96a84418b757f9825d491e702792f1d1d1e29a9145af305a6600a79556  arc-foundry-v0.8.0-2-x86_64-unknown-linux-gnu.tar.gz

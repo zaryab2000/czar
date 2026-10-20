@@ -489,6 +489,29 @@ Approved by Zaryab. Each entry cites the review finding it resolves.
 - **Phase 2 (recorded, not built):** H4 reject-and-keep and provider recourse; candidate Czar-owned escrow on `base-contracts` (its claim flow, A4-11; a dispute interface is unconfirmed, N10); revisit D27 when outside providers arrive.
 - **Amends:** D53 (replaced), D77, D72 (signer rule for `reject`), D27 (noted for Phase 2).
 
+## 12e. Contract build readiness (2026-10-20, from the contract gap audit)
+
+### D88. Contract build readiness
+- **Source:** contract gap audit of `docs/specs/03-smart-contracts/` (74 findings, ids G-01 to G-74) run before the builder PRDs in `docs/specs/07-contract-build/` were written.
+- **Decided (vault):**
+  1. **Callers.** One binding caller list (`czar-vault.md` §2, §15.1). `reserve`, `reserveWithDigests`, `registerPocket`, `grantPocketGas`, `fundPocket`, `openJob` and `fundJob` are agent-only; the owner never needs them for recovery. `settle` is open to anyone.
+  2. **Typed records and getters.** `ICzarVault.sol` declares `Envelope`, `Reservation`, `Pocket`, `Pullback`, `Job`, `CategoryLimits` and `Passkey` in storage packing order, plus a getter for each and `factory()`, `jobEscrow()`, `jobEscrowKind()`. With the two masks in the last slot, `reserve` still writes three new slots.
+  3. **Build rules.** New `czar-vault.md` §15 fixes the error for every failed check, the check order, which call emits which event, the guarded functions and the effects order, ids and `jobKey`, the job description format (69 characters, no `0x`), time boundaries, the constructor, owner-action dispatch, autonomy signatures, digest cleanup and repeat pocket funding.
+  4. **`isValidSignature` never reverts.** Exact-length and offset checks before `abi.decode` for every kind; `_agentSigned` uses a non-reverting recover; the 65-byte fallback checks `validBefore`.
+  5. **Autonomy.** `setCategoryLimits` bumps `autonomyNonce`. The owner's own `openEnvelope` is not bound by `userMax`.
+  6. **Invariants.** INV-7 allows a `Closed` pocket to keep `pendingPullback` for records left `Pending` by a force-close; INV-12 holds for open envelopes; JOB-4 holds per envelope.
+  7. **Both escrow kinds in Phase 1 bytecode**, selected by the immutable `jobEscrowKind`.
+- **Decided (factory):**
+  8. `applyGuardian(changeId, newGuardian)` checks the address against the queued hash, as `applyDefaults` does; `changeNonce` makes ids unique; admin `cancelChange`; `guardian()` getter; idempotent pause.
+  9. Constructor `(cfg, initialDefaults, guardian_, admin_)` with `Ownable(admin_)`, because under the CREATE2 deployer `msg.sender` is the deployer contract.
+  10. The factory embeds the vault creation code, so its runtime hits the 24,576-byte limit first; T-020 measures both, and the size-split PRD moves vault code into linked libraries until both fit.
+  11. Deploy salts `keccak256("czar.vault-factory.v1")` and `keccak256("czar.open-evidence-log.v1")`; reproducible build profile.
+- **Decided (adapter and tests):**
+  12. `library JobEscrowAdapter` has binding internal signatures; `IJobEscrowAdapter` is a type source only; `ICzarJobEscrowClient` gains `reject`.
+  13. Vault tests use a one-ledger USDC mock (`MockArcUSDC`: native balance is the USDC balance, as on Arc), a `MockVaultFactory`, and a `CzarVaultHarness` for vectors the public API cannot produce.
+- **Left to Zaryab:** Gate 0 checks G0-08 and G0-09 (need testnet RPC) and SCR-101 (Arc hardfork name).
+- **Amends:** D42 (the size rule now covers the factory), D73 (factory constructor and change lifecycle), RV-030 (adds `setCategoryLimits`).
+
 ---
 
 ## 13. Open items (deferred)

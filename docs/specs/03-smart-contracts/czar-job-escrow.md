@@ -45,7 +45,7 @@ As `ERC8183.sol` lines 56–105 (`Job` struct packed into 10 slots; `jobCounter`
 
 - **Hook `data` encoding (RV-059):** both the EIP reference (`ERCs` `4dec821` lines 581–674) and base-contracts (lines 646–773) prepend the caller: `abi.encode(actor, …)`. Ground truth A4-03's table omits it; any hook written before hooks are enabled must decode `actor` first.
 
-Claims (`submitClaim`, `settleClaim`, `rejectClaim`, lines 921–1048) are available to providers for partial settlements; the vault treats a settled claim like `Completed` for the settled amount (`settledAmount` field) in a later adapter version; Phase "before mainnet" uses whole-job completion only.
+Claims (`submitClaim`, `settleClaim`, `rejectClaim`, lines 921–1048) are available to providers for partial settlements; the vault already reads `settledAmount` in `syncJob` (RV-009): on `Rejected` or `Expired` it books the refund `budget − settledAmount` and counts `settledAmount` as spent; on `Completed` it counts the whole budget as spent (`czar-vault.md` §5.5). The earlier "later adapter version" wording is superseded (D88, G-56).
 
 ## 6. State machine
 
@@ -86,3 +86,4 @@ This contract exists only for mainnet (and a testnet twin for rehearsal). Deploy
 | Date | ID | Change |
 |---|---|---|
 | 2026-10-19 | RV-038 | pre-mainnet subclass: refunds unpausable, `emergencyWithdraw` limited to surplus, pause and withdraw roles split; CJE-3 restated. A4-03 hook `data` note (RV-059). |
+| 2026-10-20 | D88 | Claims sentence aligned with RV-009 `settledAmount` handling (G-56). |
