@@ -41,8 +41,7 @@ export const TYPE_STRINGS = {
   OwnerAction: "OwnerAction(uint8 action,bytes32 payloadHash,uint256 nonce,uint256 deadline)",
   ReceiptAttestation: "ReceiptAttestation(bytes32 receiptStructHash)",
   BriefRequest: "BriefRequest(bytes32 jobKey,uint64 issuedAt)",
-  DeliverableUpload:
-    "DeliverableUpload(bytes32 jobKey,bytes32 contentHash,uint64 issuedAt)",
+  DeliverableUpload: "DeliverableUpload(bytes32 jobKey,bytes32 contentHash,uint64 issuedAt)",
 } as const;
 
 export const typeHash = (typeString: string): Hash32 => keccak256(toHex(typeString));
