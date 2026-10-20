@@ -9,6 +9,7 @@ import {CoreLogic} from "./vault/logic/CoreLogic.sol";
 import {EnvelopeLogic} from "./vault/logic/EnvelopeLogic.sol";
 import {ReservationLogic} from "./vault/logic/ReservationLogic.sol";
 import {SignatureLogic} from "./vault/logic/SignatureLogic.sol";
+import {PocketLogic} from "./vault/logic/PocketLogic.sol";
 
 /// @title CzarVault
 /// @notice The per-user vault (czar-vault.md). Immutable; no proxy (D33). Every state-changing function is a thin
@@ -133,5 +134,50 @@ contract CzarVault is VaultBase, VaultStubs {
     /// @inheritdoc ICzarVault
     function isValidSignature(bytes32 digest, bytes calldata signature) external view returns (bytes4) {
         return SignatureLogic.isValidSignature(_s, _config(), digest, signature);
+    }
+
+    // ───────────── Pockets (§5.4) ─────────────
+
+    /// @inheritdoc ICzarVault
+    function registerPocket(uint64 envelopeId, address pocket, bytes32[] calldata proof) external {
+        PocketLogic.registerPocket(_s, _config(), msg.sender, envelopeId, pocket, proof);
+    }
+
+    /// @inheritdoc ICzarVault
+    function grantPocketGas(address pocket, uint256 units) external nonReentrant {
+        PocketLogic.grantPocketGas(_s, _config(), msg.sender, pocket, units);
+    }
+
+    /// @inheritdoc ICzarVault
+    function fundPocket(address pocket, uint256 amount) external nonReentrant {
+        PocketLogic.fundPocket(_s, _config(), msg.sender, pocket, amount);
+    }
+
+    /// @inheritdoc ICzarVault
+    function requestPullback(address pocket, uint256 value, uint256 maxFee, uint256 maxBlockHeight)
+        external
+        returns (uint64)
+    {
+        return PocketLogic.requestPullback(_s, _config(), msg.sender, pocket, value, maxFee, maxBlockHeight);
+    }
+
+    /// @inheritdoc ICzarVault
+    function confirmPullback(uint64 pullbackId) external nonReentrant {
+        PocketLogic.confirmPullback(_s, _config(), pullbackId);
+    }
+
+    /// @inheritdoc ICzarVault
+    function cancelPullback(uint64 pullbackId) external nonReentrant {
+        PocketLogic.cancelPullback(_s, _config(), msg.sender, pullbackId);
+    }
+
+    /// @inheritdoc ICzarVault
+    function writeOffPocket(address pocket) external {
+        PocketLogic.writeOffPocket(_s, _config(), msg.sender, pocket);
+    }
+
+    /// @inheritdoc ICzarVault
+    function recordManualReturn(address pocket, uint256 amount) external nonReentrant {
+        PocketLogic.recordManualReturn(_s, _config(), msg.sender, pocket, amount);
     }
 }

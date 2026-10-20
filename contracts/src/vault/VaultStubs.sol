@@ -16,15 +16,7 @@ abstract contract VaultStubs is VaultBase {
         revert NotBuilt();
     }
 
-    function cancelPullback(uint64) external pure {
-        revert NotBuilt();
-    }
-
     function claimJobRefund(bytes32) external pure {
-        revert NotBuilt();
-    }
-
-    function confirmPullback(uint64) external pure {
         revert NotBuilt();
     }
 
@@ -33,14 +25,6 @@ abstract contract VaultStubs is VaultBase {
     }
 
     function fundJob(bytes32, uint256) external pure {
-        revert NotBuilt();
-    }
-
-    function fundPocket(address, uint256) external pure {
-        revert NotBuilt();
-    }
-
-    function grantPocketGas(address, uint256) external pure {
         revert NotBuilt();
     }
 
@@ -60,23 +44,7 @@ abstract contract VaultStubs is VaultBase {
         revert NotBuilt();
     }
 
-    function recordManualReturn(address, uint256) external pure {
-        revert NotBuilt();
-    }
-
-    function registerPocket(uint64, address, bytes32[] calldata) external pure {
-        revert NotBuilt();
-    }
-
-    function requestPullback(address, uint256, uint256, uint256) external pure returns (uint64) {
-        revert NotBuilt();
-    }
-
     function syncJob(bytes32) external pure {
-        revert NotBuilt();
-    }
-
-    function writeOffPocket(address) external pure {
         revert NotBuilt();
     }
 }

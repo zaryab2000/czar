@@ -11,7 +11,8 @@ import {
     KIND_GATEWAY_BURN,
     KIND_SL_RECEIPT,
     EIP1271_MAGIC,
-    EIP1271_INVALID
+    EIP1271_INVALID,
+    GATEWAY_DOMAIN_SEPARATOR
 } from "../../libraries/CzarConstants.sol";
 
 /// @title SignatureLogic
@@ -122,13 +123,29 @@ library SignatureLogic {
 
     // ───────────── GATEWAY_BURN ─────────────
 
-    /// @dev Built by 07 PRD 08 (pockets). Until then a GATEWAY_BURN signature is never valid.
-    function _checkGatewayBurn(VaultState storage, VaultConfig memory, bytes32, bytes calldata)
+    /// @dev Validates a pending Gateway burn intent (czar-vault.md §6.2).
+    ///      Recovery remains valid after freeze; this path is not gated by pause or freeze.
+    function _checkGatewayBurn(VaultState storage s, VaultConfig memory c, bytes32 digest, bytes calldata sig)
         private
-        pure
+        view
         returns (bool)
     {
-        return false;
+        if (sig.length != GATEWAY_BURN_LENGTH) return false;
+        if (_word(sig, 2) != GATEWAY_BURN_SIG_OFFSET || _word(sig, 3) != AGENT_SIG_LENGTH) return false;
+        if (_word(sig, 1) > type(uint64).max) return false;
+        (, uint64 pullbackId, bytes memory agentSig) = abi.decode(sig, (bytes32, uint64, bytes));
+        ICzarVault.Pullback storage p = s.pullbacks[pullbackId];
+        if (p.state != ICzarVault.PullbackState.Pending || block.number > p.maxBlockHeight) return false;
+        ICzarVault.Pocket storage k = s.pockets[p.pocket];
+        if (k.envelopeId == 0) return false;
+        if (k.state != ICzarVault.PocketState.Draining && !(k.state == ICzarVault.PocketState.Closed && p.recovery)) {
+            return false;
+        }
+        bytes32 structHash = CzarHashing.burnIntentStructHash(
+            p.maxBlockHeight, p.maxFee, CzarHashing.transferSpecStructHash(VaultGuards.pullbackTransferSpec(c, p))
+        );
+        if (digest != CzarHashing.typedDataHash(GATEWAY_DOMAIN_SEPARATOR, structHash)) return false;
+        return VaultGuards.agentSigned(s, digest, agentSig);
     }
 
     // ───────────── SL_RECEIPT ─────────────
