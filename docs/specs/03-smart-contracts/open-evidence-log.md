@@ -214,7 +214,7 @@ Estimates; measured values go in `security-and-testing.md` gas snapshots.
 
 | Topic | Testnet | Mainnet |
 |---|---|---|
-| Address | CREATE2 through Arachnid `0x4e59b44847b379578588920cA78FbF26c0B4956C` (A9-15) | same address, same salt, same bytecode |
+| Address | CREATE2 through Arachnid `0x4e59b44847b379578588920cA78FbF26c0B4956C` (A9-15) | same address, same salt, same bytecode. Czar deploys it under T-027 (the quoted SL text says "deployed by the SL"; for Czar's Phase 1 Czar is the deployer). Salt `keccak256("czar.open-evidence-log.v1")` = `0xefdc186d7c05979030751df4b0defd2a979cb96094dd7792b5cb93d652e24199`; reproducible build profile `bytecode_hash = "none"`, `cbor_metadata = false` (D88, G-49). In Phase 1 `uriHash = keccak256(utf8("czar-archive:<root>"))` (§11, D78), not an IPFS CID hash as the quoted NatSpec says; the interface pragma is pinned `0.8.30` where the quote says `^0.8.26` (D88, G-60) |
 | Behaviour | identical | identical; no chain-specific code |
 | Cost | faucet USDC | real USDC at the same gas figures |
 | SL-F4 / SL-F17 re-check | n/a | SL §13 asks for a mainnet re-check of the EIP-7708 emitter and `authorizationState` before mainnet use; neither affects this contract |
@@ -232,3 +232,4 @@ Estimates; measured values go in `security-and-testing.md` gas snapshots.
 | 2026-10-19 | RV-014 | `commit` of an already-known `PROBE_INTENT` root reverts `AlreadyCommitted` (§1.1, §6, §7, §8); OEL-2 tightened, OEL-6 added (SCR-014). The architecture document's §7.1 carries the same amendment. |
 | 2026-10-19 | D78 | §11: Phase 1 `archiveUri` is the host-free `czar-archive:<root>`; archives served by the local server; the stage-2 public host serves the same roots. |
 | 2026-10-19 | RV-026 | §11: `demand-proof` leaf version 2 (no pseudonym; salted soul commitment). |
+| 2026-10-20 | D88 | Deployer, salt and reproducible profile; Phase 1 `uriHash` and pragma notes (G-49, G-60). |

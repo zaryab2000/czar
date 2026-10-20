@@ -1,6 +1,6 @@
 # `CzarVault` (spec 03)
 
-- **Date:** 2026-10-18; amended 2026-10-19 (G0-01 review fixes, see the change log). **Status:** draft for review. **Canonical ABI:** where a table row and `interfaces/ICzarVault.sol` differ in a name, argument order or event field, the `.sol` file wins (RV-060). Shared types, hashes, EIP-712 types and ids are defined in `docs/specs/02-data-and-protocol/data-and-protocol.md` (cited as "02 §n"). Interface: `interfaces/ICzarVault.sol`.
+- **Date:** 2026-10-18; amended 2026-10-19 (G0-01 review fixes, see the change log). **Status:** draft for review. **Canonical ABI:** where a table row and `interfaces/ICzarVault.sol` differ in a name, argument order or event field, the `.sol` file wins (RV-060). Shared types, hashes, EIP-712 types and ids are defined in `docs/specs/02-data-and-protocol/data-and-protocol.md` (cited as "02 §n"). Interface: `interfaces/ICzarVault.sol`. **Build rules (D88):** §15 makes binding every caller, error, check order, event and boundary that a §5–§7 cell leaves open; where a cell and §15 differ, §15 wins. Builder PRDs: `docs/specs/07-contract-build/`.
 - **Solidity:** `0.8.30`, pinned. Reason: the ERC-1271 payer that Circle's Facilitator settled live on Arc testnet was compiled with `solc_version = "0.8.30"`, `evm_version = "prague"`, optimizer on (`a1-erc1271-usdc/foundry.toml`, A1-12, A1-17), so that toolchain is proven on Arc; 0.8.30 has transient storage and is below the newest release `0.8.37` (2026-09-10), leaving a margin for audit tooling. EVM target `prague` for the same reason (Arc is Osaka-based, p1-A7; `prague` is the highest target the proven run used). **GAP:** `arc-forge` v0.8.0-2's bundled solc list was not checked; `forge` downloads solc per `solc_version`.
 - **OpenZeppelin:** `openzeppelin-contracts` v5.7.0 (2026-07-29): `MerkleProof`, `Hashes`, `ECDSA`, `MessageHashUtils`, `IERC1271`, `SafeERC20`, `ReentrancyGuardTransient`, `P256`, `WebAuthn`.
 
@@ -24,9 +24,10 @@ Matches spec 01 §7.1 exactly.
 | lower `autoLimit` | yes | yes | yes | no | no |
 | freeze / unfreeze | yes / yes | freeze only | no | pause only (via factory) | no |
 | rotate `agentSigner`, `autonomySigner`, `evaluator` | yes | no | no | no | no |
-| reserve / settle / fund pocket / open job / fund job | yes (recovery) | yes | no | no | no |
+| reserve, reserve with digests, register pocket, grant pocket gas, fund pocket, open job, fund job | no (D88) | yes | no | no | no |
+| request or cancel a pullback, write off a pocket, cancel a job | yes | yes | no | no | no |
 | release expired reservation / close expired envelope | yes | yes | no | no | yes |
-| claim ERC-8183 refund to vault; confirm pullback; sync job | yes | yes | no | no | yes |
+| settle, finalize, claim ERC-8183 refund to vault, confirm pullback, sync job, `sync()` | yes | yes | no | no | yes |
 | set passkey (D30 fallback) | yes | no | no | no | no |
 | set `maxPullbackFee` (≤ `MAX_PULLBACK_FEE_CEILING`, D81) | yes | no | no | no | no |
 | request a recovery pullback for a `Closed` pocket | yes | yes | no | no | no |
@@ -34,26 +35,27 @@ Matches spec 01 §7.1 exactly.
 | execute a passkey-signed `OwnerAction` | relayed by anyone with a valid WebAuthn assertion | | | | |
 
 - `owner` is `msg.sender` on owner calls (D30). `guardian` is read from `CzarVaultFactory.guardianPaused()` on every spending path.
+- **Binding (D88, G-12):** this table and the per-function list in §15.1 agree. The seven spending functions in the first row of the D88 block are agent-only: the owner has no passkey kind for them and never needs them for recovery (recovery is close, force-close, finalize, pullback and withdraw).
 
 ## 3. Constants and immutables
 
 | Name | Value | Reason / source |
 |---|---|---|
 | `USDC` | `0x3600000000000000000000000000000000000000` (immutable) | A1-01 |
-| `USDC_DOMAIN_SEPARATOR` | computed in the constructor from `block.chainid`: `keccak256(abi.encode(EIP712_DOMAIN_TYPEHASH, keccak256("USDC"), keccak256("2"), chainid, USDC))` | A1-03 (`eip712Domain()` reverts); equals `0x3611…c6b0` on 5042002 and `0x9405…df84` on 5042 (02 §6.1) |
+| `USDC_DOMAIN_SEPARATOR` | computed in the constructor from `block.chainid`: `keccak256(abi.encode(EIP712_DOMAIN_TYPEHASH, keccak256("USDC"), keccak256("2"), chainid, USDC))` | A1-03 (`eip712Domain()` reverts); equals `0x361191522483d32a83e70ae7183b4b9629442c13a78bc9921d6f707911c8c6b0` on 5042002 and `0x940506929bba468048a19b567f4f0d534714bc06604b5c3017e5d16785ccdf84` on 5042 (02 §6.1) |
 | `TRANSFER_WITH_AUTHORIZATION_TYPEHASH` | `0x7c7c6cdb67a18743f49ec6fa9b35f50d52ed05cbed4cc592e13b44501c1a2267` | `EIP3009.sol` line 35; 02 §6.2 |
-| `GATEWAY_WALLET`, `GATEWAY_MINTER` | immutables; testnet `0x0077777d7EBA4688BDeF3E311b846F25870A19B9` / `0x0022222ABE238Cc2C7Bb1f21003F0a260052475B`; mainnet `0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE` / `0x2222222d7164433c4C09B0b0D809a9b52C04C205` | p1-G1, A2-20; minter addresses from `@circle-fin/x402-batching` 3.5.0 `dist/client/index.mjs` constants (CONFIRMED by use on testnet, A2-16; mainnet minter is SDK-declared only: STRONG SIGNAL) |
-| `GATEWAY_DOMAIN` | `26` (immutable, constructor arg) | p1-G14, A2-23 |
+| `GATEWAY_WALLET`, `GATEWAY_MINTER` | immutables read from `factory.networkConfig()` in the constructor (RV-015; D88 G-51); testnet `0x0077777d7EBA4688BDeF3E311b846F25870A19B9` / `0x0022222ABE238Cc2C7Bb1f21003F0a260052475B`; mainnet `0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE` / `0x2222222d7164433c4C09B0b0D809a9b52C04C205` | p1-G1, A2-20; minter addresses from `@circle-fin/x402-batching` 3.5.0 `dist/client/index.mjs` constants (CONFIRMED by use on testnet, A2-16; mainnet minter is SDK-declared only: STRONG SIGNAL) |
+| `GATEWAY_DOMAIN` | `26` on Arc (immutable read from `factory.networkConfig().gatewayDomain` in the constructor) | p1-G14, A2-23 |
 | `GATEWAY_DOMAIN_SEPARATOR` | `0x23a37920eca61226c76d13c4462857a362147e4b18da665dba894fa297ae4f34` | 02 §6.1; `EIP712Domain.sol` lines 37–42 |
-| `BURN_INTENT_TYPEHASH`, `TRANSFER_SPEC_TYPEHASH` | `0x8b99d17a…a37c`, `0x44409c7b…089b` | `BurnIntents.sol` line 61, `TransferSpec.sol` line 87 |
+| `BURN_INTENT_TYPEHASH`, `TRANSFER_SPEC_TYPEHASH` | `0x8b99d17a83a2dd1add9fc2a450e22732c7e8564aa110ab99c20485a7a10ba37c`, `0x44409c7ba8872720f5fc290d2788c2d70a3905b7ca1cdb2ffa152791a69e089b` | `BurnIntents.sol` line 61, `TransferSpec.sol` line 87 |
 | `TRANSFER_SPEC_MAGIC`, `TRANSFER_SPEC_VERSION` | `0xca85def7`, `1` | `TransferSpec.sol` lines 21–24 (byte encoding for the replay hash) |
 | `SL_DOMAIN_SEPARATOR` | computed in constructor (`SelectionLayer`, `1`, chainid, no contract) | 02 §6.1 |
 | `VAULT_DOMAIN_SEPARATOR` | computed in constructor (`CzarVault`, `1`, chainid, `address(this)`) | 02 §6.1; used by `AutonomyRaise`, `OwnerAction`, `ReceiptAttestation` |
 | `RECEIPT_TYPEHASH` | `0xcd6ca6db33168140e9fc8604767fd5dc89fc51ca3853b876f9003e8bedd295f2` | SL §5.8 `Receipt`; 02 §6.2 |
-| `RECEIPT_ATTESTATION_TYPEHASH` | `keccak256("ReceiptAttestation(bytes32 receiptStructHash)")` (value in 02 §6.2) | binds an `SL_RECEIPT` signature to one vault (RV-013) |
-| `KIND_USDC_3009`, `KIND_GATEWAY_BURN`, `KIND_SL_RECEIPT` | 02 §6.3 tags (`SL_RECEIPT` is the `.v2` tag since RV-013) | |
-| `NONCE_TAG` | `keccak256("czar.vault.nonce.v1")` | 02 §7.2 |
-| `PAYEE_LEAF` | `0xabf82537…62fe` | 02 §5.3 |
+| `RECEIPT_ATTESTATION_TYPEHASH` | `keccak256("ReceiptAttestation(bytes32 receiptStructHash)")` = `0x01b75f6051eb731488fad2e8de7925f8a64c89ef33c418e2a62e77ae02691eff` | binds an `SL_RECEIPT` signature to one vault (RV-013) |
+| `KIND_USDC_3009`, `KIND_GATEWAY_BURN`, `KIND_SL_RECEIPT` | `0x86b499474d9c0ea9b4a99b5ce22c4ae0f1ef4bf774214e3c1e4095c0371888cb`, `0xf453aa3365355a8cf99e674b4443d5009b132245c53a3eb3b5a14953d97265f2`, `0x01c314900cb74ef1a689e81bddd748cc950a7aceb730d7cb9b7660a5aa6a3eaa` | 02 §6.3 tags (`SL_RECEIPT` is the `.v2` tag since RV-013; the retired v1 tag `0x6caa53e9addf8fd5f6ef2283c076da956fffddb63f2677a5beeed71428d8601f` must return `INVALID`) |
+| `NONCE_TAG` | `keccak256("czar.vault.nonce.v1")` = `0x28f8dafc03e5ff5b4b3e5b50613f61c133f15f5a15b023ddecb25e6e9034577d` | 02 §7.2 |
+| `PAYEE_LEAF` | `0xabf82537a2dce15f109dca3554542a6a546f104bd1343c99de6c06fdd41462fe` | 02 §5.3 |
 | `EIP1271_MAGIC` / `EIP1271_INVALID` | `0x1626ba7e` / `0xffffffff` | A1-09 |
 | `MAX_AUTHORIZATIONS_PER_RESERVATION` | `128` | bounds `finalize` loops and the exposure math (§6.5) |
 | `MAX_DIGEST_MODE_COUNT` | `8` | fallback mode costs one cold `SSTORE` per index (02 §6.3.4) |
@@ -75,7 +77,18 @@ Matches spec 01 §7.1 exactly.
 | `BPS` | `10000` | |
 | `MAX_JOB_FEE_BPS` | `500` | Czar instance only; Circle's instance must report 0 (A4-07) |
 | `MIN_JOB_EXPIRY_LEAD` | `6 minutes` | ERC-8183 reverts `ExpiryTooShort` under 5 min (p1-E7) |
-| `SECP256K1_HALF_N` | `0x7FFFFFFF…1B20A0` | low-s rule (as `OwnerSig1271.sol`) |
+| `SECP256K1_HALF_N` | `0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0` | low-s rule (as `OwnerSig1271.sol`) |
+| `EIP712_DOMAIN_TYPEHASH` (full), domain type hash without contract | `0x8b73c3c69bb8fe3d512ecc4cf759cc79239f7b179b0ffacaa9a75d522b39400f`, `0xc2f8787176b8ac6bf7215b4adcc1e069bf4ab82d9ab1df05a57a91d425935b6e` | 02 §6.1 (D88, G-11) |
+| domain strings | USDC `("USDC", "2")`, vault `("CzarVault", "1")`, SL `("SelectionLayer", "1")` | 02 §6.1 |
+| `AUTONOMY_RAISE_TYPEHASH` | `0x6247988191abc5977b0b6f569e66d23eff38cc0f0fe30f8ed678b03c3f21b368` | 02 §6.2 (D88, G-11) |
+| `OWNER_ACTION_TYPEHASH` | `0x5a8b2f7d5d70ba2335e2ee47a9d897748d8694bdb44c148ad01f541eeb2f0248` | 02 §6.2 (D88, G-11) |
+| `FORCE_CLOSE_DELAY` | `1 days` | `forceCloseEnvelope` after `expiresAt + FORCE_CLOSE_DELAY` (§5.2; D88) |
+| `CANCEL_REASON` | `keccak256("czar:cancel")` = `0x4be893f3f036dcd68d7b6cb119f5dd94b5db100d08a34bd429ab72d9a6ad1a90` | `cancelJob` reject reason (`job-escrow-adapter.md` §3; D88) |
+| `DESCRIPTION_PREFIX` | `"czar:"` | job description = prefix + 64 lowercase hex chars, no `0x` (JOB-3; §15.6) |
+| `CZAR_ESCROW_EVALUATION_GRACE` | `1 hours` | Czar-instance `claimRefund` on `Submitted` (`ERC8183.sol` line 78; §5.5) |
+| `REQUIRE_UV` | `true` | WebAuthn user verification required (§7) |
+
+- Every constant above lives in `contracts/src/libraries/CzarConstants.sol` (07 PRD 01), which is checked against the vectors file by test.
 
 ## 4. Storage layout
 
@@ -100,9 +113,10 @@ Matches spec 01 §7.1 exactly.
 | `pullbacks[pullbackId]` | `struct {address pocket; uint256 value; uint256 maxFee; uint256 maxBlockHeight; bytes32 salt; bytes32 transferSpecHash; uint64 requestedAtBlock; uint8 state; bool recovery}` | 02 §4.10; `recovery = true` for a pullback of a `Closed` pocket, credited to free balance (RV-004) | vault |
 | `jobs[jobKey]` | `struct {uint64 envelopeId; uint32 stepIndex; uint256 jobId; address provider; uint256 reservedCap; uint256 budget; uint8 state}` | 02 §4.11 | vault |
 
+- **Record types (D88, G-13, G-14):** the records are `ICzarVault.Envelope`, `Reservation`, `Pocket`, `Pullback`, `Job`, `CategoryLimits` and `Passkey`. Their field order in the interface is the storage packing order and is binding; where a row above lists the fields in another order or with `uint8 state`, the interface wins (states are the interface enums, same ABI). `digestSlot` keeps the private struct above.
 - No arrays indexed by user input. Every loop is bounded by a constant (`FINALIZE_CHUNK`, `MAX_AUTHORIZATIONS_PER_RESERVATION`).
 - Saturating helper `sat(a, b) = a > b ? a − b : 0` is used wherever a remaining amount is computed from two counters that can legitimately cross (free balance, remaining allowance); a plain `−` is used only where an invariant guarantees no underflow (RV-008, RV-011).
-- Reentrancy: `ReentrancyGuardTransient` on every function that calls USDC, GatewayWallet, GatewayMinter, the job escrow, or sends native value (`grantPocketGas`: the pocket EOA may carry EIP-7702 code, §12; RV-006). `isValidSignature` is `view` and makes no external calls except `view` reads, so it needs no guard.
+- Reentrancy: `ReentrancyGuardTransient` on every function that calls USDC, GatewayWallet, GatewayMinter, the job escrow, or sends native value (`grantPocketGas`: the pocket EOA may carry EIP-7702 code, §12; RV-006). `isValidSignature` is `view` and makes no external calls except `view` reads, so it needs no guard. The exact list of guarded functions is §15.5 (D88).
 
 ## 5. Functions
 
@@ -124,7 +138,7 @@ Format: signature; caller; preconditions in order; state changes; external calls
 | `setMaxPullbackFee(uint256 newMax)` | owner | `0 < newMax ≤ MAX_PULLBACK_FEE_CEILING` | `maxPullbackFee = newMax` | — | `MaxPullbackFeeSet(oldMax, newMax)`; `FeeCeilingExceeded(newMax, ceiling)` | 30k |
 | `executeOwnerAction(uint8 action, bytes calldata payload, uint256 deadline, WebAuthnAuth calldata auth)` | anyone (relayer) | `passkey.set`; `deadline ≥ now`; digest = EIP-712 `OwnerAction(action, keccak256(payload), ownerActionNonce, deadline)` (02 §6.2); WebAuthn verification per §7 below; then dispatch per `action` | `ownerActionNonce++`; the dispatched action's changes | per action | `OwnerActionExecuted(action, nonce)`; `PasskeyNotSet`, `Expired`, `InvalidPasskeyAssertion`, `UnknownAction` | 40k + 6,900 (P-256, A6-02) + action |
 
-Every owner-only function, and every function the owner may call for recovery, is reachable through `executeOwnerAction`; the dispatcher calls the internal form with the owner context. The action list and payload encodings are in §7 (RV-033). The only owner-callable function left out is `reserve`/`reserveWithDigests`: recovery never needs the owner to spend through the passkey path.
+Every owner-only function, and every function the owner may call for recovery, is reachable through `executeOwnerAction`; the dispatcher calls the internal form with the owner context. The action list and payload encodings are in §7 (RV-033). The seven agent-only spending functions (§2, §15.1) are not owner-callable at all: recovery never needs the owner to spend (D88, G-12).
 
 ### 5.2 Envelopes
 
@@ -142,8 +156,8 @@ Every owner-only function, and every function the owner may call for recovery, i
 
 | Function | Caller | Preconditions | State changes | Events / errors | Gas (est.) |
 |---|---|---|---|---|---|
-| `reserve(uint64 envelopeId, uint32 stepIndex, address payee, uint256 stepCap, bytes32[] proof, uint256 unitAmount, uint32 count, uint64 validBefore) → uint64 reservationId` | agent (owner for recovery) | `notPausedOrFrozen`; envelope `Open` and `now < expiresAt`; `1 ≤ count ≤ MAX_AUTHORIZATIONS_PER_RESERVATION`; `stepIndex ≠ POCKET_STEP_INDEX`; `MerkleProof.verify(proof, payeeRoot, leaf(payee, kind=1, stepIndex, stepCap))` (02 §5.3); `stepCap ≤ maxStepAmount` (RV-002); `total = unitAmount × count`; **`stepUsed[envelopeId][stepIndex] + total ≤ stepCap`** (per step, across every reservation and job of the step and its alternates; RV-002); `now + MIN_TTL ≤ validBefore ≤ min(now + MAX_TTL, expiresAt)` (RV-056); `spent + reserved + pocketOutstanding + jobEscrowed + shortfall + total ≤ cap` | `reservationCount++`; store (`mode = envelope`); `reserved += total`; `stepUsed[envelopeId][stepIndex] += total`; `openReservations++` | `Reserved(reservationId, envelopeId, payee, stepIndex, unitAmount, count, validBefore, mode)`; `PayeeNotInPlan`, `StepCapExceeded(stepIndex, used, stepCap, wanted)`, `CapExceeded`, `BadTtl`, `BadCount`, `EnvelopeNotOpen`, `EnvelopeExpired` | 132k + 400/proof node |
-| `reserveWithDigests(... same ...)` | agent | same; `count ≤ MAX_DIGEST_MODE_COUNT` | same, `mode = digest`; for each `i < count`: `digestSlot[digest_i] = (id, i)` where `digest_i = toTypedDataHash(USDC_DOMAIN_SEPARATOR, structHash(this, payee, unitAmount, 0, validBefore, nonce_i))` | same event with `mode = 1` | 110k + 24k × count |
+| `reserve(uint64 envelopeId, uint32 stepIndex, address payee, uint256 stepCap, bytes32[] proof, uint256 unitAmount, uint32 count, uint64 validBefore) → uint64 reservationId` | agent | `notPausedOrFrozen`; envelope `Open` and `now < expiresAt`; `1 ≤ count ≤ MAX_AUTHORIZATIONS_PER_RESERVATION`; `stepIndex ≠ POCKET_STEP_INDEX`; `MerkleProof.verify(proof, payeeRoot, leaf(payee, kind=1, stepIndex, stepCap))` (02 §5.3); `stepCap ≤ maxStepAmount` (RV-002); `total = unitAmount × count`; **`stepUsed[envelopeId][stepIndex] + total ≤ stepCap`** (per step, across every reservation and job of the step and its alternates; RV-002); `now + MIN_TTL ≤ validBefore ≤ min(now + MAX_TTL, expiresAt)` (RV-056); `spent + reserved + pocketOutstanding + jobEscrowed + shortfall + total ≤ cap` | `reservationCount++`; store (`mode = envelope`); `reserved += total`; `stepUsed[envelopeId][stepIndex] += total`; `openReservations++` | `Reserved(reservationId, envelopeId, payee, stepIndex, unitAmount, count, validBefore, mode)`; `PayeeNotInPlan`, `StepCapExceeded(stepIndex, used, stepCap, wanted)`, `CapExceeded`, `BadTtl`, `BadCount`, `EnvelopeNotOpen`, `EnvelopeExpired` | 132k + 400/proof node |
+| `reserveWithDigests(... same ...)` | agent | same; `count ≤ MAX_DIGEST_MODE_COUNT` | same, `mode = digest`; for each `i < count`: `digestSlot[digest_i] = (id, i)` where `digest_i = toTypedDataHash(USDC_DOMAIN_SEPARATOR, structHash(this, payee, unitAmount, 0, validBefore, nonce_i))` | same event with `mode = 1` | 132k + 24k × count (D88, G-73) |
 | `derivedNonce(uint64 reservationId, uint32 index) → bytes32` (pure/view) | anyone | — | — | — | 1k |
 | `settle(uint64 reservationId, uint32[] indices)` | anyone | reservation `Active` or `Finalizing`; `1 ≤ indices.length ≤ FINALIZE_CHUNK`; each `index < count`, bit not yet in `doneMask`; `USDC.authorizationState(this, nonce_i) == true` (A1-11, A1-12) | for each: `settledMask |= bit; doneMask |= bit; settledCount++`; `envelope.reserved −= unitAmount; envelope.spent += unitAmount; committedTotal −= unitAmount` (`stepUsed` unchanged: the money is spent on that step); then **`_finalizeIfDone(r)`** (below) | `Settled(reservationId, index, unitAmount)` per index; `ReservationFinal` when `_finalizeIfDone` fires; `NotUsed(index)`, `AlreadyDone(index)`, `ReservationNotActive` | 30k + 6k × n (+ 10k when it finalizes) |
 | `finalize(uint64 reservationId, uint32 fromIndex, uint32 toIndex)` | anyone | reservation `Active` or `Finalizing`; `now > validBefore` (USDC rejects the authorization after this, `EIP3009.sol` line 323); `fromIndex < toIndex ≤ count`; `toIndex − fromIndex ≤ FINALIZE_CHUNK`. Indices already in `doneMask` are **skipped, not refused** (RV-001) | `state = Finalizing` if it was `Active`; for each index in the range not in `doneMask`: if `authorizationState == true` → treat as settle (above); else → `doneMask |= bit; releasedCount++; reserved −= unitAmount; stepUsed[envelopeId][stepIndex] −= unitAmount` (`committedTotal` unchanged: the money stays committed to the envelope); if `mode == digest`, delete the `digestSlot` entries in the chunk; then **`_finalizeIfDone(r)`** | `Settled` / `Released(reservationId, index, unitAmount)`; `ReservationFinal(reservationId, settledCount, releasedCount)`; `NotExpired`, `BadParams`, `ReservationNotActive` | 30k + 7k × n |
@@ -159,7 +173,7 @@ Every owner-only function, and every function the owner may call for recovery, i
 | `registerPocket(uint64 envelopeId, address pocket, bytes32[] proof)` | agent | `notPausedOrFrozen`; envelope `Open` and `now < expiresAt`; `envelope.pocket == 0` (one pocket per envelope, D48); `pocket != 0`; `pocket.code.length == 0` (must be an EOA: A2-09, A2-10); `pockets[pocket].envelopeId == 0` (one pocket, one envelope, ever); **`MerkleProof.verify(proof, payeeRoot, leaf(pocket, kind=PAYEE_KIND_POCKET, POCKET_STEP_INDEX, 0))`** — the pocket address is committed in the approved plan's `payeeRoot` (D71, RV-003); `pocketCapBps > 0` | `pockets[pocket] = {envelopeId, Registered}`; `envelope.pocket = pocket`; `openPockets++` | — | `PocketRegistered(envelopeId, pocket)`; `PocketExists`, `NotEoa`, `PocketNotInPlan`, `PocketCapZero`, `EnvelopeNotOpen`, `EnvelopeExpired` | 62k + 400/proof node |
 | `grantPocketGas(address pocket, uint256 units)` | agent | `notPausedOrFrozen`; envelope `Open` and `now < expiresAt` (RV-006); pocket `Registered`; `gasGranted + units ≤ MAX_GAS_GRANT_PER_POCKET`; `spent + reserved + pocketOutstanding + jobEscrowed + shortfall + units ≤ cap` (gas counts as spent) | `gasGranted += units`; `envelope.spent += units`; `committedTotal −= units` | `pocket.call{value: units × GAS_GRANT_UNIT_WEI}("")` (native USDC; a transfer to `address(0)` would revert, A9-14, but `pocket != 0`); **`nonReentrant`** | `PocketGasGranted(pocket, units)`; `GasGrantExceeded`, `NativeSendFailed`, `Paused`, `FrozenVault` | 40k |
 | `fundPocket(address pocket, uint256 amount)` | agent | `notPausedOrFrozen`; pocket `Registered` or `Funded`; envelope `Open` and `now < expiresAt`; **`GatewayWallet.isAuthorizedForBalance(USDC, pocket, address(this)) == true`** (`Delegation.sol` lines 137–144; A2-04); `funded + amount ≤ cap × pocketCapBps / BPS` (floor); `spent + reserved + pocketOutstanding + jobEscrowed + shortfall + amount ≤ cap` | `funded += amount; outstanding += amount; envelope.pocketOutstanding += amount; committedTotal −= amount; state = Funded` | `USDC.forceApprove(GATEWAY_WALLET, amount)`; `GatewayWallet.depositFor(USDC, pocket, amount)` (`Deposits.sol` lines 79–96, pulls from `msg.sender` = vault, A2-02); `forceApprove(…, 0)` after | `PocketFunded(pocket, envelopeId, amount, funded)`; `DelegateNotSet`, `PocketCapExceeded(cap, funded, amount)` | 130k |
-| `requestPullback(address pocket, uint256 value, uint256 maxFee, uint256 maxBlockHeight) → uint64 pullbackId` | agent or owner | **normal:** pocket `Funded` or `Draining`; `0 < value ≤ outstanding − pendingPullback`. **recovery (RV-004):** pocket `Closed`; `value > 0` (no `outstanding` bound: the pocket's accounting is already settled, and the burn can only pay the vault). **both:** `maxFee ≤ maxPullbackFee` (D81); `block.number < maxBlockHeight ≤ block.number + MAX_PULLBACK_WINDOW_BLOCKS` (RV-036). Neither freeze nor pause blocks this function (money only comes back, §6.2 step 2) | `pullbackCount++`; `salt = keccak256(abi.encode(NONCE_TAG, this, pullbackId))` (02 §7.3); `transferSpecHash = keccak256(bytes.concat(TRANSFER_SPEC_MAGIC, uint32 1, uint32 26, uint32 26, b32(GATEWAY_WALLET), b32(GATEWAY_MINTER), b32(USDC), b32(USDC), b32(pocket), b32(this), b32(this), bytes32(0), uint256 value, salt, uint32 0))` (340 bytes, `TransferSpec.sol` lines 50–67; test vector 02 §6.4); store `Pending` with `recovery = (pocket was Closed)`; **normal only:** `pendingPullback += value`; `state = Draining` | — | `PullbackRequested(pullbackId, pocket, value, maxFee, maxBlockHeight, transferSpecHash, salt)`; `PullbackTooLarge`, `FeeTooHigh`, `BadParams` | 120k |
+| `requestPullback(address pocket, uint256 value, uint256 maxFee, uint256 maxBlockHeight) → uint64 pullbackId` | agent or owner | **normal:** pocket `Funded` or `Draining`; `0 < value ≤ outstanding − pendingPullback`. **recovery (RV-004):** pocket `Closed`; `value > 0` (no `outstanding` bound: the pocket's accounting is already settled, and the burn can only pay the vault). **both:** `maxFee ≤ maxPullbackFee` (D81); `block.number < maxBlockHeight ≤ block.number + MAX_PULLBACK_WINDOW_BLOCKS` (RV-036). Neither freeze nor pause blocks this function (money only comes back, §6.2 step 2) | `pullbackCount++`; `salt = keccak256(abi.encode(NONCE_TAG, this, pullbackId))` (02 §7.3); `transferSpecHash = keccak256(bytes.concat(TRANSFER_SPEC_MAGIC, uint32 TRANSFER_SPEC_VERSION, uint32 GATEWAY_DOMAIN, uint32 GATEWAY_DOMAIN, b32(GATEWAY_WALLET), b32(GATEWAY_MINTER), b32(USDC), b32(USDC), b32(pocket), b32(this), b32(this), bytes32(0), uint256 value, salt, uint32 0))` (340 bytes, `TransferSpec.sol` lines 50–67; test vector 02 §6.4); store `Pending` with `recovery = (pocket was Closed)`; **normal only:** `pendingPullback += value`; `state = Draining` | — | `PullbackRequested(pullbackId, pocket, value, maxFee, maxBlockHeight, transferSpecHash, salt)`; `PullbackTooLarge`, `FeeTooHigh`, `BadParams` | 120k |
 | `confirmPullback(uint64 pullbackId)` | anyone | record `Pending` or `Cancelled`; **`GatewayMinter.isTransferSpecHashUsed(transferSpecHash) == true`** (`TransferSpecHashes.sol` line 35; GatewayMinter inherits it via `GatewayCommon`) | `state = Confirmed`. Then exactly one branch (the USDC was minted to the vault: `Mints.sol` lines 333–349, recipient = `destinationRecipient` = vault, full `value`; the fee was taken from the pocket's balance on the burn side, `Burns.sol` lines 515–559): **(a) envelope credit** — record was `Pending`, not `recovery`, pocket not `Closed`, envelope `Open`: `pendingPullback −= value`; `x = min(value, outstanding)`; `outstanding −= x`; `envelope.pocketOutstanding −= x`; `credit = min(x, sat(balanceOf, committedTotal))`; `committedTotal += credit`; `envelope.shortfall += x − credit` (RV-011); any `value − x` stays free. **(b) late mint of a cancelled record** — record was `Cancelled`, pocket not `Closed`, envelope `Open`: `x = min(value, outstanding − pendingPullback)` (clamped so `pendingPullback ≤ outstanding` keeps holding, RV-036), then as (a) with this `x`. **(c) free-balance credit** — `recovery`, or pocket `Closed`, or envelope `Closed`: if the record was `Pending` and not `recovery`, `pendingPullback −= value`; nothing else changes (the minted USDC is free balance, as job refunds after close already are) | `GatewayMinter.isTransferSpecHashUsed` (view) | `PullbackConfirmed(pullbackId, pocket, value, creditedToEnvelope)`; `NotMinted`, `PullbackWrongState` | 50k |
 | `cancelPullback(uint64 pullbackId)` | agent or owner | record `Pending`; `block.number ≥ maxBlockHeight + PULLBACK_CANCEL_DELAY_BLOCKS` (RV-036: counted from the intent's own expiry, so no attestation for it can still be valid); `isTransferSpecHashUsed == false` | `state = Cancelled`; if not `recovery`: `pendingPullback −= value` | view read | `PullbackCancelled(pullbackId)`; `TooEarly`, `AlreadyMinted` | 30k |
 | `writeOffPocket(address pocket)` | agent or owner | pocket `Registered`, `Funded` or `Draining` (RV-049: a `Registered` pocket whose `addDelegate` failed can be closed); `pendingPullback == 0`; envelope `Open`. The signer refuses this call for K3 while the pocket has an open slow withdrawal or a non-zero Gateway balance (CZ-27, RV-004) | `writtenOff = outstanding`; `envelope.spent += writtenOff; envelope.pocketOutstanding −= writtenOff; outstanding = 0; state = Closed; openPockets−−` | — | `PocketClosed(pocket, writtenOff)`; `PullbackPending`, `PocketWrongState` | 35k |
@@ -213,7 +227,20 @@ if kind == KIND_SL_RECEIPT  → §6.3
 else → INVALID
 ```
 
-Common helper `_agentSigned(digest, sig65) → bool`: length 65, `s ≤ SECP256K1_HALF_N`, `v ∈ {27,28}`, `ecrecover(digest, v, r, s) == agentSigner && != address(0)`.
+Common helper `_agentSigned(digest, sig65) → bool`: length 65, `s ≤ SECP256K1_HALF_N`, `v ∈ {27,28}`, `ecrecover(digest, v, r, s) == agentSigner && != address(0)`. It never reverts: it uses `ECDSA.tryRecover` (or the raw `ecrecover` precompile), never `ECDSA.recover` (D88, G-16).
+
+**Never revert on malformed input (D88, G-16).** `abi.decode` reverts on short or inconsistent bytes, so the dispatcher checks the exact ABI layout before decoding; any mismatch returns `INVALID`:
+
+| Kind | Exact `signature.length` | Layout checks before `abi.decode` |
+|---|---|---|
+| fallback | `65` | none (raw `r ‖ s ‖ v`) |
+| any tagged kind | `≥ 32` | otherwise `INVALID` |
+| `USDC_3009` | `416` | word 8 (offset of `agentSig`) `== 0x120`; word 9 (its length) `== 65` |
+| `GATEWAY_BURN` | `224` | word 2 (offset) `== 0x60`; word 3 (length) `== 65` |
+| `SL_RECEIPT` | `672 + 32 × ⌈L / 32⌉`, where `L` is the `originAsserted` byte length | word 1 (offset of the receipt tuple) `== 0x60`; word 2 (offset of `agentSig`) `== 0x60 + 0x1c0 + 32 × ⌈L / 32⌉`; tuple word 4 (offset of `originAsserted`, relative to the tuple) `== 0x1a0`; `L < signature.length` (checked first, so the length arithmetic cannot overflow); the `agentSig` length word `== 65`; for the vector's 24-byte origin the length is 704 |
+
+- Words are 32-byte, numbered from 0 at the start of `signature`. `L` is read from the word at byte `0x60 + 0x1a0` (the string's length word). All lengths above were checked with viem against `abi.encode` output for `L` = 0, 24, 32, 33 and 256.
+- With these checks `abi.decode` cannot revert. The 07 PRD for signatures gives the exact code.
 
 ### 6.1 `USDC_3009` (02 §6.3.1)
 
@@ -270,11 +297,11 @@ Decode `(kind, SlReceipt receipt, agentSig)` where `SlReceipt` carries the 13 fi
 3. `bound = toTypedDataHash(VAULT_DOMAIN_SEPARATOR, keccak256(abi.encode(RECEIPT_ATTESTATION_TYPEHASH, structHash)))` — the agent signs this vault-bound wrapper, not the bare receipt digest. `VAULT_DOMAIN_SEPARATOR` carries `chainId` and `address(this)`, so an agent signature made for vault A never validates on vault B (ERC-7739-style nesting).
 4. `_agentSigned(bound, agentSig)`.
 
-Not gated by freeze (it moves no money). The signer only signs `ReceiptAttestation` for a `Receipt` whose `paymentRefHash` matches a payment of this vault that the indexer has seen settled (CZ-27 `sl-receipt` policy).
+Not gated by freeze or pause (it moves no money; D88, G-40). The signer only signs `ReceiptAttestation` for a `Receipt` whose `paymentRefHash` matches a payment of this vault that the indexer has seen settled (CZ-27 `sl-receipt` policy).
 
 ### 6.4 Fallback: 65-byte signature (02 §6.3.4)
 
-`slot = digestSlot[digest]`; require `slot.set`; then run §6.1 steps 1–3 with `(slot.reservationId, slot.index)`, skip 4–6 (the digest was computed on-chain at reserve time from the same fields), and step 7 with the 65 bytes. `r.mode == digest` is required so an envelope-mode reservation can never be used through the fallback.
+`slot = digestSlot[digest]`; require `slot.set`; then run §6.1 steps 1–3 with `(slot.reservationId, slot.index)`, check `block.timestamp < r.validBefore` (D88, G-39), skip 4–6 (the digest was computed on-chain at reserve time from the same fields), and step 7 with the 65 bytes. `r.mode == digest` is required so an envelope-mode reservation can never be used through the fallback.
 
 ### 6.5 Exposure bound (problem 1)
 
@@ -317,10 +344,10 @@ These are estimates to be measured in the Foundry gas tests (`security-and-testi
 
 - `setPasskey(qx, qy, rpIdHash)` stores the user's P-256 public key and `sha256(rpId)`. In Phase 1 the RP ID is `localhost` (D78); a passkey is bound to its RP ID, so moving the app to a public origin in stage 2 means registering a new passkey and calling `setPasskey` again through the owner's smart account.
 - `OwnerAction` digest (02 §6.2) is the WebAuthn challenge, as raw 32 bytes.
-- `WebAuthnAuth` struct (OpenZeppelin v5.7.0 `WebAuthn.sol` lines 46–57): `{challengeIndex, typeIndex, r, s, authenticatorData, clientDataJSON}`.
+- `WebAuthnAuth` struct: `ICzarVault.WebAuthnAuth` is `{challengeIndex, typeIndex, r, s, authenticatorData, clientDataJSON}`. OpenZeppelin v5.7.0's `WebAuthn.WebAuthnAuth` (`WebAuthn.sol` line 46) has the same fields in the order `{r, s, challengeIndex, typeIndex, authenticatorData, clientDataJSON}`. The vault copies the fields by name into the OpenZeppelin struct (07 PRD 01 `PasskeyVerifier`) and never casts or abi-decodes one as the other (D88, G-04).
 - Verification (`WebAuthn.verify(challenge, auth, qx, qy, requireUV = true)`, lines 93–110): type is `"webauthn.get"`; `"challenge":"<base64url(digest)>"` at `challengeIndex`; flags byte `authenticatorData[32]` has UP (bit 0) and UV (bit 2) set (W3C WebAuthn L3 §6.1: `rpIdHash` 32 bytes, `flags` 1 byte, `signCount` 4 bytes); BE/BS relationship valid; signature over `sha256(authenticatorData ‖ sha256(clientDataJSON))` verified by **`P256.verify`** (`P256.sol` lines 62–65; OpenZeppelin's `WebAuthn.verify` calls this function, not `verifyNative`), which rejects `s > N/2` (high-s) and, when the precompile at `0x100` returns empty, makes a second precompile call with a probe vector before falling back. Gas: 6,900 per precompile call (A6-02), so ≈ 6,900 on a valid assertion and ≈ 13,800 on the invalid path (RV-034).
 - **Low-s normalisation (RV-034):** WebAuthn authenticators do not normalise `s`. The app (CZ-22) and `@czar/vault-client` replace `s` with `N − s` when `s > N/2` before calling `executeOwnerAction`; the P-256 signature stays valid for the same message. A high-s fixture test proves both the refusal and the normalised acceptance.
-- Czar adds: `authenticatorData[0:32] == passkey.rpIdHash` (the OZ library lists RP ID hash validation as a feature at line 26; the vault enforces it explicitly), and `signCount` is ignored (synced passkeys, D1-12). The `origin` inside `clientDataJSON` is not checked on-chain (the RP ID hash already binds the credential to its origin's registrable domain); the app checks it client-side.
+- Czar adds: `authenticatorData[0:32] == passkey.rpIdHash` (OpenZeppelin's `WebAuthn.sol` line 26 lists RP ID hash validation among the checks it leaves out, so the vault must enforce it; D88, G-59), and `signCount` is ignored (synced passkeys, D1-12). The `origin` inside `clientDataJSON` is not checked on-chain (the RP ID hash already binds the credential to its origin's registrable domain); the app checks it client-side.
 - Relayer: anyone (Czar's relayer in practice) submits `executeOwnerAction`. Gas is paid by the relayer; the user signs nothing but the WebAuthn assertion. Replay: `ownerActionNonce`; expiry: `deadline`.
 - Payload encodings per action (`payloadHash = keccak256(payload)`; enum values match `ICzarVault.OwnerActionKind` and 02 §6.2):
 
@@ -494,12 +521,12 @@ stateDiagram-v2
 | INV-4 | When `frozen || guardianPaused`, `isValidSignature` returns `INVALID` for every `USDC_3009` digest (and its 65-byte fallback) and `reserve`, `reserveWithDigests`, `registerPocket`, `grantPocketGas`, `fundPocket`, `openJob`, `fundJob`, `openEnvelope`, `raiseAutoLimit` revert (RV-006, RV-030). |
 | INV-5 | For every reservation `R`: Σ over all authorizations USDC accepts with nonce in `{derivedNonce(R,i)}` of `value = (number of used indices) × R.unitAmount ≤ R.count × R.unitAmount` (§6.5; `value == unitAmount` per index, RV-035). |
 | INV-6 | Every `GATEWAY_BURN` digest the vault accepts has `destinationRecipient = vault`, `sourceDepositor` = a pocket of this vault, `sourceDomain = destinationDomain = 26`, `block.number ≤ maxBlockHeight`, `maxFee ≤ maxPullbackFee(at request) ≤ MAX_PULLBACK_FEE_CEILING`, and for a non-recovery record `value ≤ outstanding − pending(before)`. |
-| INV-7 | For every pocket not `Closed`: `pendingPullback ≤ outstanding ≤ funded ≤ envelope.cap × pocketCapBps / BPS`, including after a cancelled record is confirmed late (RV-036). A `Closed` pocket has `outstanding = 0` and `pendingPullback = 0`. |
+| INV-7 | For every pocket not `Closed`: `pendingPullback ≤ outstanding ≤ funded ≤ envelope.cap × pocketCapBps / BPS`, including after a cancelled record is confirmed late (RV-036). A `Closed` pocket has `outstanding = 0`, and its `pendingPullback` equals the summed `value` of its `Pending` non-recovery records (records left `Pending` by `forceCloseEnvelope` resolve later through `confirmPullback` branch (c) or `cancelPullback`; D88, G-17). |
 | INV-8 | `envelope.reserved = Σ_{active or finalizing reservations of the envelope} (count − popcount(doneMask)) × unitAmount + Σ_{opened, unreleased jobs} reservedCap` while the envelope is `Open`; `0` once it is `Closed`. |
 | INV-9 | `autoLimit[c] ≤ userMax[c]` for every category (RV-008). `usedInPeriod[c]` may exceed `autoLimit[c]` after a lowering; the remaining allowance is always computed as `sat(autoLimit, usedInPeriod)`, so no allowance computation can revert with an arithmetic panic. |
 | INV-10 | Counters (`envelopeCount`, `reservationCount`, `pullbackCount`, nonces) only increase. `autonomyNonce` increases on every raise, every lowering and every `freeze()` (RV-030). |
 | INV-11 | `isValidSignature` never returns `MAGIC` for a digest that is not the recomputation of a registered kind from fields the vault controls (no bare `ecrecover` acceptance). For `SL_RECEIPT` the recomputation is the SL `Receipt` struct hash, and the agent signature is over the vault-bound `ReceiptAttestation` (RV-013). |
-| INV-12 | For every envelope and step: `stepUsed[e][s] ≤ stepCap(s)`, and `stepUsed[e][s] = Σ_{reservations of s} (settled + unreleased indices) × unitAmount + Σ_{jobs of s} (reservedCap if Opened; budget if Funded/Submitted/Completed; budget − refund if Refunded; 0 if Released)` (RV-002). |
+| INV-12 | For every **open** envelope and step (after close, `syncJob` and `cancelJob` no longer touch `stepUsed`; D88, G-18): `stepUsed[e][s] ≤ stepCap(s)`, and `stepUsed[e][s] = Σ_{reservations of s} (settled + unreleased indices) × unitAmount + Σ_{jobs of s} (reservedCap if Opened; budget if Funded/Submitted/Completed; budget − refund if Refunded; 0 if Released)` (RV-002). |
 | INV-13 | A reservation is `Final` if and only if `popcount(doneMask) == count`; `openReservations` equals the number of the envelope's reservations that are not `Final` (RV-001). |
 | INV-14 | Every pocket was proven under its envelope's `payeeRoot` as a kind-4 leaf, each envelope has at most one pocket (`envelope.pocket`), and an envelope with `pocketCapBps == 0` has no pocket (D71, RV-003). A `Closed` envelope has no pocket in `Registered`, `Funded` or `Draining` (RV-005). |
 | INV-15 | `maxPullbackFee ≤ MAX_PULLBACK_FEE_CEILING` at all times (D81). |
@@ -538,14 +565,14 @@ All at the 20 Gwei floor (p1-A6), `1 gas = 2 × 10⁻⁸ USDC`. Estimates; measu
 | `openEnvelope` | 160,000 | 0.0032 |
 | `closeEnvelope` | 40,000 | 0.0008 |
 | `reserve` (n=1..128) | 132,000 | 0.00264 |
-| `reserveWithDigests` (n=8) | 300,000 | 0.0060 |
+| `reserveWithDigests` (n=8) | 324,000 | 0.00648 |
 | `settle` (k indices) | 30,000 + 6,000k | 0.0006 + 0.00012k |
 | `finalize` (k indices) | 30,000 + 7,000k | 0.0006 + 0.00014k |
 | `registerPocket` + `grantPocketGas` + pocket's `addDelegate` + `fundPocket` | 62,000 + 40,000 + 50,000 + 130,000 = 282,000 | 0.00564 |
 | `requestPullback` + `gatewayMint` (relayer) + `confirmPullback` + `writeOffPocket` | 120,000 + 100,000 + 50,000 + 35,000 = 305,000 | 0.0061 |
 | pocket gas sweep back to the vault (K4 native send, RV-004) | ≈ 21,000 | 0.00042 |
 | Gateway instant-transfer fee | — | 0.0035 (A2-17) |
-| `openJob` + `fundJob` + `syncJob` | 230,000 + 150,000 + 50,000 | 0.0086 |
+| `openJob` + `fundJob` + `syncJob` | 252,000 + 150,000 + 55,000 = 457,000 | 0.00914 |
 | `executeOwnerAction` | 40,000 + 6,900 + action | ≈ 0.0010 + action |
 
 **Pocket path per objective:** `C_pocket = 0.00564 + 0.0061 + 0.0035 + 0.00042 = 0.01566 USDC` (one pocket, one pullback, one gas sweep), amortized over `M` nanopayments: `C_pocket / M`. The `grantPocketGas` grant (`payer.pocketGasUnits`, 20,000 units = 0.02 USDC) is booked as spent against the envelope cap, so the planner adds it to the envelope cap; the unused part returns to the vault as free balance through the K4 sweep (RV-004), so it is room, not cost. If the sweep cannot run (the pocket key is gone), the whole grant is cost and `C_pocket` is 0.0352 USDC; routing uses the sweep figure only while CZ-27's sweep kind is live (RV-039).
@@ -564,13 +591,138 @@ All at the 20 Gwei floor (p1-A6), `1 gas = 2 × 10⁻⁸ USDC`. Estimates; measu
 | Topic | Testnet | Mainnet |
 |---|---|---|
 | Immutables | USDC same; GatewayWallet `0x0077…19B9`, Minter `0x0022…475B`, job escrow = Circle's `0x0747…4583` (kind Circle) | GatewayWallet `0x7777…00eE`, Minter `0x2222…C205` (SDK constant; verify code on-chain first), job escrow = `CzarJobEscrow` (kind Czar) |
-| USDC domain separator | `0x3611…c6b0` | `0x9405…df84` |
+| USDC domain separator | `0x361191522483d32a83e70ae7183b4b9629442c13a78bc9921d6f707911c8c6b0` | `0x940506929bba468048a19b567f4f0d534714bc06604b5c3017e5d16785ccdf84` |
 | ERC-1271 settle proof | live (A1-17) | simulation only (A1-11); rerun AR-3/AR-4 on mainnet before any spend |
 | Gateway code hash | differs from mainnet (GAP A2-G2) | re-run the pullback fork test on a mainnet fork |
 | Delegate burn on mainnet | tested | untested (GAP A2-G3) |
 | Gas price | floor 20 Gwei | same floor; thresholds recomputed from live gas |
 | Address | CREATE2 from the testnet factory: depends on (factory, owner) only | a different factory address (its constructor carries mainnet immutables), so a different vault address; the factory itself is not same-address across networks (RV-015) |
 
+
+## 15. Binding build rules (D88)
+
+These rules close the gaps the 2026-10-20 contract gap audit found (ids G-nn). They refine §5–§7: where a §5–§7 cell is silent, this section decides; where they differ, this section wins. The builder PRDs in `docs/specs/07-contract-build/` turn each rule into numbered code steps.
+
+### 15.1 Callers (G-12)
+
+| Caller rule | Functions |
+|---|---|
+| owner only (`NotOwner`) | `withdraw`, `setCategoryLimits`, `unfreeze`, `rotateSigners`, `setPasskey`, `setMaxPullbackFee`, `forceCloseEnvelope`, `recordManualReturn` |
+| agent only (`NotAgent`) | `reserve`, `reserveWithDigests`, `registerPocket`, `grantPocketGas`, `fundPocket`, `openJob`, `fundJob` |
+| owner or agent (`NotAuthorized`) | `openEnvelope` (agent within allowance), `freeze`, `requestPullback`, `cancelPullback`, `writeOffPocket`, `cancelJob`, `closeEnvelope` before `expiresAt` |
+| owner, agent or `autonomySigner` (`NotAuthorized`) | `lowerAutoLimit` |
+| anyone | `sync`, `receive`, `settle`, `finalize`, `confirmPullback`, `syncJob`, `claimJobRefund`, `closeEnvelope` at or after `expiresAt`, `raiseAutoLimit` (signature path), `executeOwnerAction` (passkey path), every view |
+
+- "Owner" includes the passkey path: `executeOwnerAction` dispatches to the internal form with `caller = owner` (§15.9).
+- `raiseAutoLimit` with an empty `sig` is accepted only when the caller is the owner (directly or action 11).
+
+### 15.2 Error for each failed check (G-15)
+
+| Check | Error |
+|---|---|
+| caller | per §15.1 |
+| `frozen` | `FrozenVault` (checked before pause) |
+| `factory.guardianPaused()` | `Paused` |
+| envelope not `Open` (including unknown id) | `EnvelopeNotOpen` |
+| `block.timestamp ≥ expiresAt` on an exposure-adding function | `EnvelopeExpired` |
+| any malformed argument with no named error: zero amount, `stepIndex == POCKET_STEP_INDEX` where a step is expected, `stepCap > maxStepAmount`, `unitAmount == 0`, `indices.length` 0 or `> FINALIZE_CHUNK`, an index `≥ count`, a bad range, `periodId` mismatch, `newLimit > autoLimit` in `lowerAutoLimit`, `provider == evaluator`, expiry bounds in `openJob`, `maxBlockHeight` bounds, `withdraw` to the vault itself, zero passkey fields, `setMaxPullbackFee(0)`, `agent == evaluator` in `rotateSigners` | `BadParams` |
+| a zero address where an address is required | `ZeroAddress` |
+| `count` out of range | `BadCount` |
+| `validBefore` outside the TTL window | `BadTtl` |
+| payee proof fails | `PayeeNotInPlan` |
+| pocket proof fails | `PocketNotInPlan` |
+| `stepUsed + wanted > stepCap` (and any `stepUsed != 0` in `openJob`) | `StepCapExceeded(stepIndex, used, stepCap, wanted)` |
+| envelope cap sum exceeded | `CapExceeded` |
+| `fundJob` with `b == 0` | `BadParams` |
+| `fundJob` escrow status not `Open`, or `block.timestamp ≥ expiredAt` | `JobNotOpen` |
+| record in the wrong state | `PocketWrongState`, `PullbackWrongState`, `JobWrongState`, `ReservationNotActive` |
+| a time gate not yet reached | `NotExpired` (`finalize`, `forceCloseEnvelope`, `claimJobRefund`), `TooEarly` (`cancelPullback`) |
+| a deadline passed | `Expired` |
+| `executeOwnerAction` with action 0 or `> 17` | `UnknownAction` |
+| `executeOwnerAction` payload that does not decode | the raw `abi.decode` revert (the relayer simulates first; no named error) |
+
+### 15.3 Check order (G-32, G-33)
+
+- **General order** in every state-changing function: (1) caller, (2) `frozen`, (3) `guardianPaused`, (4) record state, (5) time, (6) argument checks, (7) Merkle proof, (8) per-step bound, (9) envelope cap, (10) balance or allowance, (11) checks that need an external view read. Steps that do not apply are skipped. The first failing check decides the error, so tests can assert one exact error.
+- **`registerPocket`:** caller → frozen → paused → envelope `Open` → not expired → `pocketCapBps > 0` (`PocketCapZero`) → `pocket != 0` (`ZeroAddress`) → `envelope.pocket == 0` and `pockets[pocket].envelopeId == 0` (`PocketExists`) → `pocket.code.length == 0` (`NotEoa`) → proof (`PocketNotInPlan`).
+- **`fundJob`:** caller → frozen → paused → job `Opened` (`JobWrongState`) → envelope `Open` → not expired → escrow status `Open` (`JobNotOpen`) → `block.timestamp < expiredAt` (`JobNotOpen`) → `b == expectedBudget` (`BudgetChanged`) → `b > 0` (`BadParams`) → `b ≤ reservedCap` (`BudgetExceedsReserved`) → fees (`UnexpectedFees`) → token (`WrongToken`).
+- The PRDs give the full numbered order for every other function.
+
+### 15.4 Events (G-08, G-09, G-20, G-21)
+
+- `StepUsed(envelopeId, stepIndex, newValue)` is emitted after every change of `stepUsed`: in `reserve`, `reserveWithDigests`, `finalize` (once per call, with the final value, only if it changed), `openJob`, `fundJob`, `cancelJob`, `syncJob` (release and refund branches) and `claimJobRefund`.
+- `ShortfallRecorded(envelopeId, amount, newShortfall)` is emitted whenever an inbound credit records `amount = x − credit > 0`: in `confirmPullback` branches (a) and (b), `syncJob` and `claimJobRefund`.
+- `claimJobRefund` emits `JobRefunded(jobKey, refund, creditedToEnvelope)` and not `JobSynced`. `cancelJob` emits `JobCancelled(jobKey)` and not `JobSynced`. `syncJob` from `Opened` emits `JobSynced(jobKey, 6, false)`.
+- Event argument values where the `.sol` name differs from a §5 cell: `JobRefunded.budget` carries the refund (`budget − settledAmount` on the Czar kind, `budget` on Circle's); `PocketCapExceeded.cap = envelope.cap × pocketCapBps / BPS`; `ManualReturnRecorded.amount` = the credit; `EnvelopeForceClosed.writtenOffPockets` = `writtenOff`; `PocketFunded.fundedTotal` = `funded` after the call.
+- `PasskeySet(keyHash)` with `keyHash = keccak256(abi.encode(qx, qy))`.
+- `Frozen.by` and `AutoLimitLowered.by` are the owner when the call came through `executeOwnerAction`.
+
+### 15.5 Reentrancy, effects order and external reverts (G-23, G-24, G-25)
+
+- **Guarded (`nonReentrant`, OpenZeppelin `ReentrancyGuardTransient`):** `withdraw`, `openEnvelope`, `settle`, `finalize`, `grantPocketGas`, `fundPocket`, `confirmPullback`, `cancelPullback`, `recordManualReturn`, `openJob`, `fundJob`, `cancelJob`, `syncJob`, `claimJobRefund`, `executeOwnerAction`, `sync`. Not guarded: `receive()` and every view.
+- **Passkey dispatch:** every guarded external function is a thin wrapper around an internal `_name(caller, …)`. `executeOwnerAction` is itself guarded and calls the internal forms, so it never re-enters a guarded external function.
+- **Effects before interactions**, with these exact orders:
+  - `openJob`: checks → `reserved`, `stepUsed`, `openJobs` → adapter `create` → store `jobs[jobKey]` (it needs the returned `jobId`) → events.
+  - `fundJob`: checks (including the adapter view reads) → effects → adapter `fund`, which itself does `forceApprove(jobEscrow, b)` → the escrow's `fund` → `forceApprove(jobEscrow, 0)` → event.
+  - `cancelJob`: checks (status read) → effects → adapter `cancel` → event.
+  - `claimJobRefund`: adapter `claimRefund` first, then the `syncJob` refund branch on the new status. This is the one documented exception to effects-first; it is safe because the function is guarded and the escrow is a pinned contract.
+  - `fundPocket`: checks → effects → `forceApprove(GATEWAY_WALLET, amount)` → `depositFor` → `forceApprove(GATEWAY_WALLET, 0)` → event.
+  - `grantPocketGas`: checks → effects → native send → event.
+- **External reverts bubble unchanged** (Circle `ExpiryTooShort`, USDC revert strings, GatewayWallet errors). `@czar/vault-client` includes the USDC, GatewayWallet and both escrow ABIs to decode them.
+
+### 15.6 Ids, job key and job description (G-26, G-27, G-28)
+
+- `envelopeId`, `reservationId` and `pullbackId` start at 1: `id = ++count` (02 §7.1). Id 0 never exists, so a zero record means "unknown".
+- `jobKey = keccak256(abi.encode(address(jobEscrow), jobId))` (02 §7.1).
+- The ERC-8183 `description` is exactly `DESCRIPTION_PREFIX` followed by the 64 lowercase hex characters of `descriptionHash`, with no `0x`: 69 ASCII characters. OpenZeppelin `Strings.toHexString` adds `0x`, so the adapter uses its own fixed-length encoder. 02 §5.2 and JOB-3 say the same.
+
+### 15.7 Time boundaries (G-29)
+
+| Function | Allowed when |
+|---|---|
+| exposure-adding functions | `block.timestamp < expiresAt` |
+| `closeEnvelope` by anyone | `block.timestamp ≥ expiresAt` |
+| `forceCloseEnvelope` | `block.timestamp ≥ expiresAt + FORCE_CLOSE_DELAY` |
+| `finalize` | `block.timestamp > validBefore` |
+| `executeOwnerAction`, `raiseAutoLimit` | `block.timestamp ≤ deadline` |
+| `claimJobRefund` | `block.timestamp ≥ expiredAt` (Circle kind; Czar kind `Funded`), or `≥ expiredAt + CZAR_ESCROW_EVALUATION_GRACE` (Czar kind `Submitted`) |
+| `syncJob` release of an `Opened` job whose escrow is still `Open` | `block.timestamp ≥ expiredAt` |
+| `requestPullback` | `block.number < maxBlockHeight ≤ block.number + MAX_PULLBACK_WINDOW_BLOCKS` |
+| `cancelPullback` | `block.number ≥ maxBlockHeight + PULLBACK_CANCEL_DELAY_BLOCKS` |
+
+### 15.8 Constructor (G-34, G-35)
+
+- Signature: `constructor(address ownerAccount)`. `factory = msg.sender`.
+- Reads `ICzarVaultFactory(msg.sender).networkConfig()` and `.defaults()` once.
+- Reverts `ZeroAddress` if `ownerAccount`, `usdc`, `gatewayWallet`, `gatewayMinter`, `jobEscrow`, `agentSigner`, `autonomySigner` or `evaluator` is zero. Reverts `BadParams` if `jobEscrowKind > 1` or `agentSigner == evaluator`.
+- Sets `maxPullbackFee = DEFAULT_MAX_PULLBACK_FEE` and computes `USDC_DOMAIN_SEPARATOR`, `SL_DOMAIN_SEPARATOR` and `VAULT_DOMAIN_SEPARATOR` from `block.chainid`.
+- **Both escrow kinds ship in Phase 1 bytecode**, selected by the immutable `jobEscrowKind` (testnet: CircleTestnet; mainnet: CzarBase).
+
+### 15.9 `executeOwnerAction` (G-22)
+
+- Order: `passkey.set` (`PasskeyNotSet`) → `block.timestamp ≤ deadline` (`Expired`) → `1 ≤ action ≤ 17` (`UnknownAction`) → digest with the current `ownerActionNonce` → `PasskeyVerifier.verify` (`InvalidPasskeyAssertion`) → `ownerActionNonce++` → dispatch → `OwnerActionExecuted(action, nonce)`, where `nonce` is the value that was signed (before the increment).
+- Action 11 (`RAISE_AUTO_LIMIT`) calls the internal raise with `periodId = block.timestamp / PERIOD_LENGTH`, the `OwnerAction` deadline and an empty `sig`.
+- Dispatched actions run with `caller = owner`, and `openEnvelope` through action 1 sets `approverIsOwner = true`.
+
+### 15.10 Autonomy (G-30, G-31, G-36)
+
+- **`raiseAutoLimit` signature path:** `sig` must pass the same rules as `_agentSigned` (65 bytes, low `s`, `v ∈ {27,28}`, non-zero signer) and recover to `autonomySigner` over `toTypedDataHash(VAULT_DOMAIN_SEPARATOR, keccak256(abi.encode(AUTONOMY_RAISE_TYPEHASH, categoryId, newLimit, periodId, autonomyNonce, deadline)))`. Failure → `BadSigner`.
+- **`setCategoryLimits` increments `autonomyNonce`** (as `lowerAutoLimit` does, RV-030), so a raise signed before a lowering through `setCategoryLimits` can never land. It does not reset `usedInPeriod` or `lastRaiseAt`.
+- **The owner's `openEnvelope` is not bound by `userMax`.** The owner's approval is the bound for owner-opened envelopes (`cap ≤ freeBalance()`); `userMax` bounds the agent's allowance only. `security-and-testing.md` §1 says the same.
+
+### 15.11 Reservations, pockets and small rules (G-38, G-41, G-42, G-43)
+
+- **Digest-mode cleanup:** `digestSlot` entries are deleted only in `_finalizeIfDone`, for `mode == Digest`: recompute `digest_i` for every `i < count` (`count ≤ MAX_DIGEST_MODE_COUNT = 8`) and delete each. `finalize` does not delete per chunk.
+- **Repeat `fundPocket`:** allowed in Phase 1 while `funded + amount ≤ cap × pocketCapBps / BPS` (cumulative). The Phase 2 top-up rule in §5.4 relaxes this to `outstanding`.
+- **`grantPocketGas` to a re-entering pocket:** the native send's re-entry hits the guard and the send fails, so the call reverts `NativeSendFailed`.
+- **`rotateSigners`:** reverts `BadParams` if `agent == evaluator_` (JOB-2 separation).
+- **`freeze` while frozen:** allowed; it sets nothing new, bumps `autonomyNonce` again and emits `Frozen`.
+- **`withdraw`:** not gated by freeze or pause (it is the owner's own money); `to == address(this)` reverts `BadParams`.
+
+### 15.12 Size limits (G-47)
+
+- The factory embeds the vault's creation code (`new CzarVault{salt: …}`), so **the factory's runtime size**, not only the vault's, must stay under 24,576 bytes. The factory limit binds first.
+- T-020 measures both runtime sizes and both initcode sizes. 07 PRD 11 moves vault logic into external linked libraries until both runtimes and both initcodes are under their limits.
 
 ## Change log
 
@@ -598,3 +750,4 @@ All at the 20 Gwei floor (p1-A6), `1 gas = 2 × 10⁻⁸ USDC`. Estimates; measu
 | 2026-10-19 | RV-039 | Routing formulas include settle chunking, `finalize` and the gas sweep; thresholds recomputed. |
 | 2026-10-19 | RV-048, RV-049, RV-056, RV-060 | Derived `Closing`/`DelegateReady`; `writeOffPocket` on `Registered`; `validBefore ≤ expiresAt`; `.sol` canonical, row names aligned. |
 | 2026-10-20 | H1, H2, M1-b (job-path review) | `syncJob` releases `Opened` jobs whose escrow reached `Submitted`/`Completed` unfunded; new `cancelJob` (owner action 17); `fundJob(jobKey, expectedBudget)`; `JobCancelled`, `JobNotCancellable`, `BudgetChanged`; INV-16; state machine. |
+| 2026-10-20 | D88 (contract build readiness) | Contract gap audit closed: binding caller table (§2, §15.1); full constant values and the missing constants (§3); typed records and getters in `ICzarVault.sol` (§4); `GATEWAY_DOMAIN` in the replay hash; exact-length `isValidSignature` parsing; fallback expiry check; `WebAuthnAuth` order note; INV-7 and INV-12 restated; gas figures aligned; new §15 build rules (errors, check order, events, reentrancy and effects order, ids, description format, time boundaries, constructor, owner-action dispatch, autonomy, size limits). |

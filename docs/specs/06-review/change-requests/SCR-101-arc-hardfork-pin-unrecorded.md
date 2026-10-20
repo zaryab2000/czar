@@ -5,7 +5,7 @@
 | ID | SCR-101 |
 | Filed by | Czar builder (tier 1), 2026-10-19 |
 | Spec and section | `docs/specs/05-build-plan/phase-1-tasks.md` T-003 "Review fixes" (RV-058) |
-| Status | Open |
+| Status | Open (2026-10-20, D88 triage: needs Zaryab) |
 
 ## Problem
 - T-003 says to pin `arc-anvil --hardfork` to "the hardfork Arc testnet runs (read from the chain at task time and recorded)". No spec records the value, and no spec says how to read it from the chain.
@@ -24,4 +24,6 @@
 - T-003 (pin only; the rest is built), T-010, T-021, T-022
 
 ## Decision
-- 
+- **Still open; needs a testnet RPC call, which the build containers cannot make** (the 2026-10-20 attempt from the spec session was refused by the network proxy too).
+- **Does not block contract code.** The 07 PRDs run under `FOUNDRY_PROFILE=arc` with Arc Foundry's default (newest) hardfork; the shared-libraries suite passes there, with the P-256 precompile live.
+- **Action for Zaryab:** read the hardfork Arc testnet runs (record the method as a new A9 fact), then set `hardfork = "arc:zeroN"` in `[profile.arc]` and on CI's `arc-anvil` command. Needed before the M1 exit sign-off.

@@ -7,6 +7,9 @@ pragma solidity 0.8.30;
 /// @dev Specification: docs/specs/03-smart-contracts/job-escrow-adapter.md. Implemented as an internal library
 ///      selected by the vault's immutable `jobEscrowKind`; this interface documents the surface and the
 ///      two external ABIs it targets. No implementation code here.
+///      D88 (G-05): IJobEscrowAdapter is a type source (JobEscrowKind, EscrowStatus) and documentation only.
+///      Nothing inherits it; an internal library cannot implement an interface. The library's full function list,
+///      including create, fund and claimRefund, is in job-escrow-adapter.md §3.
 interface IJobEscrowAdapter {
     /// @notice Which external ABI the vault targets.
     enum JobEscrowKind { CircleTestnet, CzarBase }
@@ -98,6 +101,8 @@ interface ICzarJobEscrowClient {
     ) external returns (uint256);
     function fund(uint256 jobId, address expectedToken, uint256 expectedBudget, bytes calldata optParams) external;
     function claimRefund(uint256 jobId) external;
+    /// @notice Client reject while Open, used by cancelJob (H2; same signature as Circle's instance, D88 G-06).
+    function reject(uint256 jobId, bytes32 reason, bytes calldata optParams) external;
     function platformFeeBP() external view returns (uint256);
     function evaluatorFeeBP() external view returns (uint256);
     /// @notice Read by the adapter for the Czar kind (budget, status, paymentToken, settledAmount; RV-009).

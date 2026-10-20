@@ -6,6 +6,8 @@ pragma solidity 0.8.30;
 /// @dev Specification: docs/specs/03-smart-contracts/czar-vault-factory.md. Amended 2026-10-19 (RV-015, D73):
 ///      no version register (a new vault version is a new factory); the vault address depends only on the
 ///      factory and the owner; default signers change only through a 48 h timelock.
+///      Amended 2026-10-20 (D88): applyGuardian takes the address it was queued with; guardian() getter;
+///      admin cancelChange.
 interface ICzarVaultFactory {
     struct Defaults {
         address agentSigner;
@@ -39,6 +41,7 @@ interface ICzarVaultFactory {
         bytes32 indexed changeId, address agentSigner, address autonomySigner, address evaluator, uint64 eta
     );
     event DefaultsSet(address agentSigner, address autonomySigner, address evaluator);
+    event ChangeCancelled(bytes32 indexed changeId);
 
     error VaultExists();
     error ZeroAddress();
@@ -69,14 +72,19 @@ interface ICzarVaultFactory {
     function networkConfig() external view returns (NetworkConfig memory);
     /// @notice Admin queues a guardian change (48 h timelock).
     function queueGuardian(address newGuardian) external returns (bytes32 changeId);
-    /// @notice Anyone applies a queued guardian change after its eta.
-    function applyGuardian(bytes32 changeId) external;
+    /// @notice Anyone applies a queued guardian change after its eta; `newGuardian` must match the queued payload
+    ///         hash keccak256(abi.encode(newGuardian)) (D88, as applyDefaults).
+    function applyGuardian(bytes32 changeId, address newGuardian) external;
     /// @notice Admin queues new signer defaults for future vaults (48 h timelock, RV-015).
     function queueDefaults(address agentSigner, address autonomySigner, address evaluator)
         external
         returns (bytes32 changeId);
     /// @notice Anyone applies queued defaults after their eta; arguments must match the queued payload hash.
     function applyDefaults(bytes32 changeId, address agentSigner, address autonomySigner, address evaluator) external;
+    /// @notice Admin removes a queued change before it is applied (D88).
+    function cancelChange(bytes32 changeId) external;
     /// @notice Current defaults.
     function defaults() external view returns (Defaults memory);
+    /// @notice Current guardian (pause key, K6).
+    function guardian() external view returns (address);
 }
