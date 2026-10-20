@@ -48,6 +48,8 @@ interface ICzarVaultFactory {
     error NotGuardian();
     error TooEarly();
     error UnknownChange();
+    /// @notice jobEscrowKind > 1, or a default agent signer equal to the default evaluator (D88; the vault would refuse both).
+    error BadParams();
 
     /// @notice Deploys the vault for `ownerAccount` at keccak256(abi.encode(ownerAccount)) as CREATE2 salt.
     ///         Anyone may call; the vault's owner is always `ownerAccount` and its signers are the current defaults.

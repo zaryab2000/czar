@@ -509,6 +509,7 @@ Approved by Zaryab. Each entry cites the review finding it resolves.
 - **Decided (adapter and tests):**
   12. `library JobEscrowAdapter` has binding internal signatures; `IJobEscrowAdapter` is a type source only; `ICzarJobEscrowClient` gains `reject`.
   13. Vault tests use a one-ledger USDC mock (`MockArcUSDC`: native balance is the USDC balance, as on Arc), a `MockVaultFactory`, and a `CzarVaultHarness` for vectors the public API cannot produce.
+- **Independent review (same day):** a fresh reviewer found 16 defects in the first D88 draft; all are fixed. The two high ones: `abi.decode` also reverts on out-of-range narrow head words, so `isValidSignature` range-checks them; and spec 01 §7.1 still gave the owner the agent-only calls. Also: factory `BadParams` for a job-escrow kind above 1 or an agent signer equal to the evaluator; `Job.expiredAt` stored; `raiseAutoLimit` check order.
 - **Left to Zaryab:** Gate 0 checks G0-08 and G0-09 (need testnet RPC) and SCR-101 (Arc hardfork name).
 - **Amends:** D42 (the size rule now covers the factory), D73 (factory constructor and change lifecycle), RV-030 (adds `setCategoryLimits`).
 

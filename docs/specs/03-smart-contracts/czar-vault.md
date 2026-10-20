@@ -19,7 +19,8 @@ Matches spec 01 §7.1 exactly.
 | withdraw to any address | yes | no | no | no | no |
 | open envelope above auto-limit | yes | no | no | no | no |
 | open envelope within auto-limit allowance | yes | yes | no | no | no |
-| set `userMax[category]`, payee rules | yes | no | no | no | no |
+| set `userMax[category]` and `autoLimit` (`setCategoryLimits`) | yes | no | no | no | no |
+| force-close an envelope after `expiresAt + FORCE_CLOSE_DELAY` | yes | no | no | no | no |
 | raise `autoLimit[category]` (≤ `userMax`, ≤ weekly step) | yes | no | yes (signed, relayed) | no | no |
 | lower `autoLimit` | yes | yes | yes | no | no |
 | freeze / unfreeze | yes / yes | freeze only | no | pause only (via factory) | no |
@@ -88,7 +89,7 @@ Matches spec 01 §7.1 exactly.
 | `CZAR_ESCROW_EVALUATION_GRACE` | `1 hours` | Czar-instance `claimRefund` on `Submitted` (`ERC8183.sol` line 78; §5.5) |
 | `REQUIRE_UV` | `true` | WebAuthn user verification required (§7) |
 
-- Every constant above lives in `contracts/src/libraries/CzarConstants.sol` (07 PRD 01), which is checked against the vectors file by test.
+- Every **constant** above lives in `contracts/src/libraries/CzarConstants.sol` (07 PRD 01), which is checked against the vectors file by test. The immutables (`USDC`, `GATEWAY_*`, the three domain separators) are set in the constructor (§15.8).
 
 ## 4. Storage layout
 
@@ -101,7 +102,7 @@ Matches spec 01 §7.1 exactly.
 | `passkey` | `struct {bytes32 qx; bytes32 qy; bytes32 rpIdHash; bool set}` | D30 fallback | owner |
 | `frozen` | `bool` | user freeze | owner, agent (set only) |
 | `maxPullbackFee` | `uint256` | current bound on `requestPullback.maxFee`; starts at `DEFAULT_MAX_PULLBACK_FEE`, `≤ MAX_PULLBACK_FEE_CEILING` (D81) | owner (`setMaxPullbackFee`) |
-| `autonomyNonce`, `ownerActionNonce` | `uint256` | replay protection for 02 §6.2 types; `autonomyNonce` also increments on `freeze()` and every `lowerAutoLimit`, so a raise signed before a freeze or a lowering can never land after it (RV-030) | vault |
+| `autonomyNonce`, `ownerActionNonce` | `uint256` | replay protection for 02 §6.2 types; `autonomyNonce` also increments on `freeze()`, every `lowerAutoLimit` and every `setCategoryLimits` (D88), so a raise signed before a freeze or a lowering can never land after it (RV-030) | vault |
 | `envelopeCount`, `reservationCount`, `pullbackCount` | `uint64` | counters | vault |
 | `committedTotal` | `uint256` | Σ over open envelopes of `cap − spent − pocketOutstanding − jobEscrowed − shortfall` | vault |
 | `limits[categoryId]` | `struct {uint256 userMax; uint256 autoLimit; uint64 periodId; uint256 usedInPeriod; uint64 lastRaiseAt}` | earned autonomy; `lastRaiseAt` is the timestamp of the last raise (RV-031) | owner, autonomy, agent (lower) |
@@ -113,6 +114,7 @@ Matches spec 01 §7.1 exactly.
 | `pullbacks[pullbackId]` | `struct {address pocket; uint256 value; uint256 maxFee; uint256 maxBlockHeight; bytes32 salt; bytes32 transferSpecHash; uint64 requestedAtBlock; uint8 state; bool recovery}` | 02 §4.10; `recovery = true` for a pullback of a `Closed` pocket, credited to free balance (RV-004) | vault |
 | `jobs[jobKey]` | `struct {uint64 envelopeId; uint32 stepIndex; uint256 jobId; address provider; uint256 reservedCap; uint256 budget; uint8 state}` | 02 §4.11 | vault |
 
+- **`Job.expiredAt`:** stored at `openJob` from its argument, so `fundJob`, `syncJob` and `claimJobRefund` read the expiry without an extra escrow call (D88 review).
 - **Record types (D88, G-13, G-14):** the records are `ICzarVault.Envelope`, `Reservation`, `Pocket`, `Pullback`, `Job`, `CategoryLimits` and `Passkey`. Their field order in the interface is the storage packing order and is binding; where a row above lists the fields in another order or with `uint8 state`, the interface wins (states are the interface enums, same ABI). `digestSlot` keeps the private struct above.
 - No arrays indexed by user input. Every loop is bounded by a constant (`FINALIZE_CHUNK`, `MAX_AUTHORIZATIONS_PER_RESERVATION`).
 - Saturating helper `sat(a, b) = a > b ? a − b : 0` is used wherever a remaining amount is computed from two counters that can legitimately cross (free balance, remaining allowance); a plain `−` is used only where an invariant guarantees no underflow (RV-008, RV-011).
@@ -130,7 +132,7 @@ Format: signature; caller; preconditions in order; state changes; external calls
 | `sync()` | anyone | — | none (free balance is live: `sat(balanceOf, committedTotal)`) | `balanceOf` | `BalanceSynced(balance, committedTotal)` | 10k |
 | `receive()` payable | anyone | — | none | — | `NativeReceived(sender, weiValue)` | 3k |
 | `withdraw(address to, uint256 amount)` | owner | `to != 0` (p1-A8); `amount ≤ freeBalance()` | none (balance drops) | `USDC.safeTransfer(to, amount)` | `Withdrawn(to, amount)`; `ZeroAddress`, `InsufficientFree(free, amount)` | 45k |
-| `setCategoryLimits(bytes32 categoryId, uint256 userMax, uint256 autoLimit)` | owner | `autoLimit ≤ userMax` | `limits[categoryId].userMax/autoLimit` | — | `LimitsSet(categoryId, userMax, autoLimit)` (owner is implied; RV-060); `AutoLimitAboveUserMax` | 48k |
+| `setCategoryLimits(bytes32 categoryId, uint256 userMax, uint256 autoLimit)` | owner | `autoLimit ≤ userMax` | `limits[categoryId].userMax/autoLimit`; `autonomyNonce++` (D88, §15.10) | — | `LimitsSet(categoryId, userMax, autoLimit)` (owner is implied; RV-060); `AutoLimitAboveUserMax` | 48k |
 | `freeze()` | owner or agent | — | `frozen = true`; `autonomyNonce++` (invalidates every signed, unrelayed `AutonomyRaise`, RV-030) | — | `Frozen(by)` | 27k |
 | `unfreeze()` | owner | — | `frozen = false` | — | `Unfrozen()` | 25k |
 | `rotateSigners(address agent, address autonomy, address evaluator_)` | owner | none zero | roles | — | `SignersRotated(agent, autonomy, evaluator_)`; `ZeroAddress` | 30k |
@@ -235,12 +237,13 @@ Common helper `_agentSigned(digest, sig65) → bool`: length 65, `s ≤ SECP256K
 |---|---|---|
 | fallback | `65` | none (raw `r ‖ s ‖ v`) |
 | any tagged kind | `≥ 32` | otherwise `INVALID` |
-| `USDC_3009` | `416` | word 8 (offset of `agentSig`) `== 0x120`; word 9 (its length) `== 65` |
-| `GATEWAY_BURN` | `224` | word 2 (offset) `== 0x60`; word 3 (length) `== 65` |
-| `SL_RECEIPT` | `672 + 32 × ⌈L / 32⌉`, where `L` is the `originAsserted` byte length | word 1 (offset of the receipt tuple) `== 0x60`; word 2 (offset of `agentSig`) `== 0x60 + 0x1c0 + 32 × ⌈L / 32⌉`; tuple word 4 (offset of `originAsserted`, relative to the tuple) `== 0x1a0`; `L < signature.length` (checked first, so the length arithmetic cannot overflow); the `agentSig` length word `== 65`; for the vector's 24-byte origin the length is 704 |
+| `USDC_3009` | `416` | word 8 (offset of `agentSig`) `== 0x120`; word 9 (its length) `== 65`; range: word 1 `< 2^64` (`reservationId`), word 2 `< 2^32` (`index`), word 3 `< 2^160` (`to`) |
+| `GATEWAY_BURN` | `224` | word 2 (offset) `== 0x60`; word 3 (length) `== 65`; range: word 1 `< 2^64` (`pullbackId`) |
+| `SL_RECEIPT` | first `≥ 672` (so the length word can be read), then exactly `672 + 32 × ⌈L / 32⌉`, where `L` is the `originAsserted` byte length | word 1 (offset of the receipt tuple) `== 0x60`; tuple word 4 (offset of `originAsserted`, relative to the tuple) `== 0x1a0`; `L < signature.length` (checked before the length arithmetic, so it cannot overflow); word 2 (offset of `agentSig`) `== 0x60 + 0x1c0 + 32 × ⌈L / 32⌉`; the `agentSig` length word `== 65`; range on tuple words: 3 `< 2^16` (`statusCode`), 6, 7, 8 and 12 `< 2^64` (`tRequest`, `tPaymentSigned`, `tComplete`, `createdAt`), 9 and 11 `< 2^8` (`outcome`, `disclosure`); for the vector's 24-byte origin the length is 704 |
 
-- Words are 32-byte, numbered from 0 at the start of `signature`. `L` is read from the word at byte `0x60 + 0x1a0` (the string's length word). All lengths above were checked with viem against `abi.encode` output for `L` = 0, 24, 32, 33 and 256.
-- With these checks `abi.decode` cannot revert. The 07 PRD for signatures gives the exact code.
+- Words are 32-byte, numbered from 0 at the start of `signature`; tuple word `i` is at byte `0x60 + 32 × i`. `L` is the word at byte `0x200` (the string's length word). All lengths and offsets were checked with viem against `abi.encode` output for `L` = 0, 1, 24, 31, 32, 33 and 256.
+- **Why the range rows exist (D88 review):** ABI coder v2 reverts when a narrow type's head word holds a value outside the type (a `uint32` word with a high byte set). The range checks make every such blob `INVALID` before decoding. Padding bytes after `agentSig` and the bytes inside `originAsserted` are never checked by the decoder, so they need no rule.
+- With the length, offset and range checks, `abi.decode` cannot revert. The 07 PRD for signatures gives the exact code; a fuzz test feeds random bytes behind each kind tag and asserts the call never reverts.
 
 ### 6.1 `USDC_3009` (02 §6.3.1)
 
@@ -524,7 +527,7 @@ stateDiagram-v2
 | INV-7 | For every pocket not `Closed`: `pendingPullback ≤ outstanding ≤ funded ≤ envelope.cap × pocketCapBps / BPS`, including after a cancelled record is confirmed late (RV-036). A `Closed` pocket has `outstanding = 0`, and its `pendingPullback` equals the summed `value` of its `Pending` non-recovery records (records left `Pending` by `forceCloseEnvelope` resolve later through `confirmPullback` branch (c) or `cancelPullback`; D88, G-17). |
 | INV-8 | `envelope.reserved = Σ_{active or finalizing reservations of the envelope} (count − popcount(doneMask)) × unitAmount + Σ_{opened, unreleased jobs} reservedCap` while the envelope is `Open`; `0` once it is `Closed`. |
 | INV-9 | `autoLimit[c] ≤ userMax[c]` for every category (RV-008). `usedInPeriod[c]` may exceed `autoLimit[c]` after a lowering; the remaining allowance is always computed as `sat(autoLimit, usedInPeriod)`, so no allowance computation can revert with an arithmetic panic. |
-| INV-10 | Counters (`envelopeCount`, `reservationCount`, `pullbackCount`, nonces) only increase. `autonomyNonce` increases on every raise, every lowering and every `freeze()` (RV-030). |
+| INV-10 | Counters (`envelopeCount`, `reservationCount`, `pullbackCount`, nonces) only increase. `autonomyNonce` increases on every raise, every lowering, every `freeze()` and every `setCategoryLimits` (RV-030, D88). |
 | INV-11 | `isValidSignature` never returns `MAGIC` for a digest that is not the recomputation of a registered kind from fields the vault controls (no bare `ecrecover` acceptance). For `SL_RECEIPT` the recomputation is the SL `Receipt` struct hash, and the agent signature is over the vault-bound `ReceiptAttestation` (RV-013). |
 | INV-12 | For every **open** envelope and step (after close, `syncJob` and `cancelJob` no longer touch `stepUsed`; D88, G-18): `stepUsed[e][s] ≤ stepCap(s)`, and `stepUsed[e][s] = Σ_{reservations of s} (settled + unreleased indices) × unitAmount + Σ_{jobs of s} (reservedCap if Opened; budget if Funded/Submitted/Completed; budget − refund if Refunded; 0 if Released)` (RV-002). |
 | INV-13 | A reservation is `Final` if and only if `popcount(doneMask) == count`; `openReservations` equals the number of the envelope's reservations that are not `Final` (RV-001). |
@@ -638,6 +641,8 @@ These rules close the gaps the 2026-10-20 contract gap audit found (ids G-nn). T
 | record in the wrong state | `PocketWrongState`, `PullbackWrongState`, `JobWrongState`, `ReservationNotActive` |
 | a time gate not yet reached | `NotExpired` (`finalize`, `forceCloseEnvelope`, `claimJobRefund`), `TooEarly` (`cancelPullback`) |
 | a deadline passed | `Expired` |
+| `raiseAutoLimit` with `newLimit > userMax` | `AutoLimitAboveUserMax` (§5.6's `RaiseTooLarge` is only for the step bound) |
+| `raiseAutoLimit` signature that does not recover to `autonomySigner`, or an empty `sig` from a caller who is not the owner | `BadSigner` |
 | `executeOwnerAction` with action 0 or `> 17` | `UnknownAction` |
 | `executeOwnerAction` payload that does not decode | the raw `abi.decode` revert (the relayer simulates first; no named error) |
 
@@ -659,7 +664,7 @@ These rules close the gaps the 2026-10-20 contract gap audit found (ids G-nn). T
 
 ### 15.5 Reentrancy, effects order and external reverts (G-23, G-24, G-25)
 
-- **Guarded (`nonReentrant`, OpenZeppelin `ReentrancyGuardTransient`):** `withdraw`, `openEnvelope`, `settle`, `finalize`, `grantPocketGas`, `fundPocket`, `confirmPullback`, `cancelPullback`, `recordManualReturn`, `openJob`, `fundJob`, `cancelJob`, `syncJob`, `claimJobRefund`, `executeOwnerAction`, `sync`. Not guarded: `receive()` and every view.
+- **Guarded (`nonReentrant`, OpenZeppelin `ReentrancyGuardTransient`):** `withdraw`, `openEnvelope`, `settle`, `finalize`, `grantPocketGas`, `fundPocket`, `confirmPullback`, `cancelPullback`, `recordManualReturn`, `openJob`, `fundJob`, `cancelJob`, `syncJob`, `claimJobRefund`, `executeOwnerAction`, `sync`. Every other function is not guarded: `receive()`, every view, and the state-changing functions that make no external call other than the factory's `guardianPaused()` view (`setCategoryLimits`, `freeze`, `unfreeze`, `rotateSigners`, `setPasskey`, `setMaxPullbackFee`, `closeEnvelope`, `forceCloseEnvelope`, `reserve`, `reserveWithDigests`, `registerPocket`, `requestPullback`, `writeOffPocket`, `raiseAutoLimit`, `lowerAutoLimit`).
 - **Passkey dispatch:** every guarded external function is a thin wrapper around an internal `_name(caller, …)`. `executeOwnerAction` is itself guarded and calls the internal forms, so it never re-enters a guarded external function.
 - **Effects before interactions**, with these exact orders:
   - `openJob`: checks → `reserved`, `stepUsed`, `openJobs` → adapter `create` → store `jobs[jobKey]` (it needs the returned `jobId`) → events.
@@ -685,7 +690,7 @@ These rules close the gaps the 2026-10-20 contract gap audit found (ids G-nn). T
 | `forceCloseEnvelope` | `block.timestamp ≥ expiresAt + FORCE_CLOSE_DELAY` |
 | `finalize` | `block.timestamp > validBefore` |
 | `executeOwnerAction`, `raiseAutoLimit` | `block.timestamp ≤ deadline` |
-| `claimJobRefund` | `block.timestamp ≥ expiredAt` (Circle kind; Czar kind `Funded`), or `≥ expiredAt + CZAR_ESCROW_EVALUATION_GRACE` (Czar kind `Submitted`) |
+| `claimJobRefund` | `block.timestamp ≥ expiredAt` (Circle kind; Czar kind with escrow status `Funded`), or `≥ expiredAt + CZAR_ESCROW_EVALUATION_GRACE` (Czar kind with escrow status `Submitted`). The status is the **escrow's**, read with `readOutcome` before the time check, not the vault's record, which may still say `Funded`; `expiredAt` is the stored `Job.expiredAt` |
 | `syncJob` release of an `Opened` job whose escrow is still `Open` | `block.timestamp ≥ expiredAt` |
 | `requestPullback` | `block.number < maxBlockHeight ≤ block.number + MAX_PULLBACK_WINDOW_BLOCKS` |
 | `cancelPullback` | `block.number ≥ maxBlockHeight + PULLBACK_CANCEL_DELAY_BLOCKS` |
@@ -706,6 +711,7 @@ These rules close the gaps the 2026-10-20 contract gap audit found (ids G-nn). T
 
 ### 15.10 Autonomy (G-30, G-31, G-36)
 
+- **`raiseAutoLimit` check order:** frozen (`FrozenVault`) → paused (`Paused`) → `block.timestamp ≤ deadline` (`Expired`) → `periodId == block.timestamp / PERIOD_LENGTH` (`BadParams`) → signer (`BadSigner`): an empty `sig` is accepted only when the caller is the owner; any other `sig` must verify as below → `lastRaiseAt == 0 || block.timestamp ≥ lastRaiseAt + PERIOD_LENGTH` (`RaiseAlreadyThisPeriod`) → `newLimit > autoLimit` (`RaiseNotAbove`) → `newLimit ≤ userMax` (`AutoLimitAboveUserMax`) → `newLimit − autoLimit ≤ userMax × MAX_RAISE_STEP_BPS / BPS` (`RaiseTooLarge`).
 - **`raiseAutoLimit` signature path:** `sig` must pass the same rules as `_agentSigned` (65 bytes, low `s`, `v ∈ {27,28}`, non-zero signer) and recover to `autonomySigner` over `toTypedDataHash(VAULT_DOMAIN_SEPARATOR, keccak256(abi.encode(AUTONOMY_RAISE_TYPEHASH, categoryId, newLimit, periodId, autonomyNonce, deadline)))`. Failure → `BadSigner`.
 - **`setCategoryLimits` increments `autonomyNonce`** (as `lowerAutoLimit` does, RV-030), so a raise signed before a lowering through `setCategoryLimits` can never land. It does not reset `usedInPeriod` or `lastRaiseAt`.
 - **The owner's `openEnvelope` is not bound by `userMax`.** The owner's approval is the bound for owner-opened envelopes (`cap ≤ freeBalance()`); `userMax` bounds the agent's allowance only. `security-and-testing.md` §1 says the same.
@@ -715,7 +721,7 @@ These rules close the gaps the 2026-10-20 contract gap audit found (ids G-nn). T
 - **Digest-mode cleanup:** `digestSlot` entries are deleted only in `_finalizeIfDone`, for `mode == Digest`: recompute `digest_i` for every `i < count` (`count ≤ MAX_DIGEST_MODE_COUNT = 8`) and delete each. `finalize` does not delete per chunk.
 - **Repeat `fundPocket`:** allowed in Phase 1 while `funded + amount ≤ cap × pocketCapBps / BPS` (cumulative). The Phase 2 top-up rule in §5.4 relaxes this to `outstanding`.
 - **`grantPocketGas` to a re-entering pocket:** the native send's re-entry hits the guard and the send fails, so the call reverts `NativeSendFailed`.
-- **`rotateSigners`:** reverts `BadParams` if `agent == evaluator_` (JOB-2 separation).
+- **`rotateSigners`:** reverts `BadParams` if `agent == evaluator_` (spec 01 §7, key table, K7 row: "separate from K3").
 - **`freeze` while frozen:** allowed; it sets nothing new, bumps `autonomyNonce` again and emits `Frozen`.
 - **`withdraw`:** not gated by freeze or pause (it is the owner's own money); `to == address(this)` reverts `BadParams`.
 
@@ -751,3 +757,4 @@ These rules close the gaps the 2026-10-20 contract gap audit found (ids G-nn). T
 | 2026-10-19 | RV-048, RV-049, RV-056, RV-060 | Derived `Closing`/`DelegateReady`; `writeOffPocket` on `Registered`; `validBefore ≤ expiresAt`; `.sol` canonical, row names aligned. |
 | 2026-10-20 | H1, H2, M1-b (job-path review) | `syncJob` releases `Opened` jobs whose escrow reached `Submitted`/`Completed` unfunded; new `cancelJob` (owner action 17); `fundJob(jobKey, expectedBudget)`; `JobCancelled`, `JobNotCancellable`, `BudgetChanged`; INV-16; state machine. |
 | 2026-10-20 | D88 (contract build readiness) | Contract gap audit closed: binding caller table (§2, §15.1); full constant values and the missing constants (§3); typed records and getters in `ICzarVault.sol` (§4); `GATEWAY_DOMAIN` in the replay hash; exact-length `isValidSignature` parsing; fallback expiry check; `WebAuthnAuth` order note; INV-7 and INV-12 restated; gas figures aligned; new §15 build rules (errors, check order, events, reentrancy and effects order, ids, description format, time boundaries, constructor, owner-action dispatch, autonomy, size limits). |
+| 2026-10-20 | D88 (independent review) | `isValidSignature` range checks on narrow head words and a minimum length for `SL_RECEIPT`; `raiseAutoLimit` check order and errors; unguarded functions listed; `claimJobRefund` gate uses the escrow status; `Job.expiredAt`; `setCategoryLimits` in the nonce rows and INV-10; role-table rows for `setCategoryLimits` and `forceCloseEnvelope`; citations fixed. |

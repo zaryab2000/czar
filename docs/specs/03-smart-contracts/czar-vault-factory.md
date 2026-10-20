@@ -15,6 +15,7 @@
 | `createVault(ownerAccount)` | yes | yes | yes. The caller has no power over the result: the vault's owner is always `ownerAccount`, its signers are the factory's current defaults, and its address depends only on `ownerAccount`. In practice the app calls it from the owner's smart account or Czar's onboarding relayer does (one rule; the earlier "Czar-signed onboarding voucher" wording is superseded by RV-015) |
 | queue / apply default signers for new vaults (`agentSigner`, `autonomySigner`, `evaluator`) | queue (timelocked, 48 h) | no | apply after `eta` |
 | queue / apply guardian address | queue (timelocked, 48 h) | no | apply after `eta` |
+| cancel a queued change (`cancelChange`, D88) | yes | no | no |
 | `pause()` / `unpause()` (global stop of spending) | no | yes | no |
 | read `guardianPaused()`, `vaultOf(owner)`, `predictVault(owner)`, `networkConfig()`, `defaults()` | — | — | yes |
 
@@ -30,7 +31,8 @@
 | `FACTORY_SALT` | `keccak256("czar.vault-factory.v1")` = `0x0ad56c47d1390eb2b25c1d609e78e0da2533dee038d9f7017468cf5ed8da81dc` | CREATE2 salt for deploying the factory through the Arachnid deployer (D88, G-49) |
 
 **Constructor (D88, G-46):** `constructor(NetworkConfig memory cfg, Defaults memory initialDefaults, address guardian_, address admin_) Ownable(admin_)`.
-- Reverts `ZeroAddress` if `cfg.usdc`, `cfg.gatewayWallet`, `cfg.gatewayMinter`, `cfg.jobEscrow`, any of the three defaults, `guardian_` or `admin_` is zero.
+- Reverts `ZeroAddress` if `cfg.usdc`, `cfg.gatewayWallet`, `cfg.gatewayMinter`, `cfg.jobEscrow`, any of the three defaults, `guardian_` or `admin_` is zero. The admin is checked inside the base-constructor argument, `Ownable(_nonZero(admin_))`, because `Ownable`'s constructor runs before this body and would otherwise revert first with `OwnableInvalidOwner(address(0))`.
+- Reverts `BadParams` if `cfg.jobEscrowKind > 1` or `initialDefaults.agentSigner == initialDefaults.evaluator`: every vault constructor refuses both (`czar-vault.md` §15.8), so a factory built with them could never create a vault (D88 review).
 - The admin is set explicitly because, under the Arachnid CREATE2 deployer, `msg.sender` is the deployer contract `0x4e59…956C`, which must never own the factory. No `acceptOwnership` step is needed at deploy; later transfers use Ownable2Step.
 - `guardianPaused` starts `false`; `changeNonce` starts 0.
 
@@ -54,8 +56,8 @@
 | `createVault(address ownerAccount) → address vault` | anyone | `ownerAccount != 0`; `vaultOf[ownerAccount] == 0` | deploy `new CzarVault{salt: keccak256(abi.encode(ownerAccount))}(ownerAccount)`; the vault's constructor reads `networkConfig()` and `defaults()` from `msg.sender`; `vaultOf`, `isVault` | CREATE2 | `VaultCreated(ownerAccount, vault, VAULT_VERSION, agentSigner, autonomySigner, evaluator)`; `VaultExists`, `ZeroAddress` | ≈ 2.5M (vault deployment; measure) |
 | `predictVault(address ownerAccount) → address` (view) | anyone | — | — (`keccak256(0xff ‖ factory ‖ keccak256(abi.encode(ownerAccount)) ‖ keccak256(creationCode ‖ abi.encode(ownerAccount)))`) | — | — | 2k |
 | `pause()` / `unpause()` | guardian | — | `guardianPaused` | — | `GuardianPaused(by)` / `GuardianUnpaused(by)`; `NotGuardian` | 25k |
-| `queueGuardian(address newGuardian)` / `applyGuardian(changeId, newGuardian)` | admin / anyone after `eta` | queue: `newGuardian != 0`. apply: change exists with `kind == 1` (else `UnknownChange`); `block.timestamp ≥ eta` (else `TooEarly`); `keccak256(abi.encode(newGuardian)) == payloadHash` (else `UnknownChange`) (D88, G-44: the queue stores only a hash, so apply takes the address, as `applyDefaults` does) | queue: store `{1, eta, payloadHash}`. apply: `guardian = newGuardian`; delete the change | — | `GuardianQueued(changeId, newGuardian, eta)`, `GuardianChanged(old, new)`; `TooEarly`, `UnknownChange`, `ZeroAddress` | 50k |
-| `queueDefaults(address agent, address autonomy, address evaluator)` / `applyDefaults(changeId, agent, autonomy, evaluator)` | admin / anyone after `eta` | none zero; `keccak256(abi.encode(agent, autonomy, evaluator)) == payloadHash`; timelock | `defaults` | — | `DefaultsQueued(changeId, agent, autonomy, evaluator, eta)`, `DefaultsSet(agent, autonomy, evaluator)`; `TooEarly`, `UnknownChange`, `ZeroAddress` | 55k |
+| `queueGuardian(address newGuardian)` / `applyGuardian(changeId, newGuardian)` | admin / anyone after `eta` | queue: `newGuardian != 0`. apply: `newGuardian != 0` (`ZeroAddress`); change exists with `kind == 1` (else `UnknownChange`); `block.timestamp ≥ eta` (else `TooEarly`); `keccak256(abi.encode(newGuardian)) == payloadHash` (else `UnknownChange`) (D88, G-44: the queue stores only a hash, so apply takes the address, as `applyDefaults` does) | queue: store `{1, eta, payloadHash}`. apply: `guardian = newGuardian`; delete the change | — | `GuardianQueued(changeId, newGuardian, eta)`, `GuardianChanged(old, new)`; `TooEarly`, `UnknownChange`, `ZeroAddress` | 50k |
+| `queueDefaults(address agent, address autonomy, address evaluator)` / `applyDefaults(changeId, agent, autonomy, evaluator)` | admin / anyone after `eta` | none zero (`ZeroAddress`); queue: `agent != evaluator` (`BadParams`, D88); apply: change exists with `kind == 2`, `keccak256(abi.encode(agent, autonomy, evaluator)) == payloadHash` (`UnknownChange`); timelock (`TooEarly`) | `defaults` | — | `DefaultsQueued(changeId, agent, autonomy, evaluator, eta)`, `DefaultsSet(agent, autonomy, evaluator)`; `TooEarly`, `UnknownChange`, `ZeroAddress` | 55k |
 | `cancelChange(bytes32 changeId)` | admin | change exists (else `UnknownChange`) | delete the change | — | `ChangeCancelled(changeId)`; `UnknownChange` | 10k |
 | `guardian()` (view) | anyone | — | — | — | — | 2k |
 | `transferOwnership` / `acceptOwnership` | admin / pending | Ownable2Step | | | OZ events | |
@@ -68,7 +70,7 @@
 
 ## 6. State machine
 
-Factory state is a pause flag plus a timelock queue: `Unpaused ⇄ Paused` by the guardian (`GuardianPaused`/`GuardianUnpaused`); guardian and defaults changes go `Queued → Applied` after `ADMIN_TIMELOCK`.
+Factory state is a pause flag plus a timelock queue: `Unpaused ⇄ Paused` by the guardian (`GuardianPaused`/`GuardianUnpaused`); guardian and defaults changes go `Queued → Applied` after `ADMIN_TIMELOCK`, or `Queued → Cancelled` by the admin at any time before they apply (D88).
 
 ## 7. Events and errors
 
@@ -81,7 +83,7 @@ Factory state is a pause flag plus a timelock queue: `Unpaused ⇄ Paused` by th
 | `DefaultsQueued` | `(bytes32 indexed changeId, address agentSigner, address autonomySigner, address evaluator, uint64 eta)` |
 | `DefaultsSet` | `(address agentSigner, address autonomySigner, address evaluator)` |
 
-Errors: `VaultExists()`, `ZeroAddress()`, `NotGuardian()`, `TooEarly()`, `UnknownChange()`. (`VersionRetired()` is superseded by D73.)
+Errors: `VaultExists()`, `ZeroAddress()`, `NotGuardian()`, `TooEarly()`, `UnknownChange()`, `BadParams()` (D88). The admin-only functions revert with OpenZeppelin's `OwnableUnauthorizedAccount(account)`. (`VersionRetired()` is superseded by D73.)
 
 ## 8. External dependencies
 
@@ -108,7 +110,8 @@ None at runtime except CREATE2. The factory never holds funds and never calls in
 
 `createVault` ≈ 2.5M gas ≈ 0.05 USDC at 20 Gwei (to be measured; vault bytecode size drives it).
 
-**Size rule (D88, G-47):** the factory's runtime contains the vault's full creation code, so the factory runtime is larger than the vault runtime and hits the 24,576-byte EIP-170 limit first. Both runtimes must be under 24,576 bytes and both initcodes under 49,152 bytes. T-020 measures all four; `docs/specs/07-contract-build/` PRD 11 moves vault code into external linked libraries until all four hold.
+**Size rule (D88, G-47):** the factory's runtime contains the vault's full creation code, so the factory runtime is larger than the vault runtime and hits the 24,576-byte EIP-170 limit first. Both runtimes must be under 24,576 bytes and both initcodes under 49,152 bytes. T-020 measures all four; `docs/specs/07-contract-build/` PRD 11 moves vault code into external linked libraries until all four hold. Measured with the vault's core module only (2026-10-20, Arc Foundry v0.8.0-2): vault runtime 9,773 B and creation code 11,434 B; factory runtime 15,898 B (the vault creation code plus ≈ 4.5 KB) and factory initcode 28,501 B (the vault creation code appears twice: in the runtime and in the constructor's `VAULT_CREATION_CODE_HASH`). So the finished vault's creation code must stay under ≈ 20,000 B for the factory runtime to fit.
+- **Linked libraries change the addresses:** a linked library's address is part of the vault creation code, so of the factory initcode and the factory's CREATE2 address. Each linked library is therefore deployed first, through the Arachnid CREATE2 deployer with salt `keccak256("czar.lib.<LibraryName>.v1")` and the reproducible profile, so its address, and every address built on it, is the same on every build (`security-and-testing.md` §4 step 1a).
 
 **Reproducible deployment (D88, G-49):** the deploy profile sets `bytecode_hash = "none"` and `cbor_metadata = false`, so the same sources give the same bytecode and the same CREATE2 address on every build.
 
@@ -122,3 +125,4 @@ The factory is deployed through CREATE2 on each network, but its constructor imm
 |---|---|---|
 | 2026-10-19 | RV-015 / D73 | Version register removed (a new version is a new factory); `createVault`/`predictVault` take only the owner; network config and defaults are read by the vault constructor, not passed in init code; `setDefaults` replaced by timelocked `queueDefaults`/`applyDefaults`; one caller rule; FAC-3 has no exception; FAC-5 added; same-address claim dropped (SCR-015). |
 | 2026-10-20 | D88 | Constructor `(cfg, initialDefaults, guardian_, admin_)` with `Ownable(admin_)`; `applyGuardian(changeId, newGuardian)`; `changeNonce` and change lifecycle; `cancelChange` and `ChangeCancelled`; `guardian()` getter; idempotent pause; factory-size rule; `FACTORY_SALT`; reproducible-bytecode profile. |
+| 2026-10-20 | D88 (review) | Admin zero-check via `Ownable(_nonZero(admin_))`; `BadParams` for `jobEscrowKind > 1` or agent equal to evaluator (constructor, `queueDefaults`); `applyGuardian` zero check; `cancelChange` in the role table and state machine; measured sizes; linked-library deployment rule. |

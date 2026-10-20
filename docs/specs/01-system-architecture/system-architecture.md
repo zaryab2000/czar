@@ -528,7 +528,7 @@ flowchart LR
   - The vault must exist before its first payment (A1-13, A1-19); the factory deploys it at signup.
 - **How the vault tells an owner approval from a server signature:**
   - Owner actions are external calls where `msg.sender == owner`. The passkey signed the UserOp that produced the call. The vault stores the `objectiveHash` and `planHash` passed with `openEnvelope`, and emits them; the UserOp hash plus this event is the on-chain proof that a passkey holder approved that objective (product §6.22 step 3).
-  - Server actions are either external calls where `msg.sender == agentSigner` (reserve, finalize, register and fund pockets, open and fund jobs, close) or ERC-1271 digests whose embedded fields are checked against a reservation and whose inner signature recovers to `agentSigner`. The full function list is spec 03 `czar-vault.md` §5; `ICzarVault.sol` is the canonical ABI (RV-060).
+  - Server actions are either external calls where `msg.sender == agentSigner` (reserve, register and fund pockets, open and fund jobs; also close, pullbacks and cancel, which the owner may call too) or permissionless calls (`settle`, `finalize`, `confirmPullback`, `syncJob`, `claimJobRefund`) or ERC-1271 digests whose embedded fields are checked against a reservation and whose inner signature recovers to `agentSigner`. The full function list is spec 03 `czar-vault.md` §5; `ICzarVault.sol` is the canonical ABI (RV-060).
   - A direct passkey path (`executeOwnerAction`, P-256 at `0x100`, A6-01) **ships in the Phase 1 vault** as the D30 fallback, because an immutable vault cannot add it later; the app uses it only if AR-2 fails (G0-03). It reaches every owner and owner-recovery function (spec 03 §7, actions 1–17). **Superseded by RV-033:** "kept as a later option … Not Phase 1".
 - **What each party can do (enforced by the vault):**
 
@@ -543,7 +543,8 @@ flowchart LR
 | lower `autoLimit` | yes | yes | yes | no | no |
 | freeze / unfreeze | yes / yes | freeze only | no | pause only | no |
 | rotate agentSigner, autonomySigner, evaluator (`rotateSigners`) | yes | no | no | no | no |
-| reserve / settle / fund pocket / open job / fund job | no (owner may also, for recovery) | yes | no | no | no |
+| reserve, register / grant gas / fund pocket, open job, fund job | no (D88: agent only; the owner never needs them for recovery) | yes | no | no | no |
+| settle, finalize, confirm pullback, sync job, claim job refund | yes | yes | no | no | yes |
 | release expired reservation / close expired envelope | yes | yes | no | no | yes |
 | claim ERC-8183 refund to vault | yes | yes | no | no | yes |
 
@@ -1455,3 +1456,4 @@ No new agent-directed text was encountered in this session beyond what the groun
 - 2026-10-20 · D83: §15.3 two-lane row; merchant row in the testnet/mainnet table.
 - 2026-10-20 · D84: new §11.0 core-value rule and subject lineage table; §11.2 layer 3; §12 walkthrough step 4; §13 ASI06 row.
 - 2026-10-20 · D88: passkey path reaches actions 1–17 (H2 added `CANCEL_JOB`).
+- 2026-10-20 · D88 (review): §7.1 role rows match spec 03 `czar-vault.md` §2 and §15.1 (agent-only spending calls; `settle` and `finalize` open to anyone).
