@@ -4,27 +4,30 @@
 - **Task:** T-012 (CzarVaultFactory), plus the deployable vault skeleton and the shared vault test setup that every later vault PRD uses.
 - **You build:**
   - `contracts/foundry.toml`: one lint line (§6).
-  - `contracts/src/vault/VaultStorage.sol`: every immutable and storage variable of the vault, its constructor, shared caller checks (§7).
+  - `contracts/src/vault/VaultState.sol`: the vault's one storage struct and its immutables struct (§7.1).
+  - `contracts/src/vault/VaultGuards.sol`: the checks and helpers every logic library shares (§7.2).
+  - `contracts/src/vault/VaultBase.sol`: immutables, the storage variable, the constructor, `_config()` and every getter (§7.3).
   - `contracts/src/vault/VaultStubs.sol`: temporary placeholders so the vault can be deployed before its functions exist (§8).
   - `contracts/src/CzarVault.sol`: the concrete vault (§9).
   - `contracts/src/CzarVaultFactory.sol`: the factory (§10).
   - Test setup: `test/mocks/MockArcUSDC.sol`, `test/mocks/MockVaultFactory.sol`, `test/helpers/CzarVaultHarness.sol`, `test/helpers/VaultTestBase.sol` (§11).
   - `contracts/test/FactoryTest.t.sol` (§12).
-- **You do not build:** any vault function. Every vault function is a stub that reverts `NotBuilt()` until PRDs 04–10 build it.
-- **Dependencies:** PRD 01 done (libraries in `src/libraries/`), T-003, T-010. PR #9 (D88) merged into `build-v1`.
+- **You do not build:** any state-changing vault function. Each is a stub that reverts `NotBuilt()` until PRDs 04–10 build it in a linked library (00-conventions §3, §3.2). The getters are real from this PRD on.
+- **Why this layout (D89):** the finished vault is too big for one contract (46.5 KB against the 24,576-byte limit). Its logic goes into linked libraries, and the vault keeps its storage in one struct the libraries receive. This PRD builds that frame; read 00-conventions §3 and §3.2 before you start.
+- **Dependencies:** PRD 01 done (libraries in `src/libraries/`), PRD 02 done (OEL test follow-up; its 2 tests are in the totals below), T-003, T-010. PR #9 (D88) merged into `build-v1`.
 
 ## 2. This PRD is already verified
 - Every code block and the factory pseudo-code were built into a reference project and checked on **Arc Foundry v0.8.0-2** (checksummed release) with `FOUNDRY_PROFILE=arc`, solc 0.8.30, OpenZeppelin v5.7.0:
   - `FOUNDRY_PROFILE=arc arc-forge build --deny-warnings --sizes`: clean (compiler and lint).
   - `arc-forge fmt --check` on every file: clean. The code blocks are already in `fmt` layout.
-  - All tests: 105 passed, 0 failed (34 libraries, 22 factory, and the 49 tests that were already in the repository).
-  - Sizes at this stage: `CzarVault` runtime 5,280 B, initcode 6,910 B; `CzarVaultFactory` runtime 11,424 B, initcode 19,579 B.
+  - All tests: 107 passed, 0 failed (34 libraries, 22 factory, 2 from PRD 02, and the 49 tests that were already in the repository).
+  - Sizes at this stage: `CzarVault` runtime 7,071 B, initcode 8,704 B; `CzarVaultFactory` runtime 13,218 B, initcode 23,167 B.
 - **So:** copy every code block exactly. For the factory, follow §10 step by step; the test file in §12 is the acceptance gate.
 
 ## 3. Sources (read these, nothing else)
-- `07-contract-build/00-conventions.md`, all of it. §3 (layout, `VaultStorage is ICzarVault`, the stubs rule in §3.1), §2.4 (lint), §4.11 and §5.6 (traps) matter most here.
+- `07-contract-build/00-conventions.md`, all of it. §3 (layout, D89), §3.1 (stubs), §3.2 (library rules), §2.4 (lint), §4.11 and §5.6 (traps) matter most here.
 - `docs/specs/03-smart-contracts/czar-vault-factory.md`, all of it.
-- `docs/specs/03-smart-contracts/czar-vault.md` §3 (constants and immutables), §4 (storage), §15.1 (callers), §15.2 (errors), §15.8 (constructor).
+- `docs/specs/03-smart-contracts/czar-vault.md` §3 (constants and immutables), §4 (storage and the D89 code-layout note), §15.1 (callers), §15.2 (errors), §15.8 (constructor), §15.12 (size).
 - `docs/specs/03-smart-contracts/interfaces/ICzarVault.sol` and `ICzarVaultFactory.sol`.
 - `docs/specs/03-smart-contracts/security-and-testing.md` §3.3 (`MockArcUSDC`, `MockVaultFactory`, `CzarVaultHarness`) and §3.7 rows for RV-015.
 
@@ -37,7 +40,9 @@
 | File | Action | Section |
 |---|---|---|
 | `contracts/foundry.toml` | edit (one line block) | §6 |
-| `contracts/src/vault/VaultStorage.sol` | create | §7 |
+| `contracts/src/vault/VaultState.sol` | create | §7.1 |
+| `contracts/src/vault/VaultGuards.sol` | create | §7.2 |
+| `contracts/src/vault/VaultBase.sol` | create | §7.3 |
 | `contracts/src/vault/VaultStubs.sol` | create | §8 |
 | `contracts/src/CzarVault.sol` | create | §9 |
 | `contracts/src/CzarVaultFactory.sol` | create | §10 |
@@ -64,22 +69,216 @@ exclude_lints = ["block-timestamp"]
 ```
 - Change nothing else in `foundry.toml`.
 
-## 7. `src/vault/VaultStorage.sol`
-- **What it is:** the single home of the vault's state. Every vault module inherits it, so every module sees the same variables.
-- **Key points (read before copying):**
-  - `abstract contract VaultStorage is ICzarVault, ReentrancyGuardTransient`. Inheriting `ICzarVault` here gives every module the interface's types, events and errors, and makes the public variables below implement the interface getters (`owner()`, `agentSigner()`, …) without `override` (00-conventions §3).
-  - The three interface constants are public constants whose values come from `CzarConstants.sol` under an alias, because the file-level constant has the same name (00-conventions §4.11).
-  - Immutables can only be assigned in the declaring contract's constructor, so `VaultStorage` is the only module with a constructor. It reads the network config and default signers from `msg.sender` (the factory) and checks them exactly as `czar-vault.md` §15.8 says.
-  - The storage order is fixed. The step map is `_stepUsed` (00-conventions §4.3).
-  - The four `_require*` helpers are the only caller and gate checks. Every later module calls them; none writes its own `msg.sender` comparison. They take a `caller` argument so the passkey path (PRD 10) can pass the owner.
+## 7. The vault frame
+
+### 7.1 `src/vault/VaultState.sol`
+- **What it is:** two file-level structs and the digest-slot record.
+  - `VaultState`: every storage variable of the vault, as struct fields, in the binding order of `czar-vault.md` §4. The vault holds exactly one, `_s`, at slot 0, so the slot layout is what separate variables would give. Never reorder the fields.
+  - `VaultConfig`: the vault's immutables as one memory struct. A linked library cannot read the calling contract's immutables, so the vault builds a `VaultConfig` (`_config()`, §7.3) and passes it to every library call.
+  - `DigestSlot`: the fallback-mode lookup record (`czar-vault.md` §4; internal, not in the ABI).
+- The record types (`ICzarVault.Envelope`, `Reservation`, …) come from the interface; the field names are the spec names (00-conventions §4.3).
 ```solidity
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.30;
 
+import {ICzarVault} from "../interfaces/ICzarVault.sol";
+
+/// @dev Fallback-mode digest lookup (czar-vault.md §4, 02 §6.3.4). Internal only; not in the ABI.
+struct DigestSlot {
+    uint64 reservationId;
+    uint32 index;
+    bool set;
+}
+
+/// @dev Every storage variable of CzarVault, in the binding order of czar-vault.md §4 (07 PRD 03). The vault holds
+///      exactly one `VaultState` at slot 0, so the layout is the same as declaring these as separate state variables.
+///      The vault's logic libraries receive it as `VaultState storage s` (they run by DELEGATECALL in the vault).
+struct VaultState {
+    address agentSigner; // K3
+    address autonomySigner; // K5
+    address evaluator; // K7
+    bool frozen;
+    uint64 envelopeCount; // ids start at 1
+    uint64 reservationCount; // ids start at 1
+    uint64 pullbackCount; // ids start at 1
+    uint256 maxPullbackFee; // D81
+    uint256 autonomyNonce; // RV-030, D88
+    uint256 ownerActionNonce;
+    uint256 committedTotal; // INV-2
+    ICzarVault.Passkey passkey; // D30
+    mapping(bytes32 categoryId => ICzarVault.CategoryLimits) limits;
+    mapping(uint64 envelopeId => ICzarVault.Envelope) envelopes;
+    mapping(uint64 envelopeId => mapping(uint32 stepIndex => uint256)) stepUsed; // RV-002
+    mapping(uint64 reservationId => ICzarVault.Reservation) reservations;
+    mapping(bytes32 digest => DigestSlot) digestSlot;
+    mapping(address pocket => ICzarVault.Pocket) pockets;
+    mapping(uint64 pullbackId => ICzarVault.Pullback) pullbacks;
+    mapping(bytes32 jobKey => ICzarVault.Job) jobs;
+}
+
+/// @dev The vault's immutables, copied into memory by CzarVault._config() and passed to every logic library call:
+///      a library cannot read the calling contract's immutables (07 PRD 03).
+struct VaultConfig {
+    address owner;
+    address factory;
+    address usdc;
+    address gatewayWallet;
+    address gatewayMinter;
+    address jobEscrow;
+    uint8 jobEscrowKind;
+    uint32 gatewayDomain;
+    bytes32 usdcDomainSeparator;
+    bytes32 slDomainSeparator;
+    bytes32 vaultDomainSeparator;
+}
+```
+
+### 7.2 `src/vault/VaultGuards.sol`
+- **What it is:** an `internal` library. Every logic library calls these instead of writing its own `caller` comparison or balance read. Internal functions are copied into each library that uses one, so a check never costs a second `DELEGATECALL`.
+- **Functions and the spec rule each implements:**
+  - `requireOwner(c, caller)` → `NotOwner`; `requireAgent(s, caller)` → `NotAgent`; `requireOwnerOrAgent(s, c, caller)` → `NotAuthorized` (§15.1).
+  - `requireNotPausedOrFrozen(s, c)`: `FrozenVault` before `Paused` (§15.2).
+  - `freeBalance(s, c)`: `sat(USDC.balanceOf(vault), committedTotal)` (§5.1, RV-011).
+  - `exposure(e)`: `spent + reserved + pocketOutstanding + jobEscrowed + shortfall` (INV-1).
+  - `creditEnvelope(s, c, envelopeId, e, x)`: an inbound credit bounded by what is still free; the rest is shortfall with a `ShortfallRecorded` event (RV-011, §15.4). Used by PRDs 08 and 09.
+  - `derivedNonce`, `usdcDigest` (PRDs 06, 07), `agentSigned` (PRD 07), `pullbackTransferSpec` (PRD 08).
+- It is written in full now, so no later PRD edits it. Functions no PRD has called yet compile to nothing.
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.30;
+
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import {ICzarVault} from "../interfaces/ICzarVault.sol";
+import {ICzarVaultFactory} from "../interfaces/ICzarVaultFactory.sol";
+import {VaultState, VaultConfig} from "./VaultState.sol";
+import {SatMath} from "../libraries/SatMath.sol";
+import {CzarNonces} from "../libraries/CzarNonces.sol";
+import {CzarHashing, TransferSpecFields} from "../libraries/CzarHashing.sol";
+import {TRANSFER_SPEC_VERSION} from "../libraries/CzarConstants.sol";
+
+/// @title VaultGuards
+/// @notice The checks and small helpers every logic library shares (czar-vault.md §15.1, §15.2). Internal functions:
+///         each library that uses one gets its own copy, so there is no cross-library call for a check.
+library VaultGuards {
+    /// @dev Owner-only rule. `caller` is msg.sender, or the owner when dispatched by executeOwnerAction.
+    function requireOwner(VaultConfig memory c, address caller) internal pure {
+        if (caller != c.owner) revert ICzarVault.NotOwner();
+    }
+
+    /// @dev Agent-only rule.
+    function requireAgent(VaultState storage s, address caller) internal view {
+        if (caller != s.agentSigner) revert ICzarVault.NotAgent();
+    }
+
+    /// @dev Owner-or-agent rule.
+    function requireOwnerOrAgent(VaultState storage s, VaultConfig memory c, address caller) internal view {
+        if (caller != c.owner && caller != s.agentSigner) revert ICzarVault.NotAuthorized();
+    }
+
+    /// @dev notPausedOrFrozen: freeze is checked before pause (§15.2).
+    function requireNotPausedOrFrozen(VaultState storage s, VaultConfig memory c) internal view {
+        if (s.frozen) revert ICzarVault.FrozenVault();
+        if (ICzarVaultFactory(c.factory).guardianPaused()) revert ICzarVault.Paused();
+    }
+
+    /// @dev sat(USDC.balanceOf(vault), committedTotal) (czar-vault.md §5.1).
+    function freeBalance(VaultState storage s, VaultConfig memory c) internal view returns (uint256) {
+        return SatMath.sat(IERC20(c.usdc).balanceOf(address(this)), s.committedTotal);
+    }
+
+    /// @dev spent + reserved + pocketOutstanding + jobEscrowed + shortfall (INV-1 left side).
+    function exposure(ICzarVault.Envelope storage e) internal view returns (uint256) {
+        return e.spent + e.reserved + e.pocketOutstanding + e.jobEscrowed + e.shortfall;
+    }
+
+    /// @dev Inbound credit to an open envelope, bounded by what is still free (RV-011): the rest is shortfall.
+    function creditEnvelope(
+        VaultState storage s,
+        VaultConfig memory c,
+        uint64 envelopeId,
+        ICzarVault.Envelope storage e,
+        uint256 x
+    ) internal {
+        uint256 credit = SatMath.sat(IERC20(c.usdc).balanceOf(address(this)), s.committedTotal);
+        if (credit > x) credit = x;
+        s.committedTotal += credit;
+        if (x > credit) {
+            e.shortfall += x - credit;
+            emit ICzarVault.ShortfallRecorded(envelopeId, x - credit, e.shortfall);
+        }
+    }
+
+    /// @dev The derived EIP-3009 nonce of one reservation index (02 §7.2). `address(this)` is the vault.
+    function derivedNonce(uint64 reservationId, uint32 index) internal view returns (bytes32) {
+        return CzarNonces.derivedNonce(address(this), reservationId, index);
+    }
+
+    /// @dev The USDC TransferWithAuthorization digest for index `i` (czar-vault.md §5.3 reserveWithDigests, §6.1 step 6).
+    function usdcDigest(
+        VaultConfig memory c,
+        address payee,
+        uint256 unitAmount,
+        uint64 validBefore,
+        uint64 reservationId,
+        uint32 i
+    ) internal view returns (bytes32) {
+        bytes32 structHash = CzarHashing.transferWithAuthorizationHash(
+            address(this), payee, unitAmount, 0, validBefore, derivedNonce(reservationId, i)
+        );
+        return CzarHashing.typedDataHash(c.usdcDomainSeparator, structHash);
+    }
+
+    /// @dev §6 `_agentSigned`: 65 bytes, low s, v in {27, 28}, non-zero signer equal to agentSigner. Never reverts.
+    function agentSigned(VaultState storage s, bytes32 digest, bytes memory sig) internal view returns (bool) {
+        (address signer, ECDSA.RecoverError err,) = ECDSA.tryRecover(digest, sig);
+        return err == ECDSA.RecoverError.NoError && signer == s.agentSigner;
+    }
+
+    /// @dev The TransferSpec every pullback uses (czar-vault.md §6.2 table): value can only come back to the vault.
+    function pullbackTransferSpec(VaultConfig memory c, ICzarVault.Pullback storage p)
+        internal
+        view
+        returns (TransferSpecFields memory f)
+    {
+        f.version = TRANSFER_SPEC_VERSION;
+        f.sourceDomain = c.gatewayDomain;
+        f.destinationDomain = c.gatewayDomain;
+        f.sourceContract = CzarHashing.toBytes32(c.gatewayWallet);
+        f.destinationContract = CzarHashing.toBytes32(c.gatewayMinter);
+        f.sourceToken = CzarHashing.toBytes32(c.usdc);
+        f.destinationToken = CzarHashing.toBytes32(c.usdc);
+        f.sourceDepositor = CzarHashing.toBytes32(p.pocket);
+        f.destinationRecipient = CzarHashing.toBytes32(address(this));
+        f.sourceSigner = CzarHashing.toBytes32(address(this));
+        f.destinationCaller = bytes32(0);
+        f.value = p.value;
+        f.salt = p.salt;
+    }
+}
+```
+
+### 7.3 `src/vault/VaultBase.sol`
+- **What it is:** `abstract contract VaultBase is ICzarVault, ReentrancyGuardTransient`. It holds:
+  - the three interface constants, as public constants whose values come from `CzarConstants.sol` under an alias (00-conventions §4.11);
+  - the immutables: `owner`, `factory`, `jobEscrow`, `jobEscrowKind` are `public` (they implement interface getters); the rest are `internal`;
+  - `VaultState internal _s;`, the only storage variable;
+  - the constructor (`czar-vault.md` §15.8): reads `networkConfig()` and `defaults()` from `msg.sender` (the factory), checks them, sets the immutables and the first signers;
+  - `_config()`: the immutables as a `VaultConfig`;
+  - every getter the interface lists, including `freeBalance()` and `derivedNonce()`.
+- Only `VaultBase` has a constructor (Solidity lets only the declaring contract's constructor assign an immutable).
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.30;
+
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {ICzarVault} from "../interfaces/ICzarVault.sol";
 import {ICzarVaultFactory} from "../interfaces/ICzarVaultFactory.sol";
+import {VaultState, VaultConfig} from "./VaultState.sol";
+import {VaultGuards} from "./VaultGuards.sol";
 import {CzarHashing} from "../libraries/CzarHashing.sol";
+import {SatMath} from "../libraries/SatMath.sol";
 import {
     MAX_PULLBACK_FEE_CEILING as MAX_PULLBACK_FEE_CEILING_VALUE,
     MAX_AGENT_POCKET_CAP_BPS as MAX_AGENT_POCKET_CAP_BPS_VALUE,
@@ -92,18 +291,10 @@ import {
     VERSION_1_HASH
 } from "../libraries/CzarConstants.sol";
 
-/// @title VaultStorage
-/// @notice Every immutable and storage variable of CzarVault, the constructor, and the shared caller and gate checks.
-/// @dev czar-vault.md §3, §4, §15.1, §15.8. The only vault module with a constructor: Solidity lets only the
-///      declaring contract's constructor assign an immutable. Storage order below is fixed (00-conventions §4.9).
-abstract contract VaultStorage is ICzarVault, ReentrancyGuardTransient {
-    /// @dev Fallback-mode digest lookup (czar-vault.md §4, 02 §6.3.4). Internal only; not in the ABI.
-    struct DigestSlot {
-        uint64 reservationId;
-        uint32 index;
-        bool set;
-    }
-
+/// @title VaultBase
+/// @notice The vault's immutables, its one storage struct, the constructor, `_config()` and every read-only getter
+///         (czar-vault.md §3, §4, §15.8; 07 PRD 03). The logic lives in linked libraries under src/vault/logic/.
+abstract contract VaultBase is ICzarVault, ReentrancyGuardTransient {
     // ───────────── Constants exposed by ICzarVault (values in CzarConstants.sol) ─────────────
 
     /// @dev 500000 (0.50 USDC), D81.
@@ -138,48 +329,10 @@ abstract contract VaultStorage is ICzarVault, ReentrancyGuardTransient {
     /// @dev EIP-712 domain of this vault ("CzarVault", "1", chainid, this).
     bytes32 internal immutable VAULT_DOMAIN_SEPARATOR;
 
-    // ───────────── Storage (order fixed) ─────────────
+    // ───────────── Storage ─────────────
 
-    /// @dev K3 agent key.
-    address public agentSigner;
-    /// @dev K5 autonomy key.
-    address public autonomySigner;
-    /// @dev K7 evaluator key.
-    address public evaluator;
-    /// @dev User freeze flag.
-    bool public frozen;
-    /// @dev Number of envelopes ever opened; ids start at 1.
-    uint64 public envelopeCount;
-    /// @dev Number of reservations ever made; ids start at 1.
-    uint64 public reservationCount;
-    /// @dev Number of pullbacks ever requested; ids start at 1.
-    uint64 public pullbackCount;
-    /// @dev Current bound on requestPullback.maxFee (D81).
-    uint256 public maxPullbackFee;
-    /// @dev Replay protection for AutonomyRaise; also bumped by freeze and every lowering (RV-030, D88).
-    uint256 public autonomyNonce;
-    /// @dev Replay protection for OwnerAction.
-    uint256 public ownerActionNonce;
-    /// @dev Σ over open envelopes of cap − spent − pocketOutstanding − jobEscrowed − shortfall (INV-2).
-    uint256 public committedTotal;
-    /// @dev D30 passkey.
-    Passkey internal passkey;
-    /// @dev Earned-autonomy limits per category.
-    mapping(bytes32 categoryId => CategoryLimits) internal limits;
-    /// @dev Envelope records.
-    mapping(uint64 envelopeId => Envelope) internal envelopes;
-    /// @dev Amount reserved or spent per plan step (RV-002). Named with "_" because stepUsed() is the getter.
-    mapping(uint64 envelopeId => mapping(uint32 stepIndex => uint256)) internal _stepUsed;
-    /// @dev Reservation records.
-    mapping(uint64 reservationId => Reservation) internal reservations;
-    /// @dev Fallback-mode digest lookup.
-    mapping(bytes32 digest => DigestSlot) internal digestSlot;
-    /// @dev Pocket records.
-    mapping(address pocket => Pocket) internal pockets;
-    /// @dev Pullback records.
-    mapping(uint64 pullbackId => Pullback) internal pullbacks;
-    /// @dev Job records.
-    mapping(bytes32 jobKey => Job) internal jobs;
+    /// @dev Every storage variable, in the czar-vault.md §4 order, at slot 0 (VaultState.sol).
+    VaultState internal _s;
 
     /// @dev czar-vault.md §15.8. `msg.sender` is the factory.
     constructor(address ownerAccount) {
@@ -206,54 +359,165 @@ abstract contract VaultStorage is ICzarVault, ReentrancyGuardTransient {
         VAULT_DOMAIN_SEPARATOR =
             CzarHashing.domainSeparatorFull(VAULT_NAME_HASH, VERSION_1_HASH, block.chainid, address(this));
 
-        agentSigner = d.agentSigner;
-        autonomySigner = d.autonomySigner;
-        evaluator = d.evaluator;
-        maxPullbackFee = DEFAULT_MAX_PULLBACK_FEE;
+        _s.agentSigner = d.agentSigner;
+        _s.autonomySigner = d.autonomySigner;
+        _s.evaluator = d.evaluator;
+        _s.maxPullbackFee = DEFAULT_MAX_PULLBACK_FEE;
     }
 
-    // ───────────── Shared checks (czar-vault.md §15.1, §15.2) ─────────────
-
-    /// @dev Owner-only rule. `caller` is msg.sender, or the owner when dispatched by executeOwnerAction.
-    function _requireOwner(address caller) internal view {
-        if (caller != owner) revert NotOwner();
+    /// @dev The immutables as one memory struct, passed to every logic library call (a library cannot read them).
+    function _config() internal view returns (VaultConfig memory) {
+        return VaultConfig({
+            owner: owner,
+            factory: factory,
+            usdc: USDC,
+            gatewayWallet: GATEWAY_WALLET,
+            gatewayMinter: GATEWAY_MINTER,
+            jobEscrow: jobEscrow,
+            jobEscrowKind: jobEscrowKind,
+            gatewayDomain: GATEWAY_DOMAIN,
+            usdcDomainSeparator: USDC_DOMAIN_SEPARATOR,
+            slDomainSeparator: SL_DOMAIN_SEPARATOR,
+            vaultDomainSeparator: VAULT_DOMAIN_SEPARATOR
+        });
     }
 
-    /// @dev Agent-only rule.
-    function _requireAgent(address caller) internal view {
-        if (caller != agentSigner) revert NotAgent();
+    // ───────────── Getters (D88, G-07) ─────────────
+
+    /// @inheritdoc ICzarVault
+    function freeBalance() public view returns (uint256) {
+        return SatMath.sat(IERC20(USDC).balanceOf(address(this)), _s.committedTotal);
     }
 
-    /// @dev Owner-or-agent rule.
-    function _requireOwnerOrAgent(address caller) internal view {
-        if (caller != owner && caller != agentSigner) revert NotAuthorized();
+    /// @inheritdoc ICzarVault
+    function agentSigner() external view returns (address) {
+        return _s.agentSigner;
     }
 
-    /// @dev notPausedOrFrozen: freeze is checked before pause (§15.2).
-    function _requireNotPausedOrFrozen() internal view {
-        if (frozen) revert FrozenVault();
-        if (ICzarVaultFactory(factory).guardianPaused()) revert Paused();
+    /// @inheritdoc ICzarVault
+    function autonomySigner() external view returns (address) {
+        return _s.autonomySigner;
+    }
+
+    /// @inheritdoc ICzarVault
+    function evaluator() external view returns (address) {
+        return _s.evaluator;
+    }
+
+    /// @inheritdoc ICzarVault
+    function frozen() external view returns (bool) {
+        return _s.frozen;
+    }
+
+    /// @inheritdoc ICzarVault
+    function committedTotal() external view returns (uint256) {
+        return _s.committedTotal;
+    }
+
+    /// @inheritdoc ICzarVault
+    function envelopeCount() external view returns (uint64) {
+        return _s.envelopeCount;
+    }
+
+    /// @inheritdoc ICzarVault
+    function reservationCount() external view returns (uint64) {
+        return _s.reservationCount;
+    }
+
+    /// @inheritdoc ICzarVault
+    function pullbackCount() external view returns (uint64) {
+        return _s.pullbackCount;
+    }
+
+    /// @inheritdoc ICzarVault
+    function autonomyNonce() external view returns (uint256) {
+        return _s.autonomyNonce;
+    }
+
+    /// @inheritdoc ICzarVault
+    function ownerActionNonce() external view returns (uint256) {
+        return _s.ownerActionNonce;
+    }
+
+    /// @inheritdoc ICzarVault
+    function maxPullbackFee() external view returns (uint256) {
+        return _s.maxPullbackFee;
+    }
+
+    /// @inheritdoc ICzarVault
+    function stepUsed(uint64 envelopeId, uint32 stepIndex) external view returns (uint256) {
+        return _s.stepUsed[envelopeId][stepIndex];
+    }
+
+    /// @inheritdoc ICzarVault
+    function envelopePocket(uint64 envelopeId) external view returns (address) {
+        return _s.envelopes[envelopeId].pocket;
+    }
+
+    /// @inheritdoc ICzarVault
+    function envelopeShortfall(uint64 envelopeId) external view returns (uint256) {
+        return _s.envelopes[envelopeId].shortfall;
+    }
+
+    /// @inheritdoc ICzarVault
+    function getEnvelope(uint64 envelopeId) external view returns (Envelope memory) {
+        return _s.envelopes[envelopeId];
+    }
+
+    /// @inheritdoc ICzarVault
+    function getReservation(uint64 reservationId) external view returns (Reservation memory) {
+        return _s.reservations[reservationId];
+    }
+
+    /// @inheritdoc ICzarVault
+    function getPocket(address pocket) external view returns (Pocket memory) {
+        return _s.pockets[pocket];
+    }
+
+    /// @inheritdoc ICzarVault
+    function getPullback(uint64 pullbackId) external view returns (Pullback memory) {
+        return _s.pullbacks[pullbackId];
+    }
+
+    /// @inheritdoc ICzarVault
+    function getJob(bytes32 jobKey) external view returns (Job memory) {
+        return _s.jobs[jobKey];
+    }
+
+    /// @inheritdoc ICzarVault
+    function getLimits(bytes32 categoryId) external view returns (CategoryLimits memory) {
+        return _s.limits[categoryId];
+    }
+
+    /// @inheritdoc ICzarVault
+    function getPasskey() external view returns (Passkey memory) {
+        return _s.passkey;
+    }
+
+    /// @inheritdoc ICzarVault
+    function derivedNonce(uint64 reservationId, uint32 index) external view returns (bytes32) {
+        return VaultGuards.derivedNonce(reservationId, index);
     }
 }
 ```
 
 ## 8. `src/vault/VaultStubs.sol` (temporary)
-- **What it is:** one placeholder per `ICzarVault` function that has no body yet, so `CzarVault` is a complete contract and can be deployed by the factory and by tests. Rules: 00-conventions §3.1.
-- 44 stubs at this stage: the 62 interface functions minus the 18 that `VaultStorage`'s public variables and constants already implement.
+- **What it is:** one placeholder per state-changing `ICzarVault` function that has no body yet, so `CzarVault` is a complete contract and can be deployed by the factory and by tests. Rules: 00-conventions §3.1.
+- 32 stubs at this stage: the 62 interface functions minus the 30 that `VaultBase` already implements (getters, constants and public immutables).
 - Stubs are `pure` so the compiler raises no "can be restricted to pure" warning.
-- **Every later vault PRD deletes the stubs of the functions it builds.** PRD 04 deletes 19 of them.
+- **Every later vault PRD deletes the stubs of the functions it builds.** PRD 04 deletes 8 of them.
 ```solidity
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.30;
 
-import {VaultStorage} from "./VaultStorage.sol";
+import {VaultBase} from "./VaultBase.sol";
 
 /// @title VaultStubs
 /// @notice TEMPORARY. One placeholder per ICzarVault function that is not built, so CzarVault compiles and can be
 ///         deployed from PRD 03 on. Stubs are `pure` (stricter than the interface allows) so the compiler raises no
 ///         warning for an unused body. Each later PRD deletes the stubs of the functions it builds; PRD 10 deletes this
 ///         file. `NotBuilt` exists only here and must not appear anywhere once M1 is done.
-abstract contract VaultStubs is VaultStorage {
+abstract contract VaultStubs is VaultBase {
     /// @dev Placeholder error; removed with this file.
     error NotBuilt();
 
@@ -277,18 +541,6 @@ abstract contract VaultStubs is VaultStorage {
         revert NotBuilt();
     }
 
-    function derivedNonce(uint64, uint32) external pure returns (bytes32) {
-        revert NotBuilt();
-    }
-
-    function envelopePocket(uint64) external pure returns (address) {
-        revert NotBuilt();
-    }
-
-    function envelopeShortfall(uint64) external pure returns (uint256) {
-        revert NotBuilt();
-    }
-
     function executeOwnerAction(uint8, bytes calldata, uint256, WebAuthnAuth calldata) external pure {
         revert NotBuilt();
     }
@@ -301,10 +553,6 @@ abstract contract VaultStubs is VaultStorage {
         revert NotBuilt();
     }
 
-    function freeBalance() external pure returns (uint256) {
-        revert NotBuilt();
-    }
-
     function freeze() external pure {
         revert NotBuilt();
     }
@@ -314,34 +562,6 @@ abstract contract VaultStubs is VaultStorage {
     }
 
     function fundPocket(address, uint256) external pure {
-        revert NotBuilt();
-    }
-
-    function getEnvelope(uint64) external pure returns (Envelope memory) {
-        revert NotBuilt();
-    }
-
-    function getJob(bytes32) external pure returns (Job memory) {
-        revert NotBuilt();
-    }
-
-    function getLimits(bytes32) external pure returns (CategoryLimits memory) {
-        revert NotBuilt();
-    }
-
-    function getPasskey() external pure returns (Passkey memory) {
-        revert NotBuilt();
-    }
-
-    function getPocket(address) external pure returns (Pocket memory) {
-        revert NotBuilt();
-    }
-
-    function getPullback(uint64) external pure returns (Pullback memory) {
-        revert NotBuilt();
-    }
-
-    function getReservation(uint64) external pure returns (Reservation memory) {
         revert NotBuilt();
     }
 
@@ -421,10 +641,6 @@ abstract contract VaultStubs is VaultStorage {
         revert NotBuilt();
     }
 
-    function stepUsed(uint64, uint32) external pure returns (uint256) {
-        revert NotBuilt();
-    }
-
     function sync() external pure {
         revert NotBuilt();
     }
@@ -448,20 +664,21 @@ abstract contract VaultStubs is VaultStorage {
 ```
 
 ## 9. `src/CzarVault.sol`
-- The only concrete vault. At this stage it inherits only `VaultStubs` (which inherits `VaultStorage`). Each later PRD adds its module to the `is` list.
+- The only concrete vault. At this stage it has only its constructor. Each later PRD prints a new version of this file with the wrappers built so far.
 ```solidity
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.30;
 
-import {VaultStorage} from "./vault/VaultStorage.sol";
+import {VaultBase} from "./vault/VaultBase.sol";
 import {VaultStubs} from "./vault/VaultStubs.sol";
 
 /// @title CzarVault
-/// @notice The per-user vault (czar-vault.md). Immutable; no proxy (D33). The only concrete vault contract: it
-///         inherits every vault module. Each later PRD adds its module to this list and removes its stubs.
-contract CzarVault is VaultStubs {
+/// @notice The per-user vault (czar-vault.md). Immutable; no proxy (D33). Every state-changing function is a thin
+///         wrapper: the reentrancy guard (§15.5) stays here, the logic runs in a linked library by DELEGATECALL on
+///         this vault's storage (07 PRD 03). `msg.sender` is passed as `caller`, so the passkey path can pass the owner.
+contract CzarVault is VaultBase, VaultStubs {
     /// @dev czar-vault.md §15.8. Called by CzarVaultFactory.createVault through CREATE2.
-    constructor(address ownerAccount) VaultStorage(ownerAccount) {}
+    constructor(address ownerAccount) VaultBase(ownerAccount) {}
 }
 ```
 
@@ -1352,18 +1569,18 @@ contract FactoryTest is VaultTestBase {
 1. Do §4.
 2. Edit `foundry.toml` (§6).
 3. Create the four test-setup files (§11) and `test/FactoryTest.t.sol` (§12). Run `FOUNDRY_PROFILE=arc arc-forge test --match-path test/FactoryTest.t.sol`: it fails to compile (no `CzarVault`, no factory). Paste the first error line into your report.
-4. Create `VaultStorage.sol` (§7), `VaultStubs.sol` (§8) and `CzarVault.sol` (§9).
+4. Create `VaultState.sol`, `VaultGuards.sol` and `VaultBase.sol` (§7), `VaultStubs.sol` (§8) and `CzarVault.sol` (§9).
 5. Write `CzarVaultFactory.sol` from §10, item by item.
 6. Run `FOUNDRY_PROFILE=arc arc-forge test --match-path test/FactoryTest.t.sol`: 22 passed. If a test fails, compare the function with its numbered steps in §10.4 before anything else.
 7. `arc-forge fmt src/CzarVaultFactory.sol` (your own file), then `arc-forge fmt --check` on every file in §5 except `foundry.toml`: nothing printed.
-8. Run the full build with sizes and the full suite (00-conventions §2.2).
+8. Run the clean gate build and the full suite (00-conventions §2.2).
 
 ## 14. Definition of done
 - `FOUNDRY_PROFILE=arc arc-forge test --match-path test/FactoryTest.t.sol` → 22 passed, 0 failed.
-- `FOUNDRY_PROFILE=arc arc-forge test` → 105 passed, 0 failed (the repository's earlier tests, PRD 01 and this PRD).
-- `FOUNDRY_PROFILE=arc arc-forge build --deny-warnings --sizes` → no compiler or lint warning; `CzarVault` runtime about 5,280 B and `CzarVaultFactory` runtime about 11,424 B (paste the lines; a difference above 200 B means the code differs from this PRD).
+- `FOUNDRY_PROFILE=arc arc-forge test` → 107 passed, 0 failed (the repository's earlier tests, PRDs 01 and 02, and this PRD).
+- `rm -rf out cache && FOUNDRY_PROFILE=arc arc-forge build --deny-warnings --sizes` → no compiler or lint warning; `CzarVault` runtime about 7,071 B and `CzarVaultFactory` runtime about 13,218 B (paste the lines; a difference above 200 B means the code differs from this PRD).
 - `diff -r src/interfaces ../docs/specs/03-smart-contracts/interfaces` → nothing.
-- `grep -c "revert NotBuilt" src/vault/VaultStubs.sol` → 44.
+- `grep -c "revert NotBuilt" src/vault/VaultStubs.sol` → 32.
 
 ## 15. Stop conditions
 - A factory test fails after you have compared your code with §10 step by step: stop and report the test name and the failure line. Do not change a test.
@@ -1373,3 +1590,4 @@ contract FactoryTest is VaultTestBase {
 | Date | Change |
 |---|---|
 | 2026-10-20 | First version, verified on Arc Foundry v0.8.0-2. |
+| 2026-10-20 | D89: `VaultStorage.sol` replaced by `VaultState.sol`, `VaultGuards.sol` and `VaultBase.sol` (logic moves to linked libraries); getters built here; 32 stubs; sizes re-measured. Factory and tests unchanged. |
