@@ -4,7 +4,7 @@
 |---|---|
 | ID | SCR-111 |
 | Filed by | Czar builder (tier 2), 2026-10-19 |
-| Spec and section | `docs/specs/04-components/server-autonomy-roi-keys.md` CZ-27 §3 "Keychain access (D80 hardening, unverified)"; RV-045 |
+| Spec and section | `docs/specs/04-components/server/server-autonomy-roi-keys.md` CZ-27 §3 "Keychain access (D80 hardening, unverified)"; RV-045 |
 | Status | Open |
 
 ## Problem

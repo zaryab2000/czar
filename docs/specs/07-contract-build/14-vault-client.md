@@ -27,7 +27,7 @@
 
 ## 3. Sources (read these, nothing else)
 - `docs/specs/05-build-plan/phase-1-tasks.md` T-026.
-- `docs/specs/04-components/cross-cutting.md`:
+- `docs/specs/04-components/shared/cross-cutting.md`:
   - §2 (`@czar/vault-client` guarantee)
   - §3.1 (local environment: `arc-anvil --network arc --chain-id 5042002`)
   - §7 (pinned versions)

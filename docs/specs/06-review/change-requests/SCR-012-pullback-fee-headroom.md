@@ -4,7 +4,7 @@
 |---|---|
 | ID | SCR-012 |
 | Filed by | Independent reviewer (G0-01), 2026-10-19 |
-| Spec and section | `docs/specs/04-components/server-planning-and-payment.md` CZ-15 step 7 (line 350); `docs/specs/04-components/phase-1-acceptance-scenario.md` 5.x (line 63) |
+| Spec and section | `docs/specs/04-components/server/server-planning-and-payment.md` CZ-15 step 7 (line 350); `docs/specs/04-components/shared/phase-1-acceptance-scenario.md` 5.x (line 63) |
 | Status | Accepted, applied in CZ-15 §5.3 step 7 (`value = min(outstanding − pending, availableBalance − maxFee − safety)`), G0-05 step 5 (full-balance drain), T-053. |
 | Review finding | RV-012 (High) in `docs/specs/06-review/2026-10-19-spec-review.md` |
 

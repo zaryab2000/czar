@@ -1,6 +1,6 @@
 # The Czar app and notifications (spec 04)
 
-- **Date:** 2026-10-18. **Status:** draft for review. Conventions: `cross-cutting.md`. Shapes: docs/specs/02 only (OpenAPI `operationId`s, `mcp/czar-mcp-tools.md` §7 push payloads, stage 2). Contracts: docs/specs/03 only.
+- **Date:** 2026-10-18. **Status:** draft for review. Conventions: `../shared/cross-cutting.md`. Shapes: docs/specs/02 only (OpenAPI `operationId`s, `mcp/czar-mcp-tools.md` §7 push payloads, stage 2). Contracts: docs/specs/03 only.
 - **Components:** CZ-22 app (Phase 1, desktop browser, D69), CZ-23 notifications (**moved to stage 2, D69**; outline only, see `docs/specs/05-build-plan/stage-2-backlog.md` §2 M-4).
 
 ---
@@ -325,7 +325,7 @@ Server worker in `apps/server`; outbound to Apple's push service (`*.push.apple.
 | In | internal events `approval.created(planId)`, `result.delivered(objectiveId, resultId)` from CZ-12/CZ-15 |
 | Out | Declarative Web Push JSON `{"web_push": 8030, "notification": {"title", "body", "navigate", "app_badge"}}` (D2-06; keys exactly as 02 mcp §7) to each active `PushSubscription` of the user |
 | API | `createPushSubscription`, `deletePushSubscription` (02 §9.2) |
-| Keys | K17 VAPID key (`cross-cutting.md` §3.3) |
+| Keys | K17 VAPID key (`../shared/cross-cutting.md` §3.3) |
 
 ### 5–8, 10–13, 15. Outline (stage 2)
 

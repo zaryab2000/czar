@@ -20,8 +20,8 @@
 
 - `docs/product/decisions-log.md`: add D69; mark D28 "Home Screen web app first" as stage 2.
 - `docs/specs/01-system-architecture/`: §4.3 app, §5 deployment, §18 phase map — desktop browser for Phase 1.
-- `docs/specs/04-components/app-and-notifications.md`: CZ-22 Phase 1 = desktop web; CZ-23 push = stage 2.
-- `docs/specs/04-components/phase-1-acceptance-scenario.md`: replace phone steps with desktop-browser approval steps.
+- `docs/specs/04-components/app/app-and-notifications.md`: CZ-22 Phase 1 = desktop web; CZ-23 push = stage 2.
+- `docs/specs/04-components/shared/phase-1-acceptance-scenario.md`: replace phone steps with desktop-browser approval steps.
 - `docs/specs/05-build-plan/`: remove G0-02 and G0-15 from Gate 0; trim T-080, T-082, T-083 (below).
 
 ---

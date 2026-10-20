@@ -4,7 +4,7 @@
 |---|---|
 | ID | SCR-021 |
 | Filed by | Independent reviewer (G0-01), 2026-10-19 |
-| Spec and section | `docs/specs/02-data-and-protocol/api/openapi.yaml` `PayRequest.stepRequest.input` (line 256); CZ-09 `pay` flow (`local-agent-surfaces.md` lines 77–83); spec 01 (line 962) |
+| Spec and section | `docs/specs/02-data-and-protocol/api/openapi.yaml` `PayRequest.stepRequest.input` (line 256); CZ-09 `pay` flow (`docs/specs/04-components/local/local-agent-surfaces.md` lines 77–83); spec 01 (line 962) |
 | Status | Accepted, applied in `openapi.yaml` `StepInput`, spec 02 §4.6 `inputTemplate.inputKeys`, `plan.schema.json`, MCP §1, CZ-09 §5.2 (layers 1–2 in `czar-mcp`), CZ-12 §6; T-071, T-072. |
 | Review finding | RV-021 (High) in `docs/specs/06-review/2026-10-19-spec-review.md` |
 

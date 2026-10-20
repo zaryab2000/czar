@@ -111,29 +111,29 @@
 | RV-004 | Critical | Vault and signer: pockets | `docs/specs/05-build-plan/phase-1-tasks.md` T-037 (lines 533–536) | Pocket funds can be stranded for good: the pocket key is destroyed at `PocketClosed`, the slow-withdraw fallback cannot reach the vault, and leftover gas is never swept. | high |
 | RV-005 | Critical | Vault: envelope close | docs/specs/03-smart-contracts/czar-vault.md §5.2 `forceCloseEnvelope` (line 120) | `forceCloseEnvelope` accounting is undefined, and pocket/job calls that do not check the envelope state can then break INV-2 or lock funds. | moderate |
 | RV-006 | High | Vault: freeze and pause | docs/specs/03-smart-contracts/czar-vault.md §5.5 `fundJob` (line 161) | `fundJob` and `grantPocketGas` have no freeze or pause check in the function table. | high |
-| RV-007 | High | Signer: freeze semantics | `docs/specs/04-components/server-autonomy-roi-keys.md` CZ-27 `gateway-nano` and `evaluator-call` policies (lines 394, 397), wording (line 491) | Freeze and guardian pause do not stop pocket nanopayments or evaluator payouts, yet the product and UI say freeze stops all spending. | high |
+| RV-007 | High | Signer: freeze semantics | `docs/specs/04-components/server/server-autonomy-roi-keys.md` CZ-27 `gateway-nano` and `evaluator-call` policies (lines 394, 397), wording (line 491) | Freeze and guardian pause do not stop pocket nanopayments or evaluator payouts, yet the product and UI say freeze stops all spending. | high |
 | RV-008 | High | Vault: earned autonomy | docs/specs/03-smart-contracts/czar-vault.md INV-9 (line 426) | Lowering `autoLimit` below `usedInPeriod` (which D60/D63 do on every freeze) breaks INV-9 and makes `openEnvelope` revert with an arithmetic panic. | high |
 | RV-009 | High | Vault: jobs | docs/specs/03-smart-contracts/czar-vault.md §5.5 `syncJob` (line 162) | `syncJob` refuses `Opened` jobs, so an unfunded job blocks its envelope from closing; and its refund test cannot be checked on-chain. | high |
 | RV-010 | High | Vault: pockets (D41) | docs/specs/03-smart-contracts/czar-vault.md §5.4 prose (line 152) | `recordManualReturn` cannot be built: it relies on a stored "last sync" balance that does not exist, and its caller is stated two ways. | high |
 | RV-011 | High | Vault: accounting | docs/specs/03-smart-contracts/czar-vault.md §5.1 (lines 101, 104) | `freeBalance()` can underflow, and a normal withdraw before a pullback or refund is confirmed breaks INV-2 until envelopes close. | high |
-| RV-012 | High | Server: pullback | `docs/specs/04-components/server-planning-and-payment.md` CZ-15 step 7 (line 350) | The pullback asks to move the whole available balance, leaving nothing for Gateway's fee, so the drain likely fails. | moderate |
+| RV-012 | High | Server: pullback | `docs/specs/04-components/server/server-planning-and-payment.md` CZ-15 step 7 (line 350) | The pullback asks to move the whole available balance, leaving nothing for Gateway's fee, so the drain likely fails. | moderate |
 | RV-013 | High | Vault: signatures | docs/specs/03-smart-contracts/czar-vault.md §6.3 (line 241) | `SL_RECEIPT` makes the vault sign any SelectionLayer-domain struct hash, and one agent signature validates for every vault. | moderate |
 | RV-014 | High | OpenEvidenceLog | `docs/specs/03-smart-contracts/open-evidence-log.md` rules (line 61) | Re-committing a `PROBE_INTENT` root resets its status to 1, allowing a second reveal that swaps the probe batch after results are known. | high |
 | RV-015 | High | Factory | `docs/specs/03-smart-contracts/czar-vault-factory.md` §2 (line 14), §5 (lines 48, 51, 53) | The factory's version register cannot work as described, its caller rules disagree, and predicted vault addresses change when untimelocked defaults change. | high |
 | RV-016 | High | Build plan: deployment | `docs/specs/05-build-plan/phase-1-tasks.md` T-027 (lines 418–431), T-036 (lines 514, 519) | The deployment order is circular: T-027 (M1) needs K3, K5 and K7 addresses that T-036 (M2) creates, and no task creates K6 or K20. | high |
 | RV-017 | High | Keys: gas | `docs/specs/01-system-architecture/system-architecture.md` (lines 550, 993) | Nothing funds gas for agent (K3), autonomy (K5) and evaluator (K7) transactions, which must come from those keys as `msg.sender`. | high |
-| RV-018 | High | Injection boundary | `docs/specs/04-components/server-planning-and-payment.md` (lines 141, 165 vs 385, 388) | The specs contradict each other on whether the planner (P-03) receives merchant-derived `StepResult` text. | high |
-| RV-019 | High | MCP spend path | `docs/specs/04-components/local-agent-surfaces.md` (lines 103, 121, 152) | The MCP tools take URLs, amounts and free objects, and a coding agent can loop `pay` inside an open envelope with no further approval. | high |
+| RV-018 | High | Injection boundary | `docs/specs/04-components/server/server-planning-and-payment.md` (lines 141, 165 vs 385, 388) | The specs contradict each other on whether the planner (P-03) receives merchant-derived `StepResult` text. | high |
+| RV-019 | High | MCP spend path | `docs/specs/04-components/local/local-agent-surfaces.md` (lines 103, 121, 152) | The MCP tools take URLs, amounts and free objects, and a coding agent can loop `pay` inside an open envelope with no further approval. | high |
 | RV-020 | High | Consistency: MCP vs OpenAPI | `docs/specs/02-data-and-protocol/mcp/czar-mcp-tools.md` `pay` (lines 201, 222) | The MCP `pay` tool and the OpenAPI `createPayRequest` have incompatible request and response shapes. | high |
 | RV-021 | High | Privacy | `docs/specs/02-data-and-protocol/api/openapi.yaml` `PayRequest.stepRequest.input` (line 256) | MCP `pay.input` sends arbitrary agent-supplied data to Czar's server and the merchant without redaction. | high |
-| RV-022 | High | Security: outbound fetches | `docs/specs/04-components/server-supply-side.md` (line 134) | Only `czar-extract` blocks private addresses; planner probes, `createQuote` URLs and deliverable fetches have no SSRF guard. | moderate-high |
-| RV-023 | High | Injection boundary | `docs/specs/04-components/server-planning-and-payment.md` CZ-15 (line 398) | The specs give opposite rules for what happens when the P-01 screen is unavailable. | high |
+| RV-022 | High | Security: outbound fetches | `docs/specs/04-components/server/server-supply-side.md` (line 134) | Only `czar-extract` blocks private addresses; planner probes, `createQuote` URLs and deliverable fetches have no SSRF guard. | moderate-high |
+| RV-023 | High | Injection boundary | `docs/specs/04-components/server/server-planning-and-payment.md` CZ-15 (line 398) | The specs give opposite rules for what happens when the P-01 screen is unavailable. | high |
 | RV-024 | High | Jobs: acceptance | `docs/specs/05-build-plan/phase-1-tasks.md` T-055 (line 766) | T-055 rejects a job on a deliverable hash mismatch; the spec says `inconclusive`. | high |
-| RV-025 | High | Jobs: protocol | `docs/specs/04-components/server-planning-and-payment.md` CZ-15 (line 366) | The ERC-8183 job brief and `inputCommit` are never defined, so a real provider cannot learn the task and `descriptionHash` cannot be computed. | high |
+| RV-025 | High | Jobs: protocol | `docs/specs/04-components/server/server-planning-and-payment.md` CZ-15 (line 366) | The ERC-8183 job brief and `inputCommit` are never defined, so a real provider cannot learn the task and `descriptionHash` cannot be computed. | high |
 | RV-026 | High | Privacy | `docs/specs/02-data-and-protocol/data-and-protocol.md` §4.17 (lines 403, 408), §4.x (line 271) | The public demand-proof leaf carries both the rotatable `userPseudonym` and the vault address, linking a user's soul-version history to all their payments. | high |
-| RV-027 | High | Consistency: objective state | `docs/specs/04-components/server-planning-and-payment.md` CZ-12 (lines 33–47) | Objective status values differ between the CZ-12 state machine and the OpenAPI enum. | high |
+| RV-027 | High | Consistency: objective state | `docs/specs/04-components/server/server-planning-and-payment.md` CZ-12 (lines 33–47) | Objective status values differ between the CZ-12 state machine and the OpenAPI enum. | high |
 | RV-028 | High | Consistency: D70 local Mac | `phase-1-tasks.md` T-040 (lines 543–554), T-036 (lines 516–524) | D70 (everything runs locally on Zaryab's Mac with a local keystore) is only partly applied; hosting, keys, app origin and archive URLs still assume the cloud. | high |
-| RV-029 | High | Acceptance scenario | `docs/specs/04-components/phase-1-acceptance-scenario.md` (lines 38, 39, 60, 65, 86) | The Phase 1 acceptance scenario cannot pass under the routing rules and vault invariants it is meant to test. | high |
+| RV-029 | High | Acceptance scenario | `docs/specs/04-components/shared/phase-1-acceptance-scenario.md` (lines 38, 39, 60, 65, 86) | The Phase 1 acceptance scenario cannot pass under the routing rules and vault invariants it is meant to test. | high |
 | RV-030 | Medium | Vault: earned autonomy (decision risk D60/D63) | docs/specs/03-smart-contracts/czar-vault.md `raiseAutoLimit` (lines 172, 175–176) | A signed autonomy raise can land after a freeze lowers limits to 0, undoing D60; `raiseAutoLimit` is not freeze-gated. | high |
 | RV-031 | Medium | Vault: earned autonomy | docs/specs/03-smart-contracts/czar-vault.md §5.2 (line 118), §5.6 (line 172) | Periods are fixed calendar windows, so two raises and two full allowances can happen seconds apart around a boundary. | high |
 | RV-032 | Medium | Signer policy | CZ-27 `vault-call` policy (line 389) | The signer does not check `openEnvelope`, `reserve` or `openJob` arguments for K3 against a stored, approvable plan. | high |
@@ -144,21 +144,21 @@
 | RV-037 | Medium | Vault: pockets (decision risk D33) | docs/specs/03-smart-contracts/czar-vault.md constants (line 58) | The immutable `MAX_PULLBACK_FEE` of 0.01 USDC can permanently disable instant pullbacks if Circle's gas-based fee rises. | moderate |
 | RV-038 | Medium | CzarJobEscrow (pre-mainnet) | `docs/specs/03-smart-contracts/czar-job-escrow.md` roles (line 15), CJE-3 (line 66) | `CzarJobEscrow` gives one admin role both pause and `emergencyWithdraw`, the timelock claim contradicts itself, and pause blocks refunds. Must close before Czar's own instance ships. | high |
 | RV-039 | Medium | Routing (D37/D38) | docs/specs/03-smart-contracts/czar-vault.md §13 (lines 467, 471) | The routing formulas leave out settle chunking, `finalize`, and the unreturned gas grant, so thresholds are understated. | high |
-| RV-040 | Medium | Privacy: local | `docs/specs/04-components/local-observers-and-daemon.md` (lines 104, 119, 131–132) | When the daemon is down, raw hook payloads (including secrets and Cursor's `user_email`) are written unredacted to a plain queue file. | high |
-| RV-041 | Medium | Injection boundary | `docs/specs/04-components/ai-prompts.md` (lines 23, 74) | P-01 screens only the first 20,000 characters but P-02 reads up to 60,000, so text past the window reaches the reader unscreened. | high |
-| RV-042 | Medium | Acceptance and evidence | `ai-prompts.md` P-01 eval 7 (line 55) | Quarantine counts as `fail`, so honest sellers flagged by the screen lose ranking and job providers are rejected; quarantine triggers and labels are inconsistent. | moderate-high |
+| RV-040 | Medium | Privacy: local | `docs/specs/04-components/local/local-observers-and-daemon.md` (lines 104, 119, 131–132) | When the daemon is down, raw hook payloads (including secrets and Cursor's `user_email`) are written unredacted to a plain queue file. | high |
+| RV-041 | Medium | Injection boundary | `docs/specs/04-components/shared/ai-prompts.md` (lines 23, 74) | P-01 screens only the first 20,000 characters but P-02 reads up to 60,000, so text past the window reaches the reader unscreened. | high |
+| RV-042 | Medium | Acceptance and evidence | `docs/specs/04-components/shared/ai-prompts.md` P-01 eval 7 (line 55) | Quarantine counts as `fail`, so honest sellers flagged by the screen lose ranking and job providers are rejected; quarantine triggers and labels are inconsistent. | moderate-high |
 | RV-043 | Medium | Privacy (D31) | `data-and-protocol.md` idempotency (line 816) | Idempotent replay of `completeModelCall` would require storing model responses, but D31 says the proxy stores only counts. | high |
-| RV-044 | Medium | App: approvals | `docs/specs/04-components/app-and-notifications.md` CZ-22 (line 105) | The approval screen's integrity check compares server data with server data, so a compromised server can show benign payees and approve attacker ones. | moderate-high |
+| RV-044 | Medium | App: approvals | `docs/specs/04-components/app/app-and-notifications.md` CZ-22 (line 105) | The approval screen's integrity check compares server data with server data, so a compromised server can show benign payees and approve attacker ones. | moderate-high |
 | RV-045 | Medium | Keys (decision risk D70) | CZ-27 (lines 368, 379, 400, 456) | With every server key on one Mac, K6/K20 dual control and guardian separation cannot be met as written. | moderate |
 | RV-046 | Medium | Consistency: spec 01 | `docs/specs/01-system-architecture/system-architecture.md` §8.4 and §10.1 (lines 647, 718, 823, 891–895) | Spec 01 still describes an old vault API (`reserve(…, nonce, merkleProof)`, `settle(nonce)`, `releaseExpired`, `recordPullback`). | high |
-| RV-047 | Medium | Consistency: D51/D65 | `server-autonomy-roi-keys.md` CZ-25 (lines 308, 312, 322) | Text left over from before D51 still describes local currencies and an FX source. | high |
+| RV-047 | Medium | Consistency: D51/D65 | `docs/specs/04-components/server/server-autonomy-roi-keys.md` CZ-25 (lines 308, 312, 322) | Text left over from before D51 still describes local currencies and an FX source. | high |
 | RV-048 | Medium | Consistency: state machines | `data-and-protocol.md` (lines 283, 311) | Envelope `Closing` and pocket `DelegateReady` exist in spec 02 but have no on-chain source or derivation rule. | high |
 | RV-049 | Medium | Vault: pockets | docs/specs/03-smart-contracts/czar-vault.md §5.4 `writeOffPocket` (line 146) vs §8.3 (line 340) | A pocket that is only `Registered` cannot be closed, so a failed `addDelegate` blocks the envelope until owner force-close. | high |
 | RV-050 | Medium | Consistency: identifiers | `data-and-protocol.md` §7.4 (line 613) | `paymentId` means one id per authorization index in spec 02 but one client-chosen id per `pay` call in the MCP spec. | moderate-high |
-| RV-051 | Medium | Privacy | `local-observers-and-daemon.md` (lines 339, 445) | Screening `ActivityEvent.summary` with P-01 at intake would send `local-only` text to the hosted model. | moderate |
-| RV-052 | Medium | Consistency: D58 | `local-observers-and-daemon.md` (line 339) | One spec says soul compile is skipped without a model; D58 and CZ-04 say it falls back to rules-only. | high |
+| RV-051 | Medium | Privacy | `docs/specs/04-components/local/local-observers-and-daemon.md` (lines 339, 445) | Screening `ActivityEvent.summary` with P-01 at intake would send `local-only` text to the hosted model. | moderate |
+| RV-052 | Medium | Consistency: D58 | `docs/specs/04-components/local/local-observers-and-daemon.md` (line 339) | One spec says soul compile is skipped without a model; D58 and CZ-04 say it falls back to rules-only. | high |
 | RV-053 | Medium | Build plan: dependencies | `phase-1-tasks.md` T-086 (line 1104), T-095 (lines 1197–1199) | T-086 (M6) uses `getMonthlyStatement`, which T-095 (M7) builds, and depends on T-070 (M5) while M6 is said to share nothing with M5. | high |
-| RV-054 | Medium | Acceptance scenario | `docs/specs/04-components/phase-1-acceptance-scenario.md` (stages 3–8, line 7.1) | The release scenario does not exercise the MCP pay path, deliverable injection, a mid-step freeze, an alternate-payee retry, or injection in written-back fields. | high |
+| RV-054 | Medium | Acceptance scenario | `docs/specs/04-components/shared/phase-1-acceptance-scenario.md` (stages 3–8, line 7.1) | The release scenario does not exercise the MCP pay path, deliverable injection, a mid-step freeze, an alternate-payee retry, or injection in written-back fields. | high |
 | RV-055 | Medium | Signer policy | `phase-1-tasks.md` T-035 (line 506), T-037 (line 536) | The task-level deny lists are weaker than CZ-27's: T-035 omits `setCategoryLimits` and `setPasskey`, and T-037 implies USDC calls to Gateway are allowed for pocket keys. | high |
 | RV-056 | Low | Vault: reservations | docs/specs/03-smart-contracts/czar-vault.md `reserve` (line 128) vs §8.1 (line 313) | Reservations can keep paying for up to 600 s after the envelope expires. | high |
 | RV-057 | Low | Build plan: tests | `phase-1-tasks.md` T-030 (line 446) | T-030's test assumes `arc-anvil` returns `-32012` for wide log ranges; it has no such cap. | high |
@@ -233,7 +233,7 @@
 ### RV-003 (Critical): The agent key alone can register an EOA it controls as a pocket and move 25–50% of every open envelope there; the planner sets `pocketCapBps` 2500 even with no Gateway step.
 
 - **Area:** Vault: pockets
-- **Location:** docs/specs/03-smart-contracts/czar-vault.md §5.4 `registerPocket` (line 140); §5.2 `openEnvelope` (line 118); `docs/specs/04-components/server-planning-and-payment.md` §5 step 6 (line 143)
+- **Location:** docs/specs/03-smart-contracts/czar-vault.md §5.4 `registerPocket` (line 140); §5.2 `openEnvelope` (line 118); `docs/specs/04-components/server/server-planning-and-payment.md` §5 step 6 (line 143)
 - **Quoted text:**
   - `registerPocket(uint64 envelopeId, address pocket)` | agent | "`notPausedOrFrozen`; envelope `Open`; `pocket != 0`; `pocket.code.length == 0` (must be an EOA …); `pockets[pocket].envelopeId == 0`".
   - Planner caps: "`cap = Σ stepCap × (1 + slackBps/10000)` with `Plan.slackBps` 2500; `pocketCapBps` 2500 (D22)."
@@ -262,7 +262,7 @@
 ### RV-004 (Critical): Pocket funds can be stranded for good: the pocket key is destroyed at `PocketClosed`, the slow-withdraw fallback cannot reach the vault, and leftover gas is never swept.
 
 - **Area:** Vault and signer: pockets
-- **Location:** `docs/specs/05-build-plan/phase-1-tasks.md` T-037 (lines 533–536); `docs/specs/04-components/server-autonomy-roi-keys.md` CZ-27 (lines 366, 416, 421); `docs/specs/04-components/server-planning-and-payment.md` (lines 345, 351, 362); docs/specs/03-smart-contracts/czar-vault.md §5.4 (lines 141, 143, 146)
+- **Location:** `docs/specs/05-build-plan/phase-1-tasks.md` T-037 (lines 533–536); `docs/specs/04-components/server/server-autonomy-roi-keys.md` CZ-27 (lines 366, 416, 421); `docs/specs/04-components/server/server-planning-and-payment.md` (lines 345, 351, 362); docs/specs/03-smart-contracts/czar-vault.md §5.4 (lines 141, 143, 146)
 - **Quoted text:**
   - T-037: "Restrict signing to `addDelegate` transactions and `GatewayWalletBatched` authorizations." / "Destroy the key when `PocketClosed` is indexed." / test: "a pocket key cannot sign … any transfer to a non-Gateway address."
   - CZ-27 line 421: "`kms.pocketKeyGraceHours` (48) keeps the key for that case before destruction, unless the pocket closed with `outstanding = 0`."
@@ -345,7 +345,7 @@
 ### RV-007 (High): Freeze and guardian pause do not stop pocket nanopayments or evaluator payouts, yet the product and UI say freeze stops all spending.
 
 - **Area:** Signer: freeze semantics
-- **Location:** `docs/specs/04-components/server-autonomy-roi-keys.md` CZ-27 `gateway-nano` and `evaluator-call` policies (lines 394, 397), wording (line 491); `docs/product/czar-product.md` §6.6 (line 166)
+- **Location:** `docs/specs/04-components/server/server-autonomy-roi-keys.md` CZ-27 `gateway-nano` and `evaluator-call` policies (lines 394, 397), wording (line 491); `docs/product/czar-product.md` §6.6 (line 166)
 - **Quoted text:**
   - `gateway-nano` policy: "`pocket` is `Funded`/`Draining` for an open envelope; `payTo` is a leaf payee…; `amount ≤ stepCap`; cumulative per pocket ≤ `funded`" (no frozen check).
   - Unpause wording: "Spending is back on. Nothing was spent while paused."
@@ -398,7 +398,7 @@
 ### RV-009 (High): `syncJob` refuses `Opened` jobs, so an unfunded job blocks its envelope from closing; and its refund test cannot be checked on-chain.
 
 - **Area:** Vault: jobs
-- **Location:** docs/specs/03-smart-contracts/czar-vault.md §5.5 `syncJob` (line 162); §8.4 (line 356); `docs/specs/03-smart-contracts/job-escrow-adapter.md` (line 71); `docs/specs/04-components/server-planning-and-payment.md` (line 372)
+- **Location:** docs/specs/03-smart-contracts/czar-vault.md §5.5 `syncJob` (line 162); §8.4 (line 356); `docs/specs/03-smart-contracts/job-escrow-adapter.md` (line 71); `docs/specs/04-components/server/server-planning-and-payment.md` (line 372)
 - **Quoted text:**
   - `syncJob` preconditions: "job `Funded` or `Submitted`"; refund branch: "`Rejected` or `Expired` with refund observed (`balanceOf` ≥ before + budget, or `Refunded` event seen by the caller)".
   - Adapter line 71: "Provider never calls `setBudget`: the job stays `Opened` until expiry; `syncJob` after `expiredAt` releases `reservedCap`".
@@ -473,7 +473,7 @@
 ### RV-012 (High): The pullback asks to move the whole available balance, leaving nothing for Gateway's fee, so the drain likely fails.
 
 - **Area:** Server: pullback
-- **Location:** `docs/specs/04-components/server-planning-and-payment.md` CZ-15 step 7 (line 350); `docs/specs/04-components/phase-1-acceptance-scenario.md` 5.x (line 63)
+- **Location:** `docs/specs/04-components/server/server-planning-and-payment.md` CZ-15 step 7 (line 350); `docs/specs/04-components/shared/phase-1-acceptance-scenario.md` 5.x (line 63)
 - **Quoted text:**
   - "`value` is the pocket's Gateway `availableBalance` as reported by the Gateway API `/v1/balances` (A2-29) minus `payer.pullbackSafetyAtomic` 0".
 - **Problem:**
@@ -621,14 +621,14 @@
 ### RV-018 (High): The specs contradict each other on whether the planner (P-03) receives merchant-derived `StepResult` text.
 
 - **Area:** Injection boundary
-- **Location:** `docs/specs/04-components/server-planning-and-payment.md` (lines 141, 165 vs 385, 388); `docs/specs/01-system-architecture/system-architecture.md` (lines 1032, 1034); `docs/specs/02-data-and-protocol/data-and-protocol.md` (lines 375, 388); `phase-1-acceptance-scenario.md` 4.6 (line 51)
+- **Location:** `docs/specs/04-components/server/server-planning-and-payment.md` (lines 141, 165 vs 385, 388); `docs/specs/01-system-architecture/system-architecture.md` (lines 1032, 1034); `docs/specs/02-data-and-protocol/data-and-protocol.md` (lines 375, 388); `docs/specs/04-components/shared/phase-1-acceptance-scenario.md` 4.6 (line 51)
 - **Quoted text:**
-  - CZ-13 line 141: "The prompt never receives descriptions or any text from merchants (`ai-prompts.md` P-03)."
+  - CZ-13 line 141: "The prompt never receives descriptions or any text from merchants (`docs/specs/04-components/shared/ai-prompts.md` P-03)."
   - §5.6 line 385: "planner / paying agent | P-03, code | **only** `StepResult` objects, schema-validated, wrapped in a labelled `tool_result`".
   - Spec 02 line 375: StepResult is "the only form in which untrusted merchant output reaches the planner".
 - **Problem:**
   - `StepResult.fields[].value` is free merchant text (up to 2,000 chars × 50 fields, copied verbatim by P-02).
-  - P-03's input table in `ai-prompts.md` (lines 113–119) has no StepResult input and no tools; spec 01 describes planner tools such as `pay_step(stepId)` while CZ-15 §7 says the paying agent uses no model.
+  - P-03's input table in `docs/specs/04-components/shared/ai-prompts.md` (lines 113–119) has no StepResult input and no tools; spec 01 describes planner tools such as `pay_step(stepId)` while CZ-15 §7 says the paying agent uses no model.
 - **Evidence:**
   - Quotes above conflict within one file and across specs 01/02/04.
 - **Failure scenario:**
@@ -644,7 +644,7 @@
 ### RV-019 (High): The MCP tools take URLs, amounts and free objects, and a coding agent can loop `pay` inside an open envelope with no further approval.
 
 - **Area:** MCP spend path
-- **Location:** `docs/specs/04-components/local-agent-surfaces.md` (lines 103, 121, 152); `docs/specs/02-data-and-protocol/mcp/czar-mcp-tools.md` `quote`/`pay` (lines 156–159, 207–208); `server-planning-and-payment.md` (line 81)
+- **Location:** `docs/specs/04-components/local/local-agent-surfaces.md` (lines 103, 121, 152); `docs/specs/02-data-and-protocol/mcp/czar-mcp-tools.md` `quote`/`pay` (lines 156–159, 207–208); `docs/specs/04-components/server/server-planning-and-payment.md` (line 81)
 - **Quoted text:**
   - CZ-09 line 121: "tools take ids and enums, not payees or amounts"; line 103: "inputs are enum and id fields only".
   - CZ-12 line 81: "if an open envelope covers the step (payee in its `payeeRoot`, cap room) → `executing`".
@@ -692,7 +692,7 @@
 ### RV-021 (High): MCP `pay.input` sends arbitrary agent-supplied data to Czar's server and the merchant without redaction.
 
 - **Area:** Privacy
-- **Location:** `docs/specs/02-data-and-protocol/api/openapi.yaml` `PayRequest.stepRequest.input` (line 256); CZ-09 `pay` flow (`local-agent-surfaces.md` lines 77–83); spec 01 (line 962)
+- **Location:** `docs/specs/02-data-and-protocol/api/openapi.yaml` `PayRequest.stepRequest.input` (line 256); CZ-09 `pay` flow (`docs/specs/04-components/local/local-agent-surfaces.md` lines 77–83); spec 01 (line 962)
 - **Quoted text:**
   - `input: { type: object, description: Structured input only; never free user text (layer 3). }` in a `redacted-to-server` object.
   - Spec 01 line 962: "Layer 3 … is partial in Phase 1."
@@ -714,7 +714,7 @@
 ### RV-022 (High): Only `czar-extract` blocks private addresses; planner probes, `createQuote` URLs and deliverable fetches have no SSRF guard.
 
 - **Area:** Security: outbound fetches
-- **Location:** `docs/specs/04-components/server-supply-side.md` (line 134); CZ-13 (line 140); CZ-18 (line 637); CZ-16 (line 277)
+- **Location:** `docs/specs/04-components/server/server-supply-side.md` (line 134); CZ-13 (line 140); CZ-18 (line 637); CZ-16 (line 277)
 - **Quoted text:**
   - The private-range block appears only for `czar-extract` (supply-side line 134).
 - **Problem:**
@@ -734,19 +734,19 @@
 ### RV-023 (High): The specs give opposite rules for what happens when the P-01 screen is unavailable.
 
 - **Area:** Injection boundary
-- **Location:** `docs/specs/04-components/server-planning-and-payment.md` CZ-15 (line 398); `docs/specs/04-components/server-acceptance-evidence-selection.md` CZ-16 (line 318); `docs/specs/04-components/ai-prompts.md` (line 46)
+- **Location:** `docs/specs/04-components/server/server-planning-and-payment.md` CZ-15 (line 398); `docs/specs/04-components/server/server-acceptance-evidence-selection.md` CZ-16 (line 318); `docs/specs/04-components/shared/ai-prompts.md` (line 46)
 - **Quoted text:**
   - CZ-15: "a step whose body cannot be screened is quarantined, not delivered."
   - CZ-16: "P-01 unavailable … otherwise checks run … the result is still delivered with the warning label".
 - **Problem:**
   - T-046, T-047 and T-048 can implement opposite behaviours. One of them writes unscreened merchant text into `.czar/results`, which Claude Code reads.
 - **Evidence:**
-  - `ai-prompts.md` line 46 says the regex result stands, a third variant.
+  - `docs/specs/04-components/shared/ai-prompts.md` line 46 says the regex result stands, a third variant.
 - **Failure scenario:**
   1. The model provider is down, or the monthly cap is hit.
   2. Unscreened merchant output with an injection is delivered into the user's workspace.
 - **Proposed fix:**
-  - Pick one rule (recommended: quarantine, or deliver with no field values) and state it in CZ-15, CZ-16 and `ai-prompts.md`.
+  - Pick one rule (recommended: quarantine, or deliver with no field values) and state it in CZ-15, CZ-16 and `docs/specs/04-components/shared/ai-prompts.md`.
 - **Affected tasks:** T-046, T-047, T-048 (M3)
 - **Confidence:** high
 - **Change request:** `change-requests/SCR-023-screen-unavailable-rule.md`
@@ -754,7 +754,7 @@
 ### RV-024 (High): T-055 rejects a job on a deliverable hash mismatch; the spec says `inconclusive`.
 
 - **Area:** Jobs: acceptance
-- **Location:** `docs/specs/05-build-plan/phase-1-tasks.md` T-055 (line 766); `docs/specs/04-components/server-acceptance-evidence-selection.md` CZ-16 (line 277)
+- **Location:** `docs/specs/05-build-plan/phase-1-tasks.md` T-055 (line 766); `docs/specs/04-components/server/server-acceptance-evidence-selection.md` CZ-16 (line 277)
 - **Quoted text:**
   - T-055: "a mismatch calls `reject`".
   - CZ-16: bytes "must hash … to `deliverable`, else `inconclusive` with `detail.hashMismatch`".
@@ -773,7 +773,7 @@
 ### RV-025 (High): The ERC-8183 job brief and `inputCommit` are never defined, so a real provider cannot learn the task and `descriptionHash` cannot be computed.
 
 - **Area:** Jobs: protocol
-- **Location:** `docs/specs/04-components/server-planning-and-payment.md` CZ-15 (line 366); `docs/specs/02-data-and-protocol/data-and-protocol.md` (lines 334, 452)
+- **Location:** `docs/specs/04-components/server/server-planning-and-payment.md` CZ-15 (line 366); `docs/specs/02-data-and-protocol/data-and-protocol.md` (lines 334, 452)
 - **Quoted text:**
   - CZ-15: "The job brief (structured, from `inputTemplate`) is published off-chain at a URI the provider fetches".
   - Spec 02 line 452: `descriptionHash` uses `inputCommit`.
@@ -814,14 +814,14 @@
 ### RV-027 (High): Objective status values differ between the CZ-12 state machine and the OpenAPI enum.
 
 - **Area:** Consistency: objective state
-- **Location:** `docs/specs/04-components/server-planning-and-payment.md` CZ-12 (lines 33–47); `docs/specs/02-data-and-protocol/api/openapi.yaml` (line 163); `mcp/czar-mcp-tools.md` (line 41)
+- **Location:** `docs/specs/04-components/server/server-planning-and-payment.md` CZ-12 (lines 33–47); `docs/specs/02-data-and-protocol/api/openapi.yaml` (line 163); `mcp/czar-mcp-tools.md` (line 41)
 - **Quoted text:**
   - CZ-12 states: `received`, `planning`, `no_supplier`, `awaiting_approval`, `opening`, `executing`, `replanning`, `delivered`, `failed`, `expired`, `dismissed`.
   - OpenAPI: `enum: [received, planning, no-supplier, awaiting-approval, approved, executing, accepted, delivered, failed, closed, cancelled]`.
 - **Problem:**
   - `opening`, `replanning`, `expired`, `dismissed` are missing from the API; `approved`, `accepted`, `closed`, `cancelled` are never produced; underscores vs hyphens.
 - **Evidence:**
-  - MCP `get_objectives` and `local-soul-and-drives.md` line 429 use the hyphenated API forms.
+  - MCP `get_objectives` and `docs/specs/04-components/local/local-soul-and-drives.md` line 429 use the hyphenated API forms.
 - **Failure scenario:**
   1. `getObjective` for an objective in `opening` fails response validation in the T-009 harness; daemon `?status=` filters miss rows stored with underscores.
 - **Proposed fix:**
@@ -833,7 +833,7 @@
 ### RV-028 (High): D70 (everything runs locally on Zaryab's Mac with a local keystore) is only partly applied; hosting, keys, app origin and archive URLs still assume the cloud.
 
 - **Area:** Consistency: D70 local Mac
-- **Location:** `phase-1-tasks.md` T-040 (lines 543–554), T-036 (lines 516–524); `build-plan.md` M2 exit (line 140), §8 (line 340); `gate-0-checks.md` G0-13 row (line 26); `builder-agent-rules.md` (line 34); spec 01 (lines 410, 455); CZ-22 (`app-and-notifications.md` lines 30, 260); CZ-27 (lines 342–348, 402, 508); `data-and-protocol.md` `archiveUri` (line 428)
+- **Location:** `phase-1-tasks.md` T-040 (lines 543–554), T-036 (lines 516–524); `build-plan.md` M2 exit (line 140), §8 (line 340); `gate-0-checks.md` G0-13 row (line 26); `builder-agent-rules.md` (line 34); spec 01 (lines 410, 455); CZ-22 (`docs/specs/04-components/app/app-and-notifications.md` lines 30, 260); CZ-27 (lines 342–348, 402, 508); `data-and-protocol.md` `archiveUri` (line 428)
 - **Quoted text:**
   - T-040: "Testnet hosting: server, indexer, merchants, Postgres, object store" … "after Zaryab approves accounts" … "finds no key material (only KMS ids)".
   - G0-13 row: "agent, after Zaryab picks the KMS vendor and creates the account | none (cloud costs only)" (procedure at line 127 says it moved).
@@ -860,7 +860,7 @@
 ### RV-029 (High): The Phase 1 acceptance scenario cannot pass under the routing rules and vault invariants it is meant to test.
 
 - **Area:** Acceptance scenario
-- **Location:** `docs/specs/04-components/phase-1-acceptance-scenario.md` (lines 38, 39, 60, 65, 86); CZ-14 routing (`server-planning-and-payment.md` lines 224–236)
+- **Location:** `docs/specs/04-components/shared/phase-1-acceptance-scenario.md` (lines 38, 39, 60, 65, 86); CZ-14 routing (`docs/specs/04-components/server/server-planning-and-payment.md` lines 224–236)
 - **Quoted text:**
   - 3.1: "steps 1–2 `czar-extract` Gateway route (`gateway-nano`, 1,000 × 2 each; `routingReason = below-pocket-threshold`)".
   - 5.3: "`fundPocket(pocket, 4,000)`"; 5.8: "`PocketClosed(writtenOff = 4 × 1,000 + 3,500 fee)`".
@@ -924,7 +924,7 @@
 ### RV-032 (Medium): The signer does not check `openEnvelope`, `reserve` or `openJob` arguments for K3 against a stored, approvable plan.
 
 - **Area:** Signer policy
-- **Location:** CZ-27 `vault-call` policy (line 389); spec 01 §13 (line 1006); `planner.newPayeeNeedsApproval` (`server-planning-and-payment.md` line 147)
+- **Location:** CZ-27 `vault-call` policy (line 389); spec 01 §13 (line 1006); `planner.newPayeeNeedsApproval` (`docs/specs/04-components/server/server-planning-and-payment.md` line 147)
 - **Quoted text:**
   - `vault-call`: checks the vault, the selector, and "args ABI-encoded by the signer".
 - **Problem:**
@@ -1056,7 +1056,7 @@
 ### RV-039 (Medium): The routing formulas leave out settle chunking, `finalize`, and the unreturned gas grant, so thresholds are understated.
 
 - **Area:** Routing (D37/D38)
-- **Location:** docs/specs/03-smart-contracts/czar-vault.md §13 (lines 467, 471); `server-planning-and-payment.md` (lines 221, 235)
+- **Location:** docs/specs/03-smart-contracts/czar-vault.md §13 (lines 467, 471); `docs/specs/04-components/server/server-planning-and-payment.md` (lines 221, 235)
 - **Quoted text:**
   - `c_vd(n) = (110,000 + 30,000 + 6,000n)·gasPrice/n`; "`pocketThreshold(100) = 1,480`"; "`cPocket = 0.0149 USDC`; `pocketWorthIt` needs `V ≥ 0.149 USDC`".
 - **Problem:**
@@ -1075,7 +1075,7 @@
 ### RV-040 (Medium): When the daemon is down, raw hook payloads (including secrets and Cursor's `user_email`) are written unredacted to a plain queue file.
 
 - **Area:** Privacy: local
-- **Location:** `docs/specs/04-components/local-observers-and-daemon.md` (lines 104, 119, 131–132)
+- **Location:** `docs/specs/04-components/local/local-observers-and-daemon.md` (lines 104, 119, 131–132)
 - **Quoted text:**
   - "raw hook payload … never written except to the bounded queue"; "queue file | `local-only` | `${CLAUDE_PLUGIN_DATA}/queue/*.jsonl`, mode 0600, deleted after drain, capped".
 - **Problem:**
@@ -1092,7 +1092,7 @@
 ### RV-041 (Medium): P-01 screens only the first 20,000 characters but P-02 reads up to 60,000, so text past the window reaches the reader unscreened.
 
 - **Area:** Injection boundary
-- **Location:** `docs/specs/04-components/ai-prompts.md` (lines 23, 74); `server-supply-side.md` (line 61)
+- **Location:** `docs/specs/04-components/shared/ai-prompts.md` (lines 23, 74); `docs/specs/04-components/server/server-supply-side.md` (line 61)
 - **Quoted text:**
   - P-01: truncates at `screen.maxChars` 20,000; P-02: reads up to 60,000.
 - **Problem:**
@@ -1109,7 +1109,7 @@
 ### RV-042 (Medium): Quarantine counts as `fail`, so honest sellers flagged by the screen lose ranking and job providers are rejected; quarantine triggers and labels are inconsistent.
 
 - **Area:** Acceptance and evidence
-- **Location:** `ai-prompts.md` P-01 eval 7 (line 55); CZ-16 (lines 245, 252, 258, 279); CZ-15 (lines 291, 389)
+- **Location:** `docs/specs/04-components/shared/ai-prompts.md` P-01 eval 7 (line 55); CZ-16 (lines 245, 252, 258, 279); CZ-15 (lines 291, 389)
 - **Quoted text:**
   - P-01 eval 7 accepts that "Article text quoting … 'ignore previous instructions'" is flagged.
   - CZ-16: "Quarantined --> Fail"; jobs: Fail means `reject`.
@@ -1145,7 +1145,7 @@
 ### RV-044 (Medium): The approval screen's integrity check compares server data with server data, so a compromised server can show benign payees and approve attacker ones.
 
 - **Area:** App: approvals
-- **Location:** `docs/specs/04-components/app-and-notifications.md` CZ-22 (line 105); T-084
+- **Location:** `docs/specs/04-components/app/app-and-notifications.md` CZ-22 (line 105); T-084
 - **Quoted text:**
   - "re-encode decoded args …; compare to calldata; compare payeeRoot to the Plan's payeeRoot".
 - **Problem:**
@@ -1197,7 +1197,7 @@
 ### RV-047 (Medium): Text left over from before D51 still describes local currencies and an FX source.
 
 - **Area:** Consistency: D51/D65
-- **Location:** `server-autonomy-roi-keys.md` CZ-25 (lines 308, 312, 322); `server-planning-and-payment.md` (line 64); `schemas/soul.schema.json` (lines 124–127)
+- **Location:** `docs/specs/04-components/server/server-autonomy-roi-keys.md` CZ-25 (lines 308, 312, 322); `docs/specs/04-components/server/server-planning-and-payment.md` (line 64); `schemas/soul.schema.json` (lines 124–127)
 - **Quoted text:**
   - "Shown in <currency> at today's rate; charged in USDC."; "no external calls except the FX source (GAP)"; "Open question: FX source."
   - `users` table has `displayCurrency`; `hourlyValue.currency` "Display currency code (ISO 4217)" (required).
@@ -1267,7 +1267,7 @@
 ### RV-051 (Medium): Screening `ActivityEvent.summary` with P-01 at intake would send `local-only` text to the hosted model.
 
 - **Area:** Privacy
-- **Location:** `local-observers-and-daemon.md` (lines 339, 445); `local-soul-and-drives.md` (line 39); `ai-prompts.md` (line 17)
+- **Location:** `docs/specs/04-components/local/local-observers-and-daemon.md` (lines 339, 445); `docs/specs/04-components/local/local-soul-and-drives.md` (line 39); `docs/specs/04-components/shared/ai-prompts.md` (line 17)
 - **Quoted text:**
   - "P-01 flag on `summary` of `trusted = false` rows is stored as `flags`"; model inputs "are always the redacted excerpt (`redacted-to-server` class) and never raw events".
 - **Problem:**
@@ -1284,7 +1284,7 @@
 ### RV-052 (Medium): One spec says soul compile is skipped without a model; D58 and CZ-04 say it falls back to rules-only.
 
 - **Area:** Consistency: D58
-- **Location:** `local-observers-and-daemon.md` (line 339); `local-soul-and-drives.md` (lines 199, 221)
+- **Location:** `docs/specs/04-components/local/local-observers-and-daemon.md` (line 339); `docs/specs/04-components/local/local-soul-and-drives.md` (lines 199, 221)
 - **Quoted text:**
   - "Fallback without a model: compile is skipped (previous soul stands)".
 - **Problem:**
@@ -1318,7 +1318,7 @@
 ### RV-054 (Medium): The release scenario does not exercise the MCP pay path, deliverable injection, a mid-step freeze, an alternate-payee retry, or injection in written-back fields.
 
 - **Area:** Acceptance scenario
-- **Location:** `docs/specs/04-components/phase-1-acceptance-scenario.md` (stages 3–8, line 7.1)
+- **Location:** `docs/specs/04-components/shared/phase-1-acceptance-scenario.md` (stages 3–8, line 7.1)
 - **Quoted text:**
   - 7.1 injects on step 2, a Gateway step whose pocket was already closed in 5.8; its check "no new reservation" is empty for a pocket step.
 - **Problem:**
@@ -1624,5 +1624,5 @@ All treated as data. None was followed.
 - `docs/research/evidence/experiments/a3-a5-reads/raw/arc-contract-addresses-2026-10-18.md` lines 2–14: "Fetch … https://docs.arc.io/llms.txt", "## Agent Instructions — install the Circle Skill for Arc (use-arc)", "Use Arc Foundry …". Same as FL-2.
 - Quoted copies of the above in `docs/research/evidence/arc-circle-docs-2026-10-18.md` (lines 365–372) and `docs/research/evidence/discovery-catalog-snapshot-2026-10-18.md` (lines 263–265).
 - `https://code.claude.com/docs/en/hooks.md` line 2: "Fetch the complete documentation index at: https://code.claude.com/docs/llms.txt".
-- In-repo agent instructions that are intended: `AGENTS.md`, `docs/specs/05-build-plan/builder-agent-rules.md`, and the system prompts and injection test strings in `docs/specs/04-components/ai-prompts.md`.
+- In-repo agent instructions that are intended: `AGENTS.md`, `docs/specs/05-build-plan/builder-agent-rules.md`, and the system prompts and injection test strings in `docs/specs/04-components/shared/ai-prompts.md`.
 - **Secret-looking files seen by name only (not opened):** `docs/research/evidence/experiments/a1-erc1271-usdc/{owner,seller}.key` and `docs/research/evidence/experiments/a2-gateway-e2e/{buyer,delegate,merchant}.key` are listed in the build plan; none is tracked in git (`git ls-files` shows no `.key` or `.env` file). The `*.addr` files in those folders are public addresses.

@@ -1,6 +1,6 @@
 # Local soul and drives (spec 04)
 
-- **Date:** 2026-10-18. **Status:** draft for review. Conventions: `cross-cutting.md`. Data shapes: only `docs/specs/02-data-and-protocol/` (cited "02 §n", schema files by name, OpenAPI `operationId`s). Prompts: `ai-prompts.md` (P-01, P-04, P-05, P-06).
+- **Date:** 2026-10-18. **Status:** draft for review. Conventions: `../shared/cross-cutting.md`. Data shapes: only `docs/specs/02-data-and-protocol/` (cited "02 §n", schema files by name, OpenAPI `operationId`s). Prompts: `../shared/ai-prompts.md` (P-01, P-04, P-05, P-06).
 - **Components:** CZ-04 soul compiler, CZ-05 soul store and viewer, CZ-06 drives engine, CZ-07 objective publisher, CZ-08 shadow mode. All run inside the daemon process (`@czar/daemon`, CZ-02) on the user's machine.
 - **Wording rule (D31):** raw work data stays on the user's machine; only redacted excerpts are sent for soul compilation, through a Czar proxy that stores nothing. Never claim that nothing leaves the machine.
 
@@ -27,7 +27,7 @@
 ### 3. Runtime
 
 - In-process module of the daemon. Runs on a schedule (`soul.compileCron`, default `02:00` local) and on demand from the viewer ("Compile now"). One compile at a time (mutex); a running compile is cancelled on daemon shutdown and resumes from the last committed version on restart (versions are atomic).
-- Resource budget: ≤ 2 CPU-seconds of rule work per compile, ≤ 150 MB RAM, one model call ≤ 24,000 tokens (`models.soulMonthlyTokens`, `cross-cutting.md` §6.2), ≤ 60 s wall time (`models.soul-compiler.timeoutMs`).
+- Resource budget: ≤ 2 CPU-seconds of rule work per compile, ≤ 150 MB RAM, one model call ≤ 24,000 tokens (`models.soulMonthlyTokens`, `../shared/cross-cutting.md` §6.2), ≤ 60 s wall time (`models.soul-compiler.timeoutMs`).
 
 ### 4. Interfaces
 
@@ -37,7 +37,7 @@
 | in | viewer edits (CZ-05) | belief operations on the local store |
 | in | interview answers, accepted proposals, bundle confirmations (CZ-05, D90) | `InterviewSubmission`, `ProposedBelief` (02 §4.24–§4.25) → §5.11 |
 | in | redaction layer 2 (CZ-26 sidecar) | excerpt text in → marked text out (02 §3.1) |
-| in | P-01 `screen` and P-04 `soul-compiler` via the Czar model proxy (`completeModelCall`, AM-02) | `ai-prompts.md` |
+| in | P-01 `screen` and P-04 `soul-compiler` via the Czar model proxy (`completeModelCall`, AM-02) | `../shared/ai-prompts.md` |
 | out | `soul_versions` row (new `soul.json`) | 02 §4.2 (`soul.schema.json`) |
 | out | `soulVersionHash` to CZ-07 | `submitSoulVersion` (`POST /v1/soul-versions`, `SoulVersionSubmission`) |
 | out | weekly diff (local only) | §5.6 below |
@@ -107,7 +107,7 @@ For a belief with receipts `r_1 … r_n` (event timestamps `t_i`, ages `a_i` day
 3. Layer 2 (Presidio sidecar, CZ-26) runs on the whole excerpt; entities become `[[R:P:…]]` markers (02 §3.1). If the sidecar is down, the compile runs **rules only** (no model call); it never sends an un-redacted excerpt.
 4. P-01 `screen` runs on the excerpt; flagged lines are removed (§5.4).
 5. The excerpt goes to the Czar model proxy with the P-04 prompt. The proxy forwards to the hosted model and stores nothing (D31); the daemon logs only token counts and the prompt hash.
-6. The response (belief operations, `ai-prompts.md` P-04 schema) is validated against the gate (§5.4) and applied.
+6. The response (belief operations, `../shared/ai-prompts.md` P-04 schema) is validated against the gate (§5.4) and applied.
 7. Retention of the excerpt on the machine: it is not stored; only the resulting beliefs are.
 
 #### 5.6 Versioning and the weekly diff
@@ -178,7 +178,7 @@ stateDiagram-v2
 | `soul.excerptReceiptsPerCandidate` | 3 | enough context, small excerpt |
 | `soul.diffDelta` | 0.15 | visible change |
 | `excerptPolicy.maxChars` | 20,000 | 02 §4.2; keeps the call within 24,000 tokens |
-| `models.soul-compiler.timeoutMs` | 60,000 | `cross-cutting.md` §6.2 |
+| `models.soul-compiler.timeoutMs` | 60,000 | `../shared/cross-cutting.md` §6.2 |
 
 #### 5.11 Non-observed inputs (D90)
 
@@ -213,7 +213,7 @@ stateDiagram-v2
 
 ### 7. AI usage
 
-- P-04 `soul-compiler` (`ai-prompts.md`): inputs: current beliefs (trusted, redacted), candidates with receipt summaries (untrusted text, redacted and screened), section list (trusted). Output: belief operations.
+- P-04 `soul-compiler` (`../shared/ai-prompts.md`): inputs: current beliefs (trusted, redacted), candidates with receipt summaries (untrusted text, redacted and screened), section list (trusted). Output: belief operations.
 - P-01 `screen` on the excerpt (untrusted).
 - Fallback with no model: rules-only compile (`draftText` from templates is used verbatim). The viewer labels such versions "compiled without the language model".
 
@@ -256,13 +256,13 @@ Shown with the version: "Version 12, compiled 18 Oct 02:00 · raw data stays on 
 
 ### 13. Performance and cost
 
-≤ 24,000 tokens per compile, one per night (`cross-cutting.md` §6.2: 0.72 M tokens per month). Rules run under 2 s for 50,000 events (indexed by `occurredAt`, `projectRef`).
+≤ 24,000 tokens per compile, one per night (`../shared/cross-cutting.md` §6.2: 0.72 M tokens per month). Rules run under 2 s for 50,000 events (indexed by `occurredAt`, `projectRef`).
 
 ### 14. Tests and definition of done
 
 - Unit: each §5.1 rule on fixtures; confidence formula properties (monotone in evidence; decays with age; edited beliefs untouched); state machine transitions; gate rules (untrusted text never creates; provenance outside allowlist dropped; per-session cap; deny-list).
 - Integration: full compile on a 30-day synthetic event set (invented data); hash reproduces 02 §5.2 from the stored version; `submitSoulVersion` payload validates against `SoulVersionSubmission`.
-- Injection: P-04 eval cases in `ai-prompts.md` (≥ 3) run against the gate; the mutation "model returns add for an unknown id" is rejected.
+- Injection: P-04 eval cases in `../shared/ai-prompts.md` (≥ 3) run against the gate; the mutation "model returns add for an unknown id" is rejected.
 - Soul inputs (D90): a zero-event fixture plus a full interview yields one active, source-labelled belief per answered question, covering all five interview sections, before any nightly compile, with no model call; an unknown receipt or a changed `sourceDigest` blocks acceptance; one acceptance writes exactly one version; observed confidence and tombstones are unchanged; P-04 `fade` on a confirmed belief is discarded; old version hashes are byte-identical after migration; property tests for receipt sorting with mixed `evt_`/`src_` ids and tombstone dedupe across classes.
 - Privacy: a test asserts the excerpt contains no unmarked secret from a seeded corpus and no `local-only` field names.
 - Definition of done: all above green; rules-only compile works with the model disabled; the weekly diff renders; a deleted belief never returns in 10 compiles.
@@ -468,7 +468,7 @@ The user can override the estimate per objective in the app; actual minutes come
 
 1. Collect the triggering events; `observationHashes = keccak256(jcs(preimage))` per 02 §5.2 for each (the daemon keeps the preimages).
 2. Build the detector output `{detector, keyKind, tokens[], counts, errorClass?, reasonClass?, fileExt?, capabilitiesDefault[], taskSpec}` with the `TaskSpec` from §5.1a (D84). **Superseded by D84:** "no free text … the surrounding line is never included": the subject is the point of the task.
-3. P-05 writes `goal` (≤ 1,000 chars) naming the topic and subjects, and orders `capabilities`; fallback template without a model: "Find {fields} for {n} {topic} rows ({first 5 subjects}…) and fill the table in {fileName}" for `table-fill`, and the matching templates in `ai-prompts.md` P-05.
+3. P-05 writes `goal` (≤ 1,000 chars) naming the topic and subjects, and orders `capabilities`; fallback template without a model: "Find {fields} for {n} {topic} rows ({first 5 subjects}…) and fill the table in {fileName}" for `table-fill`, and the matching templates in `../shared/ai-prompts.md` P-05.
 4. Layer 2 redaction on `goal` (CZ-26), with every `TaskSpec` value on the allow list (D84) → `objective.goal`; the marker → value pairs for this objective are stored in the local marker map (02 §4.6.1, D82), never sent.
 5. `minutesSaved` from §5.4; `deadline` only from a `deadline`-type trusted match (Phase 2) or, when the objective has none, the confirmed interview mission deadline (`interview_answers` `mission.deadline`, D90) when its `projectRootId` equals the `projectRef` of the objective's source file or events and the date is not past. The date becomes a `Timestamp` at 23:59:59.999 on that date in the interview `place.timeZone`, or the Mac's time zone when none was given, converted to UTC. An unrelated project's deadline is never used.
 6. `roi` computed in §5.5; status `candidate`; row in `objectives`.
@@ -539,7 +539,7 @@ Scan ≤ 1 s on 50,000 events; ≤ 2,000 tokens per P-05 call.
 
 ### 14. Tests and definition of done
 
-Each detector: fixtures that fire and near-misses that do not (thresholds ± 1); D90: a matching mission deadline sets `deadline`, an unrelated one does not; an interview hourly value changes `hourlyBand` and the ROI result; a scan or an accepted belief never creates a candidate; **`TaskSpec` golden tests (D84):** a Markdown table with 5 named rows and 5 `[Add price]` cells yields `kind = table-fill`, those 5 subjects in order, `fields = [the price column header]` and the full `columns`; a list file, a code `TODO`, a repeated error and a refusal each yield the §5.1a shape; a placeholder edited in an outside editor is found by the daily rescan; a path never appears in `TaskSpec`; dedupe windows; rate caps; untrusted placeholder never fires; P-05/P-06 injection evals (`ai-prompts.md`); `objectiveHash` matches the server's recomputation. Done when a 7-day synthetic corpus yields the expected candidate set exactly.
+Each detector: fixtures that fire and near-misses that do not (thresholds ± 1); D90: a matching mission deadline sets `deadline`, an unrelated one does not; an interview hourly value changes `hourlyBand` and the ROI result; a scan or an accepted belief never creates a candidate; **`TaskSpec` golden tests (D84):** a Markdown table with 5 named rows and 5 `[Add price]` cells yields `kind = table-fill`, those 5 subjects in order, `fields = [the price column header]` and the full `columns`; a list file, a code `TODO`, a repeated error and a refusal each yield the §5.1a shape; a placeholder edited in an outside editor is found by the daily rescan; a path never appears in `TaskSpec`; dedupe windows; rate caps; untrusted placeholder never fires; P-05/P-06 injection evals (`../shared/ai-prompts.md`); `objectiveHash` matches the server's recomputation. Done when a 7-day synthetic corpus yields the expected candidate set exactly.
 
 ### 15. Dependencies
 

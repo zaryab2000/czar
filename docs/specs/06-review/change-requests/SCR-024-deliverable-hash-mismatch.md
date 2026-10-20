@@ -4,7 +4,7 @@
 |---|---|
 | ID | SCR-024 |
 | Filed by | Independent reviewer (G0-01), 2026-10-19 |
-| Spec and section | `docs/specs/05-build-plan/phase-1-tasks.md` T-055 (line 766); `docs/specs/04-components/server-acceptance-evidence-selection.md` CZ-16 (line 277) |
+| Spec and section | `docs/specs/05-build-plan/phase-1-tasks.md` T-055 (line 766); `docs/specs/04-components/server/server-acceptance-evidence-selection.md` CZ-16 (line 277) |
 | Status | Accepted (D77), applied in CZ-16 §5.5 step 2 and §10 (reject after `acceptance.deliverableRefetchTries` re-fetches; fetch failures stay inconclusive), `job-escrow-adapter.md` §9, T-055. |
 | Review finding | RV-024 (High) in `docs/specs/06-review/2026-10-19-spec-review.md` |
 

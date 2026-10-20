@@ -4,7 +4,7 @@
 |---|---|
 | ID | SCR-110 |
 | Filed by | Czar builder (tier 2), 2026-10-19 |
-| Spec and section | `docs/specs/04-components/server-autonomy-roi-keys.md` CZ-27 §4 (kind list), §5.1 (K6, K20 rows), §5.2 "Dual control" |
+| Spec and section | `docs/specs/04-components/server/server-autonomy-roi-keys.md` CZ-27 §4 (kind list), §5.1 (K6, K20 rows), §5.2 "Dual control" |
 | Status | Open, narrowed (2026-10-20, D88 triage) |
 
 ## Problem

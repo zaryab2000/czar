@@ -4,7 +4,7 @@
 |---|---|
 | ID | SCR-025 |
 | Filed by | Independent reviewer (G0-01), 2026-10-19 |
-| Spec and section | `docs/specs/04-components/server-planning-and-payment.md` CZ-15 (line 366); `docs/specs/02-data-and-protocol/data-and-protocol.md` (lines 334, 452) |
+| Spec and section | `docs/specs/04-components/server/server-planning-and-payment.md` CZ-15 (line 366); `docs/specs/02-data-and-protocol/data-and-protocol.md` (lines 334, 452) |
 | Status | Accepted, applied in spec 02 §4.21 (`JobBrief`), §5.2 (`inputCommit`), §6.2 (`BriefRequest` type), §6.4 vector, §9.2 (`getJobBrief`); `schemas/job-brief.schema.json`; `openapi.yaml`; CZ-15 §5.4; T-054. |
 | Review finding | RV-025 (High) in `docs/specs/06-review/2026-10-19-spec-review.md` |
 

@@ -4,7 +4,7 @@
 |---|---|
 | ID | SCR-103 |
 | Filed by | Czar builder (tier 1), 2026-10-19 |
-| Spec and section | `docs/specs/04-components/*.md` "Named parameters" sections; `cross-cutting.md` §3.2 |
+| Spec and section | `docs/specs/04-components/` "Named parameters" sections; `shared/cross-cutting.md` §3.2 |
 | Status | Open |
 
 ## Problem
@@ -27,7 +27,7 @@
 ## Proposed change
 - Give a default (or state "required, per environment") for each key in the first list.
 - Spell out the derived key names, pick one source for each duplicated value, and complete the partial table.
-- State the environment-file format in `cross-cutting.md` §3.2.
+- State the environment-file format in `docs/specs/04-components/shared/cross-cutting.md` §3.2.
 
 ## Affected tasks
 - T-004 (built; affected keys flagged), T-030 (`indexer.startBlock`), T-043/T-051 (`fetch.localMerchantOrigins`, `merchants.extractAllowlist`), T-057, T-045, T-068

@@ -1,6 +1,6 @@
 # Amendment verification (spec 05, Part A)
 
-- **Date:** 2026-10-18. **Scope:** AM-01 to AM-20 (from `docs/specs/04-components/amendments-and-open-decisions.md` §1) and decisions D45–D62, applied to specs 02, 03 and 04.
+- **Date:** 2026-10-18. **Scope:** AM-01 to AM-20 (from `docs/specs/04-components/shared/amendments-and-open-decisions.md` §1) and decisions D45–D62, applied to specs 02, 03 and 04.
 - **Result:** all checks pass. 0 unresolved references, 0 interface changes, 0 EIP-712 changes, 0 name mismatches, 0 banned-word hits.
 
 ## 1. What was applied, and where
@@ -31,7 +31,7 @@
 | D51 | 02 `Me.displayCurrency` fixed to `USD`; money strings USD-only in 02 and 04; `app.fxSource` removed from 04 |
 | D54 | 02 §4.20 and `schemas/evidence-batch.schema.json` (`archiveUri` required, `cid` optional and Phase 2); 03 `open-evidence-log.md` §11–§13; 04 CZ-17 and the acceptance scenario |
 | D60 | 03 `czar-vault.md` §5.6 note: the agent calls `lowerAutoLimit(categoryId, 0)` per used category after `Frozen` (no signature change); 04 CZ-15, CZ-22, CZ-24, scenario 8.4 |
-| Marks | 04 `amendments-and-open-decisions.md`: every AM marked **Applied** with its location; OD-17 to OD-34 marked **Decided** with D45–D62 |
+| Marks | `docs/specs/04-components/shared/amendments-and-open-decisions.md`: every AM marked **Applied** with its location; OD-17 to OD-34 marked **Decided** with D45–D62 |
 
 Every edited file ends with a change log (Markdown section, a YAML `x-changeLog` comment block, or a JSON `$comment`).
 
@@ -82,7 +82,7 @@ Every edited file ends with a change log (Markdown section, a YAML `x-changeLog`
 | `docs/specs/02-data-and-protocol/data-and-protocol.md` | push routes, §9.6 payloads, §9.7 push link and the `psh_` id tagged stage 2 |
 | `docs/specs/02-data-and-protocol/mcp/czar-mcp-tools.md`, `README.md` | approval happens in the app; §7 push payloads stage 2 |
 | `docs/specs/03-smart-contracts/czar-vault.md` | D60 note cites D63 (follow-up agent step; atomic version is backlog P2-15) |
-| `docs/specs/04-components/` (11 files) | CZ-22 desktop web, CZ-23 stage-2 outline, scenario Stage 0 in desktop Safari, pending list replaces push; D63 in CZ-15, CZ-22, CZ-24; D67 macOS-only CZ-02; D68 in `cross-cutting.md`; OD-35..OD-40 marked Decided (§2b of `amendments-and-open-decisions.md`) |
+| `docs/specs/04-components/` (component folders) | CZ-22 desktop web, CZ-23 stage-2 outline, scenario Stage 0 in desktop Safari, pending list replaces push; D63 in CZ-15, CZ-22, CZ-24; D67 macOS-only CZ-02; D68 in `docs/specs/04-components/shared/cross-cutting.md`; OD-35..OD-40 marked Decided (§2b of `docs/specs/04-components/shared/amendments-and-open-decisions.md`) |
 | `docs/specs/05-build-plan/gate-0-checks.md` | G0-02 and G0-15 moved to stage 2 (procedures kept) |
 | `docs/specs/05-build-plan/build-plan.md` | Gate 0 list, M6 scope, task totals (87), DoD, R-1, §11 stage-2 mobile row, OD-35..OD-40 Decided, D64 limits and pre-mainnet check, D66 in M2 entry |
 | `docs/specs/05-build-plan/phase-1-tasks.md` | T-080 desktop scaffold, T-082 desktop passkey onboarding and fixture removal, T-083 moved to stage 2, T-084–T-086 desktop only, T-046 price read (D68), T-060 macOS only (D67), T-102 desktop Stage 0, coverage tables |
@@ -113,10 +113,10 @@ Every edited file has a 2026-10-19 change-log entry. No data shape, route, contr
 | spec 02 §3.1 `PHONE_NUMBER`; spec 04 P-01 prompt "phone numbers"; T-064 PII corpus "phones" | Presidio entity and PII examples, unrelated |
 | spec 02 §9.6, mcp §7, OpenAPI `PushSubscription*`, `/v1/push/*` | sections and operations tagged stage 2 (`x-stage: 2`), kept defined |
 | spec 02 OpenAPI `listApprovals` "This list, not push, is the source of truth" | consistent with D69 |
-| spec 02 §15.3, spec 04 `cross-cutting.md` §8, `server-autonomy-roi-keys.md` mainnet row, OD-23 row | say local currency is a later option (D51) or are a decided historical row |
-| spec 04 `app-and-notifications.md` CZ-23 section | under "## CZ-23 Notifications (stage 2, D69)" |
-| spec 04 `local-agent-surfaces.md` "no server push to the daemon"; `local-soul-and-drives.md` "no push in Phase 1" | statements that there is no push, consistent |
-| spec 04 `local-observers-and-daemon.md` plugin "manifest", Chrome "Manifest V3" | Claude Code plugin manifest and Chrome extension manifest (stage 2 observer), unrelated to the web app |
+| spec 02 §15.3, `docs/specs/04-components/shared/cross-cutting.md` §8, `docs/specs/04-components/server/server-autonomy-roi-keys.md` mainnet row, OD-23 row | say local currency is a later option (D51) or are a decided historical row |
+| `docs/specs/04-components/app/app-and-notifications.md` CZ-23 section | under "## CZ-23 Notifications (stage 2, D69)" |
+| `docs/specs/04-components/local/local-agent-surfaces.md` "no server push to the daemon"; `docs/specs/04-components/local/local-soul-and-drives.md` "no push in Phase 1" | statements that there is no push, consistent |
+| `docs/specs/04-components/local/local-observers-and-daemon.md` plugin "manifest", Chrome "Manifest V3" | Claude Code plugin manifest and Chrome extension manifest (stage 2 observer), unrelated to the web app |
 | `gate-0-checks.md` G0-02, G0-15 procedures | under headings marked "moved to stage 2 (D69)" |
 | `phase-1-tasks.md` T-083 block | marked "moved to stage 2 (D69)" |
 | "every push and pull request" (`gate-0-checks.md` G0-12, `build-plan.md` §8, T-002) | git push, unrelated |

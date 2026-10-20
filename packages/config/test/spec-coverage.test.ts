@@ -15,7 +15,9 @@ const TOKEN = new RegExp(
 
 function specTokens(): Map<string, string> {
   const found = new Map<string, string>();
-  for (const file of readdirSync(SPEC_DIR).filter((name) => name.endsWith(".md"))) {
+  for (const file of readdirSync(SPEC_DIR, { recursive: true })
+    .map((name) => name.toString())
+    .filter((name) => name.endsWith(".md"))) {
     const text = readFileSync(join(SPEC_DIR, file), "utf8");
     for (const span of text.matchAll(/`([^`\n]+)`/g)) {
       for (const match of (span[1] ?? "").matchAll(TOKEN)) {

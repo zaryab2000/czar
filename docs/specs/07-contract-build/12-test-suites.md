@@ -39,7 +39,7 @@
   - §3.5 (gas)
   - §3.7, §3.7a (named tests)
 - `docs/specs/05-build-plan/phase-1-tasks.md` T-021, T-023, T-024.
-- `docs/specs/04-components/server-planning-and-payment.md` CZ-14 §5 (`routing.gas.*` and `pocketThreshold(n)`).
+- `docs/specs/04-components/server/server-planning-and-payment.md` CZ-14 §5 (`routing.gas.*` and `pocketThreshold(n)`).
 
 ## 4. Files
 | File | Action | Section |

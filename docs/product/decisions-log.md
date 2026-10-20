@@ -231,7 +231,7 @@
 
 ---
 
-## 10. Component follow-ups (2026-10-18, from `docs/specs/04-components/amendments-and-open-decisions.md`)
+## 10. Component follow-ups (2026-10-18, from `docs/specs/04-components/shared/amendments-and-open-decisions.md`)
 
 ### D45. Layer-2 redaction runs in a bundled Python Presidio helper (OD-17)
 - **Decided:** The helper ships inside the daemon installer (packaged with `uv`); users never install Python. Node regex is the forced-review fallback when the helper is down.

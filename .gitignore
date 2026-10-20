@@ -43,3 +43,9 @@ apps/web/next-env.d.ts
 
 # Docs
 docs-internal/
+
+contracts/broadcast/*/31337/
+contracts/slither-out.json
+deployments/local.json
+
+deployments/.vault-client-test*.json

@@ -4,7 +4,7 @@
 |---|---|
 | ID | SCR-106 |
 | Filed by | Czar builder (tier 1), 2026-10-19 |
-| Spec and section | `docs/specs/04-components/local-observers-and-daemon.md` CZ-26 §3, §13, §15 |
+| Spec and section | `docs/specs/04-components/local/local-observers-and-daemon.md` CZ-26 §3, §13, §15 |
 | Status | Open |
 
 ## Problem

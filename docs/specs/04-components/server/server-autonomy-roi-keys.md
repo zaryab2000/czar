@@ -1,6 +1,6 @@
 # Earned autonomy, ROI ledger, key management (spec 04)
 
-- **Date:** 2026-10-18. **Status:** draft for review. Conventions: `cross-cutting.md`. Data shapes: only `docs/specs/02-data-and-protocol/` (cited "02 §n", OpenAPI `operationId`s, MCP tool names) and `docs/specs/03-smart-contracts/` (cited "03 `<file>` §n").
+- **Date:** 2026-10-18. **Status:** draft for review. Conventions: `../shared/cross-cutting.md`. Data shapes: only `docs/specs/02-data-and-protocol/` (cited "02 §n", OpenAPI `operationId`s, MCP tool names) and `docs/specs/03-smart-contracts/` (cited "03 `<file>` §n").
 - **Components:** CZ-24 earned autonomy, CZ-25 ROI ledger, CZ-27 key management. All Phase 1, all on Czar's server.
 
 ---
