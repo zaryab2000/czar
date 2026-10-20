@@ -378,8 +378,9 @@ Crash recovery:
 #### 5.4 Job loop (ERC-8183, Circle's instance in Phase 1)
 
 1. **Open.** Build the `JobBrief` (02 §4.21, RV-025) from the step's `callInputs` (D84; `{{dep.*}}` filled as in §5.2 step 4) and acceptance profile; compute `inputCommit` and `descriptionHash` (02 §5.2); `openJob(envelopeId, stepIndex, provider, stepCap, proof, expiredAt = min(now + payer.jobDurationHours 24, envelope.expiresAt), descriptionHash)` (03 §5.5; adapter builds `createJob(provider, evaluator, expiredAt, "czar:"+hash, 0)`). The brief is served only to the provider at `GET /v1/jobs/{jobKey}/brief`, authenticated by the provider's signature (02 §9.2); only the hash is on-chain (p1-E7). **Superseded by RV-025:** "published off-chain at a URI the provider fetches" (undefined route, shape and access rule).
-2. **Budget.** Wait for `BudgetSet` (provider's `setBudget`) up to `payer.jobBudgetWaitHours` 12; if `budget > reservedCap` → `job-budget-too-high` (re-plan or renegotiate off-chain).
-3. **Fund.** `fundJob(jobKey)`; the vault reads budget and fees in the same tx (JOB-1; fees must be 0 on Circle's instance, A4-07).
+2. **Budget.** Wait for `BudgetSet` (provider's `setBudget`) up to `payer.jobBudgetWaitHours` 2 (H2; was 12). On a timeout, or `budget > reservedCap` (`job-budget-too-high`): call the vault's `cancelJob(jobKey)`, then open the job with the step's next untried alternate provider under the same `stepCap` (D36); with none left, re-plan. **Superseded by H2:** "re-plan or renegotiate off-chain".
+   - **Cancel raced by a submit (N7).** If `cancelJob` reverts `JobNotCancellable`, re-read the escrow through the adapter: `Submitted` or `Completed` with the vault job `Opened` → ask CZ-16 to `reject` it (step 1a) and call `syncJob`, which releases the job (H1); any other state → `syncJob`. Then continue with the alternate.
+3. **Fund.** `fundJob(jobKey, expectedBudget)` with the amount from the latest `BudgetSet` (M1-b); the vault reads budget and fees in the same tx (JOB-1; fees must be 0 on Circle's instance, A4-07). `BudgetChanged` → re-read the budget and decide again (fund at the new amount if ≤ `reservedCap`, else cancel as in step 2).
 4. **Submit.** `JobSubmitted(deliverable)` → CZ-16 evaluates (its own service, K7); CZ-15 only waits.
 5. **Result.** `JobCompleted` → `syncJob` → `spent`; deliverable body → §5.6. `JobRejected`/`Refunded` → `syncJob` → un-spend; step `refunded` (user wording "Money back"). Expiry → `claimJobRefund(jobKey)` by anyone (EIP reference `claimRefund` has no caller check).
 
@@ -484,3 +485,4 @@ On-chain costs per 03 §13; one executor handles ≤ 50 steps/min; p95 vault-dir
 | 2026-10-20 | D82 | CZ-13 step 1 and step 8: unpaid `local` and `agent-assist` steps, no-agent rule; CZ-15 `handed_off` replaces `local_running`. |
 | 2026-10-20 | D83 | CZ-13 steps 2–3: payment-network-only candidates, network guard on the live 402, `marketReference` on shadow plans. |
 | 2026-10-20 | D84 | CZ-12 `taskSpec` validation and `revisePlanSubjects`; CZ-13 step 4 gets `TaskSpec`, new step 4a binds `callInputs`, fallback fans out per subject; CZ-15 call inputs from `callInputs` and `{{dep.*}}`; §8 layer-3 rule superseded. |
+| 2026-10-20 | H2, M1-b, N7 | CZ-15 job loop: budget wait 2 h, `cancelJob` then alternate provider, front-run fallback to `syncJob`; `fundJob(jobKey, expectedBudget)`. |

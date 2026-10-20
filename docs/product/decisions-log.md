@@ -453,6 +453,29 @@ Approved by Zaryab. Each entry cites the review finding it resolves.
 - **Why:** the task is complete only when the person's own file is filled; their notes and formatting are kept.
 - **Amends:** CZ-11 "Does not: modify user files" (now: only the recorded placeholder spans, under these guards); D82 point 6; spec 02 `Plan`, `Result`, `ResultAck`, `createApprovalIntent`.
 
+## 12d. ERC-8183 job path (2026-10-20, from the Flow 6 review)
+
+### D87. ERC-8183 job-path fixes
+- **Context:** a review of the job flow against Circle's verified contract on Arc testnet (implementation `0xA316…351a`, read at block 68,130,229) found edge states the vault could not recover from and gaps in how work is delivered and judged. The contract facts are recorded in the review answers R1–R7 and R14.
+- **Decided (vault, applied in spec PR 1):**
+  1. **H1.** `syncJob` releases an `Opened` job whose escrow reached `Submitted` or `Completed` without funding (Circle's `submit` accepts `Open` with budget 0). The evaluator never completes an unfunded job and rejects it (N6: it decides only for vault jobs `Funded` or `Submitted` with a matching budget).
+  2. **H2.** New `cancelJob`: the vault, as client, rejects an unfunded job while the escrow is `Open`, so the step's cap is freed for an alternate provider. Budget wait 2 h. If a provider front-runs the cancel with a submit, the agent falls back to H1 (N7).
+  3. **M1-b.** `fundJob(jobKey, expectedBudget)` reverts `BudgetChanged` if the provider moved the budget; the vault still refuses a budget of 0.
+  4. New invariant INV-16 / JOB-5: every unfunded job can be released without a force-close.
+- **Decided (job path, applied in spec PR 2):**
+  5. **H3, M6, L1 (replaces D53, amends D77).** Deliverables are **pushed**: the provider uploads the bytes to Czar's server with a signed `DeliverableUpload`, then submits their hash. Uploads are append-only by content hash (N4). One cutoff: a deliverable still missing at `decisionCutoff = expiredAt − decisionMarginSeconds − txMarginSeconds` is rejected (N5). In Phase 1 only a provider on the same Mac can reach the server (N3).
+  6. **M2, N9.** The evaluator re-reads fees and the escrow implementation right before `complete` and rejects if fees are non-zero. Not atomic; before mainnet an evaluator contract or Czar-owned escrow must make it atomic (MN-10).
+  7. **M3, N8.** On freeze, funded-but-unsubmitted jobs are rejected (refund now); submitted jobs are held until unfreeze or the cutoff. The signer always allows the evaluator's `reject`.
+  8. **M4, M5.** The brief states `submitBy = expiredAt − evaluationWindowSeconds`; the agent never claims a refund while a decision is pending; job duration is one default with per-capability overrides (no type list).
+  9. **H5.** Wording: Czar checked the form of the work, not its correctness.
+  10. **N11.** Czar's results folder gets its own `.czar/.gitignore`.
+- **Decided (applied in spec PR 3):**
+  11. **N1.** Job providers are ranked on `delivery` only in Phase 1; an unverified provider may be used only with explicit approval; the scenario seeds each test provider.
+  12. **N2, H6.** Job deliverables can be artifacts, delivered whole; flagged artifacts are held outside the project until the person releases them.
+  13. **H7, N12.** Czar runs two instances of a labelled test provider; its modes are whatever it implements, not a limit on job types (D86).
+- **Phase 2 (recorded, not built):** H4 reject-and-keep and provider recourse; candidate Czar-owned escrow on `base-contracts` (its claim flow, A4-11; a dispute interface is unconfirmed, N10); revisit D27 when outside providers arrive.
+- **Amends:** D53 (replaced), D77, D72 (signer rule for `reject`), D27 (noted for Phase 2).
+
 ---
 
 ## 13. Open items (deferred)

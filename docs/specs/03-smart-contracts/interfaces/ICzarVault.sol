@@ -41,7 +41,8 @@ interface ICzarVault {
         RequestPullback, // 13
         CancelPullback, // 14
         WriteOffPocket, // 15
-        SetMaxPullbackFee // 16 (D81)
+        SetMaxPullbackFee, // 16 (D81)
+        CancelJob // 17 (H2)
     }
 
     /// @notice Parameters of openEnvelope (02 §4.5 / §4.8).
@@ -149,6 +150,8 @@ interface ICzarVault {
     event JobFunded(bytes32 indexed jobKey, uint256 budget);
     event JobSynced(bytes32 indexed jobKey, uint8 state, bool creditedToEnvelope);
     event JobRefunded(bytes32 indexed jobKey, uint256 budget, bool creditedToEnvelope);
+    /// @notice An unfunded job was cancelled by a client reject while the escrow was Open (H2).
+    event JobCancelled(bytes32 indexed jobKey);
     event LimitsSet(bytes32 indexed categoryId, uint256 userMax, uint256 autoLimit);
     event AutoLimitRaised(bytes32 indexed categoryId, uint256 oldLimit, uint256 newLimit, uint64 periodId);
     event AutoLimitLowered(bytes32 indexed categoryId, uint256 oldLimit, uint256 newLimit, address by);
@@ -206,6 +209,10 @@ interface ICzarVault {
     error UnexpectedFees(uint256 platformBp, uint256 evaluatorBp);
     error WrongToken();
     error JobNotOpen();
+    /// @notice cancelJob needs the escrow to be Open (H2); a provider may have submitted first (then syncJob releases).
+    error JobNotCancellable(uint8 escrowStatus);
+    /// @notice The escrow budget differs from the budget the agent decided to fund (M1-b).
+    error BudgetChanged(uint256 expected, uint256 actual);
     error JobWrongState();
     error NoChange();
     error AutoLimitAboveUserMax();
@@ -318,10 +325,15 @@ interface ICzarVault {
         uint64 expiredAt,
         bytes32 descriptionHash
     ) external returns (bytes32 jobKey);
-    /// @notice Agent funds the job after reading budget and fees in the same transaction.
-    function fundJob(bytes32 jobKey) external;
+    /// @notice Agent funds the job after reading budget and fees in the same transaction; reverts BudgetChanged
+    ///         unless the escrow budget equals expectedBudget (M1-b).
+    function fundJob(bytes32 jobKey, uint256 expectedBudget) external;
+    /// @notice Agent or owner cancels an unfunded job while the escrow is Open: the vault, as client, rejects it
+    ///         and the reserved cap is released (H2). Not gated by freeze or pause.
+    function cancelJob(bytes32 jobKey) external;
     /// @notice Anyone: mirror the escrow's job status into vault accounting (escrow status only; Opened jobs
-    ///         are released after expiry or rejection, RV-009).
+    ///         are released after expiry or rejection, RV-009, and when the escrow reached Submitted or
+    ///         Completed without funding, H1).
     function syncJob(bytes32 jobKey) external;
     /// @notice Anyone, after expiry: call the escrow's claimRefund and un-spend the budget.
     function claimJobRefund(bytes32 jobKey) external;
