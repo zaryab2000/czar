@@ -37,9 +37,12 @@
 - **G0-08 and G0-09** (Gate 0, read-only testnet RPC): gate PRD 11 (size limit) and PRD 08 (Gateway replay check). Each PRD tells the builder to run the check if it is not recorded.
 - **Size (D89):** settled. With every function built the vault is 14,540 B and the factory 20,747 B; PRD 11 records the numbers and adds a regression test.
 - **SCR-101** (Arc hardfork name): gates the M1 exit sign-off, not any PRD.
+- **Fork tests (T-022):** need the Arc testnet RPC, which the PRD author's environment cannot reach. They get their own PRD once a run against the RPC can verify them; PRD 12 covers T-021, T-023 and T-024.
+- **Arithmetic panics on extreme inputs (review, 2026-10-20):** `reserve` (`unitAmount × count`), `fundPocket` (`funded + amount`), `grantPocketGas` (`gasGranted + units`) and `raiseAutoLimit` (`userMax × MAX_RAISE_STEP_BPS` with a huge owner-set `userMax`) can revert with `Panic(0x11)` instead of `BadParams` when a caller passes amounts near 2^256. No funds move; only the error differs from 00-conventions §4.8. To be closed by an SCR (security pass), not by a builder.
 
 ## Change log
 | Date | Change |
 |---|---|
 | 2026-10-20 | First version: 00, 01, 03, 04, 05 Ready; the rest Planned. |
 | 2026-10-20 | D89: the vault's logic moves into linked libraries; 00, 03, 04 and 05 rewritten for it; 02 and 06 to 11 Ready (verified). PRD 02 now comes before 03, and the totals in 03–11 include its 2 tests. |
+| 2026-10-20 | Independent review and a pilot build of PRD 09: fixes in 00, 03, 04, 06–11 (event order per §15.5, T-018 command, deferrals to PRD 12, shorthand rules, pinned gas seed). Open items: fork tests, arithmetic panics. |

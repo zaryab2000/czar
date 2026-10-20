@@ -76,7 +76,7 @@ contract SizeTest is VaultTestBase {
 | `EnvelopeLogic` | 3,985 | 4,037 | 20,591 |
 | `ReservationLogic` | 6,595 | 6,647 | 17,981 |
 | `SignatureLogic` | 6,300 | 6,352 | 18,276 |
-| `PocketLogic` | 9,353 | 9,405 | 15,223 |
+| `PocketLogic` | 9,346 | 9,398 | 15,230 |
 | `JobLogic` | 11,867 | 11,919 | 12,709 |
 | `AutonomyLogic` | 2,727 | 2,779 | 21,849 |
 | `OwnerActionLogic` | 9,405 | 9,457 | 15,171 |
@@ -91,13 +91,13 @@ contract SizeTest is VaultTestBase {
 | `reserve` | 223,986 | 132,000 |
 | `reserveWithDigests` | 179,168 | 324,000 (n = 8) |
 | `settle` | 54,611 | 30,000 + 6,000k |
-| `finalize` | 185,638 | 30,000 + 7,000k |
-| `isValidSignature` | 21,053 | — |
+| `finalize` | 198,509 | 30,000 + 7,000k |
+| `isValidSignature` | 21,430 | — |
 | `registerPocket` | 97,485 | 62,000 |
 | `grantPocketGas` | 43,474 | 40,000 |
-| `fundPocket` | 201,235 | 130,000 |
+| `fundPocket` | 201,229 | 130,000 |
 | `requestPullback` | 224,275 | 120,000 |
-| `confirmPullback` | 69,838 | 50,000 |
+| `confirmPullback` | 69,839 | 50,000 |
 | `writeOffPocket` | 62,226 | 35,000 |
 | `openJob` | 448,797 | 252,000 |
 | `fundJob` | 196,516 | 150,000 |
@@ -115,7 +115,7 @@ contract SizeTest is VaultTestBase {
 ## 8. Build steps
 1. Create `test/SizeTest.t.sol` (§6). Run `FOUNDRY_PROFILE=arc arc-forge test --match-contract SizeTest`: 2 passed.
 2. Run the clean gate build: `rm -rf out cache && FOUNDRY_PROFILE=arc arc-forge build --deny-warnings --sizes`. Copy the rows for the ten contracts of §7.1.
-3. Run the gas report: `FOUNDRY_PROFILE=arc arc-forge test --gas-report --no-match-contract "Invariant|MockSelf|Libraries|OpenEvidence"`. Copy the median of each function in §7.2 from the `CzarVault` and `CzarVaultFactory` tables.
+3. Run the gas report: `FOUNDRY_PROFILE=arc arc-forge test --gas-report --fuzz-seed 0x2a --no-match-contract "Invariant|MockSelf|Libraries|OpenEvidence"`. Copy the median of each function in §7.2 from the `CzarVault` and `CzarVaultFactory` tables.
 4. Write `contracts/SIZE.md` (§7) with your numbers.
 5. `arc-forge fmt --check test/SizeTest.t.sol`: nothing printed apart from the flag notice.
 6. Run the full suite.
@@ -135,3 +135,4 @@ contract SizeTest is VaultTestBase {
 | Date | Change |
 |---|---|
 | 2026-10-20 | First version. The split it was planned for is already done (D89); this PRD is now the size and gas record and its regression test. |
+| 2026-10-20 | Review: the gas report pins the fuzz seed (`--fuzz-seed 0x2a`), so every median reproduces; `PocketLogic` size after the §15.5 event-order fix. |

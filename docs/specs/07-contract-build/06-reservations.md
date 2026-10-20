@@ -17,6 +17,7 @@
 - The test file (§9) and the test setup (§7) are printed in full: copy them exactly.
 
 ## 3. Sources (read these, nothing else)
+- `07-contract-build/01-shared-libraries.md` (the `CzarHashing`, `PayeeLeaf`, `CzarNonces` functions the steps call) and `07-contract-build/03-factory-and-vault-skeleton.md` §7 (`VaultState`, `VaultGuards`).
 - `07-contract-build/00-conventions.md` (§3.1 stubs, §3.2 library rules, §4.11 traps, §5 tests, §5.6 traps).
 - `07-contract-build/04-vault-core.md` §5 (the wrapper-and-library rule).
 - `docs/specs/03-smart-contracts/czar-vault.md`: §5.3 (the reservation functions), §6.5 (exposure bound), §8.2 (reservation state machine), §11 INV-5, INV-8, INV-12, INV-13, §15.2, §15.3, §15.4 (`StepUsed`), §15.5, §15.6 (ids), §15.7 (`finalize` time gate), §15.11 (digest-mode cleanup).
@@ -1397,3 +1398,4 @@ contract ReserveTest is VaultTestBase, PayeeTree {
 | Date | Change |
 |---|---|
 | 2026-10-20 | First version (D89 library layout), verified on Arc Foundry v0.8.0-2 against a reference implementation. |
+| 2026-10-20 | Sources: PRD 01 and PRD 03 §7 (review). |

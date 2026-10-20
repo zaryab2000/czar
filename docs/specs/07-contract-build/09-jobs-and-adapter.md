@@ -16,6 +16,7 @@
 - Sizes after this PRD: `CzarVault` runtime 13,808 B, initcode 15,501 B; `CzarVaultFactory` runtime 20,015 B; `JobLogic` runtime 11,867 B (the adapter is inside it).
 
 ## 3. Sources (read these, nothing else)
+- `07-contract-build/01-shared-libraries.md` (the `CzarHashing`, `PayeeLeaf`, `CzarNonces` functions the steps call) and `07-contract-build/03-factory-and-vault-skeleton.md` §7 (`VaultState`, `VaultGuards`).
 - `07-contract-build/00-conventions.md` (§3.2 library rules, §4.11 traps, §5 tests, §5.6 traps).
 - `docs/specs/03-smart-contracts/job-escrow-adapter.md`, all of it (the two ABIs, the binding adapter signatures in §3, fees in §4, refunds in §6, JOB-1 … JOB-5).
 - `docs/specs/03-smart-contracts/czar-vault.md`: §5.5 (the five functions), §8.4 (job state machine), §11 INV-2, INV-8, INV-12, INV-16, §15.1–§15.7 (`fundJob` check order, `claimJobRefund` time gate, events, effects order, `jobKey`, the 69-character description).
@@ -413,6 +414,8 @@ library JobEscrowAdapter {
 }
 ```
 
+- **Copy §7 exactly, then diff it.** `readOutcome` returns four values; JobLogic never uses the fourth (`expiredAt`), so a transcription slip there passes every test. After writing the file, compare it with the block above (`diff` against a copy of the block) and fix any difference.
+
 ## 8. `src/vault/logic/JobLogic.sol`
 
 ### 8.1 Header and struct
@@ -437,7 +440,10 @@ library JobEscrowAdapter {
         bytes32 descriptionHash;
     }
 ```
-- In the steps, `kind` means `_kind(c)` (§8.7) and `escrow` means `c.jobEscrow`.
+- In the steps, `kind` means `_kind(c)` (§8.7) and `escrow` means `c.jobEscrow`; use them directly, with no extra locals.
+- "Circle kind" means `kind == IJobEscrowAdapter.JobEscrowKind.CircleTestnet`; "Czar kind" means `kind == IJobEscrowAdapter.JobEscrowKind.CzarBase` (both declared in `src/interfaces/IJobEscrowAdapter.sol`).
+- Wherever a step uses `e` and the function has not declared it yet, declare it at first use: `ICzarVault.Envelope storage e = s.envelopes[<the record's envelopeId>];` (`q.envelopeId` in `_storeJob`, `j.envelopeId` elsewhere).
+- Every "→ `X`" in a check means `revert ICzarVault.X();` (or with the arguments shown).
 
 ### 8.2 `openJob(VaultState storage s, VaultConfig memory c, address caller, OpenJobRequest memory q, bytes32[] calldata proof) external returns (bytes32 jobKey)`
 - Body: `_checkOpenJob(s, c, caller, q, proof); return _storeJob(s, c, q);`
@@ -451,7 +457,7 @@ library JobEscrowAdapter {
   7. `uint256 used = s.stepUsed[q.envelopeId][q.stepIndex];` `used + q.stepCap > q.stepCap` → `ICzarVault.StepCapExceeded(q.stepIndex, used, q.stepCap, q.stepCap)` (a job reserves its whole step cap, so nothing else may be on the step; RV-002)
   8. `VaultGuards.exposure(e) + q.stepCap > e.cap` → `CapExceeded`
 - **`_storeJob(VaultState storage s, VaultConfig memory c, OpenJobRequest memory q) private returns (bytes32 jobKey)`**, effects before the escrow call (§15.5):
-  1. `e.reserved += q.stepCap; e.openJobs += 1;`
+  1. `ICzarVault.Envelope storage e = s.envelopes[q.envelopeId]; e.reserved += q.stepCap; e.openJobs += 1;`
   2. `uint256 used = s.stepUsed[q.envelopeId][q.stepIndex] + q.stepCap; s.stepUsed[q.envelopeId][q.stepIndex] = used;`
   3. `address evaluator = s.evaluator;`
   4. `uint256 jobId = JobEscrowAdapter.create(kind, escrow, q.provider, evaluator, q.expiredAt, q.descriptionHash);`
@@ -462,7 +468,7 @@ library JobEscrowAdapter {
 
 ### 8.3 `fundJob(VaultState storage s, VaultConfig memory c, address caller, bytes32 jobKey, uint256 expectedBudget) external`
 1. `ICzarVault.Job storage j = s.jobs[jobKey]; uint256 b = _checkFundJob(s, c, caller, j, expectedBudget);`
-2. Effects: `uint256 unused = j.reservedCap - b;` `e.reserved -= j.reservedCap; e.jobEscrowed += b; s.committedTotal -= b;` (the budget leaves the vault) `s.stepUsed[j.envelopeId][j.stepIndex] -= unused;` `j.budget = b; j.state = ICzarVault.JobState.Funded;`
+2. Effects: `ICzarVault.Envelope storage e = s.envelopes[j.envelopeId]; uint256 unused = j.reservedCap - b;` `e.reserved -= j.reservedCap; e.jobEscrowed += b; s.committedTotal -= b;` (the budget leaves the vault) `s.stepUsed[j.envelopeId][j.stepIndex] -= unused;` `j.budget = b; j.state = ICzarVault.JobState.Funded;`
 3. `JobEscrowAdapter.fund(kind, escrow, c.usdc, j.jobId, b);` (approve exactly `b`, fund, reset the approval)
 4. `emit ICzarVault.JobFunded(jobKey, b);`
 5. `if (unused != 0) emit ICzarVault.StepUsed(j.envelopeId, j.stepIndex, s.stepUsed[j.envelopeId][j.stepIndex]);` (only when the step's use changed)
@@ -495,12 +501,12 @@ library JobEscrowAdapter {
 3. Branch, first match wins:
    1. `state == Opened` → `_syncOpened(s, jobKey, j, status);`
    2. `status == Submitted && state == Funded` → `j.state = Submitted;` `emit ICzarVault.JobSynced(jobKey, uint8(ICzarVault.JobState.Submitted), false);`
-   3. `status == Completed` → `e.jobEscrowed -= j.budget; e.spent += j.budget;` if the envelope is `Open`: `e.openJobs -= 1;` `j.state = Completed;` `emit JobSynced(jobKey, uint8(Completed), false);`
+   3. `status == Completed` → `ICzarVault.Envelope storage e = s.envelopes[j.envelopeId];` `e.jobEscrowed -= j.budget; e.spent += j.budget;` if the envelope is `Open`: `e.openJobs -= 1;` `j.state = Completed;` `emit JobSynced(jobKey, uint8(Completed), false);`
    4. `status == Rejected || status == Expired` → `(uint256 refund, bool credited) = _bookRefund(s, c, j, settled);` `emit JobSynced(jobKey, uint8(Refunded), credited);` and `if (credited && refund != 0) emit StepUsed(...)` with the step's new value
-   5. anything else (escrow `Funded`, or `Submitted` already mirrored) → `ICzarVault.NoChange()`
+   5. anything else (escrow `Funded`, or `Submitted` already mirrored) → `revert ICzarVault.NoChange();`
 - **`_syncOpened(VaultState storage s, bytes32 jobKey, ICzarVault.Job storage j, IJobEscrowAdapter.EscrowStatus status) private`** (RV-009, H1):
-  1. `status == Funded` → `NoChange` (only the vault can fund; impossible while the vault says `Opened`)
-  2. `bool envelopeClosed = s.envelopes[j.envelopeId].state != Open;` if `status == Open && block.timestamp < j.expiredAt && !envelopeClosed` → `NoChange`
+  1. `status == Funded` → `revert ICzarVault.NoChange();` (only the vault can fund; impossible while the vault says `Opened`)
+  2. `bool envelopeClosed = s.envelopes[j.envelopeId].state != Open;` if `status == Open && block.timestamp < j.expiredAt && !envelopeClosed` → `revert ICzarVault.NoChange();`
   3. Every other case releases (escrow `Rejected`, `Expired`, `Submitted` or `Completed` with no funding, `Open` after `expiredAt`, or the envelope closed): `bool released = _releaseOpened(s, j);`
   4. `emit ICzarVault.JobSynced(jobKey, uint8(ICzarVault.JobState.Released), false);` (§15.4: from `Opened` the state is 6 and the flag false) then `if (released) emit StepUsed(...)`
 
@@ -522,7 +528,7 @@ library JobEscrowAdapter {
    - `e.reserved -= j.reservedCap; e.openJobs -= 1; s.stepUsed[j.envelopeId][j.stepIndex] -= j.reservedCap;`
    - `return j.reservedCap != 0;`
 2. **`_bookRefund(VaultState storage s, VaultConfig memory c, ICzarVault.Job storage j, uint256 settled) private returns (uint256 refund, bool credited)`** — the refund branch shared by `syncJob` and `claimJobRefund`. The escrow already sent `budget − settledAmount` back in the transaction that set `Rejected` or `Expired`, so the status alone proves the refund (`job-escrow-adapter.md` §6):
-   - `uint256 budget = j.budget; refund = budget - settled;`
+   - `ICzarVault.Envelope storage e = s.envelopes[j.envelopeId]; uint256 budget = j.budget; refund = budget - settled;`
    - `e.jobEscrowed -= budget; e.spent += budget - refund; j.state = ICzarVault.JobState.Refunded;`
    - if `e.state == Open`: `VaultGuards.creditEnvelope(s, c, j.envelopeId, e, refund); s.stepUsed[j.envelopeId][j.stepIndex] -= refund; e.openJobs -= 1; credited = true;` (else the refund is free balance)
 3. **`_kind(VaultConfig memory c) private pure returns (IJobEscrowAdapter.JobEscrowKind)`**: `return IJobEscrowAdapter.JobEscrowKind(c.jobEscrowKind);` (the constructor refuses any value above 1)
@@ -532,7 +538,7 @@ library JobEscrowAdapter {
 
 ## 9. `test/JobTest.t.sol`
 - `JobTestBase` (abstract) holds 40 tests that run against both kinds through four hooks (`_escrow`, `_setBudget`, `_escrowDescription`, `_escrowStatus`). `JobCircleTest` adds 2 (fees must be zero; no evaluation grace), `JobCzarTest` 6 (fee cap, another token, provider reject while `Open`, the partial-claim refund with the spec's figures, the evaluation grace, a third party's `claimRefund` on an `Open` job).
-- Every named test of `security-and-testing.md` §3.7 and §3.7a assigned to T-018 is here with its exact name. Two of them need a payee tree other than the four-leaf fixture; the test builds it in place with `PayeeLeaf.hash` and OpenZeppelin `Hashes.commutativeKeccak256` (a two-leaf root is the sorted-pair hash, and each proof is the other leaf; a one-leaf root is the leaf itself, with an empty proof).
+- Every named test of `security-and-testing.md` §3.7 and §3.7a assigned to T-018 is here with its exact name. Three of them need a payee tree other than the four-leaf fixture (`test_openJob_afterReserveOnSameStep_reverts` and `test_cancelJob_open_releasesAndAlternateOpens` a two-leaf tree, `test_syncJob_czarPartialClaim_refundsBudgetMinusSettled` a one-leaf tree); each builds it in place with `PayeeLeaf.hash` and OpenZeppelin `Hashes.commutativeKeccak256` (a two-leaf root is the sorted-pair hash, and each proof is the other leaf; a one-leaf root is the leaf itself, with an empty proof).
 ```solidity
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.30;
@@ -1404,7 +1410,7 @@ contract JobCzarTest is JobTestBase {
 7. Run the clean gate build and the full suite (00-conventions §2.2).
 
 ## 11. Definition of done
-- `FOUNDRY_PROFILE=arc arc-forge test --match-contract JobTest` → `JobCircleTest` 42 passed and `JobCzarTest` 46 passed, 0 failed (T-018 acceptance: both mock ABIs; the front-run `setBudget` is `test_fundJob_budgetChanged_reverts`; the refund after the envelope closed is `test_syncJob_refundAfterForceClose_isFreeBalance`).
+- `FOUNDRY_PROFILE=arc arc-forge test --match-path test/JobTest.t.sol` → `JobCircleTest` 42 passed and `JobCzarTest` 46 passed, 0 failed (T-018 acceptance: both mock ABIs; the front-run `setBudget` is `test_fundJob_budgetChanged_reverts`; the refund after the envelope closed is `test_syncJob_refundAfterForceClose_isFreeBalance`).
 - `FOUNDRY_PROFILE=arc arc-forge test` → 373 passed, 0 failed.
 - `rm -rf out cache && FOUNDRY_PROFILE=arc arc-forge build --deny-warnings --sizes` → no warnings; `CzarVault` runtime about 13,808 B and `JobLogic` about 11,867 B (more than 300 B off means your code differs from §6–§8).
 - `grep -c "revert NotBuilt" src/vault/VaultStubs.sol` → 3.
@@ -1418,3 +1424,5 @@ contract JobCzarTest is JobTestBase {
 | Date | Change |
 |---|---|
 | 2026-10-20 | First version (D89 library layout), verified on Arc Foundry v0.8.0-2 against a reference implementation, both escrow kinds. |
+| 2026-10-20 | Pilot build by a smaller model (all 373 tests, exact sizes): acceptance uses `--match-path`; `e` declared at first use; `revert` written out; kind names; three custom trees named; diff note for §7. |
+| 2026-10-20 | Sources: PRD 01 and PRD 03 §7 (review). |

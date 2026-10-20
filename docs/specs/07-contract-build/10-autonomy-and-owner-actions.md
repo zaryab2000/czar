@@ -289,6 +289,7 @@ contract CzarVault is VaultBase {
 ```
 
 ## 7. `src/vault/logic/AutonomyLogic.sol`
+- Shorthand in the steps: "→ `X`" means `revert ICzarVault.X();` (or with the arguments shown). Wherever a step uses `e`, `k` or `p` before the function declared it, declare it at first use: `ICzarVault.Envelope storage e = s.envelopes[<envelopeId>];`, `ICzarVault.Pocket storage k = s.pockets[pocket];`, `ICzarVault.Pullback storage p = s.pullbacks[pullbackId];`.
 
 ### 7.1 Header
 - `// SPDX-License-Identifier: MIT`, `pragma solidity 0.8.30;`
@@ -972,6 +973,8 @@ contract OwnerActionTest is VaultTestBase, PayeeTree {
 ## 12. Open item (not a step)
 - T-019 lists "a captured WebAuthn fixture in `contracts/test/fixtures/`". Capturing one needs a real passkey on a real device, which needs Zaryab's approval (CLAUDE.md). The tests here use assertions built with `vm.signP256`, which exercise the same verifier. Do not try to capture a fixture in this task; note it as open in your report.
 
+- **Deferred to PRD 12:** the `autonomyRaise_5042002` and `ownerAction_5042002` digests on-chain, and the `autonomyRaise` vector executed at its `deadline` (RV-061), are `test_vectors_reproducedOnChain`; the P-256 precompile gas (6,900 per call) is measured in PRD 12. `test_lowerBelowUsed_openEnvelopeRevertsAllowanceExceeded` (assigned to T-014 and T-019) is in `EnvelopeTest` (PRD 05): cite it there in your report.
+
 ## 13. Stop conditions
 - A test fails after you have compared the function with its numbered steps: stop and report the test name and failure line. Never change a test.
 - A passkey test fails with `InvalidPasskeyAssertion` although your code matches §8: run `FOUNDRY_PROFILE=arc arc-forge test --match-path test/LibrariesTest.t.sol --match-test passkey` (8 tests). If those fail too, `PasskeyVerifier` (PRD 01) is wrong: stop and report it. If they pass, compare the digest in §8.2 step 5 with `test/OwnerActionTest.t.sol` `_digest`, then stop and report.
@@ -980,3 +983,4 @@ contract OwnerActionTest is VaultTestBase, PayeeTree {
 | Date | Change |
 |---|---|
 | 2026-10-20 | First version (D89 library layout), verified on Arc Foundry v0.8.0-2 against a reference implementation. |
+| 2026-10-20 | Shorthand rules; deferrals to PRD 12 (vectors, precompile gas) and where the T-014/T-019 test lives (review). |

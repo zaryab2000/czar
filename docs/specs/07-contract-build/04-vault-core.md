@@ -137,8 +137,8 @@ contract CzarVault is VaultBase, VaultStubs {
    2. `if (to == address(0)) revert ICzarVault.ZeroAddress();`
    3. `if (to == address(this) || amount == 0) revert ICzarVault.BadParams();` (`address(this)` is the vault)
    4. `uint256 free = VaultGuards.freeBalance(s, c); if (amount > free) revert ICzarVault.InsufficientFree(free, amount);`
-   5. `emit ICzarVault.Withdrawn(to, amount);` (no state changes, so the event comes before the external call, 00-conventions §4.6)
-   6. `IERC20(c.usdc).safeTransfer(to, amount);`
+   5. `IERC20(c.usdc).safeTransfer(to, amount);`
+   6. `emit ICzarVault.Withdrawn(to, amount);` (the event comes last, after the external call, 00-conventions §4.6)
 2. **`setCategoryLimits(s, c, caller, bytes32 categoryId, uint256 userMax, uint256 autoLimit) external`** (spec §5.1, §15.10)
    1. `VaultGuards.requireOwner(c, caller);`
    2. `if (autoLimit > userMax) revert ICzarVault.AutoLimitAboveUserMax();`
@@ -596,3 +596,4 @@ contract VaultCoreTest is VaultTestBase {
 | 2026-10-20 | First version, verified on Arc Foundry v0.8.0-2 against a reference implementation. |
 | 2026-10-20 | Pilot build by a small model from this PRD alone: 141 passed, sizes identical, its `VaultCore` identical to the reference apart from whitespace. Its feedback applied: exact red-phase counts, wrapper parameter names, stub deletion method. |
 | 2026-10-20 | D89: the logic moves from the `VaultCore` module into the linked library `CoreLogic`; the getters moved to PRD 03; 8 stubs deleted here (was 19); new `CzarVault.sol`; red phase 10 passed / 26 failed; sizes re-measured. The test file is unchanged. |
+| 2026-10-20 | `withdraw`: the event comes after `safeTransfer` (00-conventions §4.6, review). |

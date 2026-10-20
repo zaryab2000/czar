@@ -73,7 +73,7 @@ exclude_lints = ["block-timestamp"]
 
 ### 7.1 `src/vault/VaultState.sol`
 - **What it is:** two file-level structs and the digest-slot record.
-  - `VaultState`: every storage variable of the vault, as struct fields, in the binding order of `czar-vault.md` §4. The vault holds exactly one, `_s`, at slot 0, so the slot layout is what separate variables would give. Never reorder the fields.
+  - `VaultState`: every storage variable of the vault, as struct fields: the `czar-vault.md` §4 variables, grouped so that small fields share a slot (the signers with `frozen` and the three counters). The field order printed in §7.1 is binding. The vault holds exactly one, `_s`, at slot 0. Never reorder the fields.
   - `VaultConfig`: the vault's immutables as one memory struct. A linked library cannot read the calling contract's immutables, so the vault builds a `VaultConfig` (`_config()`, §7.3) and passes it to every library call.
   - `DigestSlot`: the fallback-mode lookup record (`czar-vault.md` §4; internal, not in the ABI).
 - The record types (`ICzarVault.Envelope`, `Reservation`, …) come from the interface; the field names are the spec names (00-conventions §4.3).
@@ -90,8 +90,8 @@ struct DigestSlot {
     bool set;
 }
 
-/// @dev Every storage variable of CzarVault, in the binding order of czar-vault.md §4 (07 PRD 03). The vault holds
-///      exactly one `VaultState` at slot 0, so the layout is the same as declaring these as separate state variables.
+/// @dev Every storage variable of CzarVault (czar-vault.md §4), grouped so small fields share a slot; this field
+///      order is binding (07 PRD 03). The vault holds exactly one `VaultState`, at slot 0.
 ///      The vault's logic libraries receive it as `VaultState storage s` (they run by DELEGATECALL in the vault).
 struct VaultState {
     address agentSigner; // K3
@@ -1591,3 +1591,4 @@ contract FactoryTest is VaultTestBase {
 |---|---|
 | 2026-10-20 | First version, verified on Arc Foundry v0.8.0-2. |
 | 2026-10-20 | D89: `VaultStorage.sol` replaced by `VaultState.sol`, `VaultGuards.sol` and `VaultBase.sol` (logic moves to linked libraries); getters built here; 32 stubs; sizes re-measured. Factory and tests unchanged. |
+| 2026-10-20 | `VaultState` wording: grouped for packing; the printed order is binding (review). |

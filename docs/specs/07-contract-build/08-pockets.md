@@ -15,9 +15,10 @@
 ## 2. This PRD is already verified
 - A reference `PocketLogic` written from §7, with `_checkGatewayBurn` from §8, passed on **Arc Foundry v0.8.0-2** with `FOUNDRY_PROFILE=arc`: clean `--deny-warnings` build (compiler and lint), `fmt --check` clean, 285 tests passed (242 earlier plus 43 here).
 - Mutation checks were run: without the `PullbackTooLarge` check two tests fail; without the "pocket Draining, or Closed for a recovery record" check of §8 step 6 the force-close test fails.
-- Sizes after this PRD: `CzarVault` runtime 12,989 B, initcode 14,682 B; `CzarVaultFactory` runtime 19,196 B; `PocketLogic` runtime 9,353 B; `SignatureLogic` 6,300 B.
+- Sizes after this PRD: `CzarVault` runtime 12,989 B, initcode 14,682 B; `CzarVaultFactory` runtime 19,196 B; `PocketLogic` runtime 9,346 B; `SignatureLogic` 6,300 B.
 
 ## 3. Sources (read these, nothing else)
+- `07-contract-build/01-shared-libraries.md` (the `CzarHashing`, `PayeeLeaf`, `CzarNonces` functions the steps call) and `07-contract-build/03-factory-and-vault-skeleton.md` §7 (`VaultState`, `VaultGuards`).
 - `07-contract-build/00-conventions.md` (§2.4 lint, §3.2 library rules, §4.8 arithmetic, §5 tests).
 - `docs/specs/03-smart-contracts/czar-vault.md`: §5.4 (the eight functions, recovery pullbacks, `confirmPullback` branches), §6.2 (`GATEWAY_BURN`, the `TransferSpec` table), §8.3 (pocket and pullback state machines), §11 INV-2, INV-3, INV-6, INV-7, INV-14, INV-15, §15.1–§15.5, §15.7 (`requestPullback` and `cancelPullback` block bounds), §15.11 (repeat `fundPocket`, the re-entering pocket).
 - `docs/specs/02-data-and-protocol/data-and-protocol.md` §6.3.2 (`GATEWAY_BURN` encoding), §7 (`pullbackSalt`, `transferSpecReplayHash`).
@@ -225,6 +226,7 @@ contract CzarVault is VaultBase, VaultStubs {
 ```
 
 ## 7. `src/vault/logic/PocketLogic.sol`
+- Shorthand in the steps: "→ `X`" means `revert ICzarVault.X();` (or with the arguments shown). Wherever a step uses `e`, `k` or `p` before the function declared it, declare it at first use: `ICzarVault.Envelope storage e = s.envelopes[<envelopeId>];`, `ICzarVault.Pocket storage k = s.pockets[pocket];`, `ICzarVault.Pullback storage p = s.pullbacks[pullbackId];`.
 
 ### 7.1 Header and interfaces
 - `// SPDX-License-Identifier: MIT`, `pragma solidity 0.8.30;`
@@ -284,8 +286,8 @@ Order fixed by §15.3:
 5. `k.gasGranted + units > MAX_GAS_GRANT_PER_POCKET` → `ICzarVault.GasGrantExceeded()`
 6. `VaultGuards.exposure(e) + units > e.cap` → `ICzarVault.CapExceeded()`
 7. Effects: `k.gasGranted += units; e.spent += units; s.committedTotal -= units;` (gas counts as spent, §5.4)
-8. `emit ICzarVault.PocketGasGranted(pocket, units);`
-9. `(bool ok,) = pocket.call{value: units * GAS_GRANT_UNIT_WEI}("");` `if (!ok) revert ICzarVault.NativeSendFailed();` (one ledger: the native send lowers the vault's USDC balance by `units`; a re-entering pocket hits the vault's guard and the send fails, §15.11)
+8. `(bool ok,) = pocket.call{value: units * GAS_GRANT_UNIT_WEI}("");` `if (!ok) revert ICzarVault.NativeSendFailed();` (one ledger: the native send lowers the vault's USDC balance by `units`; a re-entering pocket hits the vault's guard and the send fails, §15.11)
+9. `emit ICzarVault.PocketGasGranted(pocket, units);` (last: checks → effects → native send → event, spec §15.5)
 
 ### 7.4 `fundPocket(s, c, address caller, address pocket, uint256 amount)`
 1. `requireAgent`, then `requireNotPausedOrFrozen`.
@@ -296,8 +298,8 @@ Order fixed by §15.3:
 6. `VaultGuards.exposure(e) + amount > e.cap` → `CapExceeded`
 7. `!IGatewayWalletDeposits(c.gatewayWallet).isAuthorizedForBalance(c.usdc, pocket, address(this))` → `ICzarVault.DelegateNotSet()` (the external view read is the last check, §15.3)
 8. Effects: `k.funded += amount; k.outstanding += amount; k.state = ICzarVault.PocketState.Funded; e.pocketOutstanding += amount; s.committedTotal -= amount;`
-9. `emit ICzarVault.PocketFunded(pocket, k.envelopeId, amount, k.funded);`
-10. `IERC20(c.usdc).forceApprove(c.gatewayWallet, amount);` `IGatewayWalletDeposits(c.gatewayWallet).depositFor(c.usdc, pocket, amount);` `IERC20(c.usdc).forceApprove(c.gatewayWallet, 0);` (§15.5)
+9. `IERC20(c.usdc).forceApprove(c.gatewayWallet, amount);` `IGatewayWalletDeposits(c.gatewayWallet).depositFor(c.usdc, pocket, amount);` `IERC20(c.usdc).forceApprove(c.gatewayWallet, 0);`
+10. `emit ICzarVault.PocketFunded(pocket, k.envelopeId, amount, k.funded);` (last, spec §15.5)
 
 ### 7.5 `requestPullback(s, c, address caller, address pocket, uint256 value, uint256 maxFee, uint256 maxBlockHeight) returns (uint64 pullbackId)`
 Not gated by freeze or pause (money only comes back).
@@ -1145,10 +1147,11 @@ contract PocketTest is VaultTestBase, PayeeTree {
 ## 11. Definition of done
 - `FOUNDRY_PROFILE=arc arc-forge test --match-contract PocketTest` → 43 passed, 0 failed (T-017 acceptance command).
 - `FOUNDRY_PROFILE=arc arc-forge test` → 285 passed, 0 failed.
-- `rm -rf out cache && FOUNDRY_PROFILE=arc arc-forge build --deny-warnings --sizes` → no warnings; `CzarVault` runtime about 12,989 B, `PocketLogic` about 9,353 B and `SignatureLogic` about 6,300 B (more than 300 B off means your code differs from §6–§8).
+- `rm -rf out cache && FOUNDRY_PROFILE=arc arc-forge build --deny-warnings --sizes` → no warnings; `CzarVault` runtime about 12,989 B, `PocketLogic` about 9,346 B and `SignatureLogic` about 6,300 B (more than 300 B off means your code differs from §6–§8).
 - `grep -c "revert NotBuilt" src/vault/VaultStubs.sol` → 8.
 - `diff -r src/interfaces ../docs/specs/03-smart-contracts/interfaces` → nothing.
 - G0-09 recorded and passed (§1).
+- **Not in this PRD (deferred to PRD 12):** T-017's reproduction of the burn-intent digest `0xbaa687…` and `transferSpecHash` `0xa2f49c1a…` through `CzarVaultHarness` is `test_vectors_reproducedOnChain` (PRD 12). The "cancelled record → `INVALID`" case cannot be isolated: `cancelPullback` needs `block.number ≥ maxBlockHeight + 3000`, so the height check already refuses it (`test_gatewayBurn_afterMaxBlockHeight_invalid` covers that path). `test_setMaxPullbackFee_aboveCeiling_reverts` (RV-037, assigned to T-017) is in `VaultCoreTest` (PRD 04): cite it there in your report.
 
 ## 12. Stop conditions
 - A test fails after you have compared the function with its numbered steps: stop and report the test name and failure line. Never change a test.
@@ -1159,3 +1162,4 @@ contract PocketTest is VaultTestBase, PayeeTree {
 | Date | Change |
 |---|---|
 | 2026-10-20 | First version (D89 library layout), verified on Arc Foundry v0.8.0-2 against a reference implementation. |
+| 2026-10-20 | `grantPocketGas` and `fundPocket` emit last (§15.5); shorthand rules; deferrals to PRD 12 and where RV-037 lives; Sources (review). |

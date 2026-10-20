@@ -15,6 +15,7 @@
 - Sizes after this PRD: `CzarVault` runtime 11,923 B, initcode 13,616 B; `CzarVaultFactory` runtime 18,130 B; `SignatureLogic` runtime 5,056 B.
 
 ## 3. Sources (read these, nothing else)
+- `07-contract-build/01-shared-libraries.md` (the `CzarHashing`, `PayeeLeaf`, `CzarNonces` functions the steps call) and `07-contract-build/03-factory-and-vault-skeleton.md` §7 (`VaultState`, `VaultGuards`).
 - `07-contract-build/00-conventions.md` (§3.2 library rules, §4.11 traps, §5 tests).
 - `docs/specs/03-smart-contracts/czar-vault.md`: §6 (dispatcher and the layout table), §6.1 (`USDC_3009` steps 1–7), §6.3 (`SL_RECEIPT`, RV-013), §6.4 (fallback), §6.5 (exposure bound), §15.2, §15 (D88: never reverts; range checks on narrow head words).
 - `docs/specs/02-data-and-protocol/data-and-protocol.md` §6.3 (signature encodings), §6.4 (vectors), §7.2 (derived nonce).
@@ -771,7 +772,7 @@ contract SignatureTest is VaultTestBase, PayeeTree {
 
 ## 9. Build steps (tests first)
 1. Create `test/SignatureTest.t.sol` (§8).
-2. Run `FOUNDRY_PROFILE=arc arc-forge test --match-path test/SignatureTest.t.sol`. Expected: `0 passed; 38 failed`, every failure mentioning `NotBuilt()`. Paste the summary line into your report.
+2. Run `FOUNDRY_PROFILE=arc arc-forge test --match-path test/SignatureTest.t.sol`. Expected: `0 passed; 38 failed`. 36 failures mention `NotBuilt()`; `test_usdc3009_endToEnd_transferThenSettle` and `test_exposureBound_secondUseOfIndexFails` fail with `FiatTokenV2: invalid signature` (USDC asks the stub, which refuses). Paste the summary line into your report.
 3. Write `src/vault/logic/SignatureLogic.sol` from §7.
 4. Do §5 (delete the stub) and §6 (replace `CzarVault.sol`).
 5. Run the test file again: 38 passed.
@@ -785,6 +786,8 @@ contract SignatureTest is VaultTestBase, PayeeTree {
 - `grep -c "revert NotBuilt" src/vault/VaultStubs.sol` → 16.
 - `diff -r src/interfaces ../docs/specs/03-smart-contracts/interfaces` → nothing.
 
+- **Not in this PRD (deferred to PRD 12):** T-016's exposure test that signs 1,000 authorizations against a `count = 10` reservation is `test/ExposureTest.t.sol` in PRD 12. Report T-016 as done except that item, citing PRD 12.
+
 ## 11. Stop conditions
 - A test fails after you have compared the function with its numbered steps in §7: stop and report the test name and failure line. Never change a test.
 - A fuzz test reports a revert: a length, offset or range check is missing or out of order. Compare with §7.3 steps 1–3 and §7.6 `_slLayoutOk`. If they match, stop and report the counterexample.
@@ -793,3 +796,4 @@ contract SignatureTest is VaultTestBase, PayeeTree {
 | Date | Change |
 |---|---|
 | 2026-10-20 | First version (D89 library layout), verified on Arc Foundry v0.8.0-2 against a reference implementation. |
+| 2026-10-20 | Red phase: two failures are `FiatTokenV2: invalid signature`; the 1,000-authorization exposure test is deferred to PRD 12; Sources (review). |
