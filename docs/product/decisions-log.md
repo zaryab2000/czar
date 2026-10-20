@@ -391,6 +391,22 @@ Approved by Zaryab. Each entry cites the review finding it resolves.
 - **Why the bound:** the Gateway fee tracks Arc gas (measured 0.0035 USDC at 20 Gwei). 0.50 USDC is about 143× that, covering gas up to roughly 2,850 Gwei. Above that, instantly pulling back a pocket (at most 25% of an envelope, typically a few USDC) costs more than it saves, and the slow path is the right one. A higher ceiling would only widen what a hijacked agent key can waste on fees per pullback.
 - **Consistent with D33:** vaults stay immutable; the bound is in the code and only the value is owner state.
 
+## 12a. Local-step execution (2026-10-20)
+
+### D82. Unpaid steps run on the Mac as plain code; richer work goes to the person's agent
+- **Context:** a plan can contain unpaid steps that shape earlier paid outputs into what the person asked for (for example `table-build` after `web-search` and `page-extract`). No spec said where they run or what runs them.
+- **Decided:**
+  1. **Kind `local` runs on the Mac, inside CZ-11, as plain code.** The daemon's assembler fills a fixed template per capability from the paid steps' structured fields. No model, no prompt, no network call. Phase 1 capabilities: `table-build`, `list-build`, `merge-dedupe`.
+  2. **Redaction markers are restored only on the Mac.** The daemon keeps a `local-only` marker map per objective and swaps markers back to real values when it assembles. The server never sees the map.
+  3. **New kind `agent-assist`** for shaping that needs judgement (`summarize`, `chart-build`, `translate`, `compare`). Czar does not run it. The assembler writes the structured inputs to `.czar/results/` and the `SessionStart` pointer tells the person's own agent (Claude Code in Phase 1) the step is waiting.
+  4. **No agent, no `agent-assist`.** The planner adds an `agent-assist` step only when the device reports an agent host (`IngestReport.hosts` non-empty); otherwise it drops the step and says so in the plan. Phase 1 devices always have Claude Code, so this rule matters from Phase 2.
+  5. **Cost:** both kinds cost $0, have no payee, no payee leaf and no `stepCap` above `"0"`, and are outside the envelope. Model use by the person's agent is the person's own cost and is never counted by Czar.
+  6. **Acceptance:** a `local` step gets the structural profile `local-template-v1` (columns and rows match the plan), checked on the Mac and reported as counts only. An `agent-assist` step is not checked; Czar's claims end at the structured inputs it wrote.
+  7. **Shadow mode and ROI:** quotes and the ROI ledger cover paid steps only. Wording says "assembled on your Mac" for `local` and "finished by your agent" for `agent-assist`.
+  8. **Manual task entry** (typing a task into the web app without an observer) is not in Phase 1. It is a Phase 2 item (`stage-2-backlog.md` P2-16).
+- **Why:** the server only holds redacted values, so it cannot build a usable table; a model on the server would put merchant text in front of a model (against D74) and add cost the envelope cannot see; plain code on the Mac is cheap, private and testable.
+- **Amends:** CZ-11 (gains the assembler), CZ-13 step 1 and step 8, CZ-15 `local_running`, P-03 rule 4, spec 02 §4.6.
+
 ---
 
 ## 13. Open items (deferred)

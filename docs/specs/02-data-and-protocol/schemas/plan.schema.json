@@ -115,6 +115,37 @@
       "$ref": "common.schema.json#/$defs/Timestamp",
       "description": "Creation time.",
       "x-privacyClass": "server-only"
+    },
+    "droppedSteps": {
+      "type": "array",
+      "description": "Steps the planner removed before approval, with the reason (D82: agent-assist with no agent host).",
+      "x-privacyClass": "server-only",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "description": "A dropped step.",
+        "x-privacyClass": "server-only",
+        "additionalProperties": false,
+        "required": [
+          "capability",
+          "reason"
+        ],
+        "properties": {
+          "capability": {
+            "$ref": "common.schema.json#/$defs/CapabilityTag",
+            "description": "Capability of the dropped step.",
+            "x-privacyClass": "server-only"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "no-agent"
+            ],
+            "description": "Why it was dropped.",
+            "x-privacyClass": "server-only"
+          }
+        }
+      }
     }
   },
   "required": [
@@ -161,9 +192,10 @@
             "gateway-nano",
             "erc8183-job",
             "local",
+            "agent-assist",
             "tip"
           ],
-          "description": "Payment path from the router (spec 01 §8.7, D37); tip is Phase 2.",
+          "description": "Payment path from the router (spec 01 §8.7, D37); tip is Phase 2; local and agent-assist are unpaid (D82, spec 02 §4.6.1).",
           "x-privacyClass": "server-only"
         },
         "capability": {
@@ -208,7 +240,7 @@
         },
         "payee": {
           "$ref": "common.schema.json#/$defs/Address",
-          "description": "payTo or job provider; absent for local steps.",
+          "description": "payTo or job provider; absent for local and agent-assist steps (D82).",
           "x-privacyClass": "hash-on-chain"
         },
         "alternates": {

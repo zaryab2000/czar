@@ -143,7 +143,7 @@ Fastify or Hono, Postgres 16, `@czar/schemas`, `@czar/hashing`, `@czar/vault-cli
 
 Algorithm (one objective):
 
-1. **Capability resolution.** Map `capabilities[]` (fixed taxonomy from CZ-06) to task classes for CZ-18 (`web-search` → `data-json.search`, `page-extract` → `data-json.extract`, `table-build` → `local`, …; the table lives in `@czar/config` `planner.capabilityToTaskClass`).
+1. **Capability resolution.** Map `capabilities[]` (fixed taxonomy from CZ-06) to task classes for CZ-18 (`web-search` → `data-json.search`, `page-extract` → `data-json.extract`, `table-build` → `local`, `summarize` → `agent-assist`, …; the table lives in `@czar/config` `planner.capabilityToTaskClass`). **Unpaid steps (D82):** capabilities in `planner.localTemplates` (`table-build`, `list-build`, `merge-dedupe`) become `kind = local`; those in `planner.agentAssistCapabilities` (`summarize`, `chart-build`, `translate`, `compare`) become `kind = agent-assist`, but only if the objective's device reports an agent host (latest `IngestReport.hosts` non-empty); otherwise the step is dropped and `Plan.droppedSteps` gains `{capability, reason: "no-agent"}`. Unpaid steps skip steps 2–3 and 6–7: no candidates, no probe, `unitAmount = stepCap = "0"`, no payee leaf (02 §4.6.1).
 2. **Candidate retrieval.** For each capability, call CZ-18 with constraints `{networks: [plan network], rails: [x402-exact, gateway-batched, erc8183-job], max_price_atomic: from the objective's constraints or planner.defaultMaxUnitAtomic, unknown_policy: exclude}` → `RankingDecision.ranked[]` (structured only).
 3. **Live probe.** For the top `planner.probeTopK` 3 candidates per capability, fetch the resource without payment through `safeFetch` (RV-022) and parse the 402 (02 §11.2 steps 1–5). Drop candidates whose live `amount` exceeds the candidate's step budget or whose `payTo` changed from the index and is unclaimed (p1-D7). Record `routing` flags from the live `accepts[]`.
 4. **Decomposition (P-03).** Input: the redacted goal, capabilities, deadline, `minutesSaved`, and for each capability the structured candidate list (`serviceId`, price, rail, LCBs, badges, `missing`). Output: ordered `steps[]` with `capability`, `serviceId` choice, `expectedCalls`, `inputTemplate` (structured keys only), `dependsOn`, `acceptanceProfileId`. The prompt never receives descriptions or any text from merchants or sellers, on the first plan or any re-plan (`ai-prompts.md` P-03, D74).
@@ -151,7 +151,7 @@ Algorithm (one objective):
 6. **Caps.** `unitAmount` = live price; `stepCap = unitAmount × expectedCalls × (1 + planner.stepSlackBps/10000)` (default 1000 = 10%), bounded by `planner.maxStepAtomic` 5,000,000 (5 USDC) unless the user's `constraints.maxTotal` is lower; `maxStepAmount = max(stepCap)`; `cap = Σ stepCap × (1 + slackBps/10000)` with `Plan.slackBps` 2500, plus the pocket gas grant (`payer.pocketGasUnits`) when the plan has a pocket (the vault books the grant as spent, 03 §5.4); **`pocketCapBps = 0` unless the plan has a `gateway-nano` step, then 2500** (D22, D71, RV-003). **Superseded by D71:** "`pocketCapBps` 2500" for every plan.
 6a. **Pocket (D71).** If any step is `gateway-nano`, ask CZ-27 `createPocketKey(planId)` for a new pocket address now, set `Plan.pocket`, and add the leaf `{payee: pocket, kind: 4, stepIndex: 4294967295, stepCap: "0"}` to `payeeLeaves`. The owner's approval of `payeeRoot` therefore names the pocket; the vault refuses any other pocket (`registerPocket` proof). If the plan is never approved, the key is discarded (it never held funds).
 7. **Alternates (D36, D43).** For each paid step, the next ≤ 2 ranked candidates on the same rail family whose live price ≤ `stepCap / expectedCalls` become `alternates[]`. Each alternate gets its own `PayeeLeaf{payee, kind, stepIndex, stepCap}`, so it shares the step's cap exactly.
-8. **Payee leaves and root.** `kind`: 1 for x402 `payTo`, 2 for ERC-8183 providers, 4 for the pocket (02 §4.7, D71). `payeeRoot` via `@czar/hashing` (`czar-merkle-v1`, 02 §5.3). A plan with only `local` steps has `cap = 0` and no envelope.
+8. **Payee leaves and root.** `kind`: 1 for x402 `payTo`, 2 for ERC-8183 providers, 4 for the pocket (02 §4.7, D71). `payeeRoot` via `@czar/hashing` (`czar-merkle-v1`, 02 §5.3). A plan with only unpaid steps (`local`, `agent-assist`; D82) has `cap = 0` and no envelope.
 9. **Category.** `planner.categoryByCapability` table (`web-search`, `page-extract`, `summarize` → `research`; `data-*` → `data`; `image-*` → `creative`; else `general`). The category decides the earned-autonomy allowance and `categoryId = keccak256(utf8(category))`.
 10. **Approval need.** `approvalNeeded = cap > remaining autoLimit allowance for the category` (mirror of 03 `czar-vault.md` §5.2) or `newPayees > 0` and the user's posture requires approval for new payees (`planner.newPayeeNeedsApproval` true by default).
 11. **Hashes.** `planHash` (02 §5.2); store; emit `plan.ready`.
@@ -282,7 +282,7 @@ stateDiagram-v2
   routing --> vd_reserving: kind = x402-exact
   routing --> pk_preparing: kind = gateway-nano
   routing --> job_opening: kind = erc8183-job
-  routing --> local_running: kind = local
+  routing --> handed_off: kind = local or agent-assist (D82)
   vd_reserving --> vd_signed: Reserved event or receipt
   vd_signed --> vd_called: PAYMENT-SIGNATURE sent
   vd_called --> vd_settling: 2xx + PAYMENT-RESPONSE, or settlement_pending
@@ -296,7 +296,7 @@ stateDiagram-v2
   job_submitted --> job_evaluated: CZ-16 complete/reject mined
   job_evaluated --> screening: Completed
   job_evaluated --> refunded: Rejected / Refunded
-  local_running --> screening
+  handed_off --> done: daemon ackResult.assembly entry received
   screening --> checking: P-01 screen pass
   screening --> quarantined: P-01 flag
   checking --> reading: CZ-16 delivery/structural recorded
@@ -324,6 +324,8 @@ Transition table (who, event, persisted phase):
 | `screen`, `check`, `read` | input hashes | `StepResult` id, flags |
 
 Concurrency: `payer.maxInFlightReservationsPerEnvelope` 2 (keeps reserved money small while two steps run), `payer.maxConcurrentStepsPerEnvelope` 2, `payer.maxEnvelopesPerUserConcurrent` 3; one pocket per envelope (03 `registerPocket` rule); ERC-8183 jobs count as one in-flight reservation until funded.
+
+**Unpaid steps (D82; replaces `local_running`).** The server never executes a `local` or `agent-assist` step. When every step it `dependsOn` is `done` or `failed_final`, the step moves to `handed_off`: its inputs (the accepted dependencies' `StepResult.fields`, already screened and read) go into `Result.assembly[]` (OpenAPI `Result`), and the result is delivered as usual. The step becomes `done` when the daemon's `ackResult.assembly[]` reports it (`assembled`, `assembly-failed`, `handed-to-agent` or `dropped-no-agent`); counts only cross back. An unpaid step never re-plans, never retries a paid step and never spends. If a dependency failed, its entry carries `accepted: false` and the assembler marks the gap. **Superseded by D82:** `local_running → screening`.
 
 #### 5.2 Vault-direct loop (per step with `n = expectedCalls`)
 
@@ -477,3 +479,4 @@ On-chain costs per 03 §13; one executor handles ≤ 50 steps/min; p95 vault-dir
 | 2026-10-19 | RV-025 | job brief built, hashed and served at `GET /v1/jobs/{jobKey}/brief`. |
 | 2026-10-19 | RV-039 | CZ-14 cost model and worked defaults recomputed. |
 | 2026-10-19 | RV-004, RV-036, RV-056, RV-013 | pocket sweep and recovery; pullback window; `validBefore ≤ expiresAt`; vault-bound receipts. |
+| 2026-10-20 | D82 | CZ-13 step 1 and step 8: unpaid `local` and `agent-assist` steps, no-agent rule; CZ-15 `handed_off` replaces `local_running`. |

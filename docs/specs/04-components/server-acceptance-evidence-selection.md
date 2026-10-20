@@ -242,6 +242,7 @@ Ponder 0.18.x (A9-05), viem 2.57.x (A9-05), Postgres 16; hosted fallbacks Goldsk
 | `structural` | structural | body parses as the declared `mimeType` and validates (Ajv 8, 2020-12) against the merchant's sanitized `schema`; with no schema, the JSON key-tree matches the `shape_hash_advisory` from earlier observations of this service version (SL-C1) or, with no history, parse-only | parse error, schema violation | `inconclusive` when no schema and no history (parse-only pass is recorded as `structural: inconclusive` with `detail.parseOk = true`) | `acceptance.schemaMaxBytes` 8,192 (02 §11.3) |
 | `requirement` | requirement | every key named in `Step.inputTemplate.expectedKeys` is present and non-empty | a named key missing | `not_checked` when the step has no `expectedKeys` | — |
 
+- **`local-template-v1` (D82):** the profile for unpaid `local` steps. It runs on the Mac in the CZ-11 assembler, not here: pass when the output header equals `inputTemplate.expectedKeys` exactly and rows ≥ 1. Its result arrives only as counts in `ackResult.assembly[]`; it never creates a receipt, an `AcceptanceReport`, a demand-proof leaf or a reputation observation, because no payment and no merchant are involved. `agent-assist` steps have no profile.
 - `correctness` (reference, consensus) is structurally missing in Phase 1 and is listed in `missing_dimensions_for_class` (SL-C10 step 2). The user wording never claims correctness was checked.
 - Result semantics follow SL-C7 exactly: only `pass` and `fail` enter posteriors; `inconclusive` and `not_checked` do not.
 
@@ -749,3 +750,4 @@ Postgres 16 (pgvector only in Phase 2, C1-13), `@czar/x402` for probes, `@x402/e
 | 2026-10-19 | RV-042 | quarantine → `inconclusive` (not `fail`); labels follow P-01's enum. |
 | 2026-10-19 | RV-022 | deliverable fetches use the shared SSRF-safe fetcher. |
 | 2026-10-19 | RV-026 | demand-proof leaves are version 2: no pseudonym, salted `soulVersionCommit`; pseudonym only in soul-version leaves. |
+| 2026-10-20 | D82 | `local-template-v1` profile for unpaid local steps, checked on the Mac; no evidence for unpaid steps. |

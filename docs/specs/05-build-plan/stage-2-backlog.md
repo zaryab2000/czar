@@ -58,6 +58,7 @@
 | P2-13 | Daemon on Linux and Windows | OD-39, D67 |
 | P2-14 | Snapshot routes (`/v1/snapshots`) | AM-07 |
 | P2-15 | Atomic freeze-lowers-limits in the contract | OD-35, D63 |
+| P2-16 | Manual task entry: a "New task" box in the web app that creates an `ObjectiveSubmission` without an observer (layers 1–2 still run locally); results shown in the browser with names restored client-side; `agent-assist` steps dropped for such users unless a paid merchant can do the step | D82 |
 
 ---
 
@@ -121,3 +122,4 @@
 | 2026-10-19 | D69 | §0 status set to applied; §1 marked Applied; D-numbers added to P2-13, P2-15, MN-7. |
 | 2026-10-19 | D70 | Added §6 Google Cloud hosting (GC-1 to GC-7). |
 | 2026-10-19 | D80, D78 | GC-8 dual control for K6/K20; GC-9 public origin and archive host. |
+| 2026-10-20 | D82 | P2-16 manual task entry added. |

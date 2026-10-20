@@ -322,7 +322,7 @@ stateDiagram-v2
 
 **Start.** Spawn → read K14 → open DB (migrate schema) → start hook server and socket → start sidecar lazily → heartbeat loop.
 
-**Heartbeat (every `daemon.heartbeatS`).** Drain the observer queue → flush `outbox` (oldest first, idempotency keys reused) → `listObjectives?status=delivered` → hand new results to CZ-11 → write `audit_local` rows for anything sent → every hour, `ingestReport` with `{deviceId, periodStart, periodEnd, eventsIngested, redactionHits, hosts}` (02 OpenAPI `IngestReport`, counts only).
+**Heartbeat (every `daemon.heartbeatS`).** Drain the observer queue → flush `outbox` (oldest first, idempotency keys reused) → `listObjectives?status=delivered` → hand new results to CZ-11 (which also runs the D82 assembler; results wait on the server while the Mac is asleep and are picked up on the first heartbeat after wake) → write `audit_local` rows for anything sent → every hour, `ingestReport` with `{deviceId, periodStart, periodEnd, eventsIngested, redactionHits, hosts}` (02 OpenAPI `IngestReport`, counts only).
 
 **Pairing.** User taps "Pair a computer" in the app (8-digit code, 5 min) → user runs `czar pair <code>` or pastes it in the menu-bar window → `pairDevice {pairingCode, deviceName, platform}` → store K15 → write `CZAR_DEVICE_TOKEN` into the plugin data config for CZ-09.
 
@@ -598,3 +598,4 @@ gitleaks rules v8.30.1 (C2-06); Presidio 2.2.364 at `data-privacy-stack/presidio
 | 2026-10-18 | D47 | review mode default cited |
 | 2026-10-19 | D67 | Phase 1 daemon is macOS only; Linux and Windows install paths tagged stage 2. |
 | 2026-10-19 | RV-040, RV-051, RV-052 | queue holds only intake-cleaned, layer-1-redacted payloads; intake screen is local regex only; no-model compile is rules-only (D58). Test `hook_daemonDown_queueHasNoSecretOrEmail`. |
+| 2026-10-20 | D82 | Heartbeat note: results wait on the server while the Mac sleeps; CZ-11 runs the assembler. |
