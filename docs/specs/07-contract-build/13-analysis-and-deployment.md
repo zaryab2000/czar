@@ -13,7 +13,7 @@
   - `pip install slither-analyzer==0.11.3` works on the machine (this needs PyPI access).
 
 ## 2. This PRD is already verified
-- **Slither 0.11.3** ran on the reference build. It reported 42 findings: 2 High, 10 Medium and 30 Low. All 42 are false positives or orders the spec requires, and each has a reason in §5. The gate printed `slither gate: 42 findings, all triaged`.
+- **Slither 0.11.3** ran on the reference build. It reported 42 findings: 2 High, 13 Medium and 27 Low. All 42 are false positives or orders the spec requires, and each has a reason in §5. The gate printed `slither gate: 42 findings, all triaged`.
 - **The deployment ran on a local `arc-anvil --network arc` (chain 31337).**
   - The three passes linked all eight libraries.
   - Ten contracts were deployed through the Arachnid deployer.
