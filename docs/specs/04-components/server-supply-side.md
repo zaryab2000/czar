@@ -165,6 +165,31 @@ stateDiagram-v2
 - **Same rules for ranking:** lab services are ranked by the identical `pol_default_v1`. They share one operator cluster with Czar's three core services, so none of their evidence counts as independent of another's (SL operator row).
 - **Never on mainnet:** the lab has no mainnet configuration; `merchants.lab.enabled` is forced `false` when the payment network is a mainnet.
 
+#### 5.11 Czar test provider for ERC-8183 jobs (H7, N12, D86, D87)
+
+**What it is.** A Czar-run ERC-8183 provider on Arc testnet, `czar-provider`, labelled "Czar test provider" everywhere (like the D83 lab). It is a **testing tool, not a scope limit**: the modes below are the modes this test provider implements; they say nothing about which jobs Czar's job path supports (D86). Adding a mode, including code-related work, needs no change to the job path, the brief schema or the vault.
+
+**Instances (N12).** Two instances, `czar-provider-a` and `czar-provider-b`, with provider keys K21a and K21b (CZ-27; created by T-105's script; testnet USDC for gas funded only with Zaryab's approval). Each registers its own `erc8183-job` service in Czar's index (`extensions.czar.source = "czar-test-merchant"`, `testMerchant: true`) for the capabilities of its enabled work modes, so the planner ranks them like any provider and each is the other's alternate.
+
+**Reachability (N3).** In Phase 1 Czar's server is local (`http://localhost`), so the test provider runs on the same Mac; it is the only provider that can reach `getJobBrief` and `uploadJobDeliverable` until the stage-2 public host (GC-9a).
+
+**Loop (per instance):**
+1. Watch `JobCreated` with `provider == own key` (CZ-19).
+2. Fetch the brief with a signed `BriefRequest`; recompute `inputCommit` and `descriptionHash` and refuse a mismatch.
+3. Refuse a job whose evaluator is not Czar's K7, or whose `submitBy` is closer than the work mode's `minWorkSeconds`.
+4. `setBudget(jobId, targetBudget, "")`.
+5. Wait for `JobFunded`.
+6. Do the work for its mode from `taskSpec` and `inputs`.
+7. Upload the bytes (`DeliverableUpload`), then `submit(jobId, keccak256(bytes), "")` before `submitBy`.
+
+**Modes**, set by `merchants.provider.<instance>.modes`:
+- **Work modes** (what work it does and how). **Which work modes ship in Phase 1 is open item OD-41**, decided from the I-R-2 findings.
+- **Behaviour modes** (for the scenario and tests; seeded): `honest`; `junk` (well-formed but fails the profile: reject path); `silent` (never sets a budget: H2 cancel and alternate); `early-submit` (zero-budget submit: H1); `over-budget` (budget above `budgetCap`: H2); `late` (submits after `submitBy`: M4); `no-upload` (submits a hash without uploading: N5).
+
+**Seeding (N1).** Before the scenario, T-108 runs `selection.seedJobRuns` (6) honest jobs per instance on testnet, so each has `n_eff ≥ 5` on `delivery` and is ranked normally.
+
+**Limits.** One job at a time per instance; never acts on a job with any other evaluator; never mainnet (forced off when the payment network is a mainnet).
+
 #### 5.9 Named parameters
 
 | Parameter | Default | Reason |
@@ -186,6 +211,9 @@ stateDiagram-v2
 | `merchants.perPayerPerMin` / `perRoutePerMin` | 60 / 600 | abuse bound |
 | `merchants.drainTimeoutMs` | 30,000 | never abandon a settle mid-flight |
 | `merchants.lab.enabled` | `true` (testnet only) | D83 Lane B |
+| `merchants.provider.enabled` | `true` (testnet only) | H7 |
+| `merchants.provider.<instance>.modes` | work modes per OD-41; behaviour `honest` by default | D86: modes, not job types |
+| `merchants.provider.<instance>.minWorkSeconds` | per work mode | refuse jobs it cannot finish before `submitBy` |
 | `merchants.lab.seed` | fixed integer | deterministic profiles for repeatable runs |
 | `merchants.lab.priceAtomic` | 20,000 to 100,000 per service | spread around the catalog median so price matters in ranking |
 | `merchants.lab.<service>.failRate` / `delayMs` / `schemaBreakRate` / `driftRate` / `driftBps` / `payeeSwapEveryDays` | as in §5.8a | each profile's behaviour |
@@ -324,3 +352,4 @@ Mocked GitHub API fixtures for admin / non-admin / renamed repo; `arc-anvil` tes
 | 2026-10-19 | RV-022 | `czar-extract` uses the shared `safeFetch`; the guard is no longer local to this merchant. |
 | 2026-10-20 | D83 | CZ-20 §5.8a test-merchant lab: six behaviour profiles, labels, parameters, tests. |
 | 2026-10-20 | D84 | `czar-search` live backend (fixture mode for CI only); `czar-extract` domain allowlist removed, `safeFetch` still applies. |
+| 2026-10-20 | H7, N12, D86 | §5.11 Czar test provider: two instances, loop, behaviour modes, seeding; work modes open (OD-41). |

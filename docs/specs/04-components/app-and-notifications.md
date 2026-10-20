@@ -244,6 +244,8 @@ Idempotency: every creating call sends `Idempotency-Key`; `notifySubmitted` with
 | x402 step failed after payment | "Paid {amount}; the result failed Czar's check. This merchant was rated down. Third-party calls are not refundable." (D35) |
 | job rejected | "Rejected by Czar's check. {amount} returned to your vault." |
 | job paid (H5) | "Paid {amount} after the work arrived in the agreed form. Czar checked the form, not whether it's correct." plus the existing "This was wrong" action |
+| unverified provider on the approval screen (N1) | badge "Not enough evidence yet ({n} of 5 checked jobs)" and "Czar can't vouch for this provider." |
+| files held for review (N2) | "{n} file(s) from this result are held for review on your Mac. Open the Czar viewer to release or delete them." |
 | job step on the approval screen (D86) | "This job gets only the task description and up to 2,000 characters of context, no files." |
 | freeze with jobs (M3) | "Unstarted specialist jobs were cancelled and refunded. {n} submitted job(s) on hold until you unfreeze." |
 | monthly statement | "Czar saved you {hours} hours for {totalSpentDisplay} in {month}." |
@@ -368,3 +370,4 @@ K17 VAPID private key in the secret store; a leak lets an attacker spam notifica
 | 2026-10-20 | D84 | Approval shows the subjects Czar will look up and lets the person edit them (`revisePlanSubjects`). |
 | 2026-10-20 | D85 | Approval screen fill-in-place checkbox; delivered wording. |
 | 2026-10-20 | D86, D87 | Wording: job paid (form, not correctness), job context notice, freeze with jobs. |
+| 2026-10-20 | N1, N2 | Wording: unverified provider badge; files held for review. |

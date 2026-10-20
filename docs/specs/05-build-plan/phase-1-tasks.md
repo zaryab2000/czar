@@ -70,7 +70,7 @@
 | T-056 | Acceptance profiles complete | M4 | M | T-047 |
 | T-057 | Evidence publisher | M4 | L | T-049, T-036 |
 | T-058 | Third-party verification script | M4 | M | T-057 |
-| T-059 | Multi-path testnet run | M4 | M | T-051..T-058 |
+| T-059 | Multi-path testnet run | M4 | M | T-051..T-058, T-108 |
 | T-060 | Daemon skeleton | M5 | L | T-004, T-005, T-006 |
 | T-061 | Device pairing | M5 | S | T-060, T-041 |
 | T-062 | Observer plugin | M5 | M | T-060, G0-11 |
@@ -107,6 +107,7 @@
 | T-105 | Create Phase 1 server keys in the local keystore (RV-016) | M1 | S | T-004 |
 | T-106 | Czar test-merchant lab (D83) | M4 | M | T-051, T-105 |
 | T-107 | Market view: unpaid market probes, `getMarketView`, `marketReference` (D83) | M7 | M | T-090, T-042 |
+| T-108 | Czar test provider for ERC-8183 jobs, two instances (H7, N12, D86) | M4 | M | T-105, T-043, T-051, T-054 (brief and upload routes) |
 
 ---
 
@@ -470,6 +471,7 @@
   - `ps -o args` captured during key creation contains no passphrase; the process environment of the CLI contains no `CZAR_SIGNER_PASSPHRASE`-style variable (test in `apps/signer/test/no-secret-in-argv-env.test.ts`).
 - **Note (D80):** all seven keys sit on one Mac in Phase 1; this is the accepted testnet exception. Dual control for K6 and K20 arrives with Cloud KMS (`stage-2-backlog.md` §6).
 - **D83 (2026-10-20):** the script also creates one K10-lab `payTo` key per lab service in `merchants.lab.*` plus the second payee-swap key; addresses only in `deployments/arc-testnet-keys.json`.
+- **H7, N12 (2026-10-20):** the script also creates K21a and K21b (test-provider keys); addresses only.
 
 ---
 
@@ -555,6 +557,7 @@
   - Against the KMS test key from G0-13, a signature over a known digest recovers to the key's address.
 - **Review fixes (2026-10-19):** Policies exactly CZ-27 §5.2, including the full never-signable list for K3 (`withdraw`, `unfreeze`, `rotateSigners`, `setCategoryLimits`, `setPasskey`, `recordManualReturn`, `forceCloseEnvelope`, `setMaxPullbackFee`, `raiseAutoLimit`, `executeOwnerAction`, factory selectors) (RV-055); plan-checked `openEnvelope`/`reserve`/`openJob`/`registerPocket` args (RV-032); freeze/pause checks failing closed for `gateway-nano` and evaluator `complete` (D72); vault-bound `sl-receipt` (RV-013); K5 never sends a transaction (RV-017); keystore outside the repository, passphrase only from the keychain, refuse to start otherwise (D78); interactive confirmation for K6/K20 (D80); record whether the keychain item's ACL names the signer binary (RV-045). Named tests in CZ-27 §14 and `S03/security-and-testing.md` §3.8 pass.
 - **N8 (2026-10-20):** K7 `reject` is signed whatever the vault's freeze or pause state; test it.
+- **H7 (2026-10-20):** `provider-call` policy for K21a/K21b.
 
 ### T-036 Signer policies tested on testnet, rate limits, relayer gas key in the `local-keystore` backend (D62, D70)
 - **Milestone / group / who:** M2 / M2-c / agent, after Zaryab approves funds. **Size:** M. **Deps:** T-035, T-027.
@@ -680,6 +683,7 @@
 - **D83 (2026-10-20):** candidates only on `selection.paymentNetwork`; drop a live 402 without a payment-network entry (`gate: network`); shadow plans carry `marketReference` once T-107 exists (until then, absent).
 - **D84 (2026-10-20):** P-03 receives `TaskSpec`; CZ-13 step 4a renders `callInputs` (fan-out per subject); `planHash` includes `taskSpecHash` and `callInputsHash`; rule-based fallback fans out. Test: a 5-subject `TaskSpec` yields 5 `callInputs` per paid step with each subject in its input.
 - **D86, D87 (2026-10-20):** job steps: `stepCap` from the provider's listed price (`planner.jobSlackBps`), envelope long enough for `jobDuration` + evaluation window + budget wait, `contextNotice = task-description-only`; no job-type list. Tests: a job step for any capability a listed provider claims is planned; the approval payload carries the context notice.
+- **N1 (2026-10-20):** a plan using a provider from `exploration_slot` always needs approval.
 
 ### T-046 Injection boundary: P-01 screen, P-02 reader, StepResult pipeline, eval suites
 - **Milestone / group / who:** M3 / M3-b / agent. **Size:** L. **Deps:** T-006, T-005, G0-16 (RV-062).
@@ -697,6 +701,7 @@
   - `pnpm --filter @czar/server eval P-01 P-02` passes every listed eval case, including all injection cases; CI fails if any injection case changes a protected field.
   - The regex pre-screen alone (model disabled) flags eval cases 2–6 and 9 of P-01.
 - **Review fixes (2026-10-19):** P-01 chunked over everything P-02 reads, regex over the whole body (RV-041); screen unavailable → quarantine (D76); one flag rule, quarantine recorded `inconclusive` (RV-042); before the first hosted call, G0-16's record and Zaryab's account approval exist (RV-062).
+- **H6, N2 (2026-10-20):** artifact deliverables kept whole; P-01 flags recorded; P-02 reads only `expectedKeys`.
 
 ### T-047 Acceptance checker minimal: delivery and structural in a sandbox, AcceptanceReport, reportHash
 - **Milestone / group / who:** M3 / M3-b / agent. **Size:** M. **Deps:** T-006, T-007.
@@ -840,6 +845,7 @@
 - **Review fixes (2026-10-19):** A deliverable whose fetched bytes do not hash to `deliverable` (after `acceptance.deliverableRefetchTries` re-fetches) → `fail` → `reject` (D77, RV-024; this matches CZ-16 as amended). The signer refuses `complete` while the client vault is frozen or paused (D72). Quarantine → `inconclusive`, never `reject` (RV-042). Fetches through `safeFetch` (RV-022).
 - **Job-path review (2026-10-20):** evaluator step 1a (H1, N6): decide only for vault jobs `Funded`/`Submitted` with matching budget; reject unfunded submits. Tests: a legitimate job after `syncJob` (vault `Submitted`) is evaluated; an unfunded submit is rejected and never completed.
 - **D87 (2026-10-20):** push-model lookup by `contentHash` and `decisionCutoff` (N5); fee and implementation check before `complete` (M2); timing rule (M4); freeze rule (M3). Tests: upload A, submit hash(A), upload B → A matched (N4); no upload by the cutoff → reject mined before `expiredAt`; fees raised after funding → reject; freeze with one funded and one submitted job → refund now, hold, then complete on unfreeze.
+- **H6 (2026-10-20):** artifact deliverables decided by the profile with flags recorded.
 
 ### T-056 Acceptance profiles complete: requirement check, D55 inconclusive rule, report vocabulary
 - **Milestone / group / who:** M4 / M4-a / agent. **Size:** M. **Deps:** T-047.
@@ -891,6 +897,23 @@
   - Write the run report.
 - **Acceptance tests:**
   - On testnet, every event in Stages 4–6 is present, the pocket pullback confirms, and T-058 verifies the anchored batch (exit 0).
+
+---
+
+### T-108 Czar test provider for ERC-8183 jobs, two instances (H7, N12, D86)
+- **Milestone / group / who:** M4 / M4-b / agent; testnet gas for K21a/K21b only with Zaryab's approval. **Size:** M. **Deps:** T-105 (keys), T-043, T-051, T-054 (brief and upload routes).
+- **Spec refs:** `S04/server-supply-side.md` CZ-20 §5.11; `S02/data-and-protocol.md` §4.21, §6.2 (`BriefRequest`, `DeliverableUpload`), §9.2; `S04/server-autonomy-roi-keys.md` `provider-call`; `S04/server-acceptance-evidence-selection.md` CZ-18 §5.2 (N1); D86, D87; OD-41.
+- **Outputs:** `apps/merchants/src/provider/` (instances `czar-provider-a`, `czar-provider-b`), their index entries, `@czar/config` keys `merchants.provider.*`.
+- **Steps:**
+  - Build the loop in CZ-20 §5.11 against the Circle mock first, then the fork.
+  - Implement the behaviour modes `honest`, `junk`, `silent`, `early-submit`, `over-budget`, `late`, `no-upload`.
+  - Implement the work modes chosen under OD-41. Until OD-41 is decided, one placeholder work mode that returns a deterministic, profile-valid deliverable is enough for the tests; the job path must not depend on which work mode it is.
+  - Run the seeded job runs (`selection.seedJobRuns`) before the scenario (N1).
+- **Acceptance tests:**
+  - Each behaviour mode produces its effect on the mock: `silent` → the agent cancels and opens the other instance (N12); `early-submit` → released via H1; `over-budget` → cancelled; `late` → rejected `late`; `no-upload` → rejected at `decisionCutoff`.
+  - The provider refuses a brief whose `descriptionHash` does not match, and a job whose evaluator is not K7.
+  - After seeding, both instances have `n_eff(delivery) ≥ 5` and appear in `RankingDecision.ranked[]` (scenario 8.8).
+  - Adding a new work mode needs no change outside `apps/merchants/src/provider/` (a test adds a dummy mode).
 
 ---
 
@@ -1121,6 +1144,7 @@
 - **D84 (2026-10-20):** `table-build` lays out one row per `TaskSpec` subject under the person's own header, filled by `subjectIndex`.
 - **D85 (2026-10-20):** in-place fill (CZ-11 §5.2b): clash check, atomic write, `fill_undo`, `czar undo-fill`, `ackResult.fill`. Acceptance: CZ-11 §14 in-place fill tests.
 - **N11 (2026-10-20):** create `.czar/.gitignore` (`*`) on the first write in a project.
+- **H6, N2 (2026-10-20):** CZ-11 §5.2c: unflagged artifacts to the project with a header, flagged ones held under `writeback.heldDir`, viewer release or delete, `held_artifacts` table, counts in `ackResult.artifacts`.
 
 ---
 
@@ -1201,6 +1225,7 @@
 - **D84 (2026-10-20):** approval screen shows the subject list and supports `revisePlanSubjects`; test that the app recomputes the new `planHash` before approve.
 - **D85 (2026-10-20):** "Fill {fileName} when done" checkbox sent as `ApprovalIntentRequest.fillInPlace`.
 - **D86, D87 (2026-10-20):** job context notice and job-paid wording (H5).
+- **N1, N2 (2026-10-20):** unverified-provider badge; files-held-for-review notice.
 
 ### T-085 Freeze and unfreeze (createFreezeIntent) and D60 agent lowering of limits
 - **Layout:** desktop browser only (D69). Lowering is a follow-up agent step after `Frozen`, not atomic (D63).
@@ -1274,6 +1299,7 @@
   - A service with `n_eff < 5` appears only in `unverified`, never ranked ("unknown is not bad").
   - Index items validate for both readers (Circle `metadata` shape and spec fields).
 - **D83 (2026-10-20):** reputation rows keyed by network; `findService` refuses a non-payment network with 422 `network-not-payable`; `includeMarketView` returns the T-107 view.
+- **N1 (2026-10-20):** required dimensions by payment path (`delivery` only for `erc8183-job` task classes); `exploration_slot` with `selection.unverifiedWithApproval`. Tests: CZ-18 §14 provider-eligibility case.
 
 ### T-092 Planner P-03 decomposition over CZ-18 candidates, eval suite
 - **Milestone / group / who:** M7 / M7-c / agent. **Size:** M. **Deps:** T-091, T-045.
@@ -1377,6 +1403,7 @@
   - CI job `e2e-fork` passes every check in Stages 1–8, including the injection test (7.1), freeze drill (8.4) and guardian drill (8.5).
 - **Review fixes (2026-10-19):** Runs the scenario as amended (D79, RV-029) including stages 7.1–7.1e (RV-054); no routing override exists.
 - **D84 (2026-10-20):** includes scenario 2.1/2.3 `TaskSpec` checks and the 7.2a outcome check; the five Czar-hosted test company sites are part of the fixture.
+- **H7, N1, N2, N12 (2026-10-20):** scenario 6.2–6.10 and 8.8 with both test-provider instances.
 
 ### T-102 Acceptance scenario on live testnet, including Stage 0 in a desktop browser
 - **Milestone / group / who:** M8 / M8-c / Zaryab + agent, after Zaryab approves funds. **Size:** M. **Deps:** T-101.
@@ -1491,3 +1518,4 @@
 | 2026-10-20 | D85 | Notes on T-068, T-073, T-084 for the in-place fill. |
 | 2026-10-20 | Job-path review PR 1 | Notes on T-018, T-019, T-021, T-026, T-054, T-055 for H1, H2, M1-b, N6, N7. |
 | 2026-10-20 | Job-path review PR 2 (D86, D87) | Notes on T-007, T-022, T-035, T-045, T-054, T-055, T-073, T-084. |
+| 2026-10-20 | Job-path review PR 3 (D87: N1, N2, H6, H7, N12) | New T-108 (two-instance test provider); T-059 depends on it; notes on T-035, T-045, T-046, T-055, T-073, T-084, T-091, T-101, T-105. |
