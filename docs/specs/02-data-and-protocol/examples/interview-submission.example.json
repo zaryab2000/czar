@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "1.0",
+  "schemaVersion": "1.1",
   "idempotencyKey": "3f2c7a8e-1b4d-4c9e-8a6f-0d2b5e7c9a11",
   "place": {
     "locale": "en-IN",
@@ -20,7 +20,8 @@
     "privacyRule": "Never send customer names to merchants"
   },
   "taste": {
-    "preferredFormat": "Markdown tables"
+    "preferredFormat": "Markdown tables",
+    "outputFormat": "markdown-table"
   },
   "spendingPosture": {
     "riskPreference": "careful"

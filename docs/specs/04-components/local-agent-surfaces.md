@@ -285,6 +285,7 @@ Runs between `Fetched` and `Written`, in-process, with no network and no model.
 
 1. **Restore markers.** For each `Result.assembly[].inputs[].fields[].value`, replace every `[[R:…]]` marker with its value from the objective's local marker map (02 §4.6.1). A marker with no map entry stays as-is and the cell is flagged `unrestored`. Restored values exist only in memory and in the written file.
 2. **`local` steps.** Fill the step's `template` with plain code:
+   - **Format (D91):** when the result is written as a file (not filled in place), `table-build` renders as `Result.taskSpec.output.format`: `markdown-table` (default), `csv`, or `json` (an array of one object per subject keyed by the header); `markdown-list` and `prose` fall back to `markdown-table` for a table. `list-build` renders `markdown-list`, or `json` (an array of strings); other formats fall back to `markdown-list`. Filling in place always keeps the person's own file format.
    - `table-build` (D84): one row per `Result.taskSpec.subjects[]` entry, in order, with the subject label in the first column and the person's own header (`taskSpec.columns`, else `["Subject"] + fields`); each field cell is filled from the accepted inputs with the same `subjectIndex` (first non-empty value of the matching field name); a subject with no accepted value keeps an empty cell marked "not found"; the file reports "{filled} of {n} filled".
    - `list-build`: one item per record, the first named column as the item text.
    - `merge-dedupe`: rows from all inputs, duplicates removed on the first column (case-folded, trimmed).
@@ -430,3 +431,4 @@ OpenAPI `getResult`, `ackResult`; Claude Code `SessionStart` stdout-as-context (
 | 2026-10-20 | N11 | `.czar/.gitignore` on first write. |
 | 2026-10-20 | H6, N2 (D87) | §5.2c artifacts and review holds outside the project; state machine, parameters, tests. Restored the `#### 5.3 SessionStart pointer` heading dropped by the D85 edit. |
 | 2026-10-20 | D90 | CZ-09 gains `propose_soul_context` (daemon socket only, proposals only, rate-capped); privacy, security and tests. |
+| 2026-10-20 | D91 | Assembler renders the result file in `TaskSpec.output.format`; in-place fills keep the file's own format. |

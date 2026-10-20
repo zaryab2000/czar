@@ -2,7 +2,7 @@
 
 - **Purpose:** every product decision made so far, with the reasoning. Specs follow these decisions unless a later entry changes them.
 - **Format:** each decision states what was decided and why. Open items are listed at the end.
-- **Last updated:** 2026-10-20 (D90, soul inputs beyond observation)
+- **Last updated:** 2026-10-20 (D91, supplier matching)
 
 ---
 
@@ -548,6 +548,28 @@ Approved by Zaryab. Each entry cites the review finding it resolves.
 - **Why:** gives a useful soul on day one without letting untrusted text, a model or an agent host write the soul or move money; keeps every hash honest by holding the new commitments for the one review that owns public evidence.
 - **Accepted risk:** a person may accept a plausible false proposal or a convincing agent summary; the source label and excerpt stay visible and the belief can be deleted. Until SCR-030 lands, non-observed beliefs are committed under v1 without their class in the preimage (item 12).
 - **Amends:** product §§3.2, 6.3, 7.2; roadmap §§1.1, 1.5, 3; spec 01 CZ-02/04/05/06/07/08/09, §11.1, §13; spec 02 §4.2, new §4.23–§4.26, §5.2 note, §7.1, §9.2, §9.7, §10, §13.1, §15.3; local OpenAPI 1.1; server OpenAPI (`completeModelCall` accepts P-07); MCP tools §2.6; CZ-02, CZ-26, CZ-04, CZ-05, CZ-06, CZ-07, CZ-08, CZ-09, CZ-22; ai-prompts P-01, P-07; cross-cutting §4, §6; phase-1-tasks T-109 to T-114; G0-18; stage-2 P2-20, P2-21. SCR-030 and SCR-031 filed.
+
+## 12h. Supplier matching and market knowledge (2026-10-20, I-F-2)
+
+### D91. Capability cards, staged meaning-based retrieval, a Czar test-buyer, and the output format
+- **Source:** requirement `docs-internal/imperative-features/2_supplier-matching-and-market-knowledge.md` (dated 2026-10-19) and the architect's review of it against build-v1 at 8cf9311.
+- **Context:** the requirement predates D83, D84, D87 (N1) and D90, which already cover part of it: `TaskSpec` carries the need (D84); `selection.unverifiedWithApproval` lets an untested service be planned with owner approval when nothing is ranked (N1); the test-merchant lab and two test providers give about 11 payable test sellers (D83, H7); Lane A probes the real mainnet listings unpaid (D83). The real gaps: needs that fit no tag, no knowledge of what a service actually returns, retrieval limited to exact tags, no paid path to build evidence for a new testnet service without a user's approval, the soul not shaping the result, and plans that do not say why a supplier won.
+- **Decided:**
+  1. **Capability cards (CZ-18, spec 02 §4.27).** Czar keeps one card per service and per network, built only from the seller's own live 402 (`extensions.bazaar`, sanitized per A3-36), Czar's probes, Czar's receipts and registrations. Field names and types are kept; free-text descriptions are dropped. One shape covers x402 services and ERC-8183 job providers (feature I-F-3 reuses it). Cards are retrieval data only: they never change a score.
+  2. **Circle's catalog is a lead list only.** Czar uses a Circle listing to find a URL to probe; the card comes from the seller's 402, not from Circle. Nothing from Circle is stored beyond the existing `catalog_cache` fields (D15, p1-D8). No embedding of Circle text is ever stored.
+  3. **Retrieval in stages.** Phase 1: candidates are the union of exact tag match and BM25 over card text, built by code from the `TaskSpec` (kind, topic, fields) and the tags, with no model and no new vendor. Embeddings are added only when (a) SCR-032 settles the model and its privacy impact and (b) the labelled match set shows the gain set in `selection.matchEval.*`. Until both, `selection.retrievalMode = tags+bm25`.
+  4. **Matching is measured on the real market.** The labelled match set uses Lane A mainnet listings and their cards (rank-only, never paid). Payment stays on testnet (D83 unchanged).
+  5. **Output format (`TaskSpec.output`).** A typed `format` (`markdown-table`, `csv`, `json`, `markdown-list`, `prose`) with its source. Precedence, by code: the person's own file (`file`), then the interview answer `taste.outputFormat` (`interview`), then the default for the task kind (`default`). It drives the CZ-11 write-back, the acceptance check for outputs delivered as-is, and an eligibility filter (`output-format`) for suppliers whose output is delivered as-is. It never changes a score. Amends D90 item 6: `taste.outputFormat` is a fourth Phase 1 consumer; other taste, place and spending-posture answers stay saved context.
+  6. **Versioned taxonomy and a "no tag fits" path.** `drives.capabilityTaxonomy` is a versioned list in `@czar/config`. P-05 still chooses only from it. When no tag fits, CZ-06 does not publish the objective; the viewer says Czar cannot do this kind of task yet, and a count feeds taxonomy growth (P2-23).
+  7. **Czar test-buyer (testnet only).** A vault owned by a new testnet-only key K22 buys up to `selection.testBuyer.callsPerService` small calls from an untested, non-Czar testnet service until it reaches `selection.nMin`, inside a weekly budget. Each test-buyer envelope is opened by the owner K22 (never by earned allowance), so "untested services only with owner approval" (N1) still holds. Receipts carry the flag `czar-test-buyer` and count like any Czar receipt. Funding K22 and the vault needs Zaryab's approval.
+  8. **N1 stays.** A user's money reaches an untested service only through `exploration_slot` with explicit approval. A per-user "auto-spend on untested services" setting is rejected for Phase 1.
+  9. **Shadow comparison.** Shadow plans list untested candidates and their live prices (`Plan.untestedOptions`), shown in the shadow report. Never payable from that plan.
+  10. **Explain every choice.** Each paid step carries `why`: the `TaskSpec` fields it fills, a templated evidence-and-price sentence, and each losing candidate with a reason from a fixed list. No model writes it. The approval screen shows it.
+  11. **Planning order.** Cards, the index and BM25 move to M4 (T-115); reputation stays M7 (T-091). The planner core (T-045) keeps tag matching until T-115 lands.
+  12. **Later:** open-source tool index (P2-22), taxonomy learning (P2-23), fix-it feedback (Phase 3, unchanged).
+- **Why:** turns "which supplier" from a tag lookup into a check against what each service actually returns, without breaking Circle's terms, adding a data processor, or letting untested services take user money.
+- **Accepted risk:** sellers may stuff their 402 field names to be retrieved; retrieval only widens the candidate set, and eligibility, live probes and evidence still decide. Cards for Circle-listed services rest on data the seller publishes in its own 402; the legal reading that this is not mirroring is moderate confidence (AR-11 family). Coverage of `extensions.bazaar` is unknown (SCR-033).
+- **Amends:** D90 item 6 (adds `taste.outputFormat`); D64 (K22 is a lasting testnet-only owner key for one vault); product §6.21; spec 01 CZ-18, §7.2, §11.0, §13; spec 02 §4.3.1, §4.5, §4.25, new §4.27, §12.2, §15.3; schemas `task-spec` 1.1, `plan` 1.2, `interview-submission` 1.1, new `capability-card`; CZ-06, CZ-08, CZ-11, CZ-13, CZ-16, CZ-18, CZ-22, CZ-27; P-03, P-05; T-115 to T-119; G0-18; P2-22, P2-23. SCR-032 and SCR-033 filed.
 
 ---
 

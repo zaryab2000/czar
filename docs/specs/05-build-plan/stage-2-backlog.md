@@ -63,6 +63,8 @@
 | P2-19 | **Signed-pull deliverable fallback (D87).** For providers that cannot push: `.well-known/czar-deliverable/<hex>` served only for an evaluator-signed `DeliverableRequest`, host from the provider's CZ-18 service `origin`. Needs the public host (GC-9). | D87 |
 | P2-20 | **Wider soul sources (D90).** A native folder picker for roots the daemon has not seen; instruction files of other agent hosts (Codex, Cursor) once their observers exist; a permission design for each. Phase 1 scans only CZ-02 known roots. | D90 |
 | P2-21 | **Chat-archive import (D90, SCR-031).** Parse ChatGPT and Claude exports (saved memory, custom instructions, conversations) into proposals, locally, bounded, layer 1 before storage. Starts only after SCR-031 records the official formats and a parser SCR is accepted. Phase 1 is paste only. | D90, SCR-031 |
+| P2-22 | **Open-source tools index (D91, I-F-2 L1).** Skills, plugins, MCP servers and repos as zero-cost suppliers ("install this free skill"), with its own trust model for installed code and a link to recipes (roadmap 2.5) and builder payouts. Starts after paid matching (T-115, T-117) works. | D91 |
+| P2-23 | **Taxonomy learning (D91, I-F-2 L2).** Grow `drives.capabilityTaxonomy` from the `drives_no_capability` counts and from needs that retrieved nothing, by decision, once there is volume. | D91 |
 | P2-16 | Manual task entry: a "New task" box in the web app that creates an `ObjectiveSubmission` without an observer (layers 1–2 still run locally); results shown in the browser with names restored client-side; `agent-assist` steps dropped for such users unless a paid merchant can do the step | D82 |
 
 ---
@@ -134,3 +136,4 @@
 | 2026-10-20 | D83 | MN-8 merge of the two lanes at the mainnet gate. |
 | 2026-10-20 | D86, D87 | P2-17 C1-b ready to build; P2-18 provider recourse; P2-19 signed-pull fallback; MN-10 atomic fee check; GC-9a outside providers need the public host. |
 | 2026-10-20 | D90 | P2-20 wider soul sources; P2-21 chat-archive import after SCR-031. P2-16 manual task entry unchanged. |
+| 2026-10-20 | D91 | P2-22 open-source tools index; P2-23 taxonomy learning. |

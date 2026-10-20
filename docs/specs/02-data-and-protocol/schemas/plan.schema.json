@@ -9,9 +9,9 @@
   "properties": {
     "schemaVersion": {
       "type": "string",
-      "description": "Schema version, major.minor; this file is 1.1. 1.1 (2026-10-19) adds pocket, pocket leaves (kind 4) and the pocketCapBps rule (D71), and Step.inputTemplate.inputKeys (RV-021).",
+      "description": "Schema version, major.minor; this file is 1.2 (2026-10-20: steps[].why and untestedOptions, D91; neither is in planHash).",
       "x-privacyClass": "server-only",
-      "const": "1.1"
+      "const": "1.2"
     },
     "planId": {
       "$ref": "common.schema.json#/$defs/PlanId",
@@ -212,6 +212,47 @@
       "type": "boolean",
       "default": true,
       "description": "Write found values into the person's file in place of the recorded placeholders (D85); set on the approval screen.",
+      "x-privacyClass": "server-only"
+    },
+    "untestedOptions": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "capability",
+          "serviceId",
+          "livePrice",
+          "nEff"
+        ],
+        "properties": {
+          "capability": {
+            "$ref": "common.schema.json#/$defs/CapabilityTag",
+            "description": "Capability.",
+            "x-privacyClass": "server-only"
+          },
+          "serviceId": {
+            "$ref": "common.schema.json#/$defs/SlServiceId",
+            "description": "Service.",
+            "x-privacyClass": "server-only"
+          },
+          "livePrice": {
+            "$ref": "common.schema.json#/$defs/Amount6",
+            "description": "Live 402 price per call.",
+            "x-privacyClass": "server-only"
+          },
+          "nEff": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Effective checked calls so far.",
+            "x-privacyClass": "server-only"
+          }
+        },
+        "description": "Untested option.",
+        "x-privacyClass": "server-only"
+      },
+      "description": "Shadow plans only (D91): unverified candidates quoted next to the plan, for the shadow report. Never payable from this plan; not in planHash.",
       "x-privacyClass": "server-only"
     }
   },
@@ -490,6 +531,82 @@
           ],
           "description": "Shown on the approval screen for a job step whose provider gets only the task description and TaskSpec context, no files (D86; Phase 1 has no file sharing).",
           "x-privacyClass": "server-only"
+        },
+        "why": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "fills",
+            "summary",
+            "alternativesLost"
+          ],
+          "properties": {
+            "fills": {
+              "type": "array",
+              "maxItems": 20,
+              "items": {
+                "type": "string",
+                "maxLength": 64,
+                "description": "Field name.",
+                "x-privacyClass": "server-only"
+              },
+              "description": "TaskSpec fields (or the subject label for one-subject kinds) this step fills.",
+              "x-privacyClass": "server-only"
+            },
+            "summary": {
+              "type": "string",
+              "maxLength": 300,
+              "description": "Templated sentence: evidence and price.",
+              "x-privacyClass": "server-only"
+            },
+            "alternativesLost": {
+              "type": "array",
+              "maxItems": 10,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "serviceId",
+                  "reason"
+                ],
+                "properties": {
+                  "serviceId": {
+                    "$ref": "common.schema.json#/$defs/SlServiceId",
+                    "description": "Service.",
+                    "x-privacyClass": "server-only"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "enum": [
+                      "lower-score",
+                      "price-over-budget",
+                      "unverified",
+                      "network",
+                      "rail",
+                      "output-format",
+                      "probe-failed",
+                      "payee-changed",
+                      "not-in-top-k"
+                    ],
+                    "description": "Why it lost.",
+                    "x-privacyClass": "server-only"
+                  }
+                },
+                "description": "Loser.",
+                "x-privacyClass": "server-only"
+              },
+              "description": "The ten highest-ranked candidates not chosen, with the templated reason.",
+              "x-privacyClass": "server-only"
+            },
+            "othersNotShown": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Retrieved candidates not chosen beyond the ten listed.",
+              "x-privacyClass": "server-only"
+            }
+          },
+          "description": "Templated reason for this step's supplier (D91). Not in planHash. Built by code from TaskSpec, the capability card and the RankingDecision; never model text.",
+          "x-privacyClass": "server-only"
         }
       },
       "additionalProperties": false,
@@ -576,5 +693,5 @@
       ]
     }
   },
-  "$comment": "Change log: 2026-10-18 AM-09 added inputTemplate.expectedKeys."
+  "$comment": "Change log: 2026-10-18 AM-09 added inputTemplate.expectedKeys. 2026-10-20 D91: schemaVersion 1.2; Step.why; untestedOptions (shadow only)."
 }

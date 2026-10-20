@@ -24,7 +24,7 @@
   "deviceId": "dev_X1QF1CK6FS6C908EA23RR0Y14D",
   "submittedAt": "2026-10-19T12:00:00.000Z",
   "taskSpec": {
-    "schemaVersion": "1.0",
+    "schemaVersion": "1.1",
     "kind": "table-fill",
     "topic": "Competitor pricing",
     "fileName": "pricing.md",
