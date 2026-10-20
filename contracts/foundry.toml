@@ -42,3 +42,14 @@ exclude_lints = ["block-timestamp"]
 
 [fmt]
 line_length = 120
+
+# T-027 (07 PRD 13): the reproducible deploy profile (czar-vault-factory.md §11, D88 G-49). The same sources give the
+# same bytecode, so the same CREATE2 addresses, on every build. Libraries are passed by script/deploy.sh.
+[profile.deploy]
+network = "arc"
+bytecode_hash = "none"
+cbor_metadata = false
+fs_permissions = [
+  { access = "read", path = "../deployments" },
+  { access = "write", path = "../deployments" },
+]
