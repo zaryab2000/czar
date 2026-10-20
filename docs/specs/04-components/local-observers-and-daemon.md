@@ -285,6 +285,7 @@ stateDiagram-v2
 | `audit_local` | `id`, `at`, `kind`, `payload_hash` BLOB(32), `bytes`, `destination` (`server`, `model-proxy`), `summary_counts_json` | "what left this machine" |
 | `settings` | `key` TEXT PK, `value_json` | hourly value, compile time, pause flag, pairing state |
 | `queue_drain` | `plugin_data_path`, `last_seq` | observer queue cursor |
+| `held_artifacts` (N2) | `objective_id` TEXT, `name` TEXT, `content_hash` BLOB(32), `flags_json` TEXT, `held_path` TEXT, `held_at` INTEGER, `released_at` INTEGER, `deleted_at` INTEGER | flagged artifacts held for review outside the project; `local-only` |
 | `fill_undo` (D85) | `objective_id` TEXT, `file_ref` BLOB(32), `spans_json` TEXT, `file_hash_after` BLOB(32), `filled_at` INTEGER | undo record for an in-place fill; `local-only`; kept `writeback.undoRetentionDays` |
 | `file_paths` (D84) | `file_ref` BLOB(32) PK, `project_ref` BLOB(32), `abs_path` TEXT, `last_seen_at` INTEGER, `placeholder_seen_json` TEXT | from `tool_input.file_path` (02 §8.2) and Cursor `afterFileEdit`; read by the placeholder detector (CZ-06) to open the current file from disk; `local-only`, never sent |
 
@@ -603,3 +604,4 @@ gitleaks rules v8.30.1 (C2-06); Presidio 2.2.364 at `data-privacy-stack/presidio
 | 2026-10-20 | D82 | Heartbeat note: results wait on the server while the Mac sleeps; CZ-11 runs the assembler. |
 | 2026-10-20 | D84 | Local `file_paths` table so the placeholder detector can read the person's file. |
 | 2026-10-20 | D85 | Local `fill_undo` table. |
+| 2026-10-20 | N2 | Local `held_artifacts` table. |

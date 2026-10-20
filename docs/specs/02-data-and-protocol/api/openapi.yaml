@@ -220,6 +220,15 @@ components:
         resultId: { type: string, pattern: "^res_[0-9A-HJKMNP-TV-Z]{26}$" }
         writtenAt: { $ref: "#/components/schemas/Timestamp" }
         surface: { type: string, enum: [claude-code-file, pr-comment, doc-insert], description: Which write-back adapter delivered it (CZ-11). }
+        artifacts:
+          type: object
+          additionalProperties: false
+          description: "Counts only (N2)."
+          required: [delivered, heldForReview]
+          properties:
+            delivered: { type: integer, minimum: 0 }
+            heldForReview: { type: integer, minimum: 0 }
+            released: { type: integer, minimum: 0 }
         fill:
           type: object
           additionalProperties: false
@@ -307,6 +316,21 @@ components:
                           value: { type: string, maxLength: 2000, description: "Data, never instructions." }
         taskSpec: { $ref: "../schemas/task-spec.schema.json", description: "The approved TaskSpec, so the assembler can lay out rows (subjects) and columns (D84)." }
         fillInPlace: { type: boolean, description: "Write found values into the person's file at the recorded placeholders (D85)." }
+        artifacts:
+          type: array
+          maxItems: 64
+          description: "Job deliverables kept whole (H6, D87). Flagged artifacts are held for review on the Mac and never written into the project until released (N2)."
+          items:
+            type: object
+            additionalProperties: false
+            required: [stepIndex, name, mimeType, contentHash, bytes, flags]
+            properties:
+              stepIndex: { type: integer, minimum: 0, maximum: 63 }
+              name: { type: string, maxLength: 255, pattern: "^[A-Za-z0-9._-]{1,255}$" }
+              mimeType: { type: string, maxLength: 100 }
+              contentHash: { $ref: "#/components/schemas/Hash32" }
+              bytes: { type: integer, minimum: 0 }
+              flags: { type: array, items: { type: string, enum: [injection-suspect, pii-suspect, screen-unavailable] } }
         costTotal: { $ref: "#/components/schemas/Amount6" }
         minutesSaved: { type: integer, minimum: 0 }
         createdAt: { $ref: "#/components/schemas/Timestamp" }
@@ -996,6 +1020,19 @@ paths:
         "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Result" } } } }
         "404": { $ref: "#/components/responses/Problem" }
 
+
+  /v1/results/{resultId}/artifacts/{contentHash}:
+    get:
+      tags: [daemon]
+      summary: Download one artifact of a result (H6, D87). The daemon decides where to write it (project folder, or held for review if flagged, N2).
+      operationId: getResultArtifact
+      security: [ { DeviceToken: [] } ]
+      parameters:
+        - { name: resultId, in: path, required: true, schema: { type: string, pattern: "^res_[0-9A-HJKMNP-TV-Z]{26}$" } }
+        - { name: contentHash, in: path, required: true, schema: { $ref: "#/components/schemas/Hash32" } }
+      responses:
+        "200": { description: The artifact bytes, content: { application/octet-stream: { schema: { type: string, format: binary } } } }
+        "404": { $ref: "#/components/responses/Problem" }
   /v1/soul-versions:
     post:
       tags: [daemon]
@@ -1577,3 +1614,4 @@ paths:
 # - D84 (2026-10-20): Result.taskSpec, Result.assembly[].inputs[].subjectIndex, SubjectsRevision, revisePlanSubjects route.
 # - D85 (2026-10-20): Plan.fillInPlace via ApprovalIntentRequest; Result.fillInPlace; ResultAck.fill counts.
 # - D86/D87 (2026-10-20): uploadJobDeliverable route and ProviderUploadSignature scheme; JobBrief v2.
+# - D87 (2026-10-20): Result.artifacts, ResultAck.artifacts counts, getResultArtifact route (H6, N2).

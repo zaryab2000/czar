@@ -377,6 +377,7 @@ CZ-19 projections, CZ-12 outcome intake, OpenAPI schemas. No FX source in Phase 
 | K9 claim relayer (P2) | secp256k1 ECDSA | CZ-21 | `scheduleRelease`/`executeRelease` on `BuilderEscrow` only | P2 |
 | K10 merchant payout keys | secp256k1 ECDSA, one per service | CZ-20 | `merchant-seller-proof` (Facilitator `SellerRequest`, p1-F4), Gateway sweep burn intents with `destinationRecipient` = the treasury address | no |
 | K11 Facilitator Console key | secret | CZ-20 | HTTPS header only | — |
+| K21a, K21b test-provider keys (H7, N12) | secp256k1 ECDSA, one per instance | CZ-20 §5.11 | `provider-call`: `setBudget`/`submit` on the configured escrow; `BriefRequest` and `DeliverableUpload` signatures for its own jobs | testnet only; never a vault role |
 | K12 Gateway API key (mainnet slot) | secret | CZ-15, CZ-20 | HTTPS header only | — |
 | K13 GitHub OAuth secret (P2) | secret | CZ-21 | OAuth exchange only | — |
 | K17 VAPID key | secret | CZ-23 (stage 2, D69) | push signing only; not created in Phase 1 | — |
@@ -408,6 +409,7 @@ A key store signs any 32-byte digest it is asked to sign; it cannot see that a d
 | `pocket-return` (K4, RV-004) | no | `{pocket, kind: usdc \| native, amount}` | either `USDC.transfer(owningVault, amount)` with `amount ≤` the pocket EOA's ERC-20 balance, or a plain native send of `amount` to `owningVault` (which has `receive()`); the destination is always the pocket's own vault, never caller-supplied |
 | `pocket-slow-withdraw` (K4) | no | `{pocket, step: initiate \| withdraw, value?}` | `GatewayWallet.initiateWithdrawal(USDC, value)` or `withdraw(USDC)` only, and only after the Gateway API has been unreachable for `payer.pullbackApiDownHours` (CZ-15) or the owner asked for it in the app; `withdraw` pays the pocket EOA, so a `pocket-return` transfer follows at once |
 | `relayer-tx` (relayer) | no | `{to, selector, args}` | `(to, selector)` in the relayer allowlist (§5.1 row); value 0 |
+| `provider-call` (K21a/K21b) | no | `{escrow, jobId, action: setBudget \| submit \| brief-request \| deliverable-upload, args}` | `escrow` is the configured instance; the job's `provider` is this key; `submit` only with a `contentHash` already accepted by `uploadJobDeliverable`; never signs for a job whose evaluator is not K7 |
 | `gas-refill` (relayer) | no | `{target, amount}` | `target ∈ {K3, K7, K8}` addresses; `amount ≤ signer.gas.<key>.maxAtomic − balance(target)` (§5.5) |
 
 - Per-key rate limits: `kms.maxSignaturesPerMin` per key (K3 600, K4 120 per pocket, K5 10, K7 60, K8 10, K10 300, relayer 120); excess is denied and alerted.
@@ -583,3 +585,4 @@ Phase 1: the local keystore and the macOS keychain through `@napi-rs/keyring` (D
 | 2026-10-19 | RV-049, RV-063 | pocket diagram: `confirmPullback` never closes a pocket; leaked-K4 threat text corrected. |
 | 2026-10-19 | RV-047 | CZ-25 leftover local-currency and FX text removed (D51). |
 | 2026-10-20 | N8, D87 | K7 `reject` always signable; reason tags listed. |
+| 2026-10-20 | H7, N12 | K21a/K21b test-provider keys and the `provider-call` policy. |

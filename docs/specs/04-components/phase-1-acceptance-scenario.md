@@ -70,12 +70,16 @@
 | # | Step | Pass check |
 |---|---|---|
 | 6.1 | `openJob(envelopeId, 3, provider, 400,000, proof, expiredAt = now + 24 h, descriptionHash)` | `JobOpened`; on Circle's instance `JobCreated(jobId, client = vault, provider, evaluator = vault.evaluator, expiredAt, hook = 0)` (A4-06) |
-| 6.2 | Test provider `setBudget(jobId, 300,000, "")` | `BudgetSet(jobId, 300,000)` |
-| 6.3 | `fundJob(jobKey)` | the vault read `platformFeeBP == 0 && evaluatorFeeBP == 0` (A4-07); `JobFunded(jobId, vault, 300,000)`; `Envelope.jobEscrowed == 300,000`, `reserved` released by 400,000 |
+| 6.2 | `czar-provider-a` (work mode chosen under OD-41, behaviour `honest`) fetches the brief with `BriefRequest`, checks `descriptionHash`, then `setBudget(jobId, 300,000, "")` | `BudgetSet(jobId, 300,000)`; the brief carries `taskSpec`, `submitBy`, `decisionCutoff`, `terms`, no `attachments` |
+| 6.3 | `fundJob(jobKey, 300,000)` (M1-b) | the vault read `platformFeeBP == 0 && evaluatorFeeBP == 0` (A4-07); `JobFunded(jobId, vault, 300,000)`; `Envelope.jobEscrowed == 300,000`, `reserved` released by 400,000 |
 | 6.4 | Provider uploads the deliverable to `uploadJobDeliverable` (signed `DeliverableUpload`), then `submit(jobId, keccak256(bytes), "")` before `submitBy` (D87) | `201 {contentHash}`; `JobSubmitted`; CZ-16 finds the upload by `contentHash` and runs `delivery` + `structural` in the sandbox; the bytes are not reachable by any unauthenticated request |
 | 6.5 | Evaluator (K7) calls `complete(jobId, reportHash, "")` | `JobCompleted(jobId, evaluator, reason == reportHash)`; `PaymentReleased(jobId, provider, 300,000)`; `syncJob` → `Envelope.spent += 300,000`; ledger "Paid $0.30 after acceptance" |
-| 6.6 | Negative run (second job): provider submits junk → `reject` | `JobRejected`, `Refunded(jobId, vault, budget)`; `syncJob` un-spends; ledger "Money back: $0.30" |
-| 6.7 | Negative run (third job): provider never submits; after `expiredAt`, `claimJobRefund(jobKey)` by an unrelated address | `Refunded`; `JobRefunded(creditedToEnvelope = true)` |
+| 6.6 | Negative run (second job): `czar-provider-a` behaviour `junk` → `reject` | `JobRejected`, `Refunded(jobId, vault, budget)`; `syncJob` un-spends; ledger "Money back: $0.30" |
+| 6.7 | Negative runs: behaviour `no-upload` → the evaluator rejects at `decisionCutoff` (N5); a further job funded and never submitted is refunded after `expiredAt` by `claimJobRefund(jobKey)` from an unrelated address | `Refunded`; `JobRefunded(creditedToEnvelope = true)` |
+
+| 6.8 | Alternate provider (N12, H2): `czar-provider-a` in behaviour `silent` | no `BudgetSet` within `payer.jobBudgetWaitHours`; `cancelJob` → `JobCancelled`; the step opens with `czar-provider-b` (`honest`) under the same `stepCap` and completes |
+| 6.9 | Zero-budget submit (H1, N7): behaviour `early-submit` | `fundJob` reverts `JobNotOpen`; the evaluator rejects with `czar:unfunded-submit`; `syncJob` → `Released`; the envelope closes without a force-close |
+| 6.10 | Artifact delivery (H6, N2): a job whose profile declares an artifact type; one clean run, one run carrying an injection line | the clean artifact is written whole under `.czar/results/<objectiveId>/` with its header; the flagged one is held in the Czar `held` folder, not named in the pointer, and released from the viewer |
 
 ## Stage 7: Accept, deliver, close
 
@@ -102,6 +106,7 @@
 | 8.4 | Freeze drill | one click → `createFreezeIntent` → UserOp → `Frozen`; a new `reserve` reverts `FrozenVault`; `isValidSignature` returns `0xffffffff` for a `USDC_3009` digest; a pending pullback still confirms; after `Frozen` is indexed, the follow-up agent step (not atomic, D63) calls `lowerAutoLimit(category, 0)` per category and every `autoLimit` reads 0 (D60); a raise signed before the freeze can no longer be relayed (`BadSigner`, RV-030); pockets are pulled back (D72) |
 | 8.6 | Two lanes (D83) | `getMarketView(web-search)` returns ≥ 1 Arc mainnet row with `payable: false`, a tier and the fixed label, and no score; passing that `serviceId` to `createQuote` returns 422 `network-not-payable`; a mocked 402 offering only `eip155:5042` is dropped by CZ-13 with `gate: network`; the shadow report row shows the real-market line from `Plan.marketReference` |
 | 8.7 | Test-merchant lab (D83) | after the seeded lab run (T-106), `findService(web-search)` ranks `lab-search-steady` above `lab-search-slow` and `lab-search-flaky`; `lab-extract-drift` and `lab-spot-payee-swap` are excluded by the live probe; every lab row carries the "Czar test merchant" badge |
+| 8.8 | Provider seeding and eligibility (N1) | after T-108's seeded run, each test-provider instance has `n_eff(delivery) ≥ 5` and is ranked; a fresh provider with no evidence appears only in `exploration_slot`, and its plan needs approval even within the earned allowance |
 | 8.5 | Guardian drill | `CzarVaultFactory.pause()` → `openEnvelope` reverts `Paused`; `unpause()` restores |
 
 ## Definition of done for the scenario
@@ -127,3 +132,4 @@
 | 2026-10-20 | D84 | Stage 2.1 realistic table with named rows; 2.3 checks `TaskSpec`; new 7.2a outcome check. |
 | 2026-10-20 | D85 | 7.2a checks the in-place fill of `pricing.md` and undo. |
 | 2026-10-20 | D87 | 6.4 uses the push model. |
+| 2026-10-20 | H7, N1, N2, N12, D86 | Stage 6 uses the Czar test provider by mode; new 6.8–6.10; 8.8 seeding and eligibility; `fundJob` with `expectedBudget`. |

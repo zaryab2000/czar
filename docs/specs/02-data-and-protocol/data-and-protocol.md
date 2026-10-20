@@ -872,7 +872,8 @@ Full definition: `api/openapi.yaml` (OpenAPI 3.1; 28 paths, 29 operations; parse
 | GET | `/v1/objectives?status=&cursor=` | yes | → page of `ObjectiveStatus` | |
 | GET | `/v1/objectives/{objectiveId}` | yes | → `ObjectiveStatus` (status, plan summary, `resultId`) | |
 | POST | `/v1/objectives/{objectiveId}/results/ack` | key required | `ResultAck` → `204` | write-back confirmation (CZ-11) |
-| GET | `/v1/results/{resultId}` | yes | → `Result` (labelled provenance per step) | |
+| GET | `/v1/results/{resultId}` | yes | → `Result` (labelled provenance per step; `artifacts[]` for job deliverables kept whole, H6) | |
+| GET | `/v1/results/{resultId}/artifacts/{contentHash}` (`getResultArtifact`) | yes | → artifact bytes | D87 (H6, N2): the daemon writes unflagged artifacts to the project and holds flagged ones for review |
 
 **Provider surface (EIP-712 `BriefRequest` signature, RV-025)**
 
@@ -1295,3 +1296,4 @@ Agent-directed text met this session (not followed): the Circle and Arc doc head
 | 2026-10-20 | D84 | §4.3 `taskSpec`; new §4.3.1 `TaskSpec`; §4.4 field and example; §4.5 `taskSpec`; §4.6 `fanOut`, `callInputs`, `inputTemplate` references ("never user text" superseded); §5.2 `taskSpecHash`, `objectiveHash`, `planHash`; §8.2 `file_paths` map; §9.7. |
 | 2026-10-20 | D85 | §4.3.1 `subjects[].placeholders`; §4.5 `fillInPlace`; OpenAPI `ApprovalIntentRequest`, `Result.fillInPlace`, `ResultAck.fill`. |
 | 2026-10-20 | D86, D87 | §4.11 `deliverableRef` replaces `deliverableUri`; §4.21 `JobBrief` v2 (`taskSpec`, `inputs` from `callInputs`, push delivery, `targetBudget`, `submitBy`, `decisionCutoff`, `terms`, reserved `attachments`; type-agnostic); §6.2 `DeliverableUpload` type and vector; §9.2 `uploadJobDeliverable`. |
+| 2026-10-20 | D87 (H6, N2) | `Result.artifacts`, `ResultAck.artifacts` counts, `getResultArtifact`. |
