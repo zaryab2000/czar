@@ -193,7 +193,7 @@ stateDiagram-v2
 - **Promotion:** accepting a proposal (or a bundle) runs in one transaction: re-check `sourceDigest` against the stored receipt (`409 source-changed` on mismatch), re-run layer 1, the §5.4 deny-list and the tombstone check, write the belief (`userConfirmed = true`, `confirmedAt`, `confidence = 1`), its receipts, a new `soul_versions` row and an `audit_local` row. P-04, P-07 and MCP cannot call it.
 - **Bundles (D90 item 5):** a bundle from `soul.propose` becomes `declared` only through `confirmLocalSoulBundle` with the exact list of proposals the viewer displayed in full; any other list is refused (`409 bundle-mismatch`). Receipts keep `origin = agent-host`. A model paraphrase is never part of a bundle.
 - **Conflicts:** a contradicting observation never overwrites a confirmed belief; it raises a review flag in the viewer. A passed mission deadline raises a review flag. Edit, unpin and delete work as in §5.7; a delete tombstones the key for every source class.
-- **Separation from drives:** accepting a belief never creates an objective, and a proposal never reaches CZ-06. Only three inputs change behaviour in Phase 1 (D90 item 6): typed `constraints` answers (CZ-07), a mission deadline for the same project root (CZ-06 §5.6) and `hourlyValue` (CZ-06 §5.5). `taste`, `place` and `spendingPosture` beliefs from any source are saved context.
+- **Separation from drives:** accepting a belief never creates an objective, and a proposal never reaches CZ-06. Four inputs change behaviour in Phase 1 (D90 item 6, D91 item 5): typed `constraints` answers (CZ-07), a mission deadline for the same project root (CZ-06 §5.6), `hourlyValue` (CZ-06 §5.5) and `taste.outputFormat` (CZ-06 §5.1a `TaskSpec.output`). Other `taste`, `place` and `spendingPosture` beliefs from any source are saved context.
 - **P-04 input:** the excerpt of current beliefs may include confirmed beliefs (as trusted, redacted text) in `excerptPolicy.allowSections`; P-04 may not `fade` or rewrite a `user-confirmed` belief (any such operation is discarded by the §5.4 model output gate).
 
 ### 6. Behaviour
@@ -430,6 +430,7 @@ Every objective carries a `TaskSpec` (02 §4.3.1) with the task's real subject. 
 - Limits: `drives.maxSubjects` 50 (extra rows are left out and counted in `context`); a subject that is empty after trimming is dropped.
 - Layer 1 runs on every string. Layer 2 does not replace `TaskSpec` values (D84 point 3).
 - `fileName` is the base name only; paths never leave the Mac.
+- **`output` (D91):** set by code in this order. (1) `file`: a `table-fill` in a `.md` file → `markdown-table`, in a `.csv` file → `csv`; a `list-fill` in a `.md` file → `markdown-list`. (2) `interview`: the confirmed interview answer `taste.outputFormat`. (3) `default`: `table-fill` → `markdown-table`, `list-fill` → `markdown-list`, `line-fill`, `error-fix` and `refused-task` → `prose`. The person can change it on the approval screen (`editedByUser`).
 
 #### 5.1b User-confirmed eligibility (D90; built with SCR-030)
 
@@ -444,9 +445,11 @@ Every objective carries a `TaskSpec` (02 §4.3.1) with the task's real subject. 
 - One candidate per normalized key within `drives.dedupeWindowDays` (7); a dismissed candidate's key is blocked for `drives.dismissBlockDays` (30); a delivered objective's key is blocked for `drives.deliveredBlockDays` (90).
 - At most `drives.maxCandidatesPerDay` (5) new candidates per day and `drives.maxCandidatesPerProjectPerDay` (2); overflow waits for the next day in priority order (ROI ratio descending). User-confirmed objectives (§5.1b) count toward both caps and the dedupe windows (D90).
 
-#### 5.3 Capability taxonomy (fixed tags; `capabilities` field, 02 §4.3)
+#### 5.3 Capability taxonomy (versioned list; `capabilities` field, 02 §4.3)
 
-`web-search`, `page-extract`, `table-build`, `summarize`, `translate`, `data-lookup`, `price-lookup`, `email-lookup`, `company-lookup`, `image-generate`, `transcribe`, `code-review`, `chart-build`. A detector maps to a default tag set; P-05 may reorder or drop tags, never add outside the taxonomy.
+- **Source (D91):** `drives.capabilityTaxonomy` in `@czar/config`, `{version, tags[]}`. Version 1 is the Phase 1 list: `web-search`, `page-extract`, `table-build`, `summarize`, `translate`, `data-lookup`, `price-lookup`, `email-lookup`, `company-lookup`, `image-generate`, `transcribe`, `code-review`, `chart-build`. The architect grows it by decision; the daemon and server must run the same version (the server rejects an unknown tag with `validation`).
+- A detector maps to a default tag set; P-05 may reorder or drop tags, never add outside the taxonomy.
+- **No tag fits (D91):** when the default set is empty or P-05 drops every tag, the objective is not published. It stays local with `status = dismissed` and `dismissReason = no-capability` (02 §4.3); the viewer shows "Czar can't do this kind of task yet"; the daemon counts `drives_no_capability{detector, kind}` (counts only) for taxonomy growth (stage 2 P2-23).
 
 #### 5.4 Minutes-saved estimates (`drives.minutes.*`)
 
@@ -680,6 +683,7 @@ Rows, quotes, failures (counts).
 | Report header | "What you missed this week" |
 | Row | "You spent 3h 10m on competitor research. Czar could have done it for $0.62." |
 | Row market line (D83, when `Plan.marketReference` exists) | "On the real market (Arc mainnet), 4 listed services do this from $0.04 per call. Czar has not paid or checked them yet." |
+| Row untested line (D91, when `Plan.untestedOptions` exists) | "Untested on testnet: {host} at {price} per call ({nEff} checked calls). Czar would ask before using it." |
 | Row path label | "Paid per call (checked before the next step)" / "Escrowed job (money back if rejected)" |
 | Totals | "This week: 6h 20m of your time · Czar estimate $2.14 · nothing was spent" |
 | Transition | "Start Czar: approve objectives one tap at a time. Nothing is spent until you approve." |
@@ -712,3 +716,4 @@ CZ-06, CZ-07, server planner (CZ-13 in dry-run).
 | 2026-10-20 | D84 | CZ-06 placeholder detector reads the file from disk; new §5.1a `TaskSpec` rules for all three detectors; §5.6 record carries `TaskSpec`; goal names subjects; security, wording and tests updated. |
 | 2026-10-20 | D85 | `TaskSpec` subjects record their placeholder spans. |
 | 2026-10-20 | D90 | CZ-04 §5.1 interview sources, §5.2 user-confirmed beliefs, §5.6 typed receipts and `soulHashRule`, §5.9 tables, new §5.11 non-observed inputs, tests; CZ-05 soul-input routes, flow, wording, tests; CZ-06 new §5.1b user-confirmed eligibility (built with SCR-030), caps, hourly value, mission deadline rule, tests; CZ-07 `constraints` from typed answers only; CZ-08 per-objective shadow exception (built with SCR-030). |
+| 2026-10-20 | D91 | CZ-04 §5.11 fourth consumer `taste.outputFormat`; CZ-06 §5.1a `TaskSpec.output` rule, §5.3 versioned taxonomy and the no-capability path; CZ-08 untested-options row. |

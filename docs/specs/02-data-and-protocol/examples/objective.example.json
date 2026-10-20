@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "1.0",
+  "schemaVersion": "1.1",
   "objectiveId": "obj_3YWRPWNS3245WP6SZWX8S7SW02",
   "soulVersion": 1,
   "detector": "placeholder",
@@ -22,7 +22,7 @@
   },
   "status": "candidate",
   "taskSpec": {
-    "schemaVersion": "1.0",
+    "schemaVersion": "1.1",
     "kind": "table-fill",
     "topic": "Competitor pricing",
     "fileName": "pricing.md",

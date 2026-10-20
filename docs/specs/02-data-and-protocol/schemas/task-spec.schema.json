@@ -9,8 +9,8 @@
   "properties": {
     "schemaVersion": {
       "type": "string",
-      "const": "1.0",
-      "description": "Schema version.",
+      "const": "1.1",
+      "description": "Schema version, major.minor; this file is 1.1 (2026-10-20: output, D91).",
       "x-privacyClass": "redacted-to-server"
     },
     "kind": {
@@ -159,6 +159,40 @@
       "type": "boolean",
       "description": "Subjects were changed on the approval screen.",
       "x-privacyClass": "redacted-to-server"
+    },
+    "output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "format",
+        "formatSource"
+      ],
+      "properties": {
+        "format": {
+          "type": "string",
+          "enum": [
+            "markdown-table",
+            "csv",
+            "json",
+            "markdown-list",
+            "prose"
+          ],
+          "description": "Output format.",
+          "x-privacyClass": "redacted-to-server"
+        },
+        "formatSource": {
+          "type": "string",
+          "enum": [
+            "file",
+            "interview",
+            "default"
+          ],
+          "description": "What decided the format.",
+          "x-privacyClass": "redacted-to-server"
+        }
+      },
+      "description": "How the person wants the result shaped (D91). Built by code: the person's own file decides first, then the interview answer taste.outputFormat, then the default for the task kind. Part of taskSpecHash when present.",
+      "x-privacyClass": "redacted-to-server"
     }
   },
   "required": [
@@ -168,5 +202,6 @@
     "subjects",
     "fields",
     "sourceTrust"
-  ]
+  ],
+  "$comment": "2026-10-20 D91: optional output {format, formatSource}; schemaVersion 1.1."
 }

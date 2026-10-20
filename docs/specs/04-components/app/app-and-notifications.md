@@ -229,6 +229,9 @@ Idempotency: every creating call sends `Idempotency-Key`; `notifySubmitted` with
 | payee is a lab service (D83) | badge "Czar test merchant" next to the host |
 | real-market panel (D83, objective detail and shadow summary, from `Plan.marketReference` or `getMarketView`) | header "Real market (Arc mainnet)"; line "{ready} listed services do this from {low} per call. Czar has not paid or checked them."; never a button to pay |
 | alternates (D36) | "If a service fails, Czar may use up to 2 backup services under the same step limit." |
+| step reason (D91, `Step.why`) | "Fills: {fills}. {summary}." |
+| alternative not chosen (D91) | "{host} not chosen: {reason}", where reason is: `lower-score` "weaker checked record", `price-over-budget` "costs more than this step allows", `unverified` "not enough checked calls yet", `network` "not payable on this network", `rail` "payment path not supported", `output-format` "can't return {format}", `probe-failed` "did not answer a price check", `payee-changed` "payee changed since listing", `not-in-top-k` "ranked lower" |
+| result format (D91, `TaskSpec.output`) | "Result as: {format}" with a selector; changing it sets `editedByUser` |
 | network fee line | "Network fee: about {feeDisplay}, paid from your network fee reserve" (≈ $0.001, p1-A6) |
 | expiry | "This plan expires {expiresAt}" |
 | approve button | "Approve {capDisplay}" |
@@ -372,3 +375,4 @@ K17 VAPID private key in the secret store; a leak lets an attacker spam notifica
 | 2026-10-20 | D86, D87 | Wording: job paid (form, not correctness), job context notice, freeze with jobs. |
 | 2026-10-20 | N1, N2 | Wording: unverified provider badge; files held for review. |
 | 2026-10-20 | D90 | `getSoulPointer` message before the first soul version points to the optional desktop interview; no soul data in the app. Approval display for confirmed objectives is held in SCR-030. |
+| 2026-10-20 | D91 | Approval screen shows each step's reason, each losing alternative, and the result format. |
