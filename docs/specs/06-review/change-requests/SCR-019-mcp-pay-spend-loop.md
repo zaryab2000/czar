@@ -4,7 +4,7 @@
 |---|---|
 | ID | SCR-019 |
 | Filed by | Independent reviewer (G0-01), 2026-10-19 |
-| Spec and section | `docs/specs/04-components/local-agent-surfaces.md` (lines 103, 121, 152); `docs/specs/02-data-and-protocol/mcp/czar-mcp-tools.md` `quote`/`pay` (lines 156–159, 207–208); `server-planning-and-payment.md` (line 81) |
+| Spec and section | `docs/specs/04-components/local/local-agent-surfaces.md` (lines 103, 121, 152); `docs/specs/02-data-and-protocol/mcp/czar-mcp-tools.md` `quote`/`pay` (lines 156–159, 207–208); `docs/specs/04-components/server/server-planning-and-payment.md` (line 81) |
 | Status | Accepted (D75), applied in `openapi.yaml` (`PayRequest` names `planId`/`stepIndex`, call budget; `QuoteRequest` index-only URL, no category), MCP §1 and §2.3–§2.4, CZ-12 §6, CZ-09 §5.2 and §9, scenario 7.1d; vault side via SCR-002; T-071, T-072. |
 | Review finding | RV-019 (High) in `docs/specs/06-review/2026-10-19-spec-review.md` |
 

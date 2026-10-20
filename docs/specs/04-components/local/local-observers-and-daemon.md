@@ -1,6 +1,6 @@
 # Local observers and daemon (spec 04)
 
-- **Date:** 2026-10-18. **Status:** draft for review. Conventions: `cross-cutting.md`. Data shapes: spec 02 only (cited "02 §n"). Contract calls: none (nothing in this file touches a key that can spend, D25).
+- **Date:** 2026-10-18. **Status:** draft for review. Conventions: `../shared/cross-cutting.md`. Data shapes: spec 02 only (cited "02 §n"). Contract calls: none (nothing in this file touches a key that can spend, D25).
 - **Components:** CZ-01 observers (Claude Code full; Codex, Cursor, Chrome outlined), CZ-02 daemon, CZ-03 shared memory, CZ-26 redaction library.
 - **Wording rule (D31):** raw work data stays on the machine; only redacted excerpts are sent for soul compilation, and only redacted objectives are sent for planning.
 
@@ -339,7 +339,7 @@ Reads only what the person selected in the viewer (CZ-05) and turns it into prop
 
 - **Never read:** `.env*`, `*.key`, `*.key.json`, `*.pem`, keystores, wallet and credential files, anything matching a layer-1 path rule, `transcript_path`, files outside the root (symlinks are resolved and refused when they leave the root), binary or non-UTF-8 files. Each skip is counted in `SourceScan.skipped`.
 - **Bounds:** `soulInput.scanMaxFiles` per scan; files over `soulInput.scanMaxBytesPerFile` are skipped with a visible reason, never cut; at most `soulInput.maxModelExcerptsPerScan` excerpts go to a model per scan; at most `soulInput.maxProposalsPerSource` proposals per source and `soulInput.maxPendingProposals` pending in total.
-- **Pipeline per excerpt:** layer 1 before anything is stored → `SourceReceipt` (`sourceDigest` over the exact bytes) → if the person gave egress consent for this scope: layer 2 (CZ-26) → unsupported-language check (no model call for non-English text) → P-01 screen; flagged paragraphs are removed and counted → P-07 on the remaining paragraphs → post-validation (`ai-prompts.md` P-07) → `proposed_beliefs`. Without egress consent, or when any step fails, the source is kept for review and produces **no** automatic proposal.
+- **Pipeline per excerpt:** layer 1 before anything is stored → `SourceReceipt` (`sourceDigest` over the exact bytes) → if the person gave egress consent for this scope: layer 2 (CZ-26) → unsupported-language check (no model call for non-English text) → P-01 screen; flagged paragraphs are removed and counted → P-07 on the remaining paragraphs → post-validation (`../shared/ai-prompts.md` P-07) → `proposed_beliefs`. Without egress consent, or when any step fails, the source is kept for review and produces **no** automatic proposal.
 - **Audit:** every excerpt sent writes an `audit_local` row (`kind = source-excerpt`, payload hash, bytes, `model-proxy`). Consent and revocation write `audit_local` rows too.
 - **Previews (held):** current-file open-loop previews and **Do this** come with SCR-030; until then a scan only proposes beliefs.
 
@@ -376,7 +376,7 @@ Reads only what the person selected in the viewer (CZ-05) and turns it into prop
 
 ### 7. AI usage
 
-The daemon hosts P-04 (soul compiler), P-05 (drives helper) and P-06 (refusal classifier) calls through the Czar model proxy; specs in `ai-prompts.md`; inputs are always the redacted excerpt (`redacted-to-server` class) and never raw events. Fallback without a model: compile falls back to rules-only (`modelUsed = false`, D58, CZ-04), detectors run rule-only, refusals use regex only. **Superseded by D58 / RV-052:** "compile is skipped (previous soul stands)". Intake screening of `ActivityEvent.summary` is the local regex pre-screen only, never the hosted P-01 (RV-051).
+The daemon hosts P-04 (soul compiler), P-05 (drives helper) and P-06 (refusal classifier) calls through the Czar model proxy; specs in `../shared/ai-prompts.md`; inputs are always the redacted excerpt (`redacted-to-server` class) and never raw events. Fallback without a model: compile falls back to rules-only (`modelUsed = false`, D58, CZ-04), detectors run rule-only, refusals use regex only. **Superseded by D58 / RV-052:** "compile is skipped (previous soul stands)". Intake screening of `ActivityEvent.summary` is the local regex pre-screen only, never the hosted P-01 (RV-051).
 
 ### 8. Privacy
 

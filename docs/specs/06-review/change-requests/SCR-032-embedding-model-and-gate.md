@@ -4,7 +4,7 @@
 |---|---|
 | ID | SCR-032 |
 | Filed by | Architect (Claude), 2026-10-20, from D91 item 3 |
-| Spec and section | `docs/specs/04-components/server-acceptance-evidence-selection.md` CZ-18 §5.1 (C3), §5.3c, §5.6 `selection.retrievalMode`, `selection.embedding.*`; `docs/specs/01-system-architecture/system-architecture.md` §7.2 K18, §11.1; `docs/specs/04-components/cross-cutting.md` §6, §7 |
+| Spec and section | `docs/specs/04-components/server/server-acceptance-evidence-selection.md` CZ-18 §5.1 (C3), §5.3c, §5.6 `selection.retrievalMode`, `selection.embedding.*`; `docs/specs/01-system-architecture/system-architecture.md` §7.2 K18, §11.1; `docs/specs/04-components/cross-cutting.md` §6, §7 |
 | Status | Open, **held**: embeddings stay off until this is accepted and the match-set gate passes. Phase 1 retrieval is tags plus BM25. |
 
 ## Problem

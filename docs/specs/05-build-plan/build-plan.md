@@ -15,7 +15,7 @@
 - **Guardrails first:** contracts (M1) pass unit, fuzz, invariant, fork and Slither checks and are deployed before the indexer and signer (M2). No server code calls a vault before both.
 - **Thin slice early:** M3 ends with one real reserve → x402 → settle → finalize on Arc testnet against `czar-search`, with evidence recorded. M4 widens to the pocket and job paths and anchors the proof.
 - The local side (M5) and the desktop-browser app (M6, D69) build on a working payment server. Selection Layer lite, earned autonomy and the ROI ledger (M7) come last before acceptance.
-- M8 runs `docs/specs/04-components/phase-1-acceptance-scenario.md` end to end, in CI on an `arc-anvil` fork and once on live testnet with Stage 0 in desktop Safari. It is the Phase 1 release gate.
+- M8 runs `docs/specs/04-components/shared/phase-1-acceptance-scenario.md` end to end, in CI on an `arc-anvil` fork and once on live testnet with Stage 0 in desktop Safari. It is the Phase 1 release gate.
 - Every task names its spec sections, outputs, runnable acceptance tests, dependencies, size, parallel group and owner. Steps that need funds, accounts or a real device need Zaryab's approval.
 - Agents never change specs. A spec problem becomes a spec change request (SCR), and work on that item stops until Zaryab rules on it.
 
@@ -23,7 +23,7 @@
 
 ### 2.1 Layout
 
-From `docs/specs/04-components/cross-cutting.md` §1 (one `pnpm` workspace; the specs are linked, never copied):
+From `docs/specs/04-components/shared/cross-cutting.md` §1 (one `pnpm` workspace; the specs are linked, never copied):
 
 | Path | Package | Components |
 |---|---|---|
@@ -41,7 +41,7 @@ From `docs/specs/04-components/cross-cutting.md` §1 (one `pnpm` workspace; the 
 | `models/` | prompt files and eval fixtures | P-01 to P-06 |
 | `docs/specs/` | link to this specs folder (read-only) | — |
 
-`apps/signer` is the signer service that `cross-cutting.md` places under `apps/server`'s key management (CZ-27). It runs as its own process so its network policy can be stricter (spec 04 `server-autonomy-roi-keys.md` CZ-27). Confidence: moderate.
+`apps/signer` is the signer service that `docs/specs/04-components/shared/cross-cutting.md` places under `apps/server`'s key management (CZ-27). It runs as its own process so its network policy can be stricter (`docs/specs/04-components/server/server-autonomy-roi-keys.md` CZ-27). Confidence: moderate.
 
 ### 2.2 Toolchain pins
 
@@ -53,7 +53,7 @@ From `docs/specs/04-components/cross-cutting.md` §1 (one `pnpm` workspace; the 
 | Node.js | 22 LTS (≥ 22.18 for the Gateway buyer SDK) | p1-G13, cross-cutting §7 |
 | Package manager | `pnpm`, exact versions, `minimumReleaseAge 1440`, `ignore-scripts true` | CLAUDE.md supply-chain rules |
 | Python helper | Python 3.13 with `uv`, bundled into the daemon installer; Presidio `2.2.364` | D45, C2-01 |
-| Other pins | as `cross-cutting.md` §7 (viem 2.57.x, `@x402/*` 2.28.0, `@circle-fin/x402-batching` 3.5.0, `@circle-fin/modular-wallets-core` 1.0.16, Ponder 0.18.x, `better-sqlite3-multiple-ciphers` 13.0.3, `@napi-rs/keyring` 2.1.1, gitleaks rules v8.30.1) | cross-cutting §7 |
+| Other pins | as `docs/specs/04-components/shared/cross-cutting.md` §7 (viem 2.57.x, `@x402/*` 2.28.0, `@circle-fin/x402-batching` 3.5.0, `@circle-fin/modular-wallets-core` 1.0.16, Ponder 0.18.x, `better-sqlite3-multiple-ciphers` 13.0.3, `@napi-rs/keyring` 2.1.1, gitleaks rules v8.30.1) | cross-cutting §7 |
 | MCP SDK | version that speaks `2026-07-28` and legacy `initialize` | **GAP**: chosen in T-072 and recorded |
 | Slither | version pinned in CI by T-025 | spec 03 `security-and-testing.md` §3.6 |
 
@@ -102,7 +102,7 @@ Task details are in `phase-1-tasks.md`. "Exit gate" commands run in CI unless ma
 
 - **Goal:** a repo where every later task can build, test and lint, with the spec 02 shapes and hashes available as tested packages.
 - **Components:** shared packages for CZ-all; CZ-26 layer 1.
-- **Specs:** `cross-cutting.md` §1–§5, §7; 02 §2–§7; 02 `schemas/`, `vectors/`.
+- **Specs:** `docs/specs/04-components/shared/cross-cutting.md` §1–§5, §7; 02 §2–§7; 02 `schemas/`, `vectors/`.
 - **Entry:** G0-12 passed; G0-10 passed for T-003.
 - **Exit gate:**
   - `pnpm -r lint && pnpm -r typecheck && pnpm -r test` pass with 0 warnings
@@ -131,7 +131,7 @@ Task details are in `phase-1-tasks.md`. "Exit gate" commands run in CI unless ma
 
 - **Goal:** the indexer mirrors every vault, factory and external event Czar needs, alerts on upgrades, and the signer service signs only shapes the policy allows.
 - **Components:** CZ-19, CZ-27.
-- **Specs:** 04 `server-acceptance-evidence-selection.md` CZ-19; 04 `server-autonomy-roi-keys.md` CZ-27; spec 01 §7.2, §16.
+- **Specs:** `docs/specs/04-components/server/server-acceptance-evidence-selection.md` CZ-19; `docs/specs/04-components/server/server-autonomy-roi-keys.md` CZ-27; spec 01 §7.2, §16.
 - **Entry:** M1 exit (contracts deployed); G0-13 passed; **local hosting ready on Zaryab's Mac** (Docker Postgres, indexer and server processes, `local-keystore` signer; D70). Google Cloud is stage 2 (D66, D70).
 - **Exit gate:**
   - indexer integration tests replay a scripted `fork` session and the projections equal the vault's on-chain state field by field
@@ -144,12 +144,12 @@ Task details are in `phase-1-tasks.md`. "Exit gate" commands run in CI unless ma
 
 - **Goal:** one real vault-direct payment on testnet, end to end, crash-safe, with evidence stored.
 - **Components:** CZ-12, CZ-13 (rule-based core), CZ-14, CZ-15 (vault-direct), CZ-16 (minimal), CZ-17 (receipts), CZ-20 (`czar-search` vanilla route); P-01, P-02.
-- **Specs:** 04 `server-planning-and-payment.md` (all); 04 `ai-prompts.md` P-01, P-02; 04 `server-supply-side.md` CZ-20; 02 §11, `api/openapi.yaml`.
+- **Specs:** `docs/specs/04-components/server/server-planning-and-payment.md` (all); `docs/specs/04-components/shared/ai-prompts.md` P-01, P-02; `docs/specs/04-components/server/server-supply-side.md` CZ-20; 02 §11, `api/openapi.yaml`.
 - **Entry:** M2 exit; G0-04 recorded (`vaultSignatureMode`).
 - **Test owner fixture:** until the app exists (M6), testnet vaults in M3 and M4 are created by the factory with a **test owner account** held in an encrypted test keystore, so the owner can set limits and open envelopes. This is a testnet fixture only, for M3–M4 only; T-082 removes it in M6, and it is never used in M8 or for real users (D64).
 - **Exit gate:**
   - OpenAPI contract tests pass for every daemon and app route implemented so far
-  - P-01 and P-02 eval suites pass, including every injection case in `ai-prompts.md`
+  - P-01 and P-02 eval suites pass, including every injection case in `docs/specs/04-components/shared/ai-prompts.md`
   - the kill-and-resume harness passes for every `step_executions` phase of the vault-direct loop
   - **testnet (T-050):** `Reserved` → HTTP 200 with `PAYMENT-RESPONSE.success` → `AuthorizationUsed(vault, nonce)` → `Settled` → `ReservationFinal`; the `Receipt` is stored; envelope counters match INV-1
 - **Risks:** Facilitator keyless-trial limits (part 2 A1 GAP); merchant idempotency store correctness.
@@ -158,7 +158,7 @@ Task details are in `phase-1-tasks.md`. "Exit gate" commands run in CI unless ma
 
 - **Goal:** pocket and job paths working, all three merchants live on both routes, and an anchored, third-party-verifiable proof.
 - **Components:** CZ-15 (pocket, job), CZ-16 (full Phase 1 profiles, evaluator), CZ-17 (publisher), CZ-20 (complete).
-- **Specs:** 04 `server-planning-and-payment.md` CZ-15 §5.3, §5.4; 04 `server-acceptance-evidence-selection.md` CZ-16, CZ-17; 03 `czar-vault.md` §5.4, §5.5, §6.2; 03 `job-escrow-adapter.md`; 03 `open-evidence-log.md` §11.
+- **Specs:** `docs/specs/04-components/server/server-planning-and-payment.md` CZ-15 §5.3, §5.4; `docs/specs/04-components/server/server-acceptance-evidence-selection.md` CZ-16, CZ-17; 03 `czar-vault.md` §5.4, §5.5, §6.2; 03 `job-escrow-adapter.md`; 03 `open-evidence-log.md` §11.
 - **Entry:** M3 exit; G0-05 and G0-07 passed (or the SCR they produced is resolved). Testnet vaults still use the test-keystore owner fixture (D64).
 - **Daemon platform:** macOS only in Phase 1 (D67); applies to M5.
 - **Exit gate:**
@@ -170,7 +170,7 @@ Task details are in `phase-1-tasks.md`. "Exit gate" commands run in CI unless ma
 
 - **Goal:** on Zaryab's Mac, Claude Code activity becomes redacted memory, a Work Soul, objectives (shadow and live), MCP tools and a write-back file.
 - **Components:** CZ-01 to CZ-09, CZ-11, CZ-26; server routes `completeModelCall`, `createQuote`, `reportOutcome`, `createPayRequest`, `shadowQuote`.
-- **Specs:** 04 `local-observers-and-daemon.md`, `local-soul-and-drives.md`, `local-agent-surfaces.md`, `ai-prompts.md` P-04 to P-06; 02 §8, §13, `api/local-openapi.yaml`, `mcp/czar-mcp-tools.md`.
+- **Specs:** `docs/specs/04-components/local/local-observers-and-daemon.md`, `docs/specs/04-components/local/local-soul-and-drives.md`, `docs/specs/04-components/local/local-agent-surfaces.md`, `docs/specs/04-components/shared/ai-prompts.md` P-04 to P-06; 02 §8, §13, `api/local-openapi.yaml`, `mcp/czar-mcp-tools.md`.
 - **Entry:** M3 exit (server and payment routes exist); G0-11 recorded.
 - **Exit gate:**
   - `claude plugin validate --strict plugins/claude-code` passes
@@ -185,7 +185,7 @@ Task details are in `phase-1-tasks.md`. "Exit gate" commands run in CI unless ma
 
 - **Goal:** the web app, used in a desktop browser (Safari or Chrome on macOS, D69), onboards a user to a passkey smart account and a vault, shows approvals, opens envelopes by UserOp, freezes, and shows receipts in USD.
 - **Components:** CZ-22 (desktop). CZ-23 notifications, Home Screen install, mobile layouts and the D28 native fallback are stage 2 (D69, `stage-2-backlog.md` §2).
-- **Specs:** 04 `app-and-notifications.md`; 02 `api/openapi.yaml` app surface; 03 `czar-vault-factory.md` §5; D26, D30, D51, D52, D64, D69.
+- **Specs:** `docs/specs/04-components/app/app-and-notifications.md`; 02 `api/openapi.yaml` app surface; 03 `czar-vault-factory.md` §5; D26, D30, D51, D52, D64, D69.
 - **Entry:** M3 exit; G0-03, G0-06, G0-14 passed.
 - **Approvals:** the in-app pending-approvals list is the only Phase 1 approval channel (D69).
 - **D64:** M6 removes the test-keystore owner fixture (T-082).
@@ -201,7 +201,7 @@ Task details are in `phase-1-tasks.md`. "Exit gate" commands run in CI unless ma
 
 - **Goal:** evidence-ranked service choice for the planner and MCP, earned-limit raises, and the ROI statement.
 - **Components:** CZ-18 (lite), CZ-13 (P-03), CZ-09 (`find_service`), CZ-24, CZ-25.
-- **Specs:** 04 `server-acceptance-evidence-selection.md` CZ-18; 04 `ai-prompts.md` P-03; 04 `server-autonomy-roi-keys.md` CZ-24, CZ-25; SL §5, §6.9, §6.10; D15, D40, D59.
+- **Specs:** `docs/specs/04-components/server/server-acceptance-evidence-selection.md` CZ-18; `docs/specs/04-components/shared/ai-prompts.md` P-03; `docs/specs/04-components/server/server-autonomy-roi-keys.md` CZ-24, CZ-25; SL §5, §6.9, §6.10; D15, D40, D59.
 - **Entry:** M4 exit; M5 exit for T-093.
 - **Exit gate:**
   - ranking fixtures: unverified services appear only in their own section and are never scored ("unknown is not bad")
@@ -214,7 +214,7 @@ Task details are in `phase-1-tasks.md`. "Exit gate" commands run in CI unless ma
 ### M8 Phase 1 acceptance (T-100 to T-104, 5 tasks)
 
 - **Goal:** the full scenario passes; Phase 1 is released.
-- **Specs:** 04 `phase-1-acceptance-scenario.md` (Stages 0–8 and its definition of done).
+- **Specs:** `docs/specs/04-components/shared/phase-1-acceptance-scenario.md` (Stages 0–8 and its definition of done).
 - **Entry:** M3 to M7 exits.
 - **Exit gate:**
   - `pnpm --filter e2e test:phase1 --env fork` passes Stages 1–8 in CI
@@ -324,10 +324,10 @@ Each parallel agent works in its own worktree (CLAUDE.md worktree rule).
 | Vectors | the 02 §6.4 digests in TypeScript and Solidity from one fixture | 02 `vectors/` | CI |
 | Schema contract | every API request/response validated against `openapi.yaml` and `local-openapi.yaml`; every object against `schemas/` | 02 | CI |
 | Crash recovery | kill-and-resume at every `step_executions` phase on all three paths | 04 CZ-15 §5.2–§5.4 | CI (`fork`) |
-| AI prompt evals | P-01 to P-06 cases, every injection case; a protected field changing fails the build | 04 `ai-prompts.md` | CI (model calls; budget per `cross-cutting.md` §6.2) |
+| AI prompt evals | P-01 to P-06 cases, every injection case; a protected field changing fails the build | `docs/specs/04-components/shared/ai-prompts.md` | CI (model calls; budget per `docs/specs/04-components/shared/cross-cutting.md` §6.2) |
 | End to end | Playwright (app), daemon + plugin fixtures, server against `fork` | M5, M6 tasks | CI |
 | Live testnet | thin slice (T-050), multi-path (T-059), acceptance (T-102) | tasks | testnet, with approval |
-| Release gate | the Phase 1 acceptance scenario, Stages 0–8 | 04 `phase-1-acceptance-scenario.md` | `fork` in CI, then testnet |
+| Release gate | the Phase 1 acceptance scenario, Stages 0–8 | `docs/specs/04-components/shared/phase-1-acceptance-scenario.md` | `fork` in CI, then testnet |
 
 ## 8. Security gates (each must pass for the release commit)
 
@@ -338,7 +338,7 @@ Each parallel agent works in its own worktree (CLAUDE.md worktree rule).
 | CI hygiene | GitHub Actions pinned to SHAs with version comments, `persist-credentials: false`; `zizmor` clean; `arc-foundry` from the checksummed release | T-002, T-003 |
 | Plugin | `claude plugin validate --strict plugins/claude-code` | T-062 |
 | Key policies | signer policy tests on testnet: wrong payee refused before the key store; rate limits; interactive confirmation for K6/K20 (dual control stage 2, D80); relayer gas key in the local keystore (D70); keys created by T-105 before T-027 (RV-016) | T-036, T-105, D61, D62, D80 |
-| Injection | every injection eval case in `ai-prompts.md` passes; scenario step 7.1 passes | T-046, T-066, T-068, T-092, T-101 |
+| Injection | every injection eval case in `docs/specs/04-components/shared/ai-prompts.md` passes; scenario step 7.1 passes | T-046, T-066, T-068, T-092, T-101 |
 | Logs | automated scan of all logs from the acceptance run: no objective text, soul text, merchant body, path or email (cross-cutting §4) | T-103 |
 | Dependencies | `pnpm audit --audit-level=moderate`; `uv` hashes for the Python helper | T-002, T-064 |
 

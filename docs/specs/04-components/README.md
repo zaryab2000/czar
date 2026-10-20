@@ -1,50 +1,64 @@
 # 04 — Component specifications
 
-- **Status:** draft written 2026-10-18 on top of specs 01–03. Full specs for every Phase 1 component; outlines for Phase 2 and 3 components. Amendments AM-01 to AM-20 applied to specs 02/03 and decisions D45–D62 reflected (see `amendments-and-open-decisions.md`).
+- **Status:** draft written 2026-10-18 on top of specs 01–03. Full specs for every Phase 1 component; outlines for Phase 2 and 3 components. Amendments AM-01 to AM-20 applied to specs 02/03 and decisions D45–D62 reflected (see `shared/amendments-and-open-decisions.md`).
 - **Rule:** no data shape, route, tool or contract call is defined here. Everything is referenced by its exact name in specs 02 and 03; anything new goes through a spec change request.
+
+## Folder map
+
+| Track | Canonical specifications | Build documents |
+|---|---|---|
+| Smart contracts and vault client | [`../03-smart-contracts/`](../03-smart-contracts/README.md) | [`../07-contract-build/`](../07-contract-build/README.md) |
+| Shared component rules and acceptance | [`shared/`](shared/) | To be assessed per component |
+| Local runtime and agent surfaces | [`local/`](local/) | To be assessed per component |
+| Server runtime and services | [`server/`](server/) | To be assessed per component |
+| Web app and notifications | [`app/`](app/) | To be assessed per component |
+
+Specs 01 and 02 define system-wide architecture and protocol shapes. Spec 05 is the build plan;
+spec 06 records reviews and change requests. The folders above group existing component specs
+without changing their authority or declaring a new PRD ready.
 
 ## Reading order
 
-1. `cross-cutting.md` (monorepo, config registry, logging, error codes, models, pins, mainnet differences)
-2. `server-planning-and-payment.md` (the critical path: API, planner, router, paying agent, injection boundary)
-3. `ai-prompts.md` (P-01 to P-06)
-4. `server-acceptance-evidence-selection.md`
-5. `local-observers-and-daemon.md`, `local-soul-and-drives.md`, `local-agent-surfaces.md`
-6. `app-and-notifications.md`, `server-supply-side.md`, `server-autonomy-roi-keys.md`
-7. `phase-1-acceptance-scenario.md`
-8. `amendments-and-open-decisions.md`
+1. `shared/cross-cutting.md` (monorepo, config registry, logging, error codes, models, pins, mainnet differences)
+2. `server/server-planning-and-payment.md` (the critical path: API, planner, router, paying agent, injection boundary)
+3. `shared/ai-prompts.md` (P-01 to P-07)
+4. `server/server-acceptance-evidence-selection.md`
+5. `local/local-observers-and-daemon.md`, `local/local-soul-and-drives.md`, `local/local-agent-surfaces.md`
+6. `app/app-and-notifications.md`, `server/server-supply-side.md`, `server/server-autonomy-roi-keys.md`
+7. `shared/phase-1-acceptance-scenario.md`
+8. `shared/amendments-and-open-decisions.md`
 
 ## Component index
 
 | CZ | Name | File | Phase | Runs on |
 |---|---|---|---|---|
-| CZ-01 | Observers (Claude Code; Codex, Cursor, Chrome outlines) | `local-observers-and-daemon.md` | 1 / 2 | user machine (plugin) |
-| CZ-02 | Local daemon `czard` | `local-observers-and-daemon.md` | 1 | user machine |
-| CZ-03 | Shared memory | `local-observers-and-daemon.md` | 1 | user machine |
-| CZ-04 | Soul compiler | `local-soul-and-drives.md` | 1 | user machine (+ hosted model via proxy, D31) |
-| CZ-05 | Soul store and viewer | `local-soul-and-drives.md` | 1 (desktop, D34) | user machine |
-| CZ-06 | Drives engine | `local-soul-and-drives.md` | 1 | user machine |
-| CZ-07 | Objective publisher | `local-soul-and-drives.md` | 1 | user machine |
-| CZ-08 | Shadow mode | `local-soul-and-drives.md` | 1 | user machine |
-| CZ-09 | Czar MCP server | `local-agent-surfaces.md` | 1 | user machine (stdio child) |
-| CZ-10 | Soul injection writer | `local-agent-surfaces.md` | 2 | user machine |
-| CZ-11 | Write-back adapter | `local-agent-surfaces.md` | 1 | user machine |
-| CZ-12 | Server API and objective store | `server-planning-and-payment.md` | 1 | Czar server |
-| CZ-13 | Planner | `server-planning-and-payment.md` | 1 | Czar server |
-| CZ-14 | Payment router | `server-planning-and-payment.md` | 1 | Czar server |
-| CZ-15 | Paying agent | `server-planning-and-payment.md` | 1 | Czar server |
-| CZ-16 | Acceptance checker and ERC-8183 evaluator | `server-acceptance-evidence-selection.md` | 1 | Czar server |
-| CZ-17 | Evidence producer and publisher | `server-acceptance-evidence-selection.md` | 1 | Czar server |
-| CZ-18 | Selection Layer services | `server-acceptance-evidence-selection.md` | 1 lite / 2 / 3 | Czar server |
-| CZ-19 | Indexer | `server-acceptance-evidence-selection.md` | 1 | Czar server |
-| CZ-20 | Czar x402 merchants | `server-supply-side.md` | 1 | Czar server |
-| CZ-21 | Claim server and relayer | `server-supply-side.md` | 2 | Czar server |
-| CZ-22 | Czar web app | `app-and-notifications.md` | 1 | desktop browser (Safari or Chrome on macOS, D69) |
-| CZ-23 | Notifications (web push) | `app-and-notifications.md` | stage 2 (D69; outline only) | Czar server → phone |
-| CZ-24 | Earned autonomy | `server-autonomy-roi-keys.md` | 1 | Czar server |
-| CZ-25 | ROI ledger | `server-autonomy-roi-keys.md` | 1 | Czar server |
-| CZ-26 | Redaction library | `local-observers-and-daemon.md` | 1 | user machine |
-| CZ-27 | Key management | `server-autonomy-roi-keys.md` | 1 | Czar server (KMS + signer service) |
+| CZ-01 | Observers (Claude Code; Codex, Cursor, Chrome outlines) | `local/local-observers-and-daemon.md` | 1 / 2 | user machine (plugin) |
+| CZ-02 | Local daemon `czard` | `local/local-observers-and-daemon.md` | 1 | user machine |
+| CZ-03 | Shared memory | `local/local-observers-and-daemon.md` | 1 | user machine |
+| CZ-04 | Soul compiler | `local/local-soul-and-drives.md` | 1 | user machine (+ hosted model via proxy, D31) |
+| CZ-05 | Soul store and viewer | `local/local-soul-and-drives.md` | 1 (desktop, D34) | user machine |
+| CZ-06 | Drives engine | `local/local-soul-and-drives.md` | 1 | user machine |
+| CZ-07 | Objective publisher | `local/local-soul-and-drives.md` | 1 | user machine |
+| CZ-08 | Shadow mode | `local/local-soul-and-drives.md` | 1 | user machine |
+| CZ-09 | Czar MCP server | `local/local-agent-surfaces.md` | 1 | user machine (stdio child) |
+| CZ-10 | Soul injection writer | `local/local-agent-surfaces.md` | 2 | user machine |
+| CZ-11 | Write-back adapter | `local/local-agent-surfaces.md` | 1 | user machine |
+| CZ-12 | Server API and objective store | `server/server-planning-and-payment.md` | 1 | Czar server |
+| CZ-13 | Planner | `server/server-planning-and-payment.md` | 1 | Czar server |
+| CZ-14 | Payment router | `server/server-planning-and-payment.md` | 1 | Czar server |
+| CZ-15 | Paying agent | `server/server-planning-and-payment.md` | 1 | Czar server |
+| CZ-16 | Acceptance checker and ERC-8183 evaluator | `server/server-acceptance-evidence-selection.md` | 1 | Czar server |
+| CZ-17 | Evidence producer and publisher | `server/server-acceptance-evidence-selection.md` | 1 | Czar server |
+| CZ-18 | Selection Layer services | `server/server-acceptance-evidence-selection.md` | 1 lite / 2 / 3 | Czar server |
+| CZ-19 | Indexer | `server/server-acceptance-evidence-selection.md` | 1 | Czar server |
+| CZ-20 | Czar x402 merchants | `server/server-supply-side.md` | 1 | Czar server |
+| CZ-21 | Claim server and relayer | `server/server-supply-side.md` | 2 | Czar server |
+| CZ-22 | Czar web app | `app/app-and-notifications.md` | 1 | desktop browser (Safari or Chrome on macOS, D69) |
+| CZ-23 | Notifications (web push) | `app/app-and-notifications.md` | stage 2 (D69; outline only) | Czar server → phone |
+| CZ-24 | Earned autonomy | `server/server-autonomy-roi-keys.md` | 1 | Czar server |
+| CZ-25 | ROI ledger | `server/server-autonomy-roi-keys.md` | 1 | Czar server |
+| CZ-26 | Redaction library | `local/local-observers-and-daemon.md` | 1 | user machine |
+| CZ-27 | Key management | `server/server-autonomy-roi-keys.md` | 1 | Czar server (KMS + signer service) |
 
 ## Summary
 

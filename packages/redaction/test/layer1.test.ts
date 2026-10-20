@@ -45,7 +45,8 @@ describe("redactSecrets", () => {
       "docs/specs/04-components",
       "docs/specs/05-build-plan",
     ].flatMap((dir) =>
-      readdirSync(join(root, dir))
+      readdirSync(join(root, dir), { recursive: true })
+        .map((name) => name.toString())
         .filter((name) => name.endsWith(".md"))
         .map((name) => join(root, dir, name)),
     );

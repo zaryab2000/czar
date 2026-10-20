@@ -158,7 +158,7 @@ Rules:
 ---
 ## P-04 soul-compiler
 
-- **Purpose:** turn rule-made belief candidates and existing beliefs into clear belief text and support/fade operations for the Work Soul (CZ-04, `local-soul-and-drives.md` §5). The model never creates beliefs on its own; it only acts on candidate ids and existing belief ids.
+- **Purpose:** turn rule-made belief candidates and existing beliefs into clear belief text and support/fade operations for the Work Soul (CZ-04, `../local/local-soul-and-drives.md` §5). The model never creates beliefs on its own; it only acts on candidate ids and existing belief ids.
 - **Model class:** mid-size current Claude model through the Czar proxy (`cross-cutting.md` §6.1); structured output (JSON schema below); temperature 0.
 - **Where it runs:** called by the daemon; the proxy stores nothing (D31).
 
@@ -194,7 +194,7 @@ Rules:
 {"type":"object","additionalProperties":false,"required":["operations"],"properties":{"operations":{"type":"array","maxItems":60,"items":{"type":"object","additionalProperties":false,"required":["op"],"properties":{"op":{"type":"string","enum":["add","support","fade","none"]},"candidateId":{"type":"string","pattern":"^cand_[0-9A-HJKMNP-TV-Z]{26}$"},"beliefId":{"type":"string","pattern":"^blf_[0-9A-HJKMNP-TV-Z]{26}$"},"section":{"type":"string","enum":["place","mission","rituals","friction","drives","taste","constraints","spendingPosture"]},"text":{"type":"string","maxLength":140},"receipts":{"type":"array","items":{"type":"string","pattern":"^evt_[0-9A-HJKMNP-TV-Z]{26}$"},"maxItems":10},"confidenceHint":{"type":"number","minimum":0,"maximum":1},"reason":{"type":"string","maxLength":80}}}}}}
 ```
 
-- **Post-validation (daemon, `local-soul-and-drives.md` §5.4):** `add` without a known `candidateId` → dropped; `support`/`fade` with an unknown `beliefId` → dropped; `text` failing the deny-list regex (imperatives, `0x` addresses, URLs, "install", "pay", "limit") → dropped and counted; `receipts` must be a subset of the candidate's receipts; `confidenceHint` is advisory only (the formula in §5.2 decides).
+- **Post-validation (daemon, `../local/local-soul-and-drives.md` §5.4):** `add` without a known `candidateId` → dropped; `support`/`fade` with an unknown `beliefId` → dropped; `text` failing the deny-list regex (imperatives, `0x` addresses, URLs, "install", "pay", "limit") → dropped and counted; `receipts` must be a subset of the candidate's receipts; `confidenceHint` is advisory only (the formula in §5.2 decides).
 - **Refusal and fallback:** if the model returns invalid JSON twice, or the monthly cap is hit, or the proxy is down, the compile runs rules-only with template `draftText`. The daemon never retries with a longer excerpt.
 - **Cost and latency:** ≤ 24,000 tokens per call, one call per night (`models.soulMonthlyTokens` 0.72 M); timeout 60 s (`models.soul-compiler.timeoutMs`).
 - **Eval cases:**
@@ -281,7 +281,7 @@ Classify one message from a software assistant or tool. Decide whether it is a R
 
 - **Purpose:** turn one bounded, redacted soul-source excerpt (a selected agent file, git commit subjects, a paste or an agent summary) into **proposed** descriptive statements for the person to review. It never creates a belief, an objective, a plan or a payment, and it outputs nothing executable.
 - **Model class:** smallest current Claude model through the Czar proxy (`cross-cutting.md` §6.1); structured output; temperature 0. Why: short inputs, extraction only.
-- **Where it runs:** CZ-02 source intake (`local-observers-and-daemon.md` CZ-02 §5.6), through `completeModelCall` with `prompt = P-07`; the proxy stores nothing (D31).
+- **Where it runs:** CZ-02 source intake (`../local/local-observers-and-daemon.md` CZ-02 §5.6), through `completeModelCall` with `prompt = P-07`; the proxy stores nothing (D31).
 - **Order (fixed):** layer 1 (before storage) → layer 2 → unsupported-language check → P-01 with `sourceLabel.kind = soul-source` → paragraphs P-01 flagged `injection-suspect` are removed and counted → P-07 on the rest. `pii-suspect` spans are masked as `[[R:P:PII_SUSPECT]]` before P-07.
 
 **System prompt (full text):**

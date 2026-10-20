@@ -4,7 +4,7 @@
 |---|---|
 | ID | SCR-030 |
 | Filed by | Architect (Claude), 2026-10-20, from D90 items 10–13 |
-| Spec and section | `docs/specs/02-data-and-protocol/data-and-protocol.md` §4.3, §4.4, §4.17, §4.18, §5.2, §6.4 vectors; `schemas/objective*.schema.json`, `soul-version-leaf.schema.json`, `demand-proof-leaf.v2.schema.json`; `api/openapi.yaml` (`submitObjective`, approval); `api/local-openapi.yaml`; `docs/specs/04-components/local-soul-and-drives.md` CZ-06 §5.6, CZ-07, CZ-08; `server-planning-and-payment.md` CZ-13; `app-and-notifications.md` CZ-22; `server-acceptance-evidence-selection.md` CZ-17; `docs/specs/03-smart-contracts/open-evidence-log.md` |
+| Spec and section | `docs/specs/02-data-and-protocol/data-and-protocol.md` §4.3, §4.4, §4.17, §4.18, §5.2, §6.4 vectors; `schemas/objective*.schema.json`, `soul-version-leaf.schema.json`, `demand-proof-leaf.v2.schema.json`; `api/openapi.yaml` (`submitObjective`, approval); `api/local-openapi.yaml`; `docs/specs/04-components/local/local-soul-and-drives.md` CZ-06 §5.6, CZ-07, CZ-08; `docs/specs/04-components/server/server-planning-and-payment.md` CZ-13; `docs/specs/04-components/app/app-and-notifications.md` CZ-22; `docs/specs/04-components/server/server-acceptance-evidence-selection.md` CZ-17; `docs/specs/03-smart-contracts/open-evidence-log.md` |
 | Status | Open, **held**: reviewed and applied only together with the paused Flow 7 (evidence and proof) review. Do not apply on its own. |
 | Plan | `docs-internal/technical-plans/I-F-1_soul-inputs-technical-plan.md` §6, §9 "Confirmed-demand route", §11, §13 |
 

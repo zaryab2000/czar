@@ -1,6 +1,6 @@
 # Server: acceptance, evidence, Selection Layer, indexer (spec 04)
 
-- **Date:** 2026-10-18. **Status:** draft for review. Conventions: `cross-cutting.md`. Data shapes: spec 02 only (cited "02 §n", schema files by name, OpenAPI `operationId`s). Contract behaviour: spec 03 only (cited "03 `<file>` §n").
+- **Date:** 2026-10-18. **Status:** draft for review. Conventions: `../shared/cross-cutting.md`. Data shapes: spec 02 only (cited "02 §n", schema files by name, OpenAPI `operationId`s). Contract behaviour: spec 03 only (cited "03 `<file>` §n").
 - **Components:** CZ-16 acceptance checker and ERC-8183 evaluator; CZ-17 evidence producer and publisher; CZ-18 Selection Layer services; CZ-19 indexer. All run in `apps/server` (CZ-19 in `apps/indexer`).
 - **Reading order:** CZ-19 first (everything else reads its projections), then CZ-16, CZ-17, CZ-18.
 - **Status wording:** Czar is a production system that moves user funds.
@@ -168,7 +168,7 @@ None.
 ### 11. Observability
 
 - Metrics: `czar_indexer_head_lag_blocks`, `czar_indexer_events_total{contract,event}`, `czar_indexer_rpc_errors_total{code}`, `czar_indexer_gateway_poll_seconds`, `czar_indexer_alerts_total{alert}`.
-- Logs: block numbers, tx hashes, event names, addresses, amounts only (`cross-cutting.md` §4).
+- Logs: block numbers, tx hashes, event names, addresses, amounts only (`../shared/cross-cutting.md` §4).
 
 ### 12. Interface wording
 
@@ -190,7 +190,7 @@ Surfaced through CZ-22 only: "Syncing with the network" (lag), "Small-payment ne
 
 Ponder 0.18.x (A9-05), viem 2.57.x (A9-05), Postgres 16; hosted fallbacks Goldsky or Envio for both networks (A9-02, A9-04) if Ponder proves unreliable. Open question: Arc public RPC rate limits are unpublished (A9 GAP); the keyed provider is required for production.
 
-**Mainnet differences:** contract addresses per `cross-cutting.md` §8; mainnet explorer API cannot be used (A9-11); Gateway API may need a key (K12); finality assumption re-verified pre-mainnet.
+**Mainnet differences:** contract addresses per `../shared/cross-cutting.md` §8; mainnet explorer API cannot be used (A9-11); Gateway API may need a key (K12); finality assumption re-verified pre-mainnet.
 
 ---
 
@@ -571,7 +571,7 @@ None.
 
 - Unit: tree roots reproduce fixtures built by the same rule in Foundry (03 `security-and-testing.md` §3.1); `demand-proof` leaf content hash stable under field reordering (JCS); pseudonym rotation.
 - Integration: a scripted envelope on `arc-anvil` → leaves → batch → `commit` → `Committed` seen by CZ-19 → `EvidenceBatch.committedTx` set; `PrevMismatch` injected by a second commit → retry succeeds.
-- Third-party drill: an engineer outside the team follows §5.4 with only the public guide and reproduces the root and every chain link for the Phase 1 scenario (`phase-1-acceptance-scenario.md`).
+- Third-party drill: an engineer outside the team follows §5.4 with only the public guide and reproduces the root and every chain link for the Phase 1 scenario (`../shared/phase-1-acceptance-scenario.md`).
 - Definition of done: one real testnet batch anchored with a `demand-proof` leaf whose `EnvelopeOpened` event matches; archive pinned twice; verification guide published.
 
 ### 15. Dependencies
@@ -663,7 +663,7 @@ None.
 **Build steps (per `getMarketView` call):**
 1. Fetch Circle's catalog for `network = selection.marketNetwork` and the capability's Circle `category`/`tags` (Phase 1 retrieval, §5.3), paging with `limit=200` up to `selection.marketMaxListings` (200). Same no-mirror rule: the catalog page is held in memory only; `catalog_cache` stores only `resource`, `payTo`, `network`, `fetchedAt`, `expiresAt`, `etag`.
 2. For each listing, reuse a probe result younger than `selection.marketProbeFreshMinutes` (60); otherwise probe if the budget allows (step 3), else tier `not-probed`.
-3. **Unpaid probe** through `@czar/x402` `safeFetch` (`cross-cutting.md` §2.1): `GET`, or `POST` with an empty body when the listing's method is `POST`; header `User-Agent: Czar-MarketProbe/1 (+<policy page>)`; timeout `selection.probeTimeoutMs` 2,000; no redirects to other hosts; parse the 402 with sanitizing (02 §11.3); **never** send `PAYMENT-SIGNATURE` or any payment header. Record `reachable`, `wellFormed`, live `amount`, `payTo`, `network`, `scheme`, `latencyMs`.
+3. **Unpaid probe** through `@czar/x402` `safeFetch` (`../shared/cross-cutting.md` §2.1): `GET`, or `POST` with an empty body when the listing's method is `POST`; header `User-Agent: Czar-MarketProbe/1 (+<policy page>)`; timeout `selection.probeTimeoutMs` 2,000; no redirects to other hosts; parse the 402 with sanitizing (02 §11.3); **never** send `PAYMENT-SIGNATURE` or any payment header. Record `reachable`, `wellFormed`, live `amount`, `payTo`, `network`, `scheme`, `latencyMs`.
 4. Tier: `ready` (reachable, well-formed, live price = listed price, live payTo = listed payTo); `listing-mismatch` (reachable and well-formed, price or payee differs); `unreachable` (no 402 in time, non-402 status, or not well-formed); `not-probed`.
 5. Order: tier (`ready`, `listing-mismatch`, `unreachable`, `not-probed`), then live (else listed) price ascending, then `serviceId`. **No score, no quality wording.** `successRate7d` is the share of Czar's probes in 7 days that were `reachable ∧ wellFormed`; it is a reachability figure, not a delivery figure.
 6. Every row gets `payable: false` and its fixed `label` (§12); the view gets the fixed `notice`.

@@ -4,7 +4,7 @@
 |---|---|
 | ID | SCR-105 |
 | Filed by | Czar builder (tier 1), 2026-10-19 |
-| Spec and section | `docs/specs/04-components/local-observers-and-daemon.md` CZ-02 §5.3 (DB file line); B6-11 |
+| Spec and section | `docs/specs/04-components/local/local-observers-and-daemon.md` CZ-02 §5.3 (DB file line); B6-11 |
 | Status | Open |
 
 ## Problem

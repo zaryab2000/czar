@@ -1,6 +1,6 @@
 # Server supply side: Czar's x402 merchants and the claim server (spec 04)
 
-- **Date:** 2026-10-18. **Status:** draft for review. Conventions: `cross-cutting.md`. Shapes: docs/specs/02 only. Contracts: docs/specs/03 only.
+- **Date:** 2026-10-18. **Status:** draft for review. Conventions: `../shared/cross-cutting.md`. Shapes: docs/specs/02 only. Contracts: docs/specs/03 only.
 - **Components:** CZ-20 Czar x402 merchants (Phase 1, full template), CZ-21 claim server (Phase 2, outline).
 
 ---
@@ -48,7 +48,7 @@
 - Gateway API `POST /v1/transfer` and `GatewayMinter.gatewayMint` for sweeps (A2-16, A2-17). Hand-built burn intents as in `a2-gateway-e2e/withdraw.ts`, never `GatewayClient.withdraw()` (A2-12, A2-31).
 
 **Events consumed / emitted**
-- Emits application events (not chain events): `merchant.request`, `merchant.verified`, `merchant.served`, `merchant.settled`, `merchant.settle_failed`, `merchant.sweep` (field allowlist, `cross-cutting.md` §4).
+- Emits application events (not chain events): `merchant.request`, `merchant.verified`, `merchant.served`, `merchant.settled`, `merchant.settle_failed`, `merchant.sweep` (field allowlist, `../shared/cross-cutting.md` §4).
 - CZ-19 indexes the on-chain side: USDC `Transfer`/`AuthorizationUsed` to the `payTo` addresses (vanilla) and `BatchProcessed` deltas (Gateway).
 
 ### 5. Internal design
@@ -62,7 +62,7 @@
 | `czar-search` | `GET /v1/search?q=` | `{results: [{title, url, snippet}] ≤ 10}` from a **live web search backend** (`merchants.searchBackend = live`; the source is chosen in the build plan, T-043) so real queries return real pages; the fixed index Czar controls is kept only as `merchants.searchBackend = fixture` for CI (D84) | the planner's `web-search` capability; the fixture mode makes CI repeatable | `merchants.searchPriceAtomic` = 50000 / 1000 |
 
 - **Testnet honesty:** `czar-spot` on testnet serves either a server-side cache of one public free price source refreshed every `merchants.spotRefreshSeconds` (300) or, when that source is unreachable, a deterministic synthetic series flagged `source: "synthetic-testnet"`. The `source` field is always present so acceptance checks and users are never misled. Decided by D49 (public source, cache, synthetic fallback, always a `source` field); which free source is used is chosen in the build plan.
-- **Why both rails per service:** D22 names two payment paths; the Phase 1 scenario (`phase-1-acceptance-scenario.md`) needs a vault-direct payment and a pocket payment against real sellers. Each service therefore has two resource URLs: `/v1/<svc>` (vanilla `exact`, `payTo` = K10 key) and `/nano/v1/<svc>` (Gateway `gateway.require`). They share the handler.
+- **Why both rails per service:** D22 names two payment paths; the Phase 1 scenario (`../shared/phase-1-acceptance-scenario.md`) needs a vault-direct payment and a pocket payment against real sellers. Each service therefore has two resource URLs: `/v1/<svc>` (vanilla `exact`, `payTo` = K10 key) and `/nano/v1/<svc>` (Gateway `gateway.require`). They share the handler.
 - Prices are named parameters, not facts; the catalog median is $0.10 (research snapshot), so 0.05–0.10 USDC keeps Czar in the normal range. The Gateway route price 0.001 USDC exercises sub-cent batching (D10, D37).
 
 #### 5.2 Request lifecycle (vanilla x402, `authorization` flow)
@@ -112,7 +112,7 @@ stateDiagram-v2
 
 | Item | Rule |
 |---|---|
-| K10 keys | one `payTo` EOA per service, held in the KMS (`cross-cutting.md` §3.3); signing policy: Facilitator `SellerRequest` proofs (keyless trial, p1-F4) and Gateway burn intents for sweeps only |
+| K10 keys | one `payTo` EOA per service, held in the KMS (`../shared/cross-cutting.md` §3.3); signing policy: Facilitator `SellerRequest` proofs (keyless trial, p1-F4) and Gateway burn intents for sweeps only |
 | K11 | Console API key after the trial ends (`403 registration_required`, p1-F4); stored in the secret store; `upto` needs it anyway in Phase 3 (A3-17) |
 | Vanilla settlement | USDC lands directly in `payTo` (one on-chain transfer per payment, A1-18); nothing to sweep |
 | Gateway settlement | credited to the `payTo`'s Gateway balance (A2-28); a same-chain burn intent moves it to the wallet (A2-16): fee 0.0035 USDC per intent (A2-17), attestation valid about 1,196 blocks, mint permissionless when `destinationCaller = 0` |
@@ -131,7 +131,7 @@ stateDiagram-v2
 | Rule | Detail |
 |---|---|
 | Input is data | parsed strictly against the declared `bazaar` schema; unknown keys rejected (400); never interpolated into shell, SQL or prompts |
-| `czar-extract` URL allowlist | every fetch goes through the shared `safeFetch` in `@czar/x402` (`cross-cutting.md` §2.1, RV-022: https only, pinned DNS, private/loopback/link-local/ULA/CGNAT blocked, redirects re-checked); **any public https page** (D84; **superseded:** the `merchants.extractAllowlist` domain list, which blocked the pages users actually need, such as competitors' pricing pages); max `merchants.extractMaxRedirects` 3; response ≤ `merchants.extractMaxBytes` 2 MiB; timeout `merchants.extractTimeoutMs` 8,000. **Superseded by RV-022:** the guard living only here |
+| `czar-extract` URL allowlist | every fetch goes through the shared `safeFetch` in `@czar/x402` (`../shared/cross-cutting.md` §2.1, RV-022: https only, pinned DNS, private/loopback/link-local/ULA/CGNAT blocked, redirects re-checked); **any public https page** (D84; **superseded:** the `merchants.extractAllowlist` domain list, which blocked the pages users actually need, such as competitors' pricing pages); max `merchants.extractMaxRedirects` 3; response ≤ `merchants.extractMaxBytes` 2 MiB; timeout `merchants.extractTimeoutMs` 8,000. **Superseded by RV-022:** the guard living only here |
 | Returned text | plain text (tags stripped), truncated; it is **untrusted** to the buyer and is labelled so in the response (`"untrusted": true`) |
 | Agent-directed text in fetched pages | returned verbatim as data (for example Circle and Arc doc headers, FL-1, FL-2); the seller never acts on page content |
 | Rate limits | per `payer` address: `merchants.perPayerPerMin` 60; global per route `merchants.perRoutePerMin` 600 |
@@ -274,7 +274,7 @@ Timeouts: handler ≤ `merchants.handlerTimeoutMs` (10,000); Facilitator calls �
 
 - Metrics: `czar_merchants_requests_total{route,outcome}`, `czar_merchants_settle_latency_ms`, `czar_merchants_unsettled_served_total`, `czar_merchants_sweep_amount_atomic`, `czar_merchants_refunds_total`.
 - Alerts: `unsettled-served` > 5/h; refunds above `refundDailyAtomic`; sweep failures 2 runs in a row; Facilitator error rate > 10% over 5 min.
-- Logs: allowlisted fields only (`cross-cutting.md` §4); input hashes, never inputs.
+- Logs: allowlisted fields only (`../shared/cross-cutting.md` §4); input hashes, never inputs.
 
 ### 12. Interface wording
 

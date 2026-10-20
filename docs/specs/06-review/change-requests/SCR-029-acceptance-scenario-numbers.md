@@ -4,8 +4,8 @@
 |---|---|
 | ID | SCR-029 |
 | Filed by | Independent reviewer (G0-01), 2026-10-19 |
-| Spec and section | `docs/specs/04-components/phase-1-acceptance-scenario.md` (lines 38, 39, 60, 65, 86); CZ-14 routing (`server-planning-and-payment.md` lines 224–236) |
-| Status | Accepted (D79), applied in `phase-1-acceptance-scenario.md` stages 3, 5 and 7 (numbers recomputed under the real D37/D38 rules; no test-only override); CZ-14 worked defaults; T-101, T-102. |
+| Spec and section | `docs/specs/04-components/shared/phase-1-acceptance-scenario.md` (lines 38, 39, 60, 65, 86); CZ-14 routing (`docs/specs/04-components/server/server-planning-and-payment.md` lines 224–236) |
+| Status | Accepted (D79), applied in `docs/specs/04-components/shared/phase-1-acceptance-scenario.md` stages 3, 5 and 7 (numbers recomputed under the real D37/D38 rules; no test-only override); CZ-14 worked defaults; T-101, T-102. |
 | Review finding | RV-029 (High) in `docs/specs/06-review/2026-10-19-spec-review.md` |
 
 ## Problem
@@ -31,4 +31,4 @@
 
 ## Decision
 - Accepted under Zaryab's 2026-10-19 instruction to apply every review fix (D71–D81 record the decisions he approved for the items that needed one).
-- Applied 2026-10-19 on branch `spec/review-fixes`: Accepted (D79), applied in `phase-1-acceptance-scenario.md` stages 3, 5 and 7 (numbers recomputed under the real D37/D38 rules; no test-only override); CZ-14 worked defaults; T-101, T-102.
+- Applied 2026-10-19 on branch `spec/review-fixes`: Accepted (D79), applied in `docs/specs/04-components/shared/phase-1-acceptance-scenario.md` stages 3, 5 and 7 (numbers recomputed under the real D37/D38 rules; no test-only override); CZ-14 worked defaults; T-101, T-102.

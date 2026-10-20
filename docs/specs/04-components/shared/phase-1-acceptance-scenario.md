@@ -1,7 +1,7 @@
 # Phase 1 end-to-end acceptance scenario (spec 04)
 
 - **Date:** 2026-10-18; amended 2026-10-19 (D79: numbers recomputed under the real D37/D38 routing rules, no test-only routing override; RV-029, RV-054). **Status:** draft. This scripted run is the build plan's main test. It runs on Arc testnet with Czar's own merchants (D14) and Circle's ERC-8183 instance (D27). All names, amounts and hashes below are **invented** placeholders; the harness fills real values.
-- **Pre-conditions:** contracts deployed (03 `security-and-testing.md` §4 steps 1–3); `vaultSignatureMode` chosen by the AR-3 `/verify` check; the merchant services `czar-spot`, `czar-extract` (both routes) and `czar-search` running (`server-supply-side.md`); a test provider agent for one ERC-8183 job; a Mac with desktop Safari and desktop Chrome (D69); a test user "Priya" with a fresh passkey.
+- **Pre-conditions:** contracts deployed (03 `security-and-testing.md` §4 steps 1–3); `vaultSignatureMode` chosen by the AR-3 `/verify` check; the merchant services `czar-spot`, `czar-extract` (both routes) and `czar-search` running (`../server/server-supply-side.md`); a test provider agent for one ERC-8183 job; a Mac with desktop Safari and desktop Chrome (D69); a test user "Priya" with a fresh passkey.
 - **Harness:** `tests/e2e/phase1.spec.ts` drives the daemon, the server, the app in a desktop browser (Playwright, with the passkey ceremony performed once by hand in desktop Safari on macOS and by a virtual authenticator afterwards), and reads the chain through CZ-19. Each step has a **pass/fail check**; the run stops at the first fail.
 
 ## Stage 0: Desktop browser passkey (D69)

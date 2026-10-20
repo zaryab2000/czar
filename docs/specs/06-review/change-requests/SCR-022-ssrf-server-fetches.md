@@ -4,8 +4,8 @@
 |---|---|
 | ID | SCR-022 |
 | Filed by | Independent reviewer (G0-01), 2026-10-19 |
-| Spec and section | `docs/specs/04-components/server-supply-side.md` (line 134); CZ-13 (line 140); CZ-18 (line 637); CZ-16 (line 277) |
-| Status | Accepted, applied in `cross-cutting.md` §2.1 (`safeFetch` in `@czar/x402`), CZ-13, CZ-15, CZ-16, CZ-20, `openapi.yaml` `QuoteRequest`; T-042. |
+| Spec and section | `docs/specs/04-components/server/server-supply-side.md` (line 134); CZ-13 (line 140); CZ-18 (line 637); CZ-16 (line 277) |
+| Status | Accepted, applied in `docs/specs/04-components/shared/cross-cutting.md` §2.1 (`safeFetch` in `@czar/x402`), CZ-13, CZ-15, CZ-16, CZ-20, `openapi.yaml` `QuoteRequest`; T-042. |
 | Review finding | RV-022 (High) in `docs/specs/06-review/2026-10-19-spec-review.md` |
 
 ## Problem
@@ -27,4 +27,4 @@
 
 ## Decision
 - Accepted under Zaryab's 2026-10-19 instruction to apply every review fix (D71–D81 record the decisions he approved for the items that needed one).
-- Applied 2026-10-19 on branch `spec/review-fixes`: Accepted, applied in `cross-cutting.md` §2.1 (`safeFetch` in `@czar/x402`), CZ-13, CZ-15, CZ-16, CZ-20, `openapi.yaml` `QuoteRequest`; T-042.
+- Applied 2026-10-19 on branch `spec/review-fixes`: Accepted, applied in `docs/specs/04-components/shared/cross-cutting.md` §2.1 (`safeFetch` in `@czar/x402`), CZ-13, CZ-15, CZ-16, CZ-20, `openapi.yaml` `QuoteRequest`; T-042.

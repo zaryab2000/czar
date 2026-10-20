@@ -97,7 +97,7 @@
 - **Status:** done. 6 keys have no default in the specs (SCR-103).
 - **Acceptance criteria:**
   - `pnpm --filter @czar/config test` passes, including "unknown key → startup error" and "env overlay overrides a default". ✔
-  - A grep of `S04/*.md` for parameter names finds 0 missing from the registry. ✔ (`test/spec-coverage.test.ts`)
+  - A grep of Markdown under `S04/` for parameter names finds 0 missing from the registry. ✔ (`test/spec-coverage.test.ts`)
     - It scans every backtick code span in `docs/specs/04-components` for `section.name` tokens (sections are taken from the registry).
     - Non-parameters (socket methods, event names, file names, field paths) are listed with a reason in `src/non-parameters.ts`; wildcards are expanded.
   - The review-fix keys are present (`signer.*`, `fetch.*`, `payer.pullbackWindowBlocks`, `acceptance.deliverableRefetch*`, `screen.chunkOverlapChars`, `api.briefSignatureMaxAgeSeconds`). ✔

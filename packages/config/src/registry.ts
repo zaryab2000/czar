@@ -11,7 +11,7 @@ export const PARAMETERS = [
     default: 1,
     unit: "count",
     reason: "CZ-15 retries a sandbox-timed-out check once",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:341",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:341",
     notes: "prose only (failure table)",
   },
   {
@@ -20,7 +20,7 @@ export const PARAMETERS = [
     default: 30000,
     unit: "ms",
     reason: "matches delivery",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:313",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:313",
   },
   {
     key: "acceptance.deliverableMaxBytes",
@@ -28,7 +28,7 @@ export const PARAMETERS = [
     default: 20971520,
     unit: "bytes",
     reason: "job deliverables are larger than API bodies; bounded for the sandbox",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:312",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:312",
   },
   {
     key: "acceptance.deliverableRefetchDelayMs",
@@ -36,7 +36,7 @@ export const PARAMETERS = [
     default: 60000,
     unit: "ms",
     reason: "spaced re-fetches",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:315",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:315",
   },
   {
     key: "acceptance.deliverableRefetchTries",
@@ -44,7 +44,7 @@ export const PARAMETERS = [
     default: 3,
     unit: "count",
     reason: "a stale CDN copy should not cost an honest provider the job (D77)",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:314",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:314",
     notes: "prose also line 278",
   },
   {
@@ -53,7 +53,7 @@ export const PARAMETERS = [
     default: 30000,
     unit: "ms",
     reason: "SL-C7 delivery limit = min(maxTimeoutSeconds, 30 s)",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:307",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:307",
   },
   {
     key: "acceptance.evaluatorPollSeconds",
@@ -61,7 +61,7 @@ export const PARAMETERS = [
     default: 15,
     unit: "s",
     reason: "jobs are minutes-scale; no need for sub-second",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:311",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:311",
   },
   {
     key: "acceptance.kmsRetryMax",
@@ -69,7 +69,7 @@ export const PARAMETERS = [
     default: 10,
     unit: "count",
     reason: "K7/KMS unavailable: retry, alert after this many",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:345",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:345",
     notes: "prose only (failure table)",
   },
   {
@@ -78,7 +78,7 @@ export const PARAMETERS = [
     default: 5242880,
     unit: "bytes",
     reason: "SL-C2 Q03 (5 MB)",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:308",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:308",
   },
   {
     key: "acceptance.sandboxTimeoutMs",
@@ -86,7 +86,7 @@ export const PARAMETERS = [
     default: 5000,
     unit: "ms",
     reason: "deterministic checks are fast; a slow check is a bug",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:310",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:310",
     notes: "also prose line 216 (5,000 ms)",
   },
   {
@@ -95,7 +95,7 @@ export const PARAMETERS = [
     default: 8192,
     unit: "bytes",
     reason: "02 §11.3",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:309",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:309",
   },
   {
     key: "api.approvalWaitMinutes",
@@ -103,7 +103,7 @@ export const PARAMETERS = [
     default: 15,
     unit: "minutes",
     reason: "how long `opening` waits for EnvelopeOpened; covers bundler retries",
-    source: "docs/specs/04-components/server-planning-and-payment.md:75",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:75",
   },
   {
     key: "api.briefSignatureMaxAgeSeconds",
@@ -120,7 +120,7 @@ export const PARAMETERS = [
     default: 24,
     unit: "hours",
     reason: "idempotency rows expire after 24 h (02 §9.3)",
-    source: "docs/specs/04-components/server-planning-and-payment.md:75",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:75",
   },
   {
     key: "api.planTtlHours",
@@ -128,7 +128,7 @@ export const PARAMETERS = [
     default: 24,
     unit: "hours",
     reason: "Plan.expiresAt for approval; then a fresh plan is priced",
-    source: "docs/specs/04-components/server-planning-and-payment.md:75",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:75",
   },
   {
     key: "api.plannerRetryBackoffMs",
@@ -136,7 +136,7 @@ export const PARAMETERS = [
     default: 5000,
     unit: "ms",
     reason: "planner timeout: retry 2x with this backoff",
-    source: "docs/specs/04-components/server-planning-and-payment.md:103",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:103",
   },
   {
     key: "api.rateLimitAppPerMin",
@@ -144,7 +144,7 @@ export const PARAMETERS = [
     default: 120,
     unit: "count",
     reason: "02 §9.5 rate limit (per minute)",
-    source: "docs/specs/04-components/server-planning-and-payment.md:75",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:75",
   },
   {
     key: "api.rateLimitDaemonPerMin",
@@ -152,7 +152,7 @@ export const PARAMETERS = [
     default: 600,
     unit: "count",
     reason: "02 §9.5 rate limit (per minute)",
-    source: "docs/specs/04-components/server-planning-and-payment.md:75",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:75",
   },
   {
     key: "app.approvalConfirmTimeoutSeconds",
@@ -160,7 +160,7 @@ export const PARAMETERS = [
     default: 120,
     unit: "s",
     reason: "0.5 s blocks plus bundler latency; well past normal",
-    source: "docs/specs/04-components/app-and-notifications.md:135",
+    source: "docs/specs/04-components/app/app-and-notifications.md:135",
     notes: "prose line 115 (120)",
   },
   {
@@ -169,7 +169,7 @@ export const PARAMETERS = [
     default: ["circle", "pimlico", "alchemy", "zerodev"],
     unit: "",
     reason: "A6-15 to A6-19; next bundler on rejection",
-    source: "docs/specs/04-components/app-and-notifications.md:140",
+    source: "docs/specs/04-components/app/app-and-notifications.md:140",
   },
   {
     key: "app.largeCapWarnBps",
@@ -177,7 +177,7 @@ export const PARAMETERS = [
     default: 5000,
     unit: "bps",
     reason: "warn when a cap is above 50% of the category userMax",
-    source: "docs/specs/04-components/app-and-notifications.md:139",
+    source: "docs/specs/04-components/app/app-and-notifications.md:139",
   },
   {
     key: "app.newPayeeWarnThreshold",
@@ -185,7 +185,7 @@ export const PARAMETERS = [
     default: 1,
     unit: "count",
     reason: "any new payee gets a warning (phished-approval mitigation)",
-    source: "docs/specs/04-components/app-and-notifications.md:138",
+    source: "docs/specs/04-components/app/app-and-notifications.md:138",
   },
   {
     key: "app.pairingCodeTtlMinutes",
@@ -193,7 +193,7 @@ export const PARAMETERS = [
     default: 5,
     unit: "minutes",
     reason: "02 §9.1",
-    source: "docs/specs/04-components/app-and-notifications.md:142",
+    source: "docs/specs/04-components/app/app-and-notifications.md:142",
   },
   {
     key: "app.pendingPollSeconds",
@@ -201,7 +201,7 @@ export const PARAMETERS = [
     default: 15,
     unit: "s",
     reason: "pending list is the only Phase 1 approval channel; polled while open",
-    source: "docs/specs/04-components/app-and-notifications.md:136",
+    source: "docs/specs/04-components/app/app-and-notifications.md:136",
   },
   {
     key: "app.sessionHours",
@@ -209,7 +209,7 @@ export const PARAMETERS = [
     default: 24,
     unit: "hours",
     reason: "02 §9.1",
-    source: "docs/specs/04-components/app-and-notifications.md:137",
+    source: "docs/specs/04-components/app/app-and-notifications.md:137",
   },
   {
     key: "app.staleBlocks",
@@ -217,7 +217,7 @@ export const PARAMETERS = [
     default: 120,
     unit: "blocks",
     reason: "'Syncing…' badge when Me.balances.asOfBlock age exceeds this",
-    source: "docs/specs/04-components/app-and-notifications.md:193",
+    source: "docs/specs/04-components/app/app-and-notifications.md:193",
     notes: "prose only (failure table)",
   },
   {
@@ -226,7 +226,7 @@ export const PARAMETERS = [
     default: 500000,
     unit: "atomic",
     reason: "one unit of score adds 0.50 USDC weekly allowance",
-    source: "docs/specs/04-components/server-autonomy-roi-keys.md:130",
+    source: "docs/specs/04-components/server/server-autonomy-roi-keys.md:130",
     notes: "D59",
   },
   {
@@ -235,7 +235,7 @@ export const PARAMETERS = [
     default: "0 3 * * *",
     unit: "cron",
     reason: "once a day is enough for a weekly step (UTC)",
-    source: "docs/specs/04-components/server-autonomy-roi-keys.md:126",
+    source: "docs/specs/04-components/server/server-autonomy-roi-keys.md:126",
     notes: "prose line 28 'daily at 03:00 UTC'; timezone UTC",
   },
   {
@@ -244,7 +244,7 @@ export const PARAMETERS = [
     default: 14,
     unit: "days",
     reason: "same half-life as the Selection Layer posteriors (SL-C9)",
-    source: "docs/specs/04-components/server-autonomy-roi-keys.md:128",
+    source: "docs/specs/04-components/server/server-autonomy-roi-keys.md:128",
   },
   {
     key: "autonomy.lowerFactorBps",
@@ -252,7 +252,7 @@ export const PARAMETERS = [
     default: 5000,
     unit: "bps",
     reason: "halve on a problem; fast down, slow up",
-    source: "docs/specs/04-components/server-autonomy-roi-keys.md:131",
+    source: "docs/specs/04-components/server/server-autonomy-roi-keys.md:131",
   },
   {
     key: "autonomy.minScore",
@@ -260,7 +260,7 @@ export const PARAMETERS = [
     default: 3,
     unit: "score",
     reason: "roughly three fresh positive purchases before any raise",
-    source: "docs/specs/04-components/server-autonomy-roi-keys.md:129",
+    source: "docs/specs/04-components/server/server-autonomy-roi-keys.md:129",
     notes: "decided D59 (amendments line 48)",
   },
   {
@@ -269,7 +269,7 @@ export const PARAMETERS = [
     default: 3600,
     unit: "s",
     reason: "a signed raise is useless after an hour",
-    source: "docs/specs/04-components/server-autonomy-roi-keys.md:132",
+    source: "docs/specs/04-components/server/server-autonomy-roi-keys.md:132",
   },
   {
     key: "autonomy.relayRetries",
@@ -277,7 +277,7 @@ export const PARAMETERS = [
     default: 2,
     unit: "count",
     reason: "reverts are not retried; only RPC errors",
-    source: "docs/specs/04-components/server-autonomy-roi-keys.md:133",
+    source: "docs/specs/04-components/server/server-autonomy-roi-keys.md:133",
   },
   {
     key: "autonomy.revertAlertPerDay",
@@ -285,7 +285,7 @@ export const PARAMETERS = [
     default: 10,
     unit: "count",
     reason: "alert when raise reverts exceed this per day",
-    source: "docs/specs/04-components/server-autonomy-roi-keys.md:176",
+    source: "docs/specs/04-components/server/server-autonomy-roi-keys.md:176",
     notes: "prose only",
   },
   {
@@ -294,7 +294,7 @@ export const PARAMETERS = [
     default: 28,
     unit: "days",
     reason: "four periods of evidence",
-    source: "docs/specs/04-components/server-autonomy-roi-keys.md:127",
+    source: "docs/specs/04-components/server/server-autonomy-roi-keys.md:127",
   },
   {
     key: "claims.fileCodeTtlHours",
@@ -302,7 +302,7 @@ export const PARAMETERS = [
     default: 72,
     unit: "hours",
     reason: "FUNDING.json claim code is single-use and expires",
-    source: "docs/specs/04-components/server-supply-side.md:277",
+    source: "docs/specs/04-components/server/server-supply-side.md:277",
     notes: "prose only",
   },
   {
@@ -311,7 +311,7 @@ export const PARAMETERS = [
     default: "02:00",
     unit: "",
     reason: "nightly compile, local time (roadmap 1.1)",
-    source: "docs/specs/04-components/local-observers-and-daemon.md:310",
+    source: "docs/specs/04-components/local/local-observers-and-daemon.md:310",
     notes:
       "Same schedule as soul.compileCron (`02:00` local, local-soul-and-drives.md:166): two keys for one schedule; values agree.",
   },
@@ -321,7 +321,7 @@ export const PARAMETERS = [
     default: 120,
     unit: "s",
     reason: "bounds a runaway compile (CPU-seconds)",
-    source: "docs/specs/04-components/local-observers-and-daemon.md:311",
+    source: "docs/specs/04-components/local/local-observers-and-daemon.md:311",
     notes: "prose line 214",
   },
   {
@@ -330,7 +330,7 @@ export const PARAMETERS = [
     default: 60,
     unit: "s",
     reason: "queue drain, server poll, audit flush",
-    source: "docs/specs/04-components/local-observers-and-daemon.md:313",
+    source: "docs/specs/04-components/local/local-observers-and-daemon.md:313",
   },
   {
     key: "daemon.hookPort",
@@ -338,7 +338,7 @@ export const PARAMETERS = [
     default: 47011,
     unit: "port",
     reason: "loopback-only HTTP for hooks (B1-08); auto-reassigned if busy",
-    source: "docs/specs/04-components/local-observers-and-daemon.md:307",
+    source: "docs/specs/04-components/local/local-observers-and-daemon.md:307",
   },
   {
     key: "daemon.ingestAckMs",
@@ -346,7 +346,7 @@ export const PARAMETERS = [
     default: 50,
     unit: "ms",
     reason: "hooks must return fast (B1-10)",
-    source: "docs/specs/04-components/local-observers-and-daemon.md:308",
+    source: "docs/specs/04-components/local/local-observers-and-daemon.md:308",
     notes: "prose line 272 (50)",
   },
   {
@@ -355,7 +355,7 @@ export const PARAMETERS = [
     default: 3600,
     unit: "s",
     reason: "ingestReport counts only",
-    source: "docs/specs/04-components/local-observers-and-daemon.md:314",
+    source: "docs/specs/04-components/local/local-observers-and-daemon.md:314",
   },
   {
     key: "daemon.maxHookBodyBytes",
@@ -363,7 +363,7 @@ export const PARAMETERS = [
     default: 262144,
     unit: "bytes",
     reason: "matches observer.maxPayloadBytes",
-    source: "docs/specs/04-components/local-observers-and-daemon.md:309",
+    source: "docs/specs/04-components/local/local-observers-and-daemon.md:309",
   },
   {
     key: "daemon.outboxMaxRows",
@@ -371,7 +371,7 @@ export const PARAMETERS = [
     default: 10000,
     unit: "count",
     reason: "bounds outbox growth while server unreachable",
-    source: "docs/specs/04-components/local-observers-and-daemon.md:335",
+    source: "docs/specs/04-components/local/local-observers-and-daemon.md:335",
     notes: "prose only",
   },
   {
@@ -380,7 +380,7 @@ export const PARAMETERS = [
     default: 30,
     unit: "s",
     reason: "exponential backoff with jitter",
-    source: "docs/specs/04-components/local-observers-and-daemon.md:312",
+    source: "docs/specs/04-components/local/local-observers-and-daemon.md:312",
   },
   {
     key: "daemon.outboxRetryMaxS",
@@ -388,7 +388,7 @@ export const PARAMETERS = [
     default: 3600,
     unit: "s",
     reason: "backoff ceiling",
-    source: "docs/specs/04-components/local-observers-and-daemon.md:312",
+    source: "docs/specs/04-components/local/local-observers-and-daemon.md:312",
     notes: "named inside the reason cell of daemon.outboxRetryBaseS",
   },
   {
@@ -397,7 +397,7 @@ export const PARAMETERS = [
     default: "~/Library/Application Support/Czar/czar.sock",
     unit: "path",
     reason: "control socket, mode 0600; 'per OS (§4)'",
-    source: "docs/specs/04-components/local-observers-and-daemon.md:315",
+    source: "docs/specs/04-components/local/local-observers-and-daemon.md:315",
     notes:
       "Table says 'per OS (§4)'; value taken from §4 line 221 (macOS). Linux stage 2: $XDG_RUNTIME_DIR/czar.sock; Windows stage 2: \\\\.\\pipe\\czar.",
   },
@@ -407,7 +407,7 @@ export const PARAMETERS = [
     default: 7,
     unit: "days",
     reason: "one candidate per normalized key in this window",
-    source: "docs/specs/04-components/local-soul-and-drives.md:376",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:376",
   },
   {
     key: "drives.defaultHourlyValue",
@@ -415,7 +415,7 @@ export const PARAMETERS = [
     default: 40,
     unit: "USD/hour",
     reason: "default by role/locale template when hourly value unset",
-    source: "docs/specs/04-components/local-soul-and-drives.md:395",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:395",
     notes:
       "Spec gives only 'e.g. $40/h' and 'by role/locale template'; 40 is an example, not a firm default.",
   },
@@ -425,7 +425,7 @@ export const PARAMETERS = [
     default: 90,
     unit: "days",
     reason: "delivered objective's key blocked",
-    source: "docs/specs/04-components/local-soul-and-drives.md:376",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:376",
   },
   {
     key: "drives.dismissBlockDays",
@@ -433,7 +433,7 @@ export const PARAMETERS = [
     default: 30,
     unit: "days",
     reason: "dismissed key blocked",
-    source: "docs/specs/04-components/local-soul-and-drives.md:376",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:376",
   },
   {
     key: "drives.maxCandidatesPerDay",
@@ -441,7 +441,7 @@ export const PARAMETERS = [
     default: 5,
     unit: "count",
     reason: "new candidates per day",
-    source: "docs/specs/04-components/local-soul-and-drives.md:377",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:377",
   },
   {
     key: "drives.maxCandidatesPerProjectPerDay",
@@ -449,7 +449,7 @@ export const PARAMETERS = [
     default: 2,
     unit: "count",
     reason: "new candidates per project per day",
-    source: "docs/specs/04-components/local-soul-and-drives.md:377",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:377",
   },
   {
     key: "drives.minutes.agent-refusal",
@@ -460,7 +460,7 @@ export const PARAMETERS = [
     },
     unit: "minutes",
     reason: "the person would do the step by hand (assumption)",
-    source: "docs/specs/04-components/local-soul-and-drives.md:389",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:389",
     notes: "Key name inferred from wildcard drives.minutes.*.",
   },
   {
@@ -472,7 +472,7 @@ export const PARAMETERS = [
     },
     unit: "minutes",
     reason: "typical manual lookup time (design assumption)",
-    source: "docs/specs/04-components/local-soul-and-drives.md:387",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:387",
     notes:
       "Key name inferred from wildcard drives.minutes.* (§5.4 table names detectors, not keys).",
   },
@@ -485,7 +485,7 @@ export const PARAMETERS = [
     },
     unit: "minutes",
     reason: "time lost per retry (assumption)",
-    source: "docs/specs/04-components/local-soul-and-drives.md:388",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:388",
     notes: "Key name inferred from wildcard drives.minutes.*.",
   },
   {
@@ -494,7 +494,7 @@ export const PARAMETERS = [
     default: 3,
     unit: "count",
     reason: "placeholder detector cap per project",
-    source: "docs/specs/04-components/local-soul-and-drives.md:368",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:368",
   },
   {
     key: "drives.placeholderMinAgeHours",
@@ -502,7 +502,7 @@ export const PARAMETERS = [
     default: 24,
     unit: "hours",
     reason: "writes at least this far apart",
-    source: "docs/specs/04-components/local-soul-and-drives.md:368",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:368",
   },
   {
     key: "drives.placeholderMinSeen",
@@ -510,7 +510,7 @@ export const PARAMETERS = [
     default: 2,
     unit: "count",
     reason: "placeholder seen in at least this many writes",
-    source: "docs/specs/04-components/local-soul-and-drives.md:368",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:368",
   },
   {
     key: "drives.quoteWaitHours",
@@ -518,7 +518,7 @@ export const PARAMETERS = [
     default: 24,
     unit: "hours",
     reason: "candidate pending this long without a quote, then dropped",
-    source: "docs/specs/04-components/local-soul-and-drives.md:437",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:437",
   },
   {
     key: "drives.refusalMin",
@@ -526,7 +526,7 @@ export const PARAMETERS = [
     default: 2,
     unit: "count",
     reason: "agent-refusal events in one session",
-    source: "docs/specs/04-components/local-soul-and-drives.md:370",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:370",
   },
   {
     key: "drives.refusalMinProject",
@@ -534,7 +534,7 @@ export const PARAMETERS = [
     default: 3,
     unit: "count",
     reason: "agent-refusal events in a project within 7 days",
-    source: "docs/specs/04-components/local-soul-and-drives.md:370",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:370",
   },
   {
     key: "drives.refusalModelMinConfidence",
@@ -542,7 +542,7 @@ export const PARAMETERS = [
     default: 0.7,
     unit: "",
     reason: "P-06 confidence below this = not a refusal",
-    source: "docs/specs/04-components/ai-prompts.md:262",
+    source: "docs/specs/04-components/shared/ai-prompts.md:262",
     notes: "prose only",
   },
   {
@@ -551,7 +551,7 @@ export const PARAMETERS = [
     default: 3,
     unit: "count",
     reason: "same errorClass+project at least this many times",
-    source: "docs/specs/04-components/local-soul-and-drives.md:369",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:369",
   },
   {
     key: "drives.repeatedErrorWindowHours",
@@ -559,7 +559,7 @@ export const PARAMETERS = [
     default: 24,
     unit: "hours",
     reason: "within this window",
-    source: "docs/specs/04-components/local-soul-and-drives.md:369",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:369",
   },
   {
     key: "drives.roiMultiple",
@@ -567,7 +567,7 @@ export const PARAMETERS = [
     default: 5,
     unit: "",
     reason: "show candidate only when value of time >= 5 x expected price",
-    source: "docs/specs/04-components/local-soul-and-drives.md:397",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:397",
     notes: "Decided D57 (amendments line 46)",
   },
   {
@@ -576,7 +576,7 @@ export const PARAMETERS = [
     default: 60,
     unit: "minutes",
     reason: "scan after each compile and on this interval",
-    source: "docs/specs/04-components/local-soul-and-drives.md:356",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:356",
     notes: "prose only",
   },
   {
@@ -585,7 +585,7 @@ export const PARAMETERS = [
     default: 60,
     unit: "minutes",
     reason: "spec 01 §15.3 cadence; gas 03 open-evidence-log §13",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:500",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:500",
     notes: "Phase 2: 15 (same row and line 456)",
   },
   {
@@ -594,7 +594,7 @@ export const PARAMETERS = [
     default: 5,
     unit: "count",
     reason: "PrevMismatch or RPC errors",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:504",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:504",
   },
   {
     key: "evidence.leaderLockKey",
@@ -602,7 +602,7 @@ export const PARAMETERS = [
     default: null,
     unit: "",
     reason: "single leader lock so only one publisher commits",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:408",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:408",
     noDefault: true,
     notes: "no default given",
   },
@@ -612,7 +612,7 @@ export const PARAMETERS = [
     default: 1000,
     unit: "count",
     reason: "early flush keeps archives small",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:501",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:501",
   },
   {
     key: "evidence.pinProviders",
@@ -620,7 +620,7 @@ export const PARAMETERS = [
     default: 2,
     unit: "count",
     reason: "SL-C11 two independent pins",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:502",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:502",
   },
   {
     key: "evidence.pinRetryBaseMs",
@@ -628,7 +628,7 @@ export const PARAMETERS = [
     default: 2000,
     unit: "ms",
     reason: "transient pin failures",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:503",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:503",
   },
   {
     key: "evidence.pinRetryMax",
@@ -636,7 +636,7 @@ export const PARAMETERS = [
     default: 8,
     unit: "count",
     reason: "transient pin failures",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:503",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:503",
   },
   {
     key: "evidence.pocketReceiptBeforeDestroyMs",
@@ -644,7 +644,7 @@ export const PARAMETERS = [
     default: 60000,
     unit: "ms",
     reason: "pocket receipts must be signed before CZ-15 destroys K4",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:507",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:507",
     notes:
       "Reason refers to 'destroys K4', superseded by RV-004 retirement rule (K4 kept signer.pocketKeyRetainHours).",
   },
@@ -654,7 +654,7 @@ export const PARAMETERS = [
     default: 90,
     unit: "days",
     reason: "address hygiene (spec 01 §11.3)",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:505",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:505",
   },
   {
     key: "evidence.receiptSignTimeoutMs",
@@ -662,7 +662,7 @@ export const PARAMETERS = [
     default: 10000,
     unit: "ms",
     reason: "KMS round trip",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:506",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:506",
   },
   {
     key: "evidence.verifyGuideUrl",
@@ -670,7 +670,7 @@ export const PARAMETERS = [
     default: null,
     unit: "",
     reason: "URL of the 'Verify a Czar purchase' guide",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:485",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:485",
     noDefault: true,
     notes: "no default given",
   },
@@ -680,7 +680,7 @@ export const PARAMETERS = [
     default: ["mission", "friction", "drives"],
     unit: "",
     reason: "soul sections sent in the compile excerpt (02 §4.2)",
-    source: "docs/specs/04-components/local-soul-and-drives.md:104",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:104",
     notes: "first named ai-prompts.md:185 without default",
   },
   {
@@ -689,7 +689,7 @@ export const PARAMETERS = [
     default: 20000,
     unit: "chars",
     reason: "02 §4.2; keeps the call within 24,000 tokens",
-    source: "docs/specs/04-components/local-soul-and-drives.md:177",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:177",
     notes: "prose line 104",
   },
   {
@@ -699,7 +699,7 @@ export const PARAMETERS = [
     unit: "",
     reason:
       "exact http://127.0.0.1:<port> origins of Czar's own merchants that bypass the loopback rule (D70)",
-    source: "docs/specs/04-components/cross-cutting.md:53",
+    source: "docs/specs/04-components/shared/cross-cutting.md:53",
     noDefault: true,
     notes:
       "No default; values are environment-specific (merchant ports not given). Must never include Postgres's port.",
@@ -710,7 +710,7 @@ export const PARAMETERS = [
     default: 2097152,
     unit: "bytes",
     reason: "default response cap (2 MiB) unless caller passes its own",
-    source: "docs/specs/04-components/cross-cutting.md:57",
+    source: "docs/specs/04-components/shared/cross-cutting.md:57",
   },
   {
     key: "fetch.maxRedirects",
@@ -718,7 +718,7 @@ export const PARAMETERS = [
     default: 3,
     unit: "count",
     reason: "each redirect target re-checked by every safeFetch rule",
-    source: "docs/specs/04-components/cross-cutting.md:56",
+    source: "docs/specs/04-components/shared/cross-cutting.md:56",
   },
   {
     key: "fetch.timeoutMs",
@@ -726,7 +726,7 @@ export const PARAMETERS = [
     default: 8000,
     unit: "ms",
     reason: "default timeout unless caller passes its own",
-    source: "docs/specs/04-components/cross-cutting.md:57",
+    source: "docs/specs/04-components/shared/cross-cutting.md:57",
   },
   {
     key: "indexer.confirmationBlocks",
@@ -734,7 +734,7 @@ export const PARAMETERS = [
     default: 1,
     unit: "blocks",
     reason: "cheap guard against provider lag; Arc final on inclusion",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:62",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:62",
   },
   {
     key: "indexer.crossCheckEveryBlocks",
@@ -742,7 +742,7 @@ export const PARAMETERS = [
     default: 600,
     unit: "blocks",
     reason: "cross-check latest block hashes between providers",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:155",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:155",
   },
   {
     key: "indexer.failoverHoldSeconds",
@@ -750,7 +750,7 @@ export const PARAMETERS = [
     default: 300,
     unit: "s",
     reason: "hold on the keyed provider after failover",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:61",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:61",
   },
   {
     key: "indexer.gatewayPollFailMax",
@@ -758,7 +758,7 @@ export const PARAMETERS = [
     default: 10,
     unit: "count",
     reason: "consecutive Gateway API errors before degraded",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:127",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:127",
   },
   {
     key: "indexer.gatewayPollSeconds",
@@ -766,7 +766,7 @@ export const PARAMETERS = [
     default: 30,
     unit: "s",
     reason: "Gateway transfers poll; completed lands 0–16 min later",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:131",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:131",
   },
   {
     key: "indexer.getLogsBlockRange",
@@ -774,7 +774,7 @@ export const PARAMETERS = [
     default: 9999,
     unit: "blocks",
     reason: "Arc caps eth_getLogs at 10,000 (A9-06)",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:60",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:60",
     notes: "first named line 36",
   },
   {
@@ -783,7 +783,7 @@ export const PARAMETERS = [
     default: 120,
     unit: "blocks",
     reason: "≈1 min at 0.5 s blocks (p1-A7)",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:122",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:122",
     notes: "first named in state diagram line 70",
   },
   {
@@ -792,7 +792,7 @@ export const PARAMETERS = [
     default: 24,
     unit: "hours",
     reason: "pocket Draining/Funded with closed envelope",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:125",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:125",
   },
   {
     key: "indexer.pollingIntervalMs",
@@ -800,7 +800,7 @@ export const PARAMETERS = [
     default: 1000,
     unit: "ms",
     reason: "poll at head every two blocks",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:138",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:138",
   },
   {
     key: "indexer.reserveRateAlertPerMin",
@@ -811,7 +811,7 @@ export const PARAMETERS = [
     },
     unit: "count",
     reason: "10x the expected peak",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:123",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:123",
     notes: "spec gives '60 per vault, 600 global'",
   },
   {
@@ -820,7 +820,7 @@ export const PARAMETERS = [
     default: null,
     unit: "count",
     reason: "RPC errors per minute that trigger failover",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:74",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:74",
     noDefault: true,
     notes: "named only in the state diagram; no default",
   },
@@ -830,7 +830,7 @@ export const PARAMETERS = [
     default: 250,
     unit: "ms",
     reason: "-32014 'safely retry' exponential backoff",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:61",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:61",
   },
   {
     key: "indexer.rpcRetryMax",
@@ -838,7 +838,7 @@ export const PARAMETERS = [
     default: 6,
     unit: "count",
     reason: "then fail over to the keyed provider",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:61",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:61",
   },
   {
     key: "indexer.settleFailRateBps",
@@ -846,7 +846,7 @@ export const PARAMETERS = [
     default: 500,
     unit: "bps",
     reason: "500 bps per hour; investigate Facilitator or merchant",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:124",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:124",
   },
   {
     key: "indexer.startBlock",
@@ -854,7 +854,7 @@ export const PARAMETERS = [
     default: null,
     unit: "blocks",
     reason: "re-index start = the factory deployment block",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:29",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:29",
     noDefault: true,
     notes: "deployment-specific; no default",
   },
@@ -864,7 +864,7 @@ export const PARAMETERS = [
     default: 365,
     unit: "days",
     reason: "spec 01 §16.3",
-    source: "docs/specs/04-components/server-autonomy-roi-keys.md:462",
+    source: "docs/specs/04-components/server/server-autonomy-roi-keys.md:462",
   },
   {
     key: "kms.denyAlertPerMin",
@@ -872,7 +872,7 @@ export const PARAMETERS = [
     default: 5,
     unit: "count",
     reason: "alert when K3 denial rate exceeds this",
-    source: "docs/specs/04-components/server-autonomy-roi-keys.md:523",
+    source: "docs/specs/04-components/server/server-autonomy-roi-keys.md:523",
     notes: "prose only",
   },
   {
@@ -881,7 +881,7 @@ export const PARAMETERS = [
     default: 30,
     unit: "minutes",
     reason: "two approvers for K6/K20 within this window",
-    source: "docs/specs/04-components/server-autonomy-roi-keys.md:453",
+    source: "docs/specs/04-components/server/server-autonomy-roi-keys.md:453",
     stage2: true,
     notes: "stage 2 only (D80)",
   },
@@ -891,7 +891,7 @@ export const PARAMETERS = [
     default: 300,
     unit: "count",
     reason: "by expected volume",
-    source: "docs/specs/04-components/server-autonomy-roi-keys.md:452",
+    source: "docs/specs/04-components/server/server-autonomy-roi-keys.md:452",
   },
   {
     key: "kms.maxSignaturesPerMin.K3",
@@ -899,7 +899,7 @@ export const PARAMETERS = [
     default: 600,
     unit: "count",
     reason: "ten reservations a second across all users",
-    source: "docs/specs/04-components/server-autonomy-roi-keys.md:450",
+    source: "docs/specs/04-components/server/server-autonomy-roi-keys.md:450",
     notes: "also prose line 413",
   },
   {
@@ -908,7 +908,7 @@ export const PARAMETERS = [
     default: 120,
     unit: "count",
     reason: "nanopayment bursts (per pocket)",
-    source: "docs/specs/04-components/server-autonomy-roi-keys.md:451",
+    source: "docs/specs/04-components/server/server-autonomy-roi-keys.md:451",
     notes: "limit is per pocket",
   },
   {
@@ -917,7 +917,7 @@ export const PARAMETERS = [
     default: 10,
     unit: "count",
     reason: "by expected volume",
-    source: "docs/specs/04-components/server-autonomy-roi-keys.md:452",
+    source: "docs/specs/04-components/server/server-autonomy-roi-keys.md:452",
   },
   {
     key: "kms.maxSignaturesPerMin.K7",
@@ -925,7 +925,7 @@ export const PARAMETERS = [
     default: 60,
     unit: "count",
     reason: "by expected volume",
-    source: "docs/specs/04-components/server-autonomy-roi-keys.md:452",
+    source: "docs/specs/04-components/server/server-autonomy-roi-keys.md:452",
   },
   {
     key: "kms.maxSignaturesPerMin.K8",
@@ -933,7 +933,7 @@ export const PARAMETERS = [
     default: 10,
     unit: "count",
     reason: "by expected volume",
-    source: "docs/specs/04-components/server-autonomy-roi-keys.md:452",
+    source: "docs/specs/04-components/server/server-autonomy-roi-keys.md:452",
   },
   {
     key: "kms.maxSignaturesPerMin.relayer",
@@ -941,7 +941,7 @@ export const PARAMETERS = [
     default: 120,
     unit: "count",
     reason: "by expected volume",
-    source: "docs/specs/04-components/server-autonomy-roi-keys.md:452",
+    source: "docs/specs/04-components/server/server-autonomy-roi-keys.md:452",
   },
   {
     key: "kms.projectionRetryMs",
@@ -949,7 +949,7 @@ export const PARAMETERS = [
     default: 500,
     unit: "ms",
     reason: "usdc-3009 denied until Reserved indexed; backoff (x5)",
-    source: "docs/specs/04-components/server-autonomy-roi-keys.md:518",
+    source: "docs/specs/04-components/server/server-autonomy-roi-keys.md:518",
     notes: "prose only; '500, ×5'",
   },
   {
@@ -958,7 +958,7 @@ export const PARAMETERS = [
     default: 50000000,
     unit: "atomic",
     reason: "bounds gas-key loss (50 USDC)",
-    source: "docs/specs/04-components/server-autonomy-roi-keys.md:458",
+    source: "docs/specs/04-components/server/server-autonomy-roi-keys.md:458",
     notes: "first named line 386",
   },
   {
@@ -967,7 +967,7 @@ export const PARAMETERS = [
     default: 14,
     unit: "days",
     reason: "signer accepts old and new K3 during overlap",
-    source: "docs/specs/04-components/server-autonomy-roi-keys.md:479",
+    source: "docs/specs/04-components/server/server-autonomy-roi-keys.md:479",
     notes: "prose only",
   },
   {
@@ -976,7 +976,7 @@ export const PARAMETERS = [
     default: 2000,
     unit: "ms",
     reason: "signing timeout incl. KMS round trip (target 150 ms)",
-    source: "docs/specs/04-components/server-autonomy-roi-keys.md:535",
+    source: "docs/specs/04-components/server/server-autonomy-roi-keys.md:535",
     notes: "prose only",
   },
   {
@@ -985,7 +985,7 @@ export const PARAMETERS = [
     default: 900,
     unit: "s",
     reason: "free resources after the agent goes quiet",
-    source: "docs/specs/04-components/local-agent-surfaces.md:89",
+    source: "docs/specs/04-components/local/local-agent-surfaces.md:89",
   },
   {
     key: "mcp.maxConcurrentPays",
@@ -993,7 +993,7 @@ export const PARAMETERS = [
     default: 2,
     unit: "count",
     reason: "per session; server enforces per-envelope limits",
-    source: "docs/specs/04-components/local-agent-surfaces.md:93",
+    source: "docs/specs/04-components/local/local-agent-surfaces.md:93",
   },
   {
     key: "mcp.payWaitS",
@@ -1001,7 +1001,7 @@ export const PARAMETERS = [
     default: 120,
     unit: "s",
     reason: "above the 30 s merchant timeout plus settle",
-    source: "docs/specs/04-components/local-agent-surfaces.md:92",
+    source: "docs/specs/04-components/local/local-agent-surfaces.md:92",
   },
   {
     key: "mcp.pollIntervalMs",
@@ -1009,7 +1009,7 @@ export const PARAMETERS = [
     default: 1500,
     unit: "ms",
     reason: "Arc blocks ~0.5 s; merchant calls take seconds",
-    source: "docs/specs/04-components/local-agent-surfaces.md:91",
+    source: "docs/specs/04-components/local/local-agent-surfaces.md:91",
   },
   {
     key: "mcp.quoteCacheS",
@@ -1017,7 +1017,7 @@ export const PARAMETERS = [
     default: 300,
     unit: "s",
     reason: "matches a quote's expiresAt window",
-    source: "docs/specs/04-components/local-agent-surfaces.md:90",
+    source: "docs/specs/04-components/local/local-agent-surfaces.md:90",
   },
   {
     key: "mcp.requestTimeoutS",
@@ -1025,7 +1025,7 @@ export const PARAMETERS = [
     default: 30,
     unit: "s",
     reason: "server API calls",
-    source: "docs/specs/04-components/local-agent-surfaces.md:94",
+    source: "docs/specs/04-components/local/local-agent-surfaces.md:94",
   },
   {
     key: "memory.dedupeWindowS",
@@ -1033,7 +1033,7 @@ export const PARAMETERS = [
     default: 300,
     unit: "s",
     reason: "identical content_hash within 5 min is counted, not stored",
-    source: "docs/specs/04-components/local-observers-and-daemon.md:319",
+    source: "docs/specs/04-components/local/local-observers-and-daemon.md:319",
   },
   {
     key: "memory.maxEventsPerSessionPerMin",
@@ -1041,7 +1041,7 @@ export const PARAMETERS = [
     default: 600,
     unit: "count",
     reason: "ASI06 flood cap",
-    source: "docs/specs/04-components/local-observers-and-daemon.md:317",
+    source: "docs/specs/04-components/local/local-observers-and-daemon.md:317",
   },
   {
     key: "memory.maxSummaryChars",
@@ -1049,7 +1049,7 @@ export const PARAMETERS = [
     default: 2000,
     unit: "chars",
     reason: "02 §4.1",
-    source: "docs/specs/04-components/local-observers-and-daemon.md:318",
+    source: "docs/specs/04-components/local/local-observers-and-daemon.md:318",
   },
   {
     key: "memory.queryMaxRows",
@@ -1057,7 +1057,7 @@ export const PARAMETERS = [
     default: 2000,
     unit: "count",
     reason: "viewer and compiler page through",
-    source: "docs/specs/04-components/local-observers-and-daemon.md:451",
+    source: "docs/specs/04-components/local/local-observers-and-daemon.md:451",
   },
   {
     key: "memory.retentionDays",
@@ -1065,7 +1065,7 @@ export const PARAMETERS = [
     default: 90,
     unit: "days",
     reason: "spec 01 §11.1 (user setting 30–365)",
-    source: "docs/specs/04-components/local-observers-and-daemon.md:316",
+    source: "docs/specs/04-components/local/local-observers-and-daemon.md:316",
     notes: "also lines 289, 451",
   },
   {
@@ -1074,7 +1074,7 @@ export const PARAMETERS = [
     default: 1048576,
     unit: "bytes",
     reason: "bounded replay store",
-    source: "docs/specs/04-components/server-supply-side.md:154",
+    source: "docs/specs/04-components/server/server-supply-side.md:154",
   },
   {
     key: "merchants.drainTimeoutMs",
@@ -1082,7 +1082,7 @@ export const PARAMETERS = [
     default: 30000,
     unit: "ms",
     reason: "never abandon a settle mid-flight",
-    source: "docs/specs/04-components/server-supply-side.md:163",
+    source: "docs/specs/04-components/server/server-supply-side.md:163",
   },
   {
     key: "merchants.extractAllowlist",
@@ -1090,7 +1090,7 @@ export const PARAMETERS = [
     default: null,
     unit: "",
     reason: "hostname allowlist for czar-extract (public docs/news domains)",
-    source: "docs/specs/04-components/server-supply-side.md:134",
+    source: "docs/specs/04-components/server/server-supply-side.md:134",
     noDefault: true,
     notes: "'chosen in the build plan'; no default",
   },
@@ -1100,7 +1100,7 @@ export const PARAMETERS = [
     default: 2097152,
     unit: "bytes",
     reason: "bounded fetch (2 MiB)",
-    source: "docs/specs/04-components/server-supply-side.md:160",
+    source: "docs/specs/04-components/server/server-supply-side.md:160",
   },
   {
     key: "merchants.extractMaxChars",
@@ -1108,7 +1108,7 @@ export const PARAMETERS = [
     default: 20000,
     unit: "chars",
     reason: "bounded fetch",
-    source: "docs/specs/04-components/server-supply-side.md:160",
+    source: "docs/specs/04-components/server/server-supply-side.md:160",
   },
   {
     key: "merchants.extractMaxRedirects",
@@ -1116,7 +1116,7 @@ export const PARAMETERS = [
     default: 3,
     unit: "count",
     reason: "bounded fetch",
-    source: "docs/specs/04-components/server-supply-side.md:160",
+    source: "docs/specs/04-components/server/server-supply-side.md:160",
   },
   {
     key: "merchants.extractPriceAtomic",
@@ -1124,7 +1124,7 @@ export const PARAMETERS = [
     default: 100000,
     unit: "atomic",
     reason: "matches the catalog median",
-    source: "docs/specs/04-components/server-supply-side.md:149",
+    source: "docs/specs/04-components/server/server-supply-side.md:149",
   },
   {
     key: "merchants.extractTimeoutMs",
@@ -1132,7 +1132,7 @@ export const PARAMETERS = [
     default: 8000,
     unit: "ms",
     reason: "bounded fetch",
-    source: "docs/specs/04-components/server-supply-side.md:160",
+    source: "docs/specs/04-components/server/server-supply-side.md:160",
   },
   {
     key: "merchants.facilitatorTimeoutMs",
@@ -1140,7 +1140,7 @@ export const PARAMETERS = [
     default: 15000,
     unit: "ms",
     reason: "Facilitator call bound; never retried for /settle",
-    source: "docs/specs/04-components/server-supply-side.md:214",
+    source: "docs/specs/04-components/server/server-supply-side.md:214",
     notes: "prose only",
   },
   {
@@ -1149,7 +1149,7 @@ export const PARAMETERS = [
     default: 1000,
     unit: "atomic",
     reason: "sub-cent to exercise batching (D10)",
-    source: "docs/specs/04-components/server-supply-side.md:151",
+    source: "docs/specs/04-components/server/server-supply-side.md:151",
   },
   {
     key: "merchants.gatewaySweepCron",
@@ -1157,7 +1157,7 @@ export const PARAMETERS = [
     default: "0 3 * * *",
     unit: "cron",
     reason: "daily (03:00 UTC)",
-    source: "docs/specs/04-components/server-supply-side.md:156",
+    source: "docs/specs/04-components/server/server-supply-side.md:156",
   },
   {
     key: "merchants.gatewaySweepMinAtomic",
@@ -1165,7 +1165,7 @@ export const PARAMETERS = [
     default: 1000000,
     unit: "atomic",
     reason: "fee 0.0035 stays ≤ 0.35%",
-    source: "docs/specs/04-components/server-supply-side.md:157",
+    source: "docs/specs/04-components/server/server-supply-side.md:157",
   },
   {
     key: "merchants.handlerTimeoutMs",
@@ -1173,7 +1173,7 @@ export const PARAMETERS = [
     default: 10000,
     unit: "ms",
     reason: "handler upper bound",
-    source: "docs/specs/04-components/server-supply-side.md:214",
+    source: "docs/specs/04-components/server/server-supply-side.md:214",
     notes: "prose only",
   },
   {
@@ -1182,7 +1182,7 @@ export const PARAMETERS = [
     default: 300,
     unit: "s",
     reason: "≤ vault MAX_RESERVATION_TTL 600",
-    source: "docs/specs/04-components/server-supply-side.md:152",
+    source: "docs/specs/04-components/server/server-supply-side.md:152",
   },
   {
     key: "merchants.paymentIdTtlHours",
@@ -1190,7 +1190,7 @@ export const PARAMETERS = [
     default: 24,
     unit: "hours",
     reason: "matches API idempotency (02 §9.3)",
-    source: "docs/specs/04-components/server-supply-side.md:153",
+    source: "docs/specs/04-components/server/server-supply-side.md:153",
   },
   {
     key: "merchants.perPayerPerMin",
@@ -1198,7 +1198,7 @@ export const PARAMETERS = [
     default: 60,
     unit: "count",
     reason: "abuse bound",
-    source: "docs/specs/04-components/server-supply-side.md:162",
+    source: "docs/specs/04-components/server/server-supply-side.md:162",
   },
   {
     key: "merchants.perRoutePerMin",
@@ -1206,7 +1206,7 @@ export const PARAMETERS = [
     default: 600,
     unit: "count",
     reason: "abuse bound",
-    source: "docs/specs/04-components/server-supply-side.md:162",
+    source: "docs/specs/04-components/server/server-supply-side.md:162",
   },
   {
     key: "merchants.refundDailyAtomic",
@@ -1214,7 +1214,7 @@ export const PARAMETERS = [
     default: 5000000,
     unit: "atomic",
     reason: "bounds a refund-policy abuse (per service per day)",
-    source: "docs/specs/04-components/server-supply-side.md:159",
+    source: "docs/specs/04-components/server/server-supply-side.md:159",
   },
   {
     key: "merchants.searchPriceAtomic",
@@ -1222,7 +1222,7 @@ export const PARAMETERS = [
     default: 50000,
     unit: "atomic",
     reason: "(no reason given)",
-    source: "docs/specs/04-components/server-supply-side.md:150",
+    source: "docs/specs/04-components/server/server-supply-side.md:150",
     notes: "searchPriceAtomic/spotRefreshSeconds reason cell empty",
   },
   {
@@ -1231,7 +1231,7 @@ export const PARAMETERS = [
     default: 30,
     unit: "minutes",
     reason: "x402 reconciliation window used by CZ-15",
-    source: "docs/specs/04-components/server-supply-side.md:155",
+    source: "docs/specs/04-components/server/server-supply-side.md:155",
   },
   {
     key: "merchants.spotPriceAtomic",
@@ -1239,7 +1239,7 @@ export const PARAMETERS = [
     default: 50000,
     unit: "atomic",
     reason: "normal catalog range",
-    source: "docs/specs/04-components/server-supply-side.md:148",
+    source: "docs/specs/04-components/server/server-supply-side.md:148",
   },
   {
     key: "merchants.spotRefreshSeconds",
@@ -1247,7 +1247,7 @@ export const PARAMETERS = [
     default: 300,
     unit: "s",
     reason: "(no reason given)",
-    source: "docs/specs/04-components/server-supply-side.md:161",
+    source: "docs/specs/04-components/server/server-supply-side.md:161",
     notes: "searchPriceAtomic/spotRefreshSeconds reason cell empty",
   },
   {
@@ -1256,7 +1256,7 @@ export const PARAMETERS = [
     default: 10000,
     unit: "atomic",
     reason: "matches the vault's MAX_PULLBACK_FEE",
-    source: "docs/specs/04-components/server-supply-side.md:158",
+    source: "docs/specs/04-components/server/server-supply-side.md:158",
   },
   {
     key: "models.drives-helper.timeoutMs",
@@ -1264,7 +1264,7 @@ export const PARAMETERS = [
     default: 5000,
     unit: "ms",
     reason: "P-05 latency budget ≤ 5 s",
-    source: "docs/specs/04-components/cross-cutting.md:166",
+    source: "docs/specs/04-components/shared/cross-cutting.md:166",
     derivedKey: true,
     notes:
       "Derived from wildcard models.<name>.timeoutMs (ai-prompts.md:238 'timeout 5 s'); key name inferred.",
@@ -1275,7 +1275,7 @@ export const PARAMETERS = [
     default: 120000,
     unit: "tokens",
     reason: "monthly per-user token cap for the prompt (§6.2)",
-    source: "docs/specs/04-components/cross-cutting.md:161",
+    source: "docs/specs/04-components/shared/cross-cutting.md:161",
     notes: "spec writes it in M tokens",
   },
   {
@@ -1284,7 +1284,7 @@ export const PARAMETERS = [
     default: 20000,
     unit: "ms",
     reason: "P-03 latency budget ≤ 20 s",
-    source: "docs/specs/04-components/cross-cutting.md:166",
+    source: "docs/specs/04-components/shared/cross-cutting.md:166",
     derivedKey: true,
     notes:
       "Derived from wildcard models.<name>.timeoutMs; key name not spelled out in spec. Overlaps planner.modelTimeoutMs 20000 (server-planning-and-payment.md:165).",
@@ -1295,7 +1295,7 @@ export const PARAMETERS = [
     default: 500000,
     unit: "tokens",
     reason: "monthly per-user token cap for the prompt (§6.2)",
-    source: "docs/specs/04-components/cross-cutting.md:159",
+    source: "docs/specs/04-components/shared/cross-cutting.md:159",
     notes: "spec writes it in M tokens",
   },
   {
@@ -1304,7 +1304,7 @@ export const PARAMETERS = [
     default: 8000,
     unit: "ms",
     reason: "P-02 latency budget ≤ 8 s",
-    source: "docs/specs/04-components/ai-prompts.md:100",
+    source: "docs/specs/04-components/shared/ai-prompts.md:100",
   },
   {
     key: "models.readerMonthlyTokens",
@@ -1312,7 +1312,7 @@ export const PARAMETERS = [
     default: 1800000,
     unit: "tokens",
     reason: "monthly per-user token cap for the prompt (§6.2)",
-    source: "docs/specs/04-components/cross-cutting.md:158",
+    source: "docs/specs/04-components/shared/cross-cutting.md:158",
     notes: "spec writes it in M tokens",
   },
   {
@@ -1321,7 +1321,7 @@ export const PARAMETERS = [
     default: 2000,
     unit: "ms",
     reason: "P-06 latency budget ≤ 2 s",
-    source: "docs/specs/04-components/cross-cutting.md:166",
+    source: "docs/specs/04-components/shared/cross-cutting.md:166",
     derivedKey: true,
     notes:
       "Derived from wildcard models.<name>.timeoutMs (ai-prompts.md:264 'timeout 2 s'); key name inferred.",
@@ -1332,7 +1332,7 @@ export const PARAMETERS = [
     default: 20000,
     unit: "tokens",
     reason: "monthly per-user token cap for the prompt (§6.2)",
-    source: "docs/specs/04-components/cross-cutting.md:162",
+    source: "docs/specs/04-components/shared/cross-cutting.md:162",
     notes: "spec writes it in M tokens",
   },
   {
@@ -1341,7 +1341,7 @@ export const PARAMETERS = [
     default: 2000,
     unit: "ms",
     reason: "P-01 latency budget ≤ 2 s",
-    source: "docs/specs/04-components/ai-prompts.md:54",
+    source: "docs/specs/04-components/shared/ai-prompts.md:54",
   },
   {
     key: "models.screenMonthlyTokens",
@@ -1349,7 +1349,7 @@ export const PARAMETERS = [
     default: 1200000,
     unit: "tokens",
     reason: "monthly per-user token cap for the prompt (§6.2)",
-    source: "docs/specs/04-components/cross-cutting.md:157",
+    source: "docs/specs/04-components/shared/cross-cutting.md:157",
     notes: "spec writes it in M tokens",
   },
   {
@@ -1358,7 +1358,7 @@ export const PARAMETERS = [
     default: 60000,
     unit: "ms",
     reason: "cross-cutting §6.2 (P-04 ≤ 60 s)",
-    source: "docs/specs/04-components/local-soul-and-drives.md:178",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:178",
     notes:
       "first named local-soul-and-drives.md:30 / ai-prompts.md:197 ('60 s'). Key contains a hyphen.",
   },
@@ -1368,7 +1368,7 @@ export const PARAMETERS = [
     default: 720000,
     unit: "tokens",
     reason: "monthly per-user token cap for the prompt (§6.2)",
-    source: "docs/specs/04-components/cross-cutting.md:160",
+    source: "docs/specs/04-components/shared/cross-cutting.md:160",
     notes: "spec writes it in M tokens; also ai-prompts.md:197 (0.72 M)",
   },
   {
@@ -1377,7 +1377,7 @@ export const PARAMETERS = [
     default: 6000000,
     unit: "tokens",
     reason: "hard cap per user per month",
-    source: "docs/specs/04-components/cross-cutting.md:163",
+    source: "docs/specs/04-components/shared/cross-cutting.md:163",
     notes:
       "Row shows total '≈ 4.4 M tokens' (sum of caps = 4.36 M) and '(hard cap 6 M)'; default taken as the 6 M hard cap — ambiguous.",
   },
@@ -1387,7 +1387,7 @@ export const PARAMETERS = [
     default: 30,
     unit: "s",
     reason: "push notification delivery (stage 2)",
-    source: "docs/specs/04-components/app-and-notifications.md:317",
+    source: "docs/specs/04-components/app/app-and-notifications.md:317",
     stage2: true,
     notes: "stage 2 only (D69)",
   },
@@ -1397,7 +1397,7 @@ export const PARAMETERS = [
     default: 120,
     unit: "chars",
     reason: "push notification delivery (stage 2)",
-    source: "docs/specs/04-components/app-and-notifications.md:317",
+    source: "docs/specs/04-components/app/app-and-notifications.md:317",
     stage2: true,
     notes: "stage 2 only (D69)",
   },
@@ -1407,7 +1407,7 @@ export const PARAMETERS = [
     default: 300,
     unit: "s",
     reason: "push notification delivery (stage 2)",
-    source: "docs/specs/04-components/app-and-notifications.md:317",
+    source: "docs/specs/04-components/app/app-and-notifications.md:317",
     stage2: true,
     notes: "stage 2 only (D69)",
   },
@@ -1417,7 +1417,7 @@ export const PARAMETERS = [
     default: 5,
     unit: "count",
     reason: "push notification delivery (stage 2)",
-    source: "docs/specs/04-components/app-and-notifications.md:317",
+    source: "docs/specs/04-components/app/app-and-notifications.md:317",
     stage2: true,
     notes: "stage 2 only (D69)",
   },
@@ -1427,7 +1427,7 @@ export const PARAMETERS = [
     default: 86400,
     unit: "s",
     reason: "push notification delivery (stage 2)",
-    source: "docs/specs/04-components/app-and-notifications.md:317",
+    source: "docs/specs/04-components/app/app-and-notifications.md:317",
     stage2: true,
     notes: "stage 2 only (D69)",
   },
@@ -1437,7 +1437,7 @@ export const PARAMETERS = [
     default: 2,
     unit: "s",
     reason: "far below the 600 s default; never slow the agent",
-    source: "docs/specs/04-components/local-observers-and-daemon.md:103",
+    source: "docs/specs/04-components/local/local-observers-and-daemon.md:103",
   },
   {
     key: "observer.maxPayloadBytes",
@@ -1445,7 +1445,7 @@ export const PARAMETERS = [
     default: 262144,
     unit: "bytes",
     reason: "large tool outputs summarized by the daemon (256 KiB)",
-    source: "docs/specs/04-components/local-observers-and-daemon.md:104",
+    source: "docs/specs/04-components/local/local-observers-and-daemon.md:104",
   },
   {
     key: "observer.queueFlushBatch",
@@ -1453,7 +1453,7 @@ export const PARAMETERS = [
     default: 200,
     unit: "count",
     reason: "drain size per daemon heartbeat",
-    source: "docs/specs/04-components/local-observers-and-daemon.md:106",
+    source: "docs/specs/04-components/local/local-observers-and-daemon.md:106",
   },
   {
     key: "observer.queueMaxEvents",
@@ -1461,7 +1461,7 @@ export const PARAMETERS = [
     default: 5000,
     unit: "count",
     reason: "about a day of heavy use; oldest dropped first",
-    source: "docs/specs/04-components/local-observers-and-daemon.md:105",
+    source: "docs/specs/04-components/local/local-observers-and-daemon.md:105",
   },
   {
     key: "observer.sessionEndBudgetMs",
@@ -1469,7 +1469,7 @@ export const PARAMETERS = [
     default: 1000,
     unit: "ms",
     reason: "under the 1.5 s shared SessionEnd budget",
-    source: "docs/specs/04-components/local-observers-and-daemon.md:107",
+    source: "docs/specs/04-components/local/local-observers-and-daemon.md:107",
   },
   {
     key: "payer.callRetries",
@@ -1477,7 +1477,7 @@ export const PARAMETERS = [
     default: 3,
     unit: "count",
     reason: "same header, same paymentId, within validBefore",
-    source: "docs/specs/04-components/server-planning-and-payment.md:333",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:333",
     notes: "prose only",
   },
   {
@@ -1486,7 +1486,7 @@ export const PARAMETERS = [
     default: 30000,
     unit: "ms",
     reason: "merchant call timeout = min(maxTimeoutSeconds, this)",
-    source: "docs/specs/04-components/server-planning-and-payment.md:333",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:333",
     notes: "prose only",
   },
   {
@@ -1495,7 +1495,7 @@ export const PARAMETERS = [
     default: 12,
     unit: "hours",
     reason: "wait for provider's setBudget",
-    source: "docs/specs/04-components/server-planning-and-payment.md:377",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:377",
     notes: "prose only",
   },
   {
@@ -1504,7 +1504,7 @@ export const PARAMETERS = [
     default: 24,
     unit: "hours",
     reason: "job expiredAt = min(now + this, envelope.expiresAt)",
-    source: "docs/specs/04-components/server-planning-and-payment.md:376",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:376",
     notes: "prose only",
   },
   {
@@ -1513,7 +1513,7 @@ export const PARAMETERS = [
     default: 60,
     unit: "s",
     reason: "executor lease TTL, renewed",
-    source: "docs/specs/04-components/server-planning-and-payment.md:265",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:265",
     notes: "prose only",
   },
   {
@@ -1522,7 +1522,7 @@ export const PARAMETERS = [
     default: 2,
     unit: "count",
     reason: "concurrency",
-    source: "docs/specs/04-components/server-planning-and-payment.md:326",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:326",
     notes: "prose only",
   },
   {
@@ -1531,7 +1531,7 @@ export const PARAMETERS = [
     default: 3,
     unit: "count",
     reason: "concurrency",
-    source: "docs/specs/04-components/server-planning-and-payment.md:326",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:326",
     notes: "prose only",
   },
   {
@@ -1540,7 +1540,7 @@ export const PARAMETERS = [
     default: 2,
     unit: "count",
     reason: "keeps reserved money small while two steps run",
-    source: "docs/specs/04-components/server-planning-and-payment.md:326",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:326",
     notes: "prose only",
   },
   {
@@ -1549,7 +1549,7 @@ export const PARAMETERS = [
     default: 20000,
     unit: "atomic",
     reason: "pocket gas grant 0.02 USDC; bounded by MAX_GAS_GRANT_PER_POCKET 50,000",
-    source: "docs/specs/04-components/server-planning-and-payment.md:355",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:355",
     notes: "prose only; first named line 151 (gas grant in plan cap)",
   },
   {
@@ -1558,7 +1558,7 @@ export const PARAMETERS = [
     default: 24,
     unit: "hours",
     reason: "Gateway API down this long → slow withdrawal path",
-    source: "docs/specs/04-components/server-planning-and-payment.md:372",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:372",
     notes: "prose only",
   },
   {
@@ -1567,7 +1567,7 @@ export const PARAMETERS = [
     default: 10000,
     unit: "atomic",
     reason: "maxFee for pullbacks; never above vault maxPullbackFee (D81)",
-    source: "docs/specs/04-components/server-planning-and-payment.md:360",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:360",
     notes: "prose only",
   },
   {
@@ -1576,7 +1576,7 @@ export const PARAMETERS = [
     default: 0,
     unit: "atomic",
     reason: "fee headroom safety margin (RV-012)",
-    source: "docs/specs/04-components/server-planning-and-payment.md:360",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:360",
     notes: "prose only",
   },
   {
@@ -1585,7 +1585,7 @@ export const PARAMETERS = [
     default: 3600,
     unit: "blocks",
     reason: "maxBlockHeight = head + this; ≤ vault MAX_PULLBACK_WINDOW_BLOCKS 7,200 (RV-036)",
-    source: "docs/specs/04-components/server-planning-and-payment.md:360",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:360",
     notes: "prose only",
   },
   {
@@ -1594,7 +1594,7 @@ export const PARAMETERS = [
     default: 300,
     unit: "s",
     reason: "loop until validBefore + this",
-    source: "docs/specs/04-components/server-planning-and-payment.md:385",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:385",
     notes: "prose only",
   },
   {
@@ -1603,7 +1603,7 @@ export const PARAMETERS = [
     default: 15,
     unit: "s",
     reason: "settlement_pending reconciliation loop",
-    source: "docs/specs/04-components/server-planning-and-payment.md:385",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:385",
     notes: "prose only",
   },
   {
@@ -1612,7 +1612,7 @@ export const PARAMETERS = [
     default: 600,
     unit: "s",
     reason: "validBefore = min(now + min(maxTimeoutSeconds, this), expiresAt) (RV-056)",
-    source: "docs/specs/04-components/server-planning-and-payment.md:331",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:331",
     notes: "prose only",
   },
   {
@@ -1621,7 +1621,7 @@ export const PARAMETERS = [
     default: 32,
     unit: "count",
     reason: "03 FINALIZE_CHUNK",
-    source: "docs/specs/04-components/server-planning-and-payment.md:335",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:335",
     notes: "prose only",
   },
   {
@@ -1630,7 +1630,7 @@ export const PARAMETERS = [
     default: 10,
     unit: "minutes",
     reason: "signer unavailable: delay notice after this",
-    source: "docs/specs/04-components/server-planning-and-payment.md:426",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:426",
     notes: "prose only",
   },
   {
@@ -1639,7 +1639,7 @@ export const PARAMETERS = [
     default: 60,
     unit: "s",
     reason: "dropped tx (no receipt) re-sent after this",
-    source: "docs/specs/04-components/server-planning-and-payment.md:344",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:344",
     notes: "prose only",
   },
   {
@@ -1648,7 +1648,7 @@ export const PARAMETERS = [
     default: 60000,
     unit: "ms",
     reason: "Facilitator down: retry after this x3, then re-plan",
-    source: "docs/specs/04-components/server-planning-and-payment.md:420",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:420",
     notes: "prose only",
   },
   {
@@ -1661,7 +1661,7 @@ export const PARAMETERS = [
     },
     unit: "",
     reason: "maps capabilities to CZ-18 task classes",
-    source: "docs/specs/04-components/server-planning-and-payment.md:146",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:146",
     partial: true,
     notes: "Spec gives a partial table ending in '…'; full mapping missing.",
   },
@@ -1678,7 +1678,7 @@ export const PARAMETERS = [
     },
     unit: "",
     reason: "capability → spending category",
-    source: "docs/specs/04-components/server-planning-and-payment.md:155",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:155",
   },
   {
     key: "planner.defaultMaxUnitAtomic",
@@ -1686,7 +1686,7 @@ export const PARAMETERS = [
     default: 1000000,
     unit: "atomic",
     reason: "max price per unit when the objective sets none",
-    source: "docs/specs/04-components/server-planning-and-payment.md:165",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:165",
   },
   {
     key: "planner.maxAlternates",
@@ -1694,7 +1694,7 @@ export const PARAMETERS = [
     default: 2,
     unit: "count",
     reason: "D36",
-    source: "docs/specs/04-components/server-planning-and-payment.md:165",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:165",
   },
   {
     key: "planner.maxStepAtomic",
@@ -1702,7 +1702,7 @@ export const PARAMETERS = [
     default: 5000000,
     unit: "atomic",
     reason: "per-step cap bound (5 USDC)",
-    source: "docs/specs/04-components/server-planning-and-payment.md:165",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:165",
     notes: "also line 151",
   },
   {
@@ -1711,7 +1711,7 @@ export const PARAMETERS = [
     default: 64,
     unit: "count",
     reason: "02 Plan.steps ≤ 64",
-    source: "docs/specs/04-components/server-planning-and-payment.md:165",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:165",
   },
   {
     key: "planner.modelTimeoutMs",
@@ -1719,7 +1719,7 @@ export const PARAMETERS = [
     default: 20000,
     unit: "ms",
     reason: "P-03 latency budget",
-    source: "docs/specs/04-components/server-planning-and-payment.md:165",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:165",
     notes: "Same as models.<name>.timeoutMs for planner (cross-cutting.md:166).",
   },
   {
@@ -1728,7 +1728,7 @@ export const PARAMETERS = [
     default: true,
     unit: "",
     reason: "new payees need approval by default",
-    source: "docs/specs/04-components/server-planning-and-payment.md:165",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:165",
     notes: "also line 156 'true by default'",
   },
   {
@@ -1737,7 +1737,7 @@ export const PARAMETERS = [
     default: 5000,
     unit: "ms",
     reason: "planner live 402 probe timeout",
-    source: "docs/specs/04-components/server-planning-and-payment.md:165",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:165",
     notes:
       "Possible overlap: selection.probeTimeoutMs 2000 (server-acceptance-evidence-selection.md:671) is the CZ-18 probe timeout CZ-13 asks for (line 641).",
   },
@@ -1747,7 +1747,7 @@ export const PARAMETERS = [
     default: 3,
     unit: "count",
     reason: "live-probe the top K candidates per capability",
-    source: "docs/specs/04-components/server-planning-and-payment.md:165",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:165",
     notes: "also line 148",
   },
   {
@@ -1756,7 +1756,7 @@ export const PARAMETERS = [
     default: 1000,
     unit: "bps",
     reason: "stepCap slack (10%)",
-    source: "docs/specs/04-components/server-planning-and-payment.md:165",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:165",
     notes: "also line 151",
   },
   {
@@ -1765,7 +1765,7 @@ export const PARAMETERS = [
     default: 50,
     unit: "count",
     reason: "outbox retries",
-    source: "docs/specs/04-components/local-soul-and-drives.md:511",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:511",
   },
   {
     key: "publisher.pollIntervalSec",
@@ -1773,7 +1773,7 @@ export const PARAMETERS = [
     default: 30,
     unit: "s",
     reason: "outbox worker loop",
-    source: "docs/specs/04-components/local-soul-and-drives.md:494",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:494",
   },
   {
     key: "publisher.retryBackoffMs",
@@ -1785,7 +1785,7 @@ export const PARAMETERS = [
     },
     unit: "ms",
     reason: "exponential backoff (base 5,000, factor 2, max 1 h)",
-    source: "docs/specs/04-components/local-soul-and-drives.md:511",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:511",
   },
   {
     key: "publisher.statusPollSec",
@@ -1793,7 +1793,7 @@ export const PARAMETERS = [
     default: 60,
     unit: "s",
     reason: "poll non-terminal objectives",
-    source: "docs/specs/04-components/local-soul-and-drives.md:512",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:512",
   },
   {
     key: "reader.maxChars",
@@ -1801,7 +1801,7 @@ export const PARAMETERS = [
     default: 60000,
     unit: "chars",
     reason: "longest body any model reads; beyond is never read or delivered",
-    source: "docs/specs/04-components/ai-prompts.md:26",
+    source: "docs/specs/04-components/shared/ai-prompts.md:26",
     notes: "also ai-prompts.md:81",
   },
   {
@@ -1810,7 +1810,7 @@ export const PARAMETERS = [
     default: [],
     unit: "",
     reason: "user-chosen entities never redacted; stored locally",
-    source: "docs/specs/04-components/local-observers-and-daemon.md:533",
+    source: "docs/specs/04-components/local/local-observers-and-daemon.md:533",
   },
   {
     key: "redaction.languages",
@@ -1818,7 +1818,7 @@ export const PARAMETERS = [
     default: ["en"],
     unit: "",
     reason: "C2-04",
-    source: "docs/specs/04-components/local-observers-and-daemon.md:530",
+    source: "docs/specs/04-components/local/local-observers-and-daemon.md:530",
   },
   {
     key: "redaction.layer1MaxMs",
@@ -1826,7 +1826,7 @@ export const PARAMETERS = [
     default: 20,
     unit: "ms",
     reason: "intake budget, per 10 KB of text",
-    source: "docs/specs/04-components/local-observers-and-daemon.md:528",
+    source: "docs/specs/04-components/local/local-observers-and-daemon.md:528",
     notes: "spec: '20 per 10 KB'",
   },
   {
@@ -1835,7 +1835,7 @@ export const PARAMETERS = [
     default: "gitleaks v8.30.1",
     unit: "",
     reason: "pinned (C2-06)",
-    source: "docs/specs/04-components/local-observers-and-daemon.md:527",
+    source: "docs/specs/04-components/local/local-observers-and-daemon.md:527",
   },
   {
     key: "redaction.layer2Fallback",
@@ -1843,7 +1843,7 @@ export const PARAMETERS = [
     default: "regex",
     unit: "",
     reason: "when the sidecar is unavailable; forces review",
-    source: "docs/specs/04-components/local-observers-and-daemon.md:532",
+    source: "docs/specs/04-components/local/local-observers-and-daemon.md:532",
   },
   {
     key: "redaction.layer2TimeoutMs",
@@ -1851,7 +1851,7 @@ export const PARAMETERS = [
     default: 5000,
     unit: "ms",
     reason: "sidecar call bound",
-    source: "docs/specs/04-components/local-observers-and-daemon.md:529",
+    source: "docs/specs/04-components/local/local-observers-and-daemon.md:529",
   },
   {
     key: "redaction.markerCounterScope",
@@ -1859,7 +1859,7 @@ export const PARAMETERS = [
     default: "per text",
     unit: "",
     reason: "#n suffix (02 §3.1)",
-    source: "docs/specs/04-components/local-observers-and-daemon.md:534",
+    source: "docs/specs/04-components/local/local-observers-and-daemon.md:534",
   },
   {
     key: "redaction.reviewMode",
@@ -1868,7 +1868,7 @@ export const PARAMETERS = [
     default: "first-5-then-auto",
     unit: "",
     reason: "exact outbound text shown for first 5 objectives (D47)",
-    source: "docs/specs/04-components/local-observers-and-daemon.md:531",
+    source: "docs/specs/04-components/local/local-observers-and-daemon.md:531",
   },
   {
     key: "redaction.sidecarIdleS",
@@ -1876,7 +1876,7 @@ export const PARAMETERS = [
     default: 600,
     unit: "s",
     reason: "stop the lazily started sidecar after idle",
-    source: "docs/specs/04-components/local-observers-and-daemon.md:579",
+    source: "docs/specs/04-components/local/local-observers-and-daemon.md:579",
     notes: "prose only",
   },
   {
@@ -1885,7 +1885,7 @@ export const PARAMETERS = [
     default: 20,
     unit: "minutes",
     reason: "Gateway payment still `received` flagged for re-poll (A2-26 ≤ 16 min)",
-    source: "docs/specs/04-components/server-autonomy-roi-keys.md:269",
+    source: "docs/specs/04-components/server/server-autonomy-roi-keys.md:269",
   },
   {
     key: "roi.statementCron",
@@ -1893,7 +1893,7 @@ export const PARAMETERS = [
     default: "daily 04:00 UTC",
     unit: "cron",
     reason: "cheap; on-demand refresh too",
-    source: "docs/specs/04-components/server-autonomy-roi-keys.md:267",
+    source: "docs/specs/04-components/server/server-autonomy-roi-keys.md:267",
     notes: "Given in prose form, not a 5-field cron (equivalent '0 4 * * *' UTC).",
   },
   {
@@ -1902,7 +1902,7 @@ export const PARAMETERS = [
     default: 7000,
     unit: "bps",
     reason: "estimates are optimistic; discount until a user confirms",
-    source: "docs/specs/04-components/server-autonomy-roi-keys.md:268",
+    source: "docs/specs/04-components/server/server-autonomy-roi-keys.md:268",
   },
   {
     key: "routing.gas.finalize",
@@ -1910,7 +1910,7 @@ export const PARAMETERS = [
     default: 30000,
     unit: "gas",
     reason: "seeded with 03 §13 estimates; replaced by measured forge snapshot values (RV-039)",
-    source: "docs/specs/04-components/server-planning-and-payment.md:243",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:243",
   },
   {
     key: "routing.gas.pocketDrain",
@@ -1918,7 +1918,7 @@ export const PARAMETERS = [
     default: 305000,
     unit: "gas",
     reason: "seeded with 03 §13 estimates; replaced by measured forge snapshot values (RV-039)",
-    source: "docs/specs/04-components/server-planning-and-payment.md:243",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:243",
   },
   {
     key: "routing.gas.pocketSetup",
@@ -1926,7 +1926,7 @@ export const PARAMETERS = [
     default: 282000,
     unit: "gas",
     reason: "seeded with 03 §13 estimates; replaced by measured forge snapshot values (RV-039)",
-    source: "docs/specs/04-components/server-planning-and-payment.md:243",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:243",
   },
   {
     key: "routing.gas.pocketSweep",
@@ -1934,7 +1934,7 @@ export const PARAMETERS = [
     default: 21000,
     unit: "gas",
     reason: "seeded with 03 §13 estimates; replaced by measured forge snapshot values (RV-039)",
-    source: "docs/specs/04-components/server-planning-and-payment.md:243",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:243",
   },
   {
     key: "routing.gas.reserve",
@@ -1942,7 +1942,7 @@ export const PARAMETERS = [
     default: 132000,
     unit: "gas",
     reason: "seeded with 03 §13 estimates; replaced by measured forge snapshot values (RV-039)",
-    source: "docs/specs/04-components/server-planning-and-payment.md:243",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:243",
   },
   {
     key: "routing.gas.settleBase",
@@ -1950,7 +1950,7 @@ export const PARAMETERS = [
     default: 30000,
     unit: "gas",
     reason: "seeded with 03 §13 estimates; replaced by measured forge snapshot values (RV-039)",
-    source: "docs/specs/04-components/server-planning-and-payment.md:243",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:243",
   },
   {
     key: "routing.gas.settleIdx",
@@ -1958,7 +1958,7 @@ export const PARAMETERS = [
     default: 6000,
     unit: "gas",
     reason: "seeded with 03 §13 estimates; replaced by measured forge snapshot values (RV-039)",
-    source: "docs/specs/04-components/server-planning-and-payment.md:243",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:243",
   },
   {
     key: "routing.gasRefreshSeconds",
@@ -1966,7 +1966,7 @@ export const PARAMETERS = [
     default: 30,
     unit: "s",
     reason: "gasPrice = max(eth_gasPrice, 20 Gwei) refresh",
-    source: "docs/specs/04-components/server-planning-and-payment.md:243",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:243",
   },
   {
     key: "routing.gatewayFeeAtomic",
@@ -1974,7 +1974,7 @@ export const PARAMETERS = [
     default: 3500,
     unit: "atomic",
     reason: "A2-17",
-    source: "docs/specs/04-components/server-planning-and-payment.md:243",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:243",
   },
   {
     key: "routing.jobThresholdAtomic",
@@ -1982,7 +1982,7 @@ export const PARAMETERS = [
     default: 5000000,
     unit: "atomic",
     reason: "threshold for the job path",
-    source: "docs/specs/04-components/server-planning-and-payment.md:243",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:243",
   },
   {
     key: "routing.maxFeeRatioBps",
@@ -1990,7 +1990,7 @@ export const PARAMETERS = [
     default: 1000,
     unit: "bps",
     reason: "D38",
-    source: "docs/specs/04-components/server-planning-and-payment.md:243",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:243",
     notes: "first named cross-cutting.md:78 as an example",
   },
   {
@@ -1999,7 +1999,7 @@ export const PARAMETERS = [
     default: 200000000000,
     unit: "wei",
     reason: "above this the pocket path is paused (03 §12)",
-    source: "docs/specs/04-components/server-planning-and-payment.md:243",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:243",
     notes: "spec gives '200 Gwei'",
   },
   {
@@ -2008,7 +2008,7 @@ export const PARAMETERS = [
     default: 500,
     unit: "chars",
     reason: "overlap between P-01 chunks (RV-041)",
-    source: "docs/specs/04-components/ai-prompts.md:26",
+    source: "docs/specs/04-components/shared/ai-prompts.md:26",
   },
   {
     key: "screen.maxChars",
@@ -2016,7 +2016,7 @@ export const PARAMETERS = [
     default: 20000,
     unit: "chars",
     reason: "one P-01 chunk",
-    source: "docs/specs/04-components/ai-prompts.md:24",
+    source: "docs/specs/04-components/shared/ai-prompts.md:24",
   },
   {
     key: "selection.catalogTtlSeconds",
@@ -2024,7 +2024,7 @@ export const PARAMETERS = [
     default: 3600,
     unit: "s",
     reason: "p1-D2 max-age=3600",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:670",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:670",
   },
   {
     key: "selection.decisionRetentionDays",
@@ -2032,7 +2032,7 @@ export const PARAMETERS = [
     default: 90,
     unit: "days",
     reason: "SL-C10",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:674",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:674",
   },
   {
     key: "selection.halfLifeDays",
@@ -2040,7 +2040,7 @@ export const PARAMETERS = [
     default: 14,
     unit: "days",
     reason: "SL-C9 data-json",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:666",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:666",
   },
   {
     key: "selection.maxProbesPerQuery",
@@ -2048,7 +2048,7 @@ export const PARAMETERS = [
     default: 5,
     unit: "count",
     reason: "live 402 probes per query in parallel",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:722",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:722",
     notes: "prose only",
   },
   {
@@ -2057,7 +2057,7 @@ export const PARAMETERS = [
     default: 5,
     unit: "count",
     reason: "SL-C10 unverified threshold",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:667",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:667",
   },
   {
     key: "selection.plannerUnknownPolicy",
@@ -2066,7 +2066,7 @@ export const PARAMETERS = [
     default: "exclude",
     unit: "",
     reason: "money never goes to unverified services by default",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:672",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:672",
   },
   {
     key: "selection.probeTimeoutMs",
@@ -2074,7 +2074,7 @@ export const PARAMETERS = [
     default: 2000,
     unit: "ms",
     reason: "planner latency budget",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:671",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:671",
   },
   {
     key: "selection.retrieveK",
@@ -2082,7 +2082,7 @@ export const PARAMETERS = [
     default: 50,
     unit: "count",
     reason: "SL-C3",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:675",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:675",
   },
   {
     key: "selection.riskQuantile",
@@ -2090,7 +2090,7 @@ export const PARAMETERS = [
     default: 0.2,
     unit: "",
     reason: "SL-C10 default; user posture may lower it",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:668",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:668",
   },
   {
     key: "selection.snapshotRefreshSeconds",
@@ -2098,7 +2098,7 @@ export const PARAMETERS = [
     default: 300,
     unit: "s",
     reason: "matches the Phase 2 5-minute snapshot cadence",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:673",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:673",
   },
   {
     key: "selection.snapshotStaleMinutes",
@@ -2106,7 +2106,7 @@ export const PARAMETERS = [
     default: 30,
     unit: "minutes",
     reason: "flag snapshot_age above this",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:703",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:703",
     notes: "prose only",
   },
   {
@@ -2115,7 +2115,7 @@ export const PARAMETERS = [
     default: 0.2,
     unit: "",
     reason: "SL-C10",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:669",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:669",
   },
   {
     key: "selection.wLatency",
@@ -2123,7 +2123,7 @@ export const PARAMETERS = [
     default: 0.1,
     unit: "",
     reason: "SL-C10",
-    source: "docs/specs/04-components/server-acceptance-evidence-selection.md:669",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:669",
   },
   {
     key: "shadow.days",
@@ -2131,7 +2131,7 @@ export const PARAMETERS = [
     default: 7,
     unit: "days",
     reason: "roadmap 1.5 'first week'",
-    source: "docs/specs/04-components/local-soul-and-drives.md:579",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:579",
     notes: "first named line 564 (7)",
   },
   {
@@ -2140,7 +2140,7 @@ export const PARAMETERS = [
     default: 50,
     unit: "count",
     reason: "report size",
-    source: "docs/specs/04-components/local-soul-and-drives.md:579",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:579",
   },
   {
     key: "shadow.quoteTtlHours",
@@ -2148,7 +2148,7 @@ export const PARAMETERS = [
     default: 24,
     unit: "hours",
     reason: "quote refreshed after this",
-    source: "docs/specs/04-components/local-soul-and-drives.md:579",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:579",
   },
   {
     key: "signer.backend",
@@ -2157,7 +2157,7 @@ export const PARAMETERS = [
     default: "local-keystore",
     unit: "",
     reason: "D70 (RV-028)",
-    source: "docs/specs/04-components/server-autonomy-roi-keys.md:445",
+    source: "docs/specs/04-components/server/server-autonomy-roi-keys.md:445",
     notes: "Phase 1 local-keystore; stage 2 gcp-kms",
   },
   {
@@ -2166,7 +2166,7 @@ export const PARAMETERS = [
     default: 30,
     unit: "s",
     reason: "D72: freeze checks fail closed on a stale projection",
-    source: "docs/specs/04-components/server-autonomy-roi-keys.md:449",
+    source: "docs/specs/04-components/server/server-autonomy-roi-keys.md:449",
     notes: "also line 393",
   },
   {
@@ -2175,7 +2175,7 @@ export const PARAMETERS = [
     default: 5000000,
     unit: "atomic",
     reason: "≈0.003–0.006 USDC per agent tx at 20 Gwei; 2 USDC ≥ 300 txs",
-    source: "docs/specs/04-components/server-autonomy-roi-keys.md:459",
+    source: "docs/specs/04-components/server/server-autonomy-roi-keys.md:459",
   },
   {
     key: "signer.gas.K3.minAtomic",
@@ -2183,7 +2183,7 @@ export const PARAMETERS = [
     default: 500000,
     unit: "atomic",
     reason: "≈0.003–0.006 USDC per agent tx at 20 Gwei; 2 USDC ≥ 300 txs",
-    source: "docs/specs/04-components/server-autonomy-roi-keys.md:459",
+    source: "docs/specs/04-components/server/server-autonomy-roi-keys.md:459",
   },
   {
     key: "signer.gas.K3.targetAtomic",
@@ -2191,7 +2191,7 @@ export const PARAMETERS = [
     default: 2000000,
     unit: "atomic",
     reason: "≈0.003–0.006 USDC per agent tx at 20 Gwei; 2 USDC ≥ 300 txs",
-    source: "docs/specs/04-components/server-autonomy-roi-keys.md:459",
+    source: "docs/specs/04-components/server/server-autonomy-roi-keys.md:459",
   },
   {
     key: "signer.gas.K7.maxAtomic",
@@ -2199,7 +2199,7 @@ export const PARAMETERS = [
     default: 1000000,
     unit: "atomic",
     reason: "complete/reject ≈ 0.002 USDC each",
-    source: "docs/specs/04-components/server-autonomy-roi-keys.md:460",
+    source: "docs/specs/04-components/server/server-autonomy-roi-keys.md:460",
     notes:
       "K7/K8 rows written as signer.gas.<key>.* with min/target/max order assumed from the K3 row",
   },
@@ -2209,7 +2209,7 @@ export const PARAMETERS = [
     default: 100000,
     unit: "atomic",
     reason: "complete/reject ≈ 0.002 USDC each",
-    source: "docs/specs/04-components/server-autonomy-roi-keys.md:460",
+    source: "docs/specs/04-components/server/server-autonomy-roi-keys.md:460",
     notes:
       "K7/K8 rows written as signer.gas.<key>.* with min/target/max order assumed from the K3 row",
   },
@@ -2219,7 +2219,7 @@ export const PARAMETERS = [
     default: 500000,
     unit: "atomic",
     reason: "complete/reject ≈ 0.002 USDC each",
-    source: "docs/specs/04-components/server-autonomy-roi-keys.md:460",
+    source: "docs/specs/04-components/server/server-autonomy-roi-keys.md:460",
     notes:
       "K7/K8 rows written as signer.gas.<key>.* with min/target/max order assumed from the K3 row",
   },
@@ -2229,7 +2229,7 @@ export const PARAMETERS = [
     default: 1000000,
     unit: "atomic",
     reason: "≈ 0.07 USDC per day of commits",
-    source: "docs/specs/04-components/server-autonomy-roi-keys.md:461",
+    source: "docs/specs/04-components/server/server-autonomy-roi-keys.md:461",
     notes:
       "K7/K8 rows written as signer.gas.<key>.* with min/target/max order assumed from the K3 row",
   },
@@ -2239,7 +2239,7 @@ export const PARAMETERS = [
     default: 100000,
     unit: "atomic",
     reason: "≈ 0.07 USDC per day of commits",
-    source: "docs/specs/04-components/server-autonomy-roi-keys.md:461",
+    source: "docs/specs/04-components/server/server-autonomy-roi-keys.md:461",
     notes:
       "K7/K8 rows written as signer.gas.<key>.* with min/target/max order assumed from the K3 row",
   },
@@ -2249,7 +2249,7 @@ export const PARAMETERS = [
     default: 500000,
     unit: "atomic",
     reason: "≈ 0.07 USDC per day of commits",
-    source: "docs/specs/04-components/server-autonomy-roi-keys.md:461",
+    source: "docs/specs/04-components/server/server-autonomy-roi-keys.md:461",
     notes:
       "K7/K8 rows written as signer.gas.<key>.* with min/target/max order assumed from the K3 row",
   },
@@ -2259,7 +2259,7 @@ export const PARAMETERS = [
     default: "dev.czar.signer.keystore",
     unit: "",
     reason: "D78: passphrase only in the macOS keychain",
-    source: "docs/specs/04-components/server-autonomy-roi-keys.md:447",
+    source: "docs/specs/04-components/server/server-autonomy-roi-keys.md:447",
     notes: "also line 351",
   },
   {
@@ -2268,7 +2268,7 @@ export const PARAMETERS = [
     default: "~/Library/Application Support/Czar/signer/keystore/",
     unit: "path",
     reason: "D78: outside the repository",
-    source: "docs/specs/04-components/server-autonomy-roi-keys.md:446",
+    source: "docs/specs/04-components/server/server-autonomy-roi-keys.md:446",
     notes: "also cross-cutting.md:87, server-autonomy-roi-keys.md:350",
   },
   {
@@ -2277,7 +2277,7 @@ export const PARAMETERS = [
     default: 500,
     unit: "atomic",
     reason: "native balance below another sweep's cost counts as zero",
-    source: "docs/specs/04-components/server-autonomy-roi-keys.md:456",
+    source: "docs/specs/04-components/server/server-autonomy-roi-keys.md:456",
   },
   {
     key: "signer.pocketKeyRetainHours",
@@ -2285,7 +2285,7 @@ export const PARAMETERS = [
     default: 24,
     unit: "hours",
     reason: "keep K4 one more day after every balance reads zero (RV-004)",
-    source: "docs/specs/04-components/server-autonomy-roi-keys.md:454",
+    source: "docs/specs/04-components/server/server-autonomy-roi-keys.md:454",
   },
   {
     key: "signer.slowWithdrawMarginHours",
@@ -2293,7 +2293,7 @@ export const PARAMETERS = [
     default: 24,
     unit: "hours",
     reason: "margin over Gateway's 7-day withdrawalDelay",
-    source: "docs/specs/04-components/server-autonomy-roi-keys.md:455",
+    source: "docs/specs/04-components/server/server-autonomy-roi-keys.md:455",
   },
   {
     key: "signer.socketPath",
@@ -2301,7 +2301,7 @@ export const PARAMETERS = [
     default: "~/Library/Application Support/Czar/signer/signer.sock",
     unit: "path",
     reason: "local IPC, no TCP port",
-    source: "docs/specs/04-components/server-autonomy-roi-keys.md:448",
+    source: "docs/specs/04-components/server/server-autonomy-roi-keys.md:448",
   },
   {
     key: "soul.activeConfidence",
@@ -2309,7 +2309,7 @@ export const PARAMETERS = [
     default: 0.5,
     unit: "",
     reason: "show only beliefs at least as likely as not",
-    source: "docs/specs/04-components/local-soul-and-drives.md:81",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:81",
   },
   {
     key: "soul.allowedProvenance",
@@ -2327,7 +2327,7 @@ export const PARAMETERS = [
     ],
     unit: "",
     reason: "ASI06 allowlist",
-    source: "docs/specs/04-components/local-soul-and-drives.md:174",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:174",
     notes: "table says 'list in §5.4'; list at line 94",
   },
   {
@@ -2336,7 +2336,7 @@ export const PARAMETERS = [
     default: 180,
     unit: "days",
     reason: "revival window",
-    source: "docs/specs/04-components/local-soul-and-drives.md:172",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:172",
   },
   {
     key: "soul.compileCron",
@@ -2344,7 +2344,7 @@ export const PARAMETERS = [
     default: "02:00",
     unit: "cron",
     reason: "overnight, machine usually idle (local time)",
-    source: "docs/specs/04-components/local-soul-and-drives.md:166",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:166",
     notes:
       "Not a 5-field cron; spec value '`02:00` local'. Duplicates daemon.compileAt (02:00 local).",
   },
@@ -2354,7 +2354,7 @@ export const PARAMETERS = [
     default: 14,
     unit: "days",
     reason: "matches SL 14-day half-life (SL-C9)",
-    source: "docs/specs/04-components/local-soul-and-drives.md:77",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:77",
   },
   {
     key: "soul.diffDelta",
@@ -2362,7 +2362,7 @@ export const PARAMETERS = [
     default: 0.15,
     unit: "",
     reason: "visible change",
-    source: "docs/specs/04-components/local-soul-and-drives.md:176",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:176",
   },
   {
     key: "soul.diversityTarget",
@@ -2370,7 +2370,7 @@ export const PARAMETERS = [
     default: 2,
     unit: "count",
     reason: "two independent signals",
-    source: "docs/specs/04-components/local-soul-and-drives.md:79",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:79",
   },
   {
     key: "soul.dropConfidence",
@@ -2378,7 +2378,7 @@ export const PARAMETERS = [
     default: 0.15,
     unit: "",
     reason: "archive threshold",
-    source: "docs/specs/04-components/local-soul-and-drives.md:171",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:171",
   },
   {
     key: "soul.evidenceScale",
@@ -2386,7 +2386,7 @@ export const PARAMETERS = [
     default: 3,
     unit: "",
     reason: "three fresh receipts ≈ 0.5 evidence weight",
-    source: "docs/specs/04-components/local-soul-and-drives.md:80",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:80",
   },
   {
     key: "soul.excerptReceiptsPerCandidate",
@@ -2394,7 +2394,7 @@ export const PARAMETERS = [
     default: 3,
     unit: "count",
     reason: "enough context, small excerpt",
-    source: "docs/specs/04-components/local-soul-and-drives.md:175",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:175",
   },
   {
     key: "soul.fadeDays",
@@ -2402,7 +2402,7 @@ export const PARAMETERS = [
     default: 30,
     unit: "days",
     reason: "one month unseen",
-    source: "docs/specs/04-components/local-soul-and-drives.md:170",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:170",
   },
   {
     key: "soul.maxCandidatesPerSession",
@@ -2410,7 +2410,7 @@ export const PARAMETERS = [
     default: 10,
     unit: "count",
     reason: "ASI06 flood cap",
-    source: "docs/specs/04-components/local-soul-and-drives.md:173",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:173",
   },
   {
     key: "soul.maxScreenFlags",
@@ -2418,7 +2418,7 @@ export const PARAMETERS = [
     default: 20,
     unit: "count",
     reason: "compile aborted when P-01 flags exceed this",
-    source: "docs/specs/04-components/local-soul-and-drives.md:224",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:224",
     notes: "prose only",
   },
   {
@@ -2427,7 +2427,7 @@ export const PARAMETERS = [
     default: 2,
     unit: "count",
     reason: "two is a pattern",
-    source: "docs/specs/04-components/local-soul-and-drives.md:78",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:78",
   },
   {
     key: "soul.missionWindowDays",
@@ -2435,7 +2435,7 @@ export const PARAMETERS = [
     default: 14,
     unit: "days",
     reason: "projects active in two weeks are missions",
-    source: "docs/specs/04-components/local-soul-and-drives.md:167",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:167",
   },
   {
     key: "soul.ritualMinRepeats",
@@ -2443,7 +2443,7 @@ export const PARAMETERS = [
     default: 3,
     unit: "count",
     reason: "three weeks of the same slot",
-    source: "docs/specs/04-components/local-soul-and-drives.md:168",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:168",
   },
   {
     key: "soul.ritualMinWeeks",
@@ -2451,7 +2451,7 @@ export const PARAMETERS = [
     default: 3,
     unit: "count",
     reason: "three weeks of the same slot",
-    source: "docs/specs/04-components/local-soul-and-drives.md:168",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:168",
   },
   {
     key: "soul.staleDays",
@@ -2459,7 +2459,7 @@ export const PARAMETERS = [
     default: 5,
     unit: "days",
     reason: "roadmap 1.2 'untouched for days'",
-    source: "docs/specs/04-components/local-soul-and-drives.md:169",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:169",
   },
   {
     key: "soul.versionRetention",
@@ -2467,7 +2467,7 @@ export const PARAMETERS = [
     default: 52,
     unit: "count",
     reason: "newest soul versions kept",
-    source: "docs/specs/04-components/local-soul-and-drives.md:210",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:210",
     notes: "prose only",
   },
   {
@@ -2476,7 +2476,7 @@ export const PARAMETERS = [
     default: 128,
     unit: "count",
     reason: "contract constant MAX_AUTHORIZATIONS_PER_RESERVATION (D39); read-only mirror",
-    source: "docs/specs/04-components/cross-cutting.md:83",
+    source: "docs/specs/04-components/shared/cross-cutting.md:83",
     readOnly: true,
     notes: "03 czar-vault.md:58 = 128",
   },
@@ -2486,7 +2486,7 @@ export const PARAMETERS = [
     default: 500,
     unit: "ms",
     reason: "edits queue while DB locked, up to 10 s",
-    source: "docs/specs/04-components/local-soul-and-drives.md:309",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:309",
   },
   {
     key: "viewer.maxBeliefTextChars",
@@ -2494,7 +2494,7 @@ export const PARAMETERS = [
     default: 500,
     unit: "chars",
     reason: "02 §4.2",
-    source: "docs/specs/04-components/local-soul-and-drives.md:289",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:289",
   },
   {
     key: "viewer.port",
@@ -2502,7 +2502,7 @@ export const PARAMETERS = [
     default: 0,
     unit: "port",
     reason: "0 = ephemeral, written to the socket dir",
-    source: "docs/specs/04-components/local-soul-and-drives.md:289",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:289",
   },
   {
     key: "viewer.sessionIdleMin",
@@ -2510,7 +2510,7 @@ export const PARAMETERS = [
     default: 30,
     unit: "minutes",
     reason: "viewer idle timeout",
-    source: "docs/specs/04-components/local-soul-and-drives.md:269",
+    source: "docs/specs/04-components/local/local-soul-and-drives.md:269",
     notes: "also line 289",
   },
   {
@@ -2519,7 +2519,7 @@ export const PARAMETERS = [
     default: 3600,
     unit: "s",
     reason: "outbox backoff ceiling",
-    source: "docs/specs/04-components/local-agent-surfaces.md:284",
+    source: "docs/specs/04-components/local/local-agent-surfaces.md:284",
   },
   {
     key: "writeback.dir",
@@ -2527,7 +2527,7 @@ export const PARAMETERS = [
     default: ".czar/results",
     unit: "path",
     reason: "inside the project, gitignore-suggested",
-    source: "docs/specs/04-components/local-agent-surfaces.md:279",
+    source: "docs/specs/04-components/local/local-agent-surfaces.md:279",
   },
   {
     key: "writeback.heldReminderDays",
@@ -2535,7 +2535,7 @@ export const PARAMETERS = [
     default: 3,
     unit: "days",
     reason: "re-notify about held results",
-    source: "docs/specs/04-components/local-agent-surfaces.md:283",
+    source: "docs/specs/04-components/local/local-agent-surfaces.md:283",
   },
   {
     key: "writeback.maxBodyBytes",
@@ -2543,7 +2543,7 @@ export const PARAMETERS = [
     default: 1000000,
     unit: "bytes",
     reason: "matches Result.body max",
-    source: "docs/specs/04-components/local-agent-surfaces.md:280",
+    source: "docs/specs/04-components/local/local-agent-surfaces.md:280",
   },
   {
     key: "writeback.pointerMaxChars",
@@ -2551,7 +2551,7 @@ export const PARAMETERS = [
     default: 200,
     unit: "chars",
     reason: "keep context small",
-    source: "docs/specs/04-components/local-agent-surfaces.md:281",
+    source: "docs/specs/04-components/local/local-agent-surfaces.md:281",
   },
   {
     key: "writeback.pointerSocketTimeoutMs",
@@ -2559,6 +2559,6 @@ export const PARAMETERS = [
     default: 300,
     unit: "ms",
     reason: "SessionStart must stay fast",
-    source: "docs/specs/04-components/local-agent-surfaces.md:282",
+    source: "docs/specs/04-components/local/local-agent-surfaces.md:282",
   },
 ] as const satisfies readonly ParameterSpec[];

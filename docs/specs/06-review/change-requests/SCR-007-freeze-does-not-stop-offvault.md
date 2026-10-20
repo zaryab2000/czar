@@ -4,7 +4,7 @@
 |---|---|
 | ID | SCR-007 |
 | Filed by | Independent reviewer (G0-01), 2026-10-19 |
-| Spec and section | `docs/specs/04-components/server-autonomy-roi-keys.md` CZ-27 `gateway-nano` and `evaluator-call` policies (lines 394, 397), wording (line 491); `docs/product/czar-product.md` §6.6 (line 166) |
+| Spec and section | `docs/specs/04-components/server/server-autonomy-roi-keys.md` CZ-27 `gateway-nano` and `evaluator-call` policies (lines 394, 397), wording (line 491); `docs/product/czar-product.md` §6.6 (line 166) |
 | Status | Accepted (D72), applied in CZ-27 §5.2 (freeze checks fail closed), CZ-15 §5.3 step 7 and §6 (pullbacks on freeze), CZ-27 §12 and CZ-22 §5.4 wording, `docs/product/czar-product.md` §6.6; T-035, T-052, T-055. |
 | Review finding | RV-007 (High) in `docs/specs/06-review/2026-10-19-spec-review.md` |
 

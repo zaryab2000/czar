@@ -4,7 +4,7 @@
 |---|---|
 | ID | SCR-004 |
 | Filed by | Independent reviewer (G0-01), 2026-10-19 |
-| Spec and section | `docs/specs/05-build-plan/phase-1-tasks.md` T-037 (lines 533–536); `docs/specs/04-components/server-autonomy-roi-keys.md` CZ-27 (lines 366, 416, 421); `docs/specs/04-components/server-planning-and-payment.md` (lines 345, 351, 362); docs/specs/03-smart-contracts/czar-vault.md §5.4 (lines 141, 143, 146) |
+| Spec and section | `docs/specs/05-build-plan/phase-1-tasks.md` T-037 (lines 533–536); `docs/specs/04-components/server/server-autonomy-roi-keys.md` CZ-27 (lines 366, 416, 421); `docs/specs/04-components/server/server-planning-and-payment.md` (lines 345, 351, 362); docs/specs/03-smart-contracts/czar-vault.md §5.4 (lines 141, 143, 146) |
 | Status | Accepted with changes: applied in `czar-vault.md` §5.4 (recovery pullbacks for `Closed` pockets, sweep path), §6.2; CZ-27 §5.1–§5.3 (`pocket-return`, `pocket-slow-withdraw`, zero-balance retirement rule); CZ-15 §5.3; T-037 now matches CZ-27. Change: instead of an owner-only pullback for closed pockets, any agent or owner may request a *recovery* pullback (money can only return to the vault, credited to free balance), which lets the server sweep automatically. |
 | Review finding | RV-004 (Critical) in `docs/specs/06-review/2026-10-19-spec-review.md` |
 

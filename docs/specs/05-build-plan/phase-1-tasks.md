@@ -2,7 +2,7 @@
 
 - **Date:** 2026-10-18. **Status:** ready once Gate 0 passes (`gate-0-checks.md`). Milestones, entry criteria and exit gates: `build-plan.md` §5.
 - **Every agent follows `builder-agent-rules.md`.** A task never changes a spec; spec problems go through `spec-change-request-template.md`.
-- **Path shorthands:** `S01/` = `docs/specs/01-system-architecture/`, `S02/` = `docs/specs/02-data-and-protocol/`, `S03/` = `docs/specs/03-smart-contracts/`, `S04/` = `docs/specs/04-components/`, `S05/` = `docs/specs/05-build-plan/`. Code paths follow the monorepo layout in `S04/cross-cutting.md` §1.
+- **Path shorthands:** `S01/` = `docs/specs/01-system-architecture/`, `S02/` = `docs/specs/02-data-and-protocol/`, `S03/` = `docs/specs/03-smart-contracts/`, `S04/` = `docs/specs/04-components/`, `S05/` = `docs/specs/05-build-plan/`. Code paths follow the monorepo layout in `S04/shared/cross-cutting.md` §1.
 - **How to read a task:**
   - **Spec refs** are the source of truth. Read them all before coding.
   - **Inputs** must exist before the task starts. **Outputs** are what the task creates.
@@ -126,7 +126,7 @@
 
 ### T-001 Repo scaffold: pnpm workspace, Node 22, strict tsconfig, oxlint/oxfmt, root .gitignore
 - **Milestone / group / who:** M0 / M0-a / agent. **Size:** M. **Deps:** Gate 0 G0-12.
-- **Spec refs:** `S04/cross-cutting.md` §1, §7; `S01/system-architecture.md` §17; `S05/gate-0-checks.md` G0-12.
+- **Spec refs:** `S04/shared/cross-cutting.md` §1, §7; `S01/system-architecture.md` §17; `S05/gate-0-checks.md` G0-12.
 - **Inputs:** an empty code repo.
 - **Outputs:** `package.json`, `pnpm-workspace.yaml`, `tsconfig.base.json`, `.oxlintrc.json`, `.gitignore`, empty package folders `apps/*`, `packages/*`, `plugins/claude-code`, `contracts/`, `models/`, `CLAUDE.md` (copied from `S05/builder-agent-rules.md`).
 - **Steps:**
@@ -141,7 +141,7 @@
 
 ### T-002 CI: pinned actions, gitleaks secret scan, zizmor, lint/type/test jobs
 - **Milestone / group / who:** M0 / M0-a / agent. **Size:** M. **Deps:** T-001.
-- **Spec refs:** `S03/security-and-testing.md` §3.6; `S04/cross-cutting.md` §7 (gitleaks v8.30.1, C2-06); `S05/gate-0-checks.md` G0-12; A9-13 (no `foundry-toolchain` in CI).
+- **Spec refs:** `S03/security-and-testing.md` §3.6; `S04/shared/cross-cutting.md` §7 (gitleaks v8.30.1, C2-06); `S05/gate-0-checks.md` G0-12; A9-13 (no `foundry-toolchain` in CI).
 - **Inputs:** T-001 workspace.
 - **Outputs:** `.github/workflows/ci.yml`, `.github/workflows/secrets.yml`, `.github/dependabot.yml`.
 - **Steps:**
@@ -170,32 +170,32 @@
 
 ### T-004 @czar/config parameter registry
 - **Milestone / group / who:** M0 / M0-b / agent. **Size:** S. **Deps:** T-001.
-- **Spec refs:** `S04/cross-cutting.md` §3.2, §3.3; every component's "Named parameters" section in `S04/`.
+- **Spec refs:** `S04/shared/cross-cutting.md` §3.2, §3.3; every component's "Named parameters" section in `S04/`.
 - **Outputs:** `packages/config/` (registry, env overlay `CZAR_<SECTION>_<KEY>`, `czar config dump`).
 - **Steps:**
   - One typed registry entry per parameter named in `S04/` with default, unit and reason.
   - Read-only mirrors of contract constants (for example `vault.maxAuthorizationsPerReservation = 128`, D39).
   - Unknown keys fail at startup.
-- **Inputs:** workspace from T-001; parameter tables in `docs/specs/04-components/*.md`.
+- **Inputs:** workspace from T-001; parameter tables under `docs/specs/04-components/`.
 - **Acceptance tests:**
   - `pnpm --filter @czar/config test` passes, including: unknown key → startup error; env overlay overrides a default.
-  - A script greps `S04/*.md` for `` `<component>.<name>` `` parameter names and the test asserts each exists in the registry (0 missing).
+  - A script scans Markdown recursively under `S04/` for `` `<component>.<name>` `` parameter names and the test asserts each exists in the registry (0 missing).
 - **Review fixes (2026-10-19):** Registry adds `signer.backend`, `signer.keystorePath`, `signer.keychainService`, `signer.socketPath`, `signer.freezeStateMaxAgeSec`, `signer.gas.*`, `signer.pocketKeyRetainHours`, `fetch.*`, `payer.pullbackWindowBlocks`, `acceptance.deliverableRefetch*`, `screen.chunkOverlapChars`, `api.briefSignatureMaxAgeSeconds` (RV-028 and others). Test: the loader refuses any key or `CZAR_*` variable whose name contains `passphrase`, `secret`, `private`, `mnemonic` or `seed` (D78).
 
 ### T-005 @czar/logging allowlist
 - **Milestone / group / who:** M0 / M0-b / agent. **Size:** S. **Deps:** T-001.
-- **Spec refs:** `S04/cross-cutting.md` §4; `S01/system-architecture.md` §16.3.
+- **Spec refs:** `S04/shared/cross-cutting.md` §4; `S01/system-architecture.md` §16.3.
 - **Outputs:** `packages/logging/`.
 - **Steps:**
   - JSON lines with the fixed fields; drop any field outside the allowlist.
   - Truncate IPs; strip query strings from URLs.
-- **Inputs:** workspace from T-001; allowlist in `docs/specs/04-components/cross-cutting.md` §4.
+- **Inputs:** workspace from T-001; allowlist in `docs/specs/04-components/shared/cross-cutting.md` §4.
 - **Acceptance tests:**
   - `pnpm --filter @czar/logging test` passes a corpus test: goal text, soul text, file paths, emails and a merchant body are never emitted; redaction markers are kept.
 
 ### T-006 @czar/schemas: compile 02 schemas, validators, privacyClassOf, sender guard
 - **Milestone / group / who:** M0 / M0-b / agent. **Size:** M. **Deps:** T-001.
-- **Spec refs:** `S02/data-and-protocol.md` §2–§4; `S02/schemas/*.schema.json`; `S04/cross-cutting.md` §2.
+- **Spec refs:** `S02/data-and-protocol.md` §2–§4; `S02/schemas/*.schema.json`; `S04/shared/cross-cutting.md` §2.
 - **Outputs:** `packages/schemas/` (generated types, Ajv 8 2020-12 validators, `privacyClassOf(name, field)`, `assertNoLocalOnly(obj)`).
 - **Steps:**
   - Load all 19 schema files, including cross-file `$id` refs (`receipt` → `payment-ref`).
@@ -224,7 +224,7 @@
 
 ### T-008 @czar/redaction layer 1 (vendored gitleaks v8.30.1 rules) and marker format
 - **Milestone / group / who:** M0 / M0-b / agent. **Size:** M. **Deps:** T-001.
-- **Spec refs:** `S04/local-observers-and-daemon.md` CZ-26; `S02/data-and-protocol.md` §3.1; C2-06, C2-07.
+- **Spec refs:** `S04/local/local-observers-and-daemon.md` CZ-26; `S02/data-and-protocol.md` §3.1; C2-06, C2-07.
 - **Outputs:** `packages/redaction/` (layer 1 rules, `[[R:S:<rule>]]` markers, layer-2 client interface for T-064).
 - **Steps:**
   - Vendor `config/gitleaks.toml` at v8.30.1 (222 rules, MIT) and convert to TypeScript regexes.
@@ -422,7 +422,7 @@
 
 ### T-024 Gas snapshot and measured gas table for routing
 - **Milestone / group / who:** M1 / M1-e / agent. **Size:** S. **Deps:** T-020.
-- **Spec refs:** `S03/czar-vault.md` §6.6, §13; `S03/security-and-testing.md` §3.5; `S04/server-planning-and-payment.md` CZ-14 §5; D37, D38.
+- **Spec refs:** `S03/czar-vault.md` §6.6, §13; `S03/security-and-testing.md` §3.5; `S04/server/server-planning-and-payment.md` CZ-14 §5; D37, D38.
 - **Outputs:** `contracts/.gas-snapshot`, `packages/config/gas-table.json` (values for `routing.gas.*`).
 - **Inputs:** all contracts and tests from T-020; `packages/config` from T-004.
 - **Steps:**
@@ -448,7 +448,7 @@
 
 ### T-026 @czar/vault-client: typed calls, signature-envelope encoders, error decoding, WebAuthn helpers
 - **Milestone / group / who:** M1 / M1-e / agent. **Size:** L. **Deps:** T-020, T-007.
-- **Spec refs:** `S04/cross-cutting.md` §2; `S02/data-and-protocol.md` §6.3; `S03/interfaces/*.sol`; `S03/czar-vault.md` §9.2.
+- **Spec refs:** `S04/shared/cross-cutting.md` §2; `S02/data-and-protocol.md` §6.3; `S03/interfaces/*.sol`; `S03/czar-vault.md` §9.2.
 - **Outputs:** `packages/vault-client/` (viem 2.57.x).
 - **Steps:** ABI from compiled interfaces; encoders for `USDC_3009`, `GATEWAY_BURN`, `SL_RECEIPT` v2 (13 receipt fields + `ReceiptAttestation` signature, RV-013) and the 65-byte fallback; low-s normalisation of P-256 assertions before `executeOwnerAction` (RV-034); revert decoding to error names; `maxFeePerGas ≥ 20 Gwei` (p1-A6).
 - **Inputs:** compiled ABIs from T-020; `packages/hashing` from T-007.
@@ -476,7 +476,7 @@
 
 ### T-105 Create Phase 1 server keys in the local keystore and record their addresses (RV-016)
 - **Milestone / group / who:** M1 / M1-f / agent, after Zaryab approves key creation. **Size:** S. **Deps:** T-004.
-- **Spec refs:** `S04/server-autonomy-roi-keys.md` CZ-27 §2, §3 (keystore location, passphrase rule, key table); `S03/security-and-testing.md` §4 step 2; D70, D78, D80.
+- **Spec refs:** `S04/server/server-autonomy-roi-keys.md` CZ-27 §2, §3 (keystore location, passphrase rule, key table); `S03/security-and-testing.md` §4 step 2; D70, D78, D80.
 - **Outputs:** the signer service's encrypted keystore at the path CZ-27 fixes (`~/Library/Application Support/Czar/signer/keystore/`, outside the repository); `deployments/arc-testnet-keys.json` holding **addresses and key references only** (K3 agent, K5 autonomy, K6 guardian, K7 evaluator, K8 evidence publisher, the relayer gas key, K20 factory admin; K9 is the Phase 2 claim relayer and is not created).
 - **Steps:**
   - Use the T-035 signer CLI's `create-key` command if it exists; otherwise a minimal one-off script in `apps/signer/scripts/create-keys.ts` that uses the same keystore format (CZ-27 §3). T-035 later adopts the keystore unchanged.
@@ -498,7 +498,7 @@
 
 ### T-030 Indexer: Ponder project, chains config, ≤9,999-block paging, -32012/-32014 retry
 - **Milestone / group / who:** M2 / M2-a / agent. **Size:** M. **Deps:** T-027.
-- **Spec refs:** `S04/server-acceptance-evidence-selection.md` CZ-19 §5.1, §5.2, §10; A9-05, A9-06, A9-07, A9-08; p1-A7.
+- **Spec refs:** `S04/server/server-acceptance-evidence-selection.md` CZ-19 §5.1, §5.2, §10; A9-05, A9-06, A9-07, A9-08; p1-A7.
 - **Outputs:** `apps/indexer/` (Ponder 0.18.x, `ponder.config.ts` with `ethGetLogsBlockRange` 9,999 and the deployed addresses).
 - **Inputs:** `deployments/arc-testnet.json` from T-027; compiled ABIs.
 - **Steps:**
@@ -564,7 +564,7 @@
 
 ### T-035 Signer service (CZ-27) with request validation and a pluggable backend; Phase 1 backend `local-keystore` (D61, D70)
 - **Milestone / group / who:** M2 / M2-a / agent. **Size:** L. **Deps:** T-026, G0-13, T-105 (keys).
-- **Spec refs:** `S04/server-autonomy-roi-keys.md` CZ-27 §5.1, §5.2, §5.4, §9; D61, D62; AR-1.
+- **Spec refs:** `S04/server/server-autonomy-roi-keys.md` CZ-27 §5.1, §5.2, §5.4, §9; D61, D62; AR-1.
 - **Outputs:** `apps/server/src/signer/` (separate process), policy tables per key K3, K4, K5, K7, K8, K9 (Phase 2), K10.
 - **Steps:**
   - Rebuild every digest from structured fields before asking the KMS; allowlist of contracts and selectors per key; per-key rate limits (`kms.maxSignaturesPerMin`); audit row per signature.
@@ -612,7 +612,7 @@
 
 ### T-040 Local testnet hosting on Zaryab's Mac: server, indexer, merchants, Postgres, local object store (D70, D78)
 - **Milestone / group / who:** M3 / M3-a / agent. **Size:** M. **Deps:** T-034, T-036.
-- **Spec refs:** `S01/system-architecture.md` §5; `S04/cross-cutting.md` §2.1, §3.1, §3.3; CZ-27 §3; D70, D78.
+- **Spec refs:** `S01/system-architecture.md` §5; `S04/shared/cross-cutting.md` §2.1, §3.1, §3.3; CZ-27 §3; D70, D78.
 - **Outputs:** `ops/local/` (launchd plists or a process manager file for server, indexer, merchants; Docker Compose for Postgres), `env/testnet.toml` with parameter overlays only, a local object-store directory outside the repository.
 - **Inputs:** indexer query API from T-034; the signer and keystore from T-035/T-105.
 - **Steps:**
@@ -627,7 +627,7 @@
 
 ### T-041 Server skeleton CZ-12: device tokens, idempotency, RFC 9457 errors, rate limits, Postgres schema, objective state machine
 - **Milestone / group / who:** M3 / M3-a / agent. **Size:** L. **Deps:** T-006, T-009, T-004, T-005.
-- **Spec refs:** `S04/server-planning-and-payment.md` CZ-12 §4–§14; `S02/data-and-protocol.md` §9.1–§9.5; `S02/api/openapi.yaml`.
+- **Spec refs:** `S04/server/server-planning-and-payment.md` CZ-12 §4–§14; `S02/data-and-protocol.md` §9.1–§9.5; `S02/api/openapi.yaml`.
 - **Outputs:** `apps/server/` (HTTP app, migrations for the CZ-12 tables, middleware).
 - **Inputs:** `packages/schemas` (T-006), `packages/api-contract` (T-009), `packages/config` (T-004), `packages/logging` (T-005).
 - **Steps:**
@@ -656,7 +656,7 @@
 
 ### T-043 Merchant czar-search vanilla x402 route with Facilitator keyless trial and payment-identifier store
 - **Milestone / group / who:** M3 / M3-b / agent. **Size:** M. **Deps:** T-042, T-040, G0-04.
-- **Spec refs:** `S04/server-supply-side.md` CZ-20 §5.1, §5.2, §5.4, §5.5; `S02/data-and-protocol.md` §11.1; D14, D49; A1-15, p1-F4.
+- **Spec refs:** `S04/server/server-supply-side.md` CZ-20 §5.1, §5.2, §5.4, §5.5; `S02/data-and-protocol.md` §11.1; D14, D49; A1-15, p1-F4.
 - **Outputs:** `apps/merchants/src/search/` (vanilla route only), payout key K10 via the signer.
 - **Inputs:** `packages/x402` from T-042; testnet hosting from T-040; Facilitator record `docs/specs/05-build-plan/gate-0-results/G0-04.md`.
 - **Steps:**
@@ -671,7 +671,7 @@
 
 ### T-044 Payment router CZ-14 (pure policy) with measured gas table
 - **Milestone / group / who:** M3 / M3-b / agent. **Size:** M. **Deps:** T-024, T-004.
-- **Spec refs:** `S04/server-planning-and-payment.md` CZ-14 §5; `S03/czar-vault.md` §13; D37, D38, D39, D48.
+- **Spec refs:** `S04/server/server-planning-and-payment.md` CZ-14 §5; `S03/czar-vault.md` §13; D37, D38, D39, D48.
 - **Outputs:** `apps/server/src/router/`.
 - **Inputs:** `packages/config/gas-table.json` from T-024; `packages/config` from T-004.
 - **Steps:**
@@ -685,7 +685,7 @@
 
 ### T-045 Planner core CZ-13: rule-based plan, live probe, caps, alternates, payee leaves, payeeRoot, planHash (Czar-registered candidates only)
 - **Milestone / group / who:** M3 / M3-b / agent. **Size:** L. **Deps:** T-041, T-042, T-044, T-007.
-- **Spec refs:** `S04/server-planning-and-payment.md` CZ-13 §5 (steps 1–3, 5–11), §6 (rule-based fallback); `S02/data-and-protocol.md` §4.5–§4.7, §5.2, §5.3; D36, D43.
+- **Spec refs:** `S04/server/server-planning-and-payment.md` CZ-13 §5 (steps 1–3, 5–11), §6 (rule-based fallback); `S02/data-and-protocol.md` §4.5–§4.7, §5.2, §5.3; D36, D43.
 - **Outputs:** `apps/server/src/planner/` (no P-03 yet; T-092 adds it), `shadowQuote` reuses it later.
 - **Inputs:** `apps/server/` from T-041; `packages/x402` (T-042); `apps/server/src/router/` (T-044); `packages/hashing` (T-007).
 - **Steps:**
@@ -706,15 +706,15 @@
 
 ### T-046 Injection boundary: P-01 screen, P-02 reader, StepResult pipeline, eval suites
 - **Milestone / group / who:** M3 / M3-b / agent. **Size:** L. **Deps:** T-006, T-005, G0-16 (RV-062).
-- **Spec refs:** `S04/server-planning-and-payment.md` CZ-15 §5.6; `S04/ai-prompts.md` P-01, P-02 (system prompts, schemas, post-validation, eval cases); `S02/data-and-protocol.md` §4.15; C3-04, C3-09.
+- **Spec refs:** `S04/server/server-planning-and-payment.md` CZ-15 §5.6; `S04/shared/ai-prompts.md` P-01, P-02 (system prompts, schemas, post-validation, eval cases); `S02/data-and-protocol.md` §4.15; C3-04, C3-09.
 - **Outputs:** `models/P-01.md`, `models/P-02.md`, `models/evals/P-01/`, `models/evals/P-02/`, `apps/server/src/boundary/`.
-- **Inputs:** `packages/schemas` (T-006); `packages/logging` (T-005); prompt texts in `docs/specs/04-components/ai-prompts.md`.
+- **Inputs:** `packages/schemas` (T-006); `packages/logging` (T-005); prompt texts in `docs/specs/04-components/shared/ai-prompts.md`.
 - **Steps:**
   - Add the regex pre-screen and the P-01 call.
   - Add the P-02 call with post-validation.
   - Build `StepResult` objects and wrap them for the planner.
   - Wire the eval suites into CI.
-  - Read the current model prices from the provider's pricing page and record them in the task report; file an SCR to add money figures to `S04/cross-cutting.md` §6.2. Until that SCR is applied, budgets stay in tokens and request counts (D68).
+  - Read the current model prices from the provider's pricing page and record them in the task report; file an SCR to add money figures to `S04/shared/cross-cutting.md` §6.2. Until that SCR is applied, budgets stay in tokens and request counts (D68).
 - **Acceptance tests:**
   - The task report lists the model prices with source and date, and the SCR ID (D68).
   - `pnpm --filter @czar/server eval P-01 P-02` passes every listed eval case, including all injection cases; CI fails if any injection case changes a protected field.
@@ -724,7 +724,7 @@
 
 ### T-047 Acceptance checker minimal: delivery and structural in a sandbox, AcceptanceReport, reportHash
 - **Milestone / group / who:** M3 / M3-b / agent. **Size:** M. **Deps:** T-006, T-007.
-- **Spec refs:** `S04/server-acceptance-evidence-selection.md` CZ-16 §5.1–§5.4, §5.8; `S02/data-and-protocol.md` §4.14, §5.2; D55.
+- **Spec refs:** `S04/server/server-acceptance-evidence-selection.md` CZ-16 §5.1–§5.4, §5.8; `S02/data-and-protocol.md` §4.14, §5.2; D55.
 - **Outputs:** `apps/server/src/acceptance/` (sandbox without network).
 - **Inputs:** `packages/schemas` (T-006); `packages/hashing` (T-007).
 - **Steps:**
@@ -739,7 +739,7 @@
 
 ### T-048 Paying agent vault-direct loop with step_executions and crash recovery
 - **Milestone / group / who:** M3 / M3-c / agent. **Size:** L. **Deps:** T-045, T-046, T-047, T-034, T-036.
-- **Spec refs:** `S04/server-planning-and-payment.md` CZ-15 §5.1, §5.2, §5.5, §6, §10, §12; `S03/czar-vault.md` §5.3, §6.1; `S02/data-and-protocol.md` §7.4, §7.5; A3-11, F1-06.
+- **Spec refs:** `S04/server/server-planning-and-payment.md` CZ-15 §5.1, §5.2, §5.5, §6, §10, §12; `S03/czar-vault.md` §5.3, §6.1; `S02/data-and-protocol.md` §7.4, §7.5; A3-11, F1-06.
 - **Outputs:** `apps/server/src/payer/vault-direct.ts`, `apps/server/src/payer/executions.ts`, executor leases.
 - **Steps:**
   - Tests first on `arc-anvil` with mocked Facilitator and a local seller.
@@ -769,7 +769,7 @@
 
 ### T-050 Thin slice on testnet: one real reserve → x402 → settle → finalize against czar-search, evidence recorded
 - **Milestone / group / who:** M3 / M3-d / agent, after Zaryab approves funds. **Size:** M. **Deps:** T-049, T-043.
-- **Spec refs:** `S04/phase-1-acceptance-scenario.md` Stage 4; `S01/system-architecture.md` §8.3; A1-17.
+- **Spec refs:** `S04/shared/phase-1-acceptance-scenario.md` Stage 4; `S01/system-architecture.md` §8.3; A1-17.
 - **Outputs:** run report `reports/m3-thin-slice.md` (tx hashes, events, no keys).
 - **Inputs:** receipts and evidence store from T-049; `czar-search` route from T-043; Zaryab's funds approval.
 - **Steps:**
@@ -786,7 +786,7 @@
 
 ### T-051 Merchants complete: czar-spot, czar-extract, Gateway routes for all three, sweeps, refunds (D50), index entries
 - **Milestone / group / who:** M4 / M4-a / agent. **Size:** L. **Deps:** T-050.
-- **Spec refs:** `S04/server-supply-side.md` CZ-20 §5.1–§5.9; `S02/data-and-protocol.md` §11.1, §12.2 (`extensions.czar.rail`, AM-17); D49, D50; p1-G11, A2-17, A2-28.
+- **Spec refs:** `S04/server/server-supply-side.md` CZ-20 §5.1–§5.9; `S02/data-and-protocol.md` §11.1, §12.2 (`extensions.czar.rail`, AM-17); D49, D50; p1-G11, A2-17, A2-28.
 - **Outputs:** `apps/merchants/src/{spot,extract,search}/` with vanilla and Gateway routes, sweep job, refund job.
 - **Inputs:** `apps/merchants/src/search/` and the M3 exit report `reports/m3-thin-slice.md` from T-050.
 - **Steps:**
@@ -850,7 +850,7 @@
 
 ### T-055 ERC-8183 evaluator service with K7 and the .well-known deliverable (D53)
 - **Milestone / group / who:** M4 / M4-c / agent. **Size:** M. **Deps:** T-054, T-056.
-- **Spec refs:** `S04/server-acceptance-evidence-selection.md` CZ-16 §5.5, §5.6; `S02/data-and-protocol.md` §4.11 (`deliverableUri`, AM-08); D27, D53.
+- **Spec refs:** `S04/server/server-acceptance-evidence-selection.md` CZ-16 §5.5, §5.6; `S02/data-and-protocol.md` §4.11 (`deliverableUri`, AM-08); D27, D53.
 - **Outputs:** `apps/server/src/evaluator/`.
 - **Inputs:** `apps/server/src/payer/job.ts` from T-054; profiles from T-056.
 - **Steps:**
@@ -895,7 +895,7 @@
 
 ### T-058 Third-party verification script (recompute from Committed event)
 - **Milestone / group / who:** M4 / M4-c / agent. **Size:** M. **Deps:** T-057.
-- **Spec refs:** CZ-17 §5.3, §5.4; `S04/phase-1-acceptance-scenario.md` Stage 8.2; p1-G10.
+- **Spec refs:** CZ-17 §5.3, §5.4; `S04/shared/phase-1-acceptance-scenario.md` Stage 8.2; p1-G10.
 - **Outputs:** `tools/verify-demand-proof/` (needs only an RPC URL and the archive URL).
 - **Inputs:** `apps/server/src/evidence/publisher.ts` and a committed batch from T-057.
 - **Steps:**
@@ -907,7 +907,7 @@
 
 ### T-059 Multi-path testnet run: vault-direct, pocket, job (complete, reject, expiry), batch anchored
 - **Milestone / group / who:** M4 / M4-d / agent, after Zaryab approves funds. **Size:** M. **Deps:** T-051..T-058.
-- **Spec refs:** `S04/phase-1-acceptance-scenario.md` Stages 4, 5, 6, 8.1, 8.2.
+- **Spec refs:** `S04/shared/phase-1-acceptance-scenario.md` Stages 4, 5, 6, 8.1, 8.2.
 - **Outputs:** run report `reports/m4-multipath.md`.
 - **Inputs:** outputs of T-051..T-058; Zaryab's funds approval.
 - **Steps:**
@@ -921,7 +921,7 @@
 
 ### T-108 Czar test provider for ERC-8183 jobs, two instances (H7, N12, D86)
 - **Milestone / group / who:** M4 / M4-b / agent; testnet gas for K21a/K21b only with Zaryab's approval. **Size:** M. **Deps:** T-105 (keys), T-043, T-051, T-054 (brief and upload routes).
-- **Spec refs:** `S04/server-supply-side.md` CZ-20 §5.11; `S02/data-and-protocol.md` §4.21, §6.2 (`BriefRequest`, `DeliverableUpload`), §9.2; `S04/server-autonomy-roi-keys.md` `provider-call`; `S04/server-acceptance-evidence-selection.md` CZ-18 §5.2 (N1); D86, D87; OD-41.
+- **Spec refs:** `S04/server/server-supply-side.md` CZ-20 §5.11; `S02/data-and-protocol.md` §4.21, §6.2 (`BriefRequest`, `DeliverableUpload`), §9.2; `S04/server/server-autonomy-roi-keys.md` `provider-call`; `S04/server/server-acceptance-evidence-selection.md` CZ-18 §5.2 (N1); D86, D87; OD-41.
 - **Outputs:** `apps/merchants/src/provider/` (instances `czar-provider-a`, `czar-provider-b`), their index entries, `@czar/config` keys `merchants.provider.*`.
 - **Steps:**
   - Build the loop in CZ-20 §5.11 against the Circle mock first, then the fork.
@@ -938,7 +938,7 @@
 
 ### T-106 Czar test-merchant lab: six behaviour profiles on testnet (D83)
 - **Milestone / group / who:** M4 / M4-a / agent. **Size:** M. **Deps:** T-051, T-105.
-- **Spec refs:** `S04/server-supply-side.md` CZ-20 §5.8a, §5.9, §14; `S04/server-acceptance-evidence-selection.md` CZ-18 §5.2, §12; D83.
+- **Spec refs:** `S04/server/server-supply-side.md` CZ-20 §5.8a, §5.9, §14; `S04/server/server-acceptance-evidence-selection.md` CZ-18 §5.2, §12; D83.
 - **Outputs:** `apps/merchants/src/lab/` (route group `/lab/<service>/…`), profile parameters in `@czar/config` `merchants.lab.*`, index entries with `czar-test-merchant`.
 - **Inputs:** merchant core from T-051; lab `payTo` addresses from T-105.
 - **Steps:**
@@ -981,7 +981,7 @@
 
 ### T-060 Daemon skeleton (macOS only, D67): macOS SMAppService/launchctl install, update, uninstall; Unix socket and loopback hook endpoint; encrypted SQLite; keychain
 - **Milestone / group / who:** M5 / M5-a / agent. **Size:** L. **Deps:** T-004, T-005, T-006.
-- **Spec refs:** `S04/local-observers-and-daemon.md` CZ-02 §3, §5.1–§5.5, §10, §12; B6-02 to B6-06, B6-12, B6-17, B6-19; D3-08; D67 (macOS only in Phase 1; Linux and Windows are stage 2, `S05/stage-2-backlog.md` P2-13).
+- **Spec refs:** `S04/local/local-observers-and-daemon.md` CZ-02 §3, §5.1–§5.5, §10, §12; B6-02 to B6-06, B6-12, B6-17, B6-19; D3-08; D67 (macOS only in Phase 1; Linux and Windows are stage 2, `S05/stage-2-backlog.md` P2-13).
 - **Outputs:** `apps/daemon/` (lifecycle, socket, hook endpoint with `Origin` check and token K16, SQLite schema, keychain access).
 - **Inputs:** `packages/config` (T-004), `packages/logging` (T-005), `packages/schemas` (T-006).
 - **Steps:**
@@ -1007,7 +1007,7 @@
 
 ### T-062 Observer plugin czar-observer: hooks.json, .mcp.json, validate --strict, http default with command fallback (D46)
 - **Milestone / group / who:** M5 / M5-b / agent. **Size:** M. **Deps:** T-060, G0-11, G0-17 (B3-10 re-check).
-- **Spec refs:** `S04/local-observers-and-daemon.md` CZ-01 §5.1–§5.4; `S02/data-and-protocol.md` §8.2; `S02/mcp/czar-mcp-tools.md` §5; D46; B1-08 to B1-11, B1-18, B1-22, B1-25, B1-34 to B1-39.
+- **Spec refs:** `S04/local/local-observers-and-daemon.md` CZ-01 §5.1–§5.4; `S02/data-and-protocol.md` §8.2; `S02/mcp/czar-mcp-tools.md` §5; D46; B1-08 to B1-11, B1-18, B1-22, B1-25, B1-34 to B1-39.
 - **Outputs:** `plugins/claude-code/` (`.claude-plugin/plugin.json`, `hooks/hooks.json`, `.mcp.json`, `skills/czar/SKILL.md`, `bin/czar-hook`).
 - **Inputs:** `apps/daemon/` hook endpoint from T-060; host check record `docs/specs/05-build-plan/gate-0-results/G0-11.md`.
 - **Steps:**
@@ -1022,7 +1022,7 @@
 
 ### T-063 Hook intake: host detection, 02 §8 mappings, drop user_email, layer-1 redaction, ASI06 write gate, memory
 - **Milestone / group / who:** M5 / M5-c / agent. **Size:** L. **Deps:** T-062, T-008.
-- **Spec refs:** `S02/data-and-protocol.md` §8.1–§8.5, §4.1 (`repeatCount`, `provenance.flags`, AM-12); `S04/local-observers-and-daemon.md` CZ-02 §5.2, CZ-03 §5.2; B3-04, B3-10; C3-02.
+- **Spec refs:** `S02/data-and-protocol.md` §8.1–§8.5, §4.1 (`repeatCount`, `provenance.flags`, AM-12); `S04/local/local-observers-and-daemon.md` CZ-02 §5.2, CZ-03 §5.2; B3-04, B3-10; C3-02.
 - **Outputs:** `apps/daemon/src/intake/`, `apps/daemon/src/memory/`.
 - **Inputs:** `plugins/claude-code/` from T-062; `packages/redaction` from T-008.
 - **Steps:**
@@ -1038,7 +1038,7 @@
 
 ### T-064 Bundled Presidio helper czar-redact packaged with uv inside the installer (D45), regex fallback with forced review
 - **Milestone / group / who:** M5 / M5-b / agent. **Size:** L. **Deps:** T-060.
-- **Spec refs:** `S04/local-observers-and-daemon.md` CZ-26 §3–§10; D45, D47; C2-01 to C2-05; AR-19 in `S04/amendments-and-open-decisions.md` §3.
+- **Spec refs:** `S04/local/local-observers-and-daemon.md` CZ-26 §3–§10; D45, D47; C2-01 to C2-05; AR-19 in `S04/shared/amendments-and-open-decisions.md` §3.
 - **Outputs:** `apps/redact-sidecar/` (Python 3.13, `uv`, hashes pinned, Presidio 2.2.364), installer bundling, socket protocol.
 - **Inputs:** `apps/daemon/` socket from T-060; layer-2 client interface in `packages/redaction` (T-008).
 - **Steps:**
@@ -1052,7 +1052,7 @@
 
 ### T-065 Server model proxy route completeModelCall (stores counts only, D31)
 - **Milestone / group / who:** M5 / M5-b / agent. **Size:** M. **Deps:** T-041.
-- **Spec refs:** `S02/api/openapi.yaml` `completeModelCall` (AM-02); `S04/cross-cutting.md` §6; D31.
+- **Spec refs:** `S02/api/openapi.yaml` `completeModelCall` (AM-02); `S04/shared/cross-cutting.md` §6; D31.
 - **Outputs:** `apps/server/src/models/proxy.ts`.
 - **Inputs:** `apps/server/` from T-041; prompt files in `models/`.
 - **Steps:**
@@ -1066,7 +1066,7 @@
 
 ### T-066 Soul compiler CZ-04 with P-04, D58 rules-only fallback, submitSoulVersion, weekly diff
 - **Milestone / group / who:** M5 / M5-d / agent. **Size:** L. **Deps:** T-063, T-064, T-065.
-- **Spec refs:** `S04/local-soul-and-drives.md` CZ-04 §5.1–§5.10; `S04/ai-prompts.md` P-04; `S02/data-and-protocol.md` §4.2 (`Belief.state`, `Belief.key`, AM-13), §5.2, §4.18; D31, D58.
+- **Spec refs:** `S04/local/local-soul-and-drives.md` CZ-04 §5.1–§5.10; `S04/shared/ai-prompts.md` P-04; `S02/data-and-protocol.md` §4.2 (`Belief.state`, `Belief.key`, AM-13), §5.2, §4.18; D31, D58.
 - **Outputs:** `apps/daemon/src/soul/`, `models/P-04.md`, `models/evals/P-04/`.
 - **Inputs:** memory from T-063; `apps/redact-sidecar/` from T-064; model proxy from T-065.
 - **Steps:**
@@ -1084,7 +1084,7 @@
 
 ### T-067 Soul viewer CZ-05 on local-openapi.yaml routes
 - **Milestone / group / who:** M5 / M5-e / agent. **Size:** M. **Deps:** T-066.
-- **Spec refs:** `S04/local-soul-and-drives.md` CZ-05; `S02/api/local-openapi.yaml` (AM-16); D34; D3-08.
+- **Spec refs:** `S04/local/local-soul-and-drives.md` CZ-05; `S02/api/local-openapi.yaml` (AM-16); D34; D3-08.
 - **Outputs:** `apps/daemon/src/viewer/` (loopback UI and routes).
 - **Inputs:** `apps/daemon/src/soul/` from T-066; `packages/api-contract` (T-009).
 - **Steps:**
@@ -1098,7 +1098,7 @@
 
 ### T-068 Drives engine CZ-06: three detectors, P-05, P-06, ROI filter (D56, D57)
 - **Milestone / group / who:** M5 / M5-d / agent. **Size:** L. **Deps:** T-063, T-065.
-- **Spec refs:** `S04/local-soul-and-drives.md` CZ-06 §5.1–§5.8; `S04/ai-prompts.md` P-05, P-06; `S02/data-and-protocol.md` §4.3 (statuses, AM-14), §5.2; D56, D57.
+- **Spec refs:** `S04/local/local-soul-and-drives.md` CZ-06 §5.1–§5.8; `S04/shared/ai-prompts.md` P-05, P-06; `S02/data-and-protocol.md` §4.3 (statuses, AM-14), §5.2; D56, D57.
 - **Outputs:** `apps/daemon/src/drives/`, `models/P-05.md`, `models/P-06.md`, eval folders.
 - **Inputs:** memory from T-063; model proxy from T-065.
 - **Steps:**
@@ -1114,7 +1114,7 @@
 
 ### T-069 Objective publisher CZ-07 with first-five review (D47)
 - **Milestone / group / who:** M5 / M5-e / agent. **Size:** M. **Deps:** T-068, T-064, T-061.
-- **Spec refs:** `S04/local-soul-and-drives.md` CZ-07; `S02/data-and-protocol.md` §4.4, §5.2; D25, D47.
+- **Spec refs:** `S04/local/local-soul-and-drives.md` CZ-07; `S02/data-and-protocol.md` §4.4, §5.2; D25, D47.
 - **Outputs:** `apps/daemon/src/publisher/`.
 - **Inputs:** `apps/daemon/src/drives/` (T-068); redaction helper (T-064); device token (T-061).
 - **Steps:**
@@ -1129,7 +1129,7 @@
 
 ### T-070 Shadow mode CZ-08, shadowQuote route, IngestReport.shadowTotals
 - **Milestone / group / who:** M5 / M5-e / agent. **Size:** M. **Deps:** T-069, T-045.
-- **Spec refs:** `S04/local-soul-and-drives.md` CZ-08; `S02/api/openapi.yaml` `shadowQuote`, `ingestReport` (`shadowTotals`, AM-04), `getMe` (`mode`, `shadowEndsAt`, AM-03).
+- **Spec refs:** `S04/local/local-soul-and-drives.md` CZ-08; `S02/api/openapi.yaml` `shadowQuote`, `ingestReport` (`shadowTotals`, AM-04), `getMe` (`mode`, `shadowEndsAt`, AM-03).
 - **Outputs:** `apps/daemon/src/shadow/`, server `shadowQuote` handler.
 - **Inputs:** publisher from T-069; planner from T-045.
 - **Steps:**
@@ -1155,7 +1155,7 @@
 
 ### T-072 MCP server CZ-09: stdio, dual era, get_objectives/quote/pay/report_outcome, URL-mode elicitation
 - **Milestone / group / who:** M5 / M5-d / agent. **Size:** L. **Deps:** T-071, T-061.
-- **Spec refs:** `S04/local-agent-surfaces.md` CZ-09 §5.1–§5.3, §10; `S02/mcp/czar-mcp-tools.md` §1–§6; D3-02 to D3-11.
+- **Spec refs:** `S04/local/local-agent-surfaces.md` CZ-09 §5.1–§5.3, §10; `S02/mcp/czar-mcp-tools.md` §1–§6; D3-02 to D3-11.
 - **Outputs:** `apps/mcp/` and `plugins/claude-code/bin/czar-mcp`.
 - **Inputs:** routes from T-071; device token from T-061.
 - **Steps:**
@@ -1170,7 +1170,7 @@
 
 ### T-073 Write-back adapter CZ-11 with getResult/ackResult and SessionStart pointer
 - **Milestone / group / who:** M5 / M5-d / agent. **Size:** M. **Deps:** T-062, T-061.
-- **Spec refs:** `S04/local-agent-surfaces.md` CZ-11 §5.1–§5.4; `S02/api/openapi.yaml` `getResult`, `ackResult`; `S02/data-and-protocol.md` §13.1 (result marker, AM-18); B1-14.
+- **Spec refs:** `S04/local/local-agent-surfaces.md` CZ-11 §5.1–§5.4; `S02/api/openapi.yaml` `getResult`, `ackResult`; `S02/data-and-protocol.md` §13.1 (result marker, AM-18); B1-14.
 - **Outputs:** `apps/daemon/src/writeback/`, `SessionStart` pointer in the plugin.
 - **Inputs:** `plugins/claude-code/` from T-062; device token from T-061.
 - **Steps:**
@@ -1182,7 +1182,7 @@
   - `ackResult` returns `204`; the next `SessionStart` prints the pointer line.
 - **Review fixes (2026-10-19):** Status filters use `ObjectiveStatusValue` only (RV-027).
 - **D82 extension (2026-10-20):** the adapter also builds the assembler (CZ-11 §5.2a). Size becomes L.
-  - Extra spec refs: `S02/data-and-protocol.md` §4.6.1; OpenAPI `Result.assembly`, `ResultAck.assembly`; `S04/server-acceptance-evidence-selection.md` `local-template-v1`.
+  - Extra spec refs: `S02/data-and-protocol.md` §4.6.1; OpenAPI `Result.assembly`, `ResultAck.assembly`; `S04/server/server-acceptance-evidence-selection.md` `local-template-v1`.
   - Extra outputs: `apps/daemon/src/writeback/assembler/` (templates `table-build`, `list-build`, `merge-dedupe`; marker restore; `local-template-v1` check); marker-map storage written by T-069.
   - Extra acceptance tests: every assembler test in CZ-11 §14; a Phase 1 scenario run where `table-build` after `web-search` and `page-extract` writes a table with restored names and reports `assembled` with `structuralPass = true`; no model call and no network call happen during assembly (asserted by a network-deny test).
 - **D84 (2026-10-20):** `table-build` lays out one row per `TaskSpec` subject under the person's own header, filled by `subjectIndex`.
@@ -1209,7 +1209,7 @@
 
 ### T-110 Soul source intake, migration and redaction (D90)
 - **Milestone / group / who:** M5 / M5-c / agent. **Size:** L. **Deps:** T-060, T-063, T-064, T-109.
-- **Spec refs:** `S04/local-observers-and-daemon.md` CZ-02 §4 (`soul.propose`), §5.3 (new tables, migration), §5.6, §8, §9, §14; CZ-26 §2, §6, §14; `S02/data-and-protocol.md` §4.23, §4.26, §9.7; D90 item 8.
+- **Spec refs:** `S04/local/local-observers-and-daemon.md` CZ-02 §4 (`soul.propose`), §5.3 (new tables, migration), §5.6, §8, §9, §14; CZ-26 §2, §6, §14; `S02/data-and-protocol.md` §4.23, §4.26, §9.7; D90 item 8.
 - **Outputs:** `apps/daemon/src/soul-input/` (roots, consent, scanner, git reader, paste, socket method), SQLite migration.
 - **Inputs:** daemon (T-060), `file_paths` (T-063), sidecar (T-064), schemas (T-109).
 - **Steps:**
@@ -1224,7 +1224,7 @@
 
 ### T-111 P-07, belief promotion and the three Phase 1 consumers (D90)
 - **Milestone / group / who:** M5 / M5-d / agent. **Size:** M. **Deps:** T-065, T-066, T-068, T-069, T-110.
-- **Spec refs:** `S04/ai-prompts.md` P-01 (`soul-source`), P-07; `S04/local-soul-and-drives.md` CZ-04 §5.2, §5.6, §5.9, §5.11, §14; CZ-06 §5.5, §5.6 step 5; CZ-07 §5 (`constraints`); `S04/cross-cutting.md` §6; D90 items 3, 6, 9.
+- **Spec refs:** `S04/shared/ai-prompts.md` P-01 (`soul-source`), P-07; `S04/local/local-soul-and-drives.md` CZ-04 §5.2, §5.6, §5.9, §5.11, §14; CZ-06 §5.5, §5.6 step 5; CZ-07 §5 (`constraints`); `S04/shared/cross-cutting.md` §6; D90 items 3, 6, 9.
 - **Outputs:** `models/P-07.md`, `models/evals/P-07/`; `apps/daemon/src/soul/promotion.ts`; interview templates; consumer wiring in drives and publisher.
 - **Inputs:** proxy (T-065), compiler (T-066), drives (T-068), publisher (T-069), intake (T-110).
 - **Steps:**
@@ -1239,7 +1239,7 @@
 
 ### T-112 Viewer: interview, sources, review, bundle confirm (D90)
 - **Milestone / group / who:** M5 / M5-e / agent. **Size:** M. **Deps:** T-067, T-111.
-- **Spec refs:** `S04/local-soul-and-drives.md` CZ-05 §2, §4, §6, §8, §12, §14; `S02/api/local-openapi.yaml` 1.1; `S04/app-and-notifications.md` §12 (`getSoulPointer` message); D90 items 2–6.
+- **Spec refs:** `S04/local/local-soul-and-drives.md` CZ-05 §2, §4, §6, §8, §12, §14; `S02/api/local-openapi.yaml` 1.1; `S04/app/app-and-notifications.md` §12 (`getSoulPointer` message); D90 items 2–6.
 - **Outputs:** `apps/daemon/src/viewer/` soul-input pages and routes; the server's `SoulPointer.message` rule.
 - **Inputs:** viewer (T-067), promotion (T-111).
 - **Steps:**
@@ -1253,7 +1253,7 @@
 
 ### T-113 MCP `propose_soul_context` (D90)
 - **Milestone / group / who:** M5 / M5-d / agent. **Size:** S. **Deps:** T-072, T-111.
-- **Spec refs:** `S02/mcp/czar-mcp-tools.md` §2.6; `S04/local-agent-surfaces.md` CZ-09 §4, §6, §8, §9, §14; D90 items 5, 8.
+- **Spec refs:** `S02/mcp/czar-mcp-tools.md` §2.6; `S04/local/local-agent-surfaces.md` CZ-09 §4, §6, §8, §9, §14; D90 items 5, 8.
 - **Outputs:** the tool in `apps/mcp/`; skill wording in `plugins/claude-code/skills/czar/SKILL.md`.
 - **Inputs:** MCP server (T-072), `soul.propose` (T-110, T-111).
 - **Steps:**
@@ -1266,7 +1266,7 @@
 ### T-114 User-confirmed open loops (D90) — blocked on SCR-030 / Flow 7
 - **Milestone / group / who:** M5 / M5-e / agent. **Size:** L. **Deps:** T-068, T-069, T-070, T-112, and SCR-030 accepted in the Flow 7 review.
 - **Status:** **do not start.** The wire field, hash rules, leaf versions, confirm route and server enforcement are not in the specs yet; building them now would invent them (CLAUDE.md). This task is rewritten from SCR-030's decision.
-- **Spec refs (current):** `S04/local-soul-and-drives.md` CZ-06 §5.1b, CZ-08 §2 exception; `S06/change-requests/SCR-030-confirmed-demand-and-soul-v2-evidence.md`; D90 items 10, 11, 13.
+- **Spec refs (current):** `S04/local/local-soul-and-drives.md` CZ-06 §5.1b, CZ-08 §2 exception; `S06/change-requests/SCR-030-confirmed-demand-and-soul-v2-evidence.md`; D90 items 10, 11, 13.
 - **Acceptance tests (expected, final after SCR-030):**
   - A scan preview alone cannot publish; **Do this** on a current placeholder yields an objective with `observationHashes = []`, two typed commitments and the D84 subjects.
   - Every confirmed objective skips the shadow default, but without the owner's UserOp no envelope opens and earned allowance cannot fund it.
@@ -1290,7 +1290,7 @@
 
 ### T-080 Web app scaffold (Next.js) for the desktop browser, USD-only formatter (D51)
 - **Milestone / group / who:** M6 / M6-a / agent. **Size:** M. **Deps:** T-001.
-- **Spec refs:** `S04/app-and-notifications.md` CZ-22 §3, §5.1, §12; D51, D69 (desktop browser in Phase 1; Home Screen install and manifest are stage 2).
+- **Spec refs:** `S04/app/app-and-notifications.md` CZ-22 §3, §5.1, §12; D51, D69 (desktop browser in Phase 1; Home Screen install and manifest are stage 2).
 - **Outputs:** `apps/web/`, `packages/money-format/` inside `apps/web` (USD only, USDC 1:1).
 - **Inputs:** workspace from T-001.
 - **Steps:**
@@ -1316,7 +1316,7 @@
 
 ### T-082 Onboarding in the desktop browser: passkey MSCA, createVault UserOp, funding, limits, Network fee reserve (D52)
 - **Milestone / group / who:** M6 / M6-b / agent. **Size:** L. **Deps:** T-080, T-081, T-026, G0-03.
-- **Spec refs:** `S04/app-and-notifications.md` CZ-22 §5.2, §10, §12; `S03/czar-vault-factory.md` §5; `S03/czar-vault.md` §5.1; D26, D30, D52, D64, D69; D1-01, A1-13, A6-06, A6-19, A6-26.
+- **Spec refs:** `S04/app/app-and-notifications.md` CZ-22 §5.2, §10, §12; `S03/czar-vault-factory.md` §5; `S03/czar-vault.md` §5.1; D26, D30, D52, D64, D69; D1-01, A1-13, A6-06, A6-19, A6-26.
 - **Outputs:** onboarding screens and flows in `apps/web/`.
 - **Inputs:** `apps/web/` (T-080); app read routes (T-081); `packages/vault-client` (T-026); MSCA record `docs/specs/05-build-plan/gate-0-results/G0-03.md`.
 - **Steps:**
@@ -1334,7 +1334,7 @@
 ### T-083 Notifications CZ-23 and createPushSubscription with Declarative Web Push — moved to stage 2 (D69)
 - **Status:** moved to stage 2 (D69). Not part of Phase 1; no Phase 1 task depends on it. Kept here for stage 2 (`S05/stage-2-backlog.md` §2, M-4). When scheduled it also needs the stage-2 checks G0-02 and G0-15.
 - **Milestone / group / who:** stage 2 / — / agent. **Size:** M. **Deps:** T-080, T-041, G0-15 (stage 2).
-- **Spec refs:** `S04/app-and-notifications.md` CZ-23; `S02/mcp/czar-mcp-tools.md` §7; `S02/api/openapi.yaml` `createPushSubscription`, `deletePushSubscription`; D2-02, D2-04, D2-06, D2-07.
+- **Spec refs:** `S04/app/app-and-notifications.md` CZ-23; `S02/mcp/czar-mcp-tools.md` §7; `S02/api/openapi.yaml` `createPushSubscription`, `deletePushSubscription`; D2-02, D2-04, D2-06, D2-07.
 - **Outputs:** `apps/server/src/push/`, subscription UI behind a real tap.
 - **Inputs:** `apps/web/` (T-080); `apps/server/` (T-041); push record `docs/specs/05-build-plan/gate-0-results/G0-15.md`.
 - **Steps:**
@@ -1348,7 +1348,7 @@
 ### T-084 Approvals: listApprovals, getApproval, createApprovalIntent with re-encode check, UserOp submit, notifySubmitted
 - **Layout:** desktop browser only; the pending list (`listApprovals`) is the only approval channel in Phase 1 (D69). Mobile layouts are stage 2.
 - **Milestone / group / who:** M6 / M6-c / agent. **Size:** L. **Deps:** T-082, T-045.
-- **Spec refs:** `S04/app-and-notifications.md` CZ-22 §5.3, §12; `S02/api/openapi.yaml` `listApprovals`, `getApproval`, `createApprovalIntent` (`decoded`, AM-06), `notifySubmitted`; CZ-12 §5; D30, D36.
+- **Spec refs:** `S04/app/app-and-notifications.md` CZ-22 §5.3, §12; `S02/api/openapi.yaml` `listApprovals`, `getApproval`, `createApprovalIntent` (`decoded`, AM-06), `notifySubmitted`; CZ-12 §5; D30, D36.
 - **Outputs:** approval screens and flow.
 - **Inputs:** onboarding from T-082; planner from T-045.
 - **Steps:**
@@ -1368,7 +1368,7 @@
 ### T-085 Freeze and unfreeze (createFreezeIntent) and D60 agent lowering of limits
 - **Layout:** desktop browser only (D69). Lowering is a follow-up agent step after `Frozen`, not atomic (D63).
 - **Milestone / group / who:** M6 / M6-c / agent. **Size:** M. **Deps:** T-084, T-048, T-034.
-- **Spec refs:** `S04/app-and-notifications.md` CZ-22 §5.4; `S03/czar-vault.md` §5.1, §5.6 (D60 note); `S02/api/openapi.yaml` `createFreezeIntent`; D60, D63.
+- **Spec refs:** `S04/app/app-and-notifications.md` CZ-22 §5.4; `S03/czar-vault.md` §5.1, §5.6 (D60 note); `S02/api/openapi.yaml` `createFreezeIntent`; D60, D63.
 - **Outputs:** freeze UI, server listener that calls `lowerAutoLimit(categoryId, 0)` per used category after `Frozen`.
 - **Inputs:** approvals from T-084; paying agent from T-048; indexer query API from T-034.
 - **Steps:**
@@ -1383,7 +1383,7 @@
 ### T-086 Ledger, receipts, monthly statement and shadow summary screens
 - **Layout:** desktop browser only (D69).
 - **Milestone / group / who:** M6 / M6-c / agent. **Size:** M. **Deps:** T-081, T-070, T-095, M5 exit (RV-053).
-- **Spec refs:** `S04/app-and-notifications.md` CZ-22 §12 (every money state); `S04/server-planning-and-payment.md` CZ-15 §12; `S02/api/openapi.yaml` `listReceipts`, `getMonthlyStatement`; D35, D51.
+- **Spec refs:** `S04/app/app-and-notifications.md` CZ-22 §12 (every money state); `S04/server/server-planning-and-payment.md` CZ-15 §12; `S02/api/openapi.yaml` `listReceipts`, `getMonthlyStatement`; D35, D51.
 - **Inputs:** app read routes from T-081; shadow totals from T-070.
 - **Outputs:** ledger, receipts, monthly statement and shadow summary screens in `apps/web/`.
 - **Steps:**
@@ -1412,7 +1412,7 @@
 
 ### T-090 Selection Layer lite: attribution, Czar-registered index, live Circle catalog with TTL cache (D15)
 - **Milestone / group / who:** M7 / M7-a / agent. **Size:** L. **Deps:** T-041, T-051.
-- **Spec refs:** `S04/server-acceptance-evidence-selection.md` CZ-18 §5.1, §5.3, §5.4, §5.5; `S02/data-and-protocol.md` §12.3; D15; p1-D1, p1-D2, p1-D7, p1-D8.
+- **Spec refs:** `S04/server/server-acceptance-evidence-selection.md` CZ-18 §5.1, §5.3, §5.4, §5.5; `S02/data-and-protocol.md` §12.3; D15; p1-D1, p1-D2, p1-D7, p1-D8.
 - **Outputs:** `apps/server/src/selection/intake/`.
 - **Inputs:** `apps/server/` from T-041; merchants and index entries from T-051.
 - **Steps:**
@@ -1442,7 +1442,7 @@
 
 ### T-092 Planner P-03 decomposition over CZ-18 candidates, eval suite
 - **Milestone / group / who:** M7 / M7-c / agent. **Size:** M. **Deps:** T-091, T-045.
-- **Spec refs:** CZ-13 §5 step 4, §7; `S04/ai-prompts.md` P-03.
+- **Spec refs:** CZ-13 §5 step 4, §7; `S04/shared/ai-prompts.md` P-03.
 - **Outputs:** `models/P-03.md`, `models/evals/P-03/`, planner integration.
 - **Inputs:** ranking from T-091; planner from T-045.
 - **Steps:**
@@ -1456,7 +1456,7 @@
 
 ### T-093 MCP find_service wiring
 - **Milestone / group / who:** M7 / M7-c / agent. **Size:** S. **Deps:** T-091, T-072.
-- **Spec refs:** `S02/mcp/czar-mcp-tools.md` §2.2; `S04/local-agent-surfaces.md` CZ-09 §4.
+- **Spec refs:** `S02/mcp/czar-mcp-tools.md` §2.2; `S04/local/local-agent-surfaces.md` CZ-09 §4.
 - **Inputs:** `findService` route from T-091; `apps/mcp/` from T-072.
 - **Outputs:** `find_service` handler in `apps/mcp/`.
 - **Steps:**
@@ -1468,7 +1468,7 @@
 
 ### T-094 Earned autonomy CZ-24 and raiseAutoLimit relay
 - **Milestone / group / who:** M7 / M7-a / agent. **Size:** M. **Deps:** T-071, T-036.
-- **Spec refs:** `S04/server-autonomy-roi-keys.md` CZ-24 §5.1–§5.7; `S03/czar-vault.md` §5.6; D40, D59, D60.
+- **Spec refs:** `S04/server/server-autonomy-roi-keys.md` CZ-24 §5.1–§5.7; `S03/czar-vault.md` §5.6; D40, D59, D60.
 - **Outputs:** `apps/server/src/autonomy/`.
 - **Inputs:** `reportOutcome` route from T-071; KMS relayer and K5 from T-036.
 - **Steps:**
@@ -1482,7 +1482,7 @@
 
 ### T-095 ROI ledger CZ-25 and getMonthlyStatement
 - **Milestone / group / who:** M7 / M7-a / agent. **Size:** M. **Deps:** T-049, T-071.
-- **Spec refs:** `S04/server-autonomy-roi-keys.md` CZ-25 §5.1–§5.4; `S02/api/openapi.yaml` `getMonthlyStatement`, `LedgerReceipt` (`minutesSaved`, `minutesSource`, AM-05); D51.
+- **Spec refs:** `S04/server/server-autonomy-roi-keys.md` CZ-25 §5.1–§5.4; `S02/api/openapi.yaml` `getMonthlyStatement`, `LedgerReceipt` (`minutesSaved`, `minutesSource`, AM-05); D51.
 - **Inputs:** receipts from T-049; `reportOutcome` route from T-071.
 - **Outputs:** `apps/server/src/roi/` with `ledger_receipts` and `monthly_statements` tables; `getMonthlyStatement` handler.
 - **Steps:**
@@ -1498,7 +1498,7 @@
 
 ### T-107 Market view: unpaid market probes, `getMarketView`, `marketReference` (D83)
 - **Milestone / group / who:** M7 / M7-b / agent. **Size:** M. **Deps:** T-090, T-042.
-- **Spec refs:** `S04/server-acceptance-evidence-selection.md` CZ-18 §5.3a, §5.5 (`market_probes`, `market_origin_state`), §5.6, §12, §14; `S02/data-and-protocol.md` §4.22; `S02/schemas/market-view.schema.json`; OpenAPI `getMarketView`; D83; p1-D1, p1-D2, p1-D6, p1-D7, p1-D8.
+- **Spec refs:** `S04/server/server-acceptance-evidence-selection.md` CZ-18 §5.3a, §5.5 (`market_probes`, `market_origin_state`), §5.6, §12, §14; `S02/data-and-protocol.md` §4.22; `S02/schemas/market-view.schema.json`; OpenAPI `getMarketView`; D83; p1-D1, p1-D2, p1-D6, p1-D7, p1-D8.
 - **Outputs:** `apps/server/src/selection/market/`, the route, the background refresher, `Plan.marketReference` for CZ-13 shadow plans.
 - **Inputs:** catalog intake from T-090; `safeFetch` and 402 parsing from T-042.
 - **Steps:**
@@ -1538,7 +1538,7 @@
 
 ### T-100 End-to-end harness tests/e2e/phase1.spec.ts
 - **Milestone / group / who:** M8 / M8-a / agent. **Size:** L. **Deps:** M3..M7 exits.
-- **Spec refs:** `S04/phase-1-acceptance-scenario.md` (all stages, harness paragraph).
+- **Spec refs:** `S04/shared/phase-1-acceptance-scenario.md` (all stages, harness paragraph).
 - **Outputs:** `tests/e2e/phase1.spec.ts`, fault-injection hooks, run-report generator.
 - **Inputs:** exit reports of M3..M7 and all apps and packages built in T-001..T-095.
 - **Steps:**
@@ -1550,7 +1550,7 @@
 
 ### T-101 Acceptance scenario in CI on arc-anvil fork with mocked Circle services (stages 1–8)
 - **Milestone / group / who:** M8 / M8-b / agent. **Size:** M. **Deps:** T-100.
-- **Spec refs:** `S04/phase-1-acceptance-scenario.md` Stages 1–8, "Definition of done for the scenario"; `S04/cross-cutting.md` §3.1 (`local` environment).
+- **Spec refs:** `S04/shared/phase-1-acceptance-scenario.md` Stages 1–8, "Definition of done for the scenario"; `S04/shared/cross-cutting.md` §3.1 (`local` environment).
 - **Inputs:** `tests/e2e/phase1.spec.ts` from T-100.
 - **Outputs:** CI job `e2e-fork` in `.github/workflows/ci.yml`; run report `reports/phase-1-fork-run.md`.
 - **Steps:**
@@ -1565,7 +1565,7 @@
 
 ### T-102 Acceptance scenario on live testnet, including Stage 0 in a desktop browser
 - **Milestone / group / who:** M8 / M8-c / Zaryab + agent, after Zaryab approves funds. **Size:** M. **Deps:** T-101.
-- **Spec refs:** `S04/phase-1-acceptance-scenario.md` Stages 0–8.
+- **Spec refs:** `S04/shared/phase-1-acceptance-scenario.md` Stages 0–8.
 - **Outputs:** `reports/phase-1-acceptance.md` (every event hash, `planHash`, `payeeRoot`, batch root, archive URL, T-058 output).
 - **Inputs:** CI pass of T-101; Zaryab's funds approval; a Mac with desktop Safari.
 - **Steps:**
@@ -1578,7 +1578,7 @@
 
 ### T-103 Security gates and log scan for the release
 - **Milestone / group / who:** M8 / M8-b / agent. **Size:** M. **Deps:** T-101.
-- **Spec refs:** `S05/build-plan.md` §8; `S04/cross-cutting.md` §4; `S03/security-and-testing.md` §3.6.
+- **Spec refs:** `S05/build-plan.md` §8; `S04/shared/cross-cutting.md` §4; `S03/security-and-testing.md` §3.6.
 - **Inputs:** CI run of T-101; `docs/specs/05-build-plan/build-plan.md` §8.
 - **Outputs:** CI job `release-gates` in `.github/workflows/ci.yml`; report `reports/phase-1-security-gates.md`.
 - **Steps:**

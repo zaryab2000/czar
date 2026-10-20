@@ -1,6 +1,6 @@
 # Local agent surfaces (spec 04)
 
-- **Date:** 2026-10-18. **Status:** draft for review. Conventions: `cross-cutting.md`. Data shapes: spec 02 only; MCP tools exactly as `docs/specs/02-data-and-protocol/mcp/czar-mcp-tools.md`; OpenAPI by `operationId`.
+- **Date:** 2026-10-18. **Status:** draft for review. Conventions: `../shared/cross-cutting.md`. Data shapes: spec 02 only; MCP tools exactly as `docs/specs/02-data-and-protocol/mcp/czar-mcp-tools.md`; OpenAPI by `operationId`.
 - **Components:** CZ-09 local MCP server (Phase 1), CZ-10 soul injection writer (Phase 2 outline), CZ-11 write-back adapter (Phase 1, one surface).
 
 ---
@@ -406,7 +406,7 @@ Write ≤ 50 ms for 1 MB; pointer ≤ 300 ms; no model cost.
 
 - Unit: file naming and slugging (no traversal); header and labels generated from `provenance[]` exactly; JSON sidecar; marker-based overwrite refusal; pointer once per result and ≤ 200 chars.
 - Integration: mocked `getResult` → file → `ackResult` with the same idempotency key on retry; crash between rename and ack replays the ack.
-- End-to-end: the Phase 1 scenario step "write-back" (`phase-1-acceptance-scenario.md`) passes: the next Claude Code session shows the pointer line.
+- End-to-end: the Phase 1 scenario step "write-back" (`../shared/phase-1-acceptance-scenario.md`) passes: the next Claude Code session shows the pointer line.
 - Assembler (D82): golden tests per template; markers restored from a fixture map; an unmapped marker stays and is flagged; header ≠ `columns[]` fails `local-template-v1`; a cell holding `|`, backticks, `[x](javascript:…)` or `=cmd()` is escaped in Markdown and CSV; `accepted: false` inputs are left out and counted; a thrown template error yields `assembly-failed` with paid sections still written; `ackResult.assembly[]` carries no strings other than enums.
 - In-place fill (D85): only recorded spans change (byte-compare the rest of the file); a span whose cell was edited after detection is skipped; rows moved within 20 lines are still found; a value with `|`, backticks or a newline cannot break the table; crash between temp write and rename leaves the original intact; undo restores only cells still holding Czar's values; `fillInPlace = false` never touches the file.
 - Artifacts (H6, N2): an unflagged 200 KB Markdown artifact is written whole with its header; a flagged artifact never appears under the project folder or in the pointer; release copies it with the flag header; delete removes it; no artifact is ever applied as a patch; size limit enforced.

@@ -4,7 +4,7 @@
 |---|---|
 | ID | SCR-104 |
 | Filed by | Czar builder (tier 1), 2026-10-19 |
-| Spec and section | `docs/specs/04-components/server-acceptance-evidence-selection.md` CZ-19 §5.1; `cross-cutting.md` §3.3 |
+| Spec and section | `docs/specs/04-components/server/server-acceptance-evidence-selection.md` CZ-19 §5.1; `docs/specs/04-components/shared/cross-cutting.md` §3.3 |
 | Status | Open |
 
 ## Problem

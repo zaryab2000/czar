@@ -4,7 +4,7 @@
 |---|---|
 | ID | SCR-033 |
 | Filed by | Architect (Claude), 2026-10-20, from D91 items 1 and 4 |
-| Spec and section | `docs/specs/04-components/server-acceptance-evidence-selection.md` CZ-18 §5.3b; `docs/specs/02-data-and-protocol/data-and-protocol.md` §4.27, §15.3 |
+| Spec and section | `docs/specs/04-components/server/server-acceptance-evidence-selection.md` CZ-18 §5.3b; `docs/specs/02-data-and-protocol/data-and-protocol.md` §4.27, §15.3 |
 | Status | Open (research). Does not block T-115; it sets how useful mainnet cards will be. |
 
 ## Problem

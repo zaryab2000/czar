@@ -4,7 +4,7 @@
 |---|---|
 | ID | SCR-109 |
 | Filed by | Czar builder (tier 2), 2026-10-19 |
-| Spec and section | `docs/specs/04-components/server-autonomy-roi-keys.md` CZ-27 §5.2 (`gateway-nano`, `merchant-seller-proof`); `docs/specs/02-data-and-protocol/data-and-protocol.md` §6 |
+| Spec and section | `docs/specs/04-components/server/server-autonomy-roi-keys.md` CZ-27 §5.2 (`gateway-nano`, `merchant-seller-proof`); `docs/specs/02-data-and-protocol/data-and-protocol.md` §6 |
 | Status | Open |
 
 ## Problem
