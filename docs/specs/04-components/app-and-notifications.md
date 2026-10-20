@@ -217,6 +217,8 @@ Idempotency: every creating call sends `Idempotency-Key`; `notifySubmitted` with
 | step, x402 or nanopayment | "Paid per call, checked before the next step" |
 | step, ERC-8183 job | "Held in escrow, money back if rejected" |
 | payee | "{host}" plus badge "New payee" when never paid before |
+| payee is a lab service (D83) | badge "Czar test merchant" next to the host |
+| real-market panel (D83, objective detail and shadow summary, from `Plan.marketReference` or `getMarketView`) | header "Real market (Arc mainnet)"; line "{ready} listed services do this from {low} per call. Czar has not paid or checked them."; never a button to pay |
 | alternates (D36) | "If a service fails, Czar may use up to 2 backup services under the same step limit." |
 | network fee line | "Network fee: about {feeDisplay}, paid from your network fee reserve" (≈ $0.001, p1-A6) |
 | expiry | "This plan expires {expiresAt}" |
@@ -350,3 +352,4 @@ K17 VAPID private key in the secret store; a leak lets an attacker spam notifica
 | 2026-10-19 | RV-028 / D78 | Phase 1 origin `http://localhost`, RP ID `localhost`, served by the local server; CDN and `czar.dev` hosts are stage 2. |
 | 2026-10-19 | RV-044 | approval integrity check recomputes `payeeRoot` and `planHash` on the device from the displayed leaves. |
 | 2026-10-19 | RV-007 / D72 | freeze wording: payments cannot start; pockets pulled back. |
+| 2026-10-20 | D83 | Wording: Czar test merchant badge; real-market panel (read-only). |

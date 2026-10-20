@@ -39,7 +39,7 @@ One `pnpm` workspace (Node 22 LTS, ESM only, TypeScript strict; spec 01 §17). C
 | `@czar/schemas` | a value that passes `validate<Name>()` is exactly the 02 object; `privacyClassOf(name, field)` reads the `x-privacyClass` annotation so senders can assert nothing `local-only` crosses a link | property tests: every schema example in 02 §4 validates; every `local-only` field is rejected by the `ObjectiveSubmission` sender guard |
 | `@czar/hashing` | reproduces the six digests and the derived nonce in `02/vectors/eip712-vectors.json` byte for byte; Merkle roots verify with OpenZeppelin `MerkleProof` | the vectors file is the fixture; a Foundry test consumes the same fixture (03 `security-and-testing.md` §3.1) |
 | `@czar/redaction` | layer 1 replaces every match of the pinned gitleaks rule set with a `[[R:S:<rule>]]` marker; markers are never reversible; idempotent | the gitleaks test corpus at the pinned tag; mutation tests |
-| `@czar/x402` | parses v2 headers and the v1 fallback per 02 §11.2; refuses `upto`, `batch-settlement`, cross-chain offers; sanitizes extensions per 02 §11.3; owns `safeFetch`, the only way any Czar server process fetches an outside URL (§2.1, RV-022) | fixtures from `x402-flow.mjs` (A1-17) and the A2 seller logs; the §2.1 SSRF corpus |
+| `@czar/x402` | parses v2 headers and the v1 fallback per 02 §11.2; refuses `upto`, `batch-settlement`, cross-chain offers, and any `accepts[]` entry whose network is not in `x402.allowedPaymentNetworks` (Phase 1: `[eip155:5042002]`, D83); sanitizes extensions per 02 §11.3; owns `safeFetch`, the only way any Czar server process fetches an outside URL (§2.1, RV-022) | fixtures from `x402-flow.mjs` (A1-17) and the A2 seller logs; the §2.1 SSRF corpus |
 | `@czar/vault-client` | every encoder output matches 03 `czar-vault.md` §6 and reverts are decoded to the custom-error names | `arc-anvil` fork tests against the compiled interfaces |
 | `@czar/config` | every parameter in this folder exists in the registry with its default; unknown keys fail at startup | snapshot test of the dump |
 | `@czar/logging` | a log line cannot contain a field outside the allowlist (§4); a redaction marker may appear, raw text may not | unit test with a corpus of forbidden strings |
@@ -103,7 +103,7 @@ Every outbound fetch of a URL that came from outside Czar's own code goes throug
 
 ### 5.1 API `czarCode` (02 §9.4)
 
-`validation`, `idempotency-conflict`, `replay-not-stored` (RV-043), `device-revoked`, `session-expired`, `hash-mismatch`, `plan-expired`, `envelope-not-open`, `approval-required`, `payment-id-conflict`, `plan-not-approved`, `step-not-in-plan`, `step-calls-exhausted`, `step-cap-exhausted`, `input-not-in-template`, `input-redaction-hit`, `resource-not-indexed` (RV-019, RV-021), `fetch-blocked` (RV-022), `rate-limited`, `upstream-unavailable` (retryable), `frozen`, `paused`.
+`validation`, `idempotency-conflict`, `replay-not-stored` (RV-043), `device-revoked`, `session-expired`, `hash-mismatch`, `plan-expired`, `envelope-not-open`, `approval-required`, `payment-id-conflict`, `plan-not-approved`, `step-not-in-plan`, `step-calls-exhausted`, `step-cap-exhausted`, `input-not-in-template`, `input-redaction-hit`, `resource-not-indexed` (RV-019, RV-021), `fetch-blocked` (RV-022), `network-not-payable` (D83), `rate-limited`, `upstream-unavailable` (retryable), `frozen`, `paused`.
 
 ### 5.2 `StepError.code` (02 §4.16; used by MCP tools and the paying agent)
 
@@ -120,6 +120,7 @@ Every outbound fetch of a URL that came from outside Czar's own code goes throug
 | `structural-failed` | acceptance `structural` fail | re-plan |
 | `injection-quarantined` | screen flagged the body, or the screen was unavailable (D76); shown to the user; recorded `inconclusive` (RV-042) | no |
 | `fetch-blocked` | `safeFetch` refused the URL (§2.1, RV-022) | no |
+| `network-not-payable` | a service or network outside `selection.paymentNetwork` was named for search, quote or pay (D83) | never; the market view is rank-only in Phase 1 |
 | `step-calls-exhausted` / `step-cap-exhausted` | the step's approved call budget or cap is used (RV-019) | after a new approval |
 | `pocket-funding-failed` | `DelegateNotSet`, `PocketCapExceeded`, Gateway API error | depends |
 | `pullback-pending` | pullback requested, not yet minted | automatic |
@@ -220,3 +221,4 @@ Supply-chain rules (CLAUDE.md): `pnpm audit --audit-level=moderate`, `minimumRel
 | 2026-10-19 | RV-022 | §2.1 shared `safeFetch` in `@czar/x402`; all outbound fetches use it. |
 | 2026-10-19 | D78, RV-028 | keystore outside the repository; no secret-like config keys or env vars. |
 | 2026-10-19 | RV-019, RV-021, RV-043, D76 | new `czarCode` and `StepError` codes. |
+| 2026-10-20 | D83 | `@czar/x402` buyer refuses networks outside `x402.allowedPaymentNetworks`. |

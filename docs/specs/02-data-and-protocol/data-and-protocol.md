@@ -228,6 +228,7 @@ Each object: purpose, fields (name, type, required, privacy class, description, 
 | `payeeRoot` | `Hash32` | yes | PUB | Merkle root of `payeeLeaves` (§5.3) |
 | `rankingDecisionIds` | array of string | no | SO | SL `query_id`s used |
 | `shadow` | boolean | yes | SO | true for shadow-mode pricing (no envelope) |
+| `marketReference` | object `{network, perCapability[{capability, ready, low?, median?}]}` | no | SO | shadow plans only: real-market prices from the `MarketView` (D83 point 7); never used for payment |
 | `droppedSteps` | array of `{capability, reason: no-agent}` ≤ 64 | no | SO | steps removed before approval (D82); shown to the person with the plan |
 | `createdAt` | `Timestamp` | yes | SO | |
 
@@ -457,7 +458,28 @@ type PaymentRef =
 
 ### 4.19 `RankingDecision`
 
+- **Payment network only (D83):** every service in `ranked[]`, `unverified[]` and `exploration_slot` is on `selection.paymentNetwork`; market-network services appear only in a `MarketView` (§4.22).
 - Adopted from SL §5.6 verbatim. Schema `schemas/ranking-decision.schema.json` mirrors the TypeScript shape. Privacy `SO` (the SL's own publication rules apply when the full Selection Layer ships).
+
+### 4.22 `MarketView` (D83)
+
+- **Purpose:** Lane A of D83. Real services listed on the market network (`selection.marketNetwork`, Arc mainnet), each checked by Czar's own unpaid 402 probe. It shows that real services can be discovered and screened; it is **not** a quality ranking and nothing in it is payable in Phase 1.
+- **Schema:** `schemas/market-view.schema.json`. Example: `examples/market-view.example.json`.
+
+| Field | Type | R | PC | Description |
+|---|---|---|---|---|
+| `viewId` | `mkv_<Ulid>` | yes | SO | |
+| `capability` | `CapabilityTag` | yes | SO | |
+| `network`, `paymentNetwork` | `Caip2` | yes | SO | the split is always visible |
+| `generatedAt`, `catalogFetchedAt` | `Timestamp` | yes / no | SO | catalog freshness (≤ 3,600 s, p1-D2) |
+| `counts` | `{listed, probed, ready}` | yes | SO | |
+| `priceSummary` | `{low?, median?}` | no | SO | over `ready` rows only |
+| `services[]` | ≤ 50 rows `{serviceId, resource, network, payable: false, tier, rail?, livePrice?, listedPrice?, payTo?, probe{probedAt, reachable, wellFormed?, priceMatchesListing?, payToMatchesListing?, latencyMs?, successRate7d?, probes7d?}, label}` | yes | SO | ordered by tier then live price |
+| `notice` | string | yes | SO | fixed text (CZ-18 §12) |
+
+- **Tiers:** `ready` (reachable, well-formed, live price and payee match the listing); `listing-mismatch` (reachable and well-formed, but price or payee differs; p1-D7 found about 10%); `unreachable` (no 402 within `selection.probeTimeoutMs`, or not well-formed); `not-probed` (over the probe budget).
+- **Invariants:** `payable = false` on every row in Phase 1 (schema `const`); `network = selection.marketNetwork`; no merchant description or metadata text (p1-D8); nothing in a `MarketView` is ever an input to `Plan`, `PayeeLeaf`, `RankingDecision.ranked[]` or any reputation posterior.
+- **Persistence:** the view itself is not stored. Czar stores only its own probe outcomes, keyed by `(resource, payTo, network)` (CZ-18 §5.5 `market_probes`).
 
 ### 4.20 `EvidenceBatch`
 
@@ -626,6 +648,7 @@ Spec 03's Foundry tests MUST reproduce the seven on-chain entries (all but `brie
 | `beliefId` | `blf_<Ulid>` | daemon | local | |
 | `objectiveId` | `obj_<Ulid>` | daemon | global (sent to server) | server rejects a reused id from another device |
 | `planId` | `pln_<Ulid>` | server | global | |
+| `viewId` | `mkv_<Ulid>` | server | global | `MarketView` (D83); not stored |
 | `stepId` | `stp_<Ulid>` | server | global; `stepIndex` is the on-chain-visible position | |
 | `deviceId` | `dev_<Ulid>` | server at pairing | global | |
 | `envelopeId` | `uint64`, per-vault counter from 1 | vault | per vault; global ref `envelopeRef = Caip10(vault) + ":" + envelopeId` | counters never reuse |
@@ -825,7 +848,8 @@ Full definition: `api/openapi.yaml` (OpenAPI 3.1; 28 paths, 29 operations; parse
 | POST | `/v1/shadow/quotes` | key required | `ShadowQuoteRequest` → `Plan` with `shadow: true` | no envelope, no payment (CZ-08) |
 | POST | `/v1/pay/requests` | key + `payRequestId` | `PayRequest` `{payRequestId, objectiveId, planId, stepIndex, calls?, maxAmount?, input?}` → `PayResponse` (`executing` \| `approval-required` + `elicitationUrl` \| `accepted` \| `rejected` \| `failed`) | canonical shape; the MCP `pay` tool mirrors it (D75). Pays only a step of an approved plan with an open envelope, within the step's `expectedCalls` (RV-019); `409` on a reused `payRequestId` with a different request (§7.4) |
 | POST | `/v1/hooks/ingest-report` | key required | `IngestReport` (counts only, optional `shadowTotals`, AM-04) → `204` | no events, no text |
-| POST | `/v1/services/search` (`findService`) | key required | `FindServiceRequest` → `FindServiceResponse` | backs MCP `find_service` (AM-01) |
+| POST | `/v1/services/search` (`findService`) | key required | `FindServiceRequest` → `FindServiceResponse` | backs MCP `find_service` (AM-01); `network` other than `selection.paymentNetwork` → 422 `network-not-payable` (D83) |
+| POST | `/v1/services/market-view` (`getMarketView`) | key required | `MarketViewRequest {capability, maxPrice?}` → `MarketView` (§4.22) | Lane A of D83; read-only; backs MCP `find_service` with `includeMarketView` and the app's market screen |
 | POST | `/v1/quotes` (`createQuote`) | key required | `QuoteRequest` → `QuoteResponse` | backs MCP `quote`; moves no money (AM-01) |
 | POST | `/v1/outcomes` (`reportOutcome`) | key required | `OutcomeReport` → `OutcomeRecorded` | backs MCP `report_outcome` (AM-01) |
 | POST | `/v1/models/complete` (`completeModelCall`) | key required, **never replayed** | `ModelCallRequest` → `ModelCallResponse` | model proxy for P-01, P-04, P-05, P-06; stores only token counts (D31, AM-02); a repeated key gets `409 replay-not-stored` (RV-043) |
@@ -879,7 +903,7 @@ Full definition: `api/openapi.yaml` (OpenAPI 3.1; 28 paths, 29 operations; parse
 ### 9.4 Error model
 
 - `application/problem+json` (RFC 9457): `type` under `https://czar.dev/problems/`, `title`, `status`, `detail` (no user text), `instance`, `czarCode`, `retryable` (§2.3).
-- Stable `czarCode` values used in Phase 1: `validation`, `idempotency-conflict`, `replay-not-stored` (RV-043), `device-revoked`, `session-expired`, `hash-mismatch`, `plan-expired`, `envelope-not-open`, `approval-required`, `payment-id-conflict` (now about `payRequestId`), `plan-not-approved`, `step-not-in-plan`, `step-calls-exhausted`, `step-cap-exhausted`, `input-not-in-template`, `input-redaction-hit` (RV-019, RV-021), `resource-not-indexed` (RV-019), `fetch-blocked` (RV-022), `rate-limited`, `upstream-unavailable` (retryable), `frozen`, `paused`.
+- Stable `czarCode` values used in Phase 1: `validation`, `idempotency-conflict`, `replay-not-stored` (RV-043), `device-revoked`, `session-expired`, `hash-mismatch`, `plan-expired`, `envelope-not-open`, `approval-required`, `payment-id-conflict` (now about `payRequestId`), `plan-not-approved`, `step-not-in-plan`, `step-calls-exhausted`, `step-cap-exhausted`, `input-not-in-template`, `input-redaction-hit` (RV-019, RV-021), `resource-not-indexed` (RV-019), `fetch-blocked` (RV-022), `network-not-payable` (D83), `rate-limited`, `upstream-unavailable` (retryable), `frozen`, `paused`.
 
 ### 9.5 Pagination and rate limits
 
@@ -1229,3 +1253,4 @@ Agent-directed text met this session (not followed): the Circle and Arc doc head
 | 2026-10-19 | RV-019, RV-020, RV-021, RV-027, RV-043, RV-050 / D75 | §4.6 `inputKeys`; §7.1 `quoteId`, `payRequestId`; §7.4; §9.2–§9.4; §10. |
 | 2026-10-19 | RV-018 / D74 | §4.15 `StepResult` never reaches the planner. |
 | 2026-10-20 | D82 | §4.6 kind `agent-assist`; §4.6.1 unpaid steps, `AssemblyRecord`, marker map; §5.3 empty-tree rule; OpenAPI `Result.assembly`, `ResultAck.assembly`. |
+| 2026-10-20 | D83 | §4.5 `marketReference`; §4.19 payment network only; new §4.22 `MarketView`; schema and example; OpenAPI `getMarketView`; `FindServiceRequest.network` must be the payment network. |

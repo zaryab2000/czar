@@ -99,6 +99,8 @@
 | 8.2 | Third-party verification script (`recompute.ts`-style) | from the `Committed` event: resolve `czar-archive:<root>` against the hosts in Czar's `POLICY_RELEASE` (the local server in Phase 1), check `keccak256(utf8(uri))` against `uriHash`, rebuild root (match), find the `demand-proof` leaf, confirm `EnvelopeOpened(objectiveHash, planHash)` on-chain, confirm `AuthorizationUsed` for step 0's nonce, Gateway `GET /v1/x402/transfers?nonce=` for steps 1–2, `JobCompleted` for step 3; `reportHash` for step 3 equals the on-chain `reason` |
 | 8.3 | Earned autonomy | after `report_outcome(useful)` on steps 0 and 3, CZ-24 proposes a raise within D40; `raiseAutoLimit` relayed; `AutoLimitRaised` indexed; a second raise less than one period after the first reverts `RaiseAlreadyThisPeriod` (RV-031) |
 | 8.4 | Freeze drill | one click → `createFreezeIntent` → UserOp → `Frozen`; a new `reserve` reverts `FrozenVault`; `isValidSignature` returns `0xffffffff` for a `USDC_3009` digest; a pending pullback still confirms; after `Frozen` is indexed, the follow-up agent step (not atomic, D63) calls `lowerAutoLimit(category, 0)` per category and every `autoLimit` reads 0 (D60); a raise signed before the freeze can no longer be relayed (`BadSigner`, RV-030); pockets are pulled back (D72) |
+| 8.6 | Two lanes (D83) | `getMarketView(web-search)` returns ≥ 1 Arc mainnet row with `payable: false`, a tier and the fixed label, and no score; passing that `serviceId` to `createQuote` returns 422 `network-not-payable`; a mocked 402 offering only `eip155:5042` is dropped by CZ-13 with `gate: network`; the shadow report row shows the real-market line from `Plan.marketReference` |
+| 8.7 | Test-merchant lab (D83) | after the seeded lab run (T-106), `findService(web-search)` ranks `lab-search-steady` above `lab-search-slow` and `lab-search-flaky`; `lab-extract-drift` and `lab-spot-payee-swap` are excluded by the live probe; every lab row carries the "Czar test merchant" badge |
 | 8.5 | Guardian drill | `CzarVaultFactory.pause()` → `openEnvelope` reverts `Paused`; `unpause()` restores |
 
 ## Definition of done for the scenario
@@ -120,3 +122,4 @@
 | 2026-10-19 | RV-029 / D79 | Numbers recomputed under the real routing rules: Gateway steps 90 × 1,000; cap 836,250; pocket 198,000; write-off 185,000; close figures. No test-only routing override. |
 | 2026-10-19 | RV-054 | Stages 7.1–7.1e: injection on a vault-direct step, deliverable injection, screen unavailable, alternate retry, MCP pay path, mid-step freeze. |
 | 2026-10-19 | D74, D78, RV-026, RV-030, RV-031 | Planner assertion, archive URI, demand-proof v2, freeze and raise checks. |
+| 2026-10-20 | D83 | Stage 8 rows 8.6 (two lanes) and 8.7 (test-merchant lab). |

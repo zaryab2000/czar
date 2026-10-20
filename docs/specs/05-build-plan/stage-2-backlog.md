@@ -86,6 +86,7 @@
 | MN-5 | Deploy Czar-owned ERC-8183 instance (`CzarJobEscrow`) | D27, D32 |
 | MN-6 | Re-pin all external addresses and implementations | spec 01 §6.2 |
 | MN-7 | Remove the test-keystore vault owner used in M3–M4 | OD-36, D64 |
+| MN-8 | Merge the two lanes: switch `selection.paymentNetwork` to Arc mainnet and fund a small, capped real budget to pay real merchants and build mainnet posteriors; needs Zaryab's explicit multi-step confirmation; turn the test-merchant lab off | D83 |
 
 ---
 
@@ -123,3 +124,4 @@
 | 2026-10-19 | D70 | Added §6 Google Cloud hosting (GC-1 to GC-7). |
 | 2026-10-19 | D80, D78 | GC-8 dual control for K6/K20; GC-9 public origin and archive host. |
 | 2026-10-20 | D82 | P2-16 manual task entry added. |
+| 2026-10-20 | D83 | MN-8 merge of the two lanes at the mainnet gate. |

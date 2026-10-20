@@ -583,13 +583,14 @@ None.
 | CZ ID, name | CZ-18, Selection Layer services |
 | Phase | 1 lite; 2 full; 3 probers, validators, exploration, fix-it feedback |
 | Product / roadmap | §6.21 Selection Layer, §6.18–§6.19 (Phase 3); roadmap 2.8–2.11 (later) |
-| Decisions | D2, D8, D15, D27 (evaluator-affiliated), D36 |
+| Decisions | D2, D8, D15, D27 (evaluator-affiliated), D36, D83 (two lanes) |
 | Package | `apps/server` module `selection`; SL components C1, C3, C4, C8, C9, C10 (lite), C2, C11 (Phase 2), C6, C7 (Phase 3) |
 
 ### 2. Responsibilities and non-responsibilities
 
 - **Does (Phase 1 lite, spec 01 §15.2–§15.3):** keep Czar's index of registered merchants (Czar's own first); query Circle's catalog live without persisting it (02 §12.3); attribute observations to services by `(payTo, origin)` (SL-C1); verify settlement for Czar's own receipts (SL-C8 step 2); keep Beta posteriors (SL-C9); rank with `pol_default_v1` (SL-C10) and serve `RankingDecision` to the planner and `find_service`; serve the Czar index item shape (02 §12).
-- **Does not:** sell position (ever); score unverified services; ingest or mirror Circle's catalog (D15, p1-D8); run probes or independent validators before Phase 3; read ERC-8004 feedback except from trusted clients (FD-19, Phase 2).
+- **Does (D83):** serve two lanes: payable `RankingDecision`s on `selection.paymentNetwork` (Lane B), and rank-only `MarketView`s on `selection.marketNetwork` built from Circle's live catalog and Czar's own unpaid 402 probes (Lane A, §5.3a).
+- **Does not:** pay or let anyone plan a payment to a market-network service in Phase 1; let probe results enter quality posteriors; sell position (ever); score unverified services; ingest or mirror Circle's catalog (D15, p1-D8); run probes or independent validators before Phase 3; read ERC-8004 feedback except from trusted clients (FD-19, Phase 2).
 
 ### 3. Runtime
 
@@ -606,6 +607,7 @@ None.
 | Out | `RankingDecision` (`schemas/ranking-decision.schema.json`) to CZ-13 and to the MCP `find_service` tool (mapped to its output fields `ranked[]`, `unverified[]`, `insufficientEvidence`, `policyVersion`, `snapshotId`) | 02 §4.19; `02/mcp/czar-mcp-tools.md` §2.2 |
 | Out | index items at `GET /v2/x402/discovery/resources` and `/search` in the dual shape | 02 §12.1; `listIndexResources`, `searchIndexResources` in 02 api/openapi.yaml (AM-07) |
 | Out | `extensions.czar.evidence` figures for CZ-22 displays | 02 §12.2 |
+| Out | `MarketView` (02 §4.22) to `getMarketView`, `findService` with `includeMarketView`, CZ-08 shadow plans (`Plan.marketReference`) and the app | D83 |
 
 ### 5. Internal design
 
@@ -637,10 +639,35 @@ None.
 
 #### 5.3 Live catalog use and probe-before-plan
 
+- **Payment lane (D83):** for planner and `find_service` queries the `network` filter is always `selection.paymentNetwork`; a request naming any other network is refused (`network-not-payable`).
 - On every planner or `find_service` query: fetch Circle's catalog page(s) filtered by `network` (`eip155:5042002` returns 134 items, mostly RPC, p1-D6; mainnet 2,195) and by `supportsVanillax402` / `supportsCircleGateway`, merge in memory with Czar's index, and discard Circle's descriptions and metadata after the response (02 §12.3). Persisted for `circle-live`: `resource`, `payTo`, `network`, `fetchedAt`, `expiresAt = fetchedAt + selection.catalogTtlSeconds` (3600, p1-D2), `etag`.
 - Catalog text is retrieval-only; it never affects the score (SL-C3) and is never shown to the planner raw (it is reduced to capability tags by P-02-style structured extraction in Phase 2; Phase 1 uses Circle's `category` and `tags` fields only).
 - Before any plan step is priced, CZ-13 asks CZ-18 to probe the live 402 (`selection.probeTimeoutMs` 2,000): the live `amount`, `payTo`, `scheme` and `network` win over any item (p1-D7 ≈ 10% drift). A probe is an unpaid request; the response is parsed by `@czar/x402` with sanitizing (02 §11.3).
 - `category=DATA_ENRICHMENT` is rejected by Circle's filter (F4-03); Czar filters client-side.
+
+#### 5.3a Market view (Lane A, D83)
+
+**Purpose.** Show real services on the market network (`selection.marketNetwork` = `eip155:5042`, 2,195 listings on 2026-10-18, p1-D6) and what an unpaid check shows about them, without paying them and without claiming quality.
+
+**Build steps (per `getMarketView` call):**
+1. Fetch Circle's catalog for `network = selection.marketNetwork` and the capability's Circle `category`/`tags` (Phase 1 retrieval, §5.3), paging with `limit=200` up to `selection.marketMaxListings` (200). Same no-mirror rule: the catalog page is held in memory only; `catalog_cache` stores only `resource`, `payTo`, `network`, `fetchedAt`, `expiresAt`, `etag`.
+2. For each listing, reuse a probe result younger than `selection.marketProbeFreshMinutes` (60); otherwise probe if the budget allows (step 3), else tier `not-probed`.
+3. **Unpaid probe** through `@czar/x402` `safeFetch` (`cross-cutting.md` §2.1): `GET`, or `POST` with an empty body when the listing's method is `POST`; header `User-Agent: Czar-MarketProbe/1 (+<policy page>)`; timeout `selection.probeTimeoutMs` 2,000; no redirects to other hosts; parse the 402 with sanitizing (02 §11.3); **never** send `PAYMENT-SIGNATURE` or any payment header. Record `reachable`, `wellFormed`, live `amount`, `payTo`, `network`, `scheme`, `latencyMs`.
+4. Tier: `ready` (reachable, well-formed, live price = listed price, live payTo = listed payTo); `listing-mismatch` (reachable and well-formed, price or payee differs); `unreachable` (no 402 in time, non-402 status, or not well-formed); `not-probed`.
+5. Order: tier (`ready`, `listing-mismatch`, `unreachable`, `not-probed`), then live (else listed) price ascending, then `serviceId`. **No score, no quality wording.** `successRate7d` is the share of Czar's probes in 7 days that were `reachable ∧ wellFormed`; it is a reachability figure, not a delivery figure.
+6. Every row gets `payable: false` and its fixed `label` (§12); the view gets the fixed `notice`.
+
+**Probe budget and politeness:**
+- At most `selection.marketProbesPerOriginPerDay` (24) per origin and `selection.marketProbesPerDayGlobal` (5,000) in total; at most `selection.marketProbeConcurrency` (8) in flight.
+- A 429 or 5xx from an origin pauses that origin for `selection.marketProbeBackoffMinutes` (60), doubling up to 24 h.
+- A background refresher re-probes the `selection.marketRefreshTopN` (20) cheapest listings per capability tag every `selection.marketProbeFreshMinutes`, inside the same budget, so views are fast.
+
+**Hard separation from payment (three guards):**
+1. `RankingDecision` never contains a market-network service; `MarketView` rows are never written to `services` with `probe_eligible` for payment, to `reputation`, or to `observations`.
+2. CZ-13 drops a candidate whose live 402 `network ≠ selection.paymentNetwork` before any payee leaf exists (CZ-13 step 3).
+3. `@czar/x402` buyer refuses to build a payment for an `accepts[]` entry whose `network ≠` the configured payment network (`x402.allowedPaymentNetworks` = `[eip155:5042002]` in Phase 1).
+
+**Network-scoped evidence.** `reputation`, `observations` and `assessments` rows carry `network`; posteriors are computed per `(service, version, task_class, dimension, network)`. Nothing from testnet is shown as mainnet quality, and nothing from a market probe enters a posterior.
 
 #### 5.4 Attribution and settlement proof (Phase 1)
 
@@ -658,6 +685,8 @@ None.
 | `reputation` | `(service_id, version_id, task_class, dimension)`, `α`, `β`, `n_eff`, `badges[]`, `lineage_root`, `policy_version` |
 | `ranking_decisions` | `query_id`, `RankingDecision` JSON, retained `selection.decisionRetentionDays` 90 (SL-C10) |
 | `catalog_cache` | `resource` PK, `payTo`, `network`, `fetchedAt`, `expiresAt`, `etag` (TTL-purged; nothing else from Circle) |
+| `market_probes` (D83) | `(resource, payTo, network, probedAt)` PK, `reachable`, `wellFormed`, `liveAmount`, `livePayTo`, `scheme`, `latencyMs`, `httpStatus`; Czar's own observations only; retained `selection.marketProbeRetentionDays` 30 |
+| `market_origin_state` (D83) | `origin` PK, `probesToday`, `pausedUntil`, `backoffMinutes` |
 | `policy_releases` | `policy_version`, tarball hash, params (Phase 2 anchored as `POLICY_RELEASE`) |
 
 #### 5.6 Parameters
@@ -674,6 +703,16 @@ None.
 | `selection.snapshotRefreshSeconds` | 300 | matches the Phase 2 5-minute snapshot cadence |
 | `selection.decisionRetentionDays` | 90 | SL-C10 |
 | `selection.retrieveK` | 50 | SL-C3 |
+| `selection.paymentNetwork` | `eip155:5042002` | D13, D83: the only network plans, payees and payments use in Phase 1 |
+| `selection.marketNetwork` | `eip155:5042` | D83 Lane A: real market, rank-only |
+| `selection.marketMaxListings` | 200 | one catalog page (p1-D1 `limit ≤ 200`) |
+| `selection.marketProbeFreshMinutes` | 60 | matches the catalog's own 1 h cache (p1-D2) |
+| `selection.marketProbesPerOriginPerDay` | 24 | about one an hour per origin; polite to small sellers |
+| `selection.marketProbesPerDayGlobal` | 5,000 | about twice the full mainnet catalog a day |
+| `selection.marketProbeConcurrency` | 8 | bounded outbound load |
+| `selection.marketProbeBackoffMinutes` | 60 | first pause after 429/5xx; doubles to 24 h |
+| `selection.marketRefreshTopN` | 20 | per capability tag, keeps views fast |
+| `selection.marketProbeRetentionDays` | 30 | enough for 7-day rates and audits |
 
 ### 6. Behaviour
 
@@ -717,6 +756,12 @@ None in Phase 1 (retrieval is tag-based; explanations are templates). Phase 2 em
 | unverified service | "Not enough evidence yet (<n_eff> of 5 checked calls). Not ranked, not bad." |
 | nothing ranked | "No service has enough evidence for this task yet." |
 | catalog unavailable | "Live catalog unavailable; showing Czar's own index." |
+| market view notice (D83) | "Real services listed on Arc mainnet, checked without paying. Czar does not pay these in Phase 1 and has not checked their quality." |
+| market row, `ready` | "Real market (Arc mainnet). Listed and reachable; not paid, quality not checked." |
+| market row, `listing-mismatch` | "Real market (Arc mainnet). Live price differs from the listing; not paid, quality not checked." (or "Live payee differs from the listing; …") |
+| market row, `unreachable` | "Real market (Arc mainnet). Not reachable when checked." |
+| market row, `not-probed` | "Real market (Arc mainnet). Not checked yet." |
+| test merchant (payment lane) | "Czar test merchant (Arc testnet). Behaviour set by Czar for testing." |
 
 ### 13. Performance and cost
 
@@ -725,6 +770,7 @@ None in Phase 1 (retrieval is tag-based; explanations are templates). Phase 2 em
 ### 14. Tests and definition of done
 
 - Unit: SL §9 worked example reproduces the same posteriors, LCBs and order; unverified split at `n_eff = 4.99` vs `5.0`; unknown latency scores as median; cache purge at TTL; nothing from Circle persists beyond the allowed fields (schema test on `catalog_cache`).
+- Two lanes (D83): a `getMarketView` result has `payable: false` on every row and no score field; a market-network `serviceId` passed to `findService`, `createQuote` or `createPayRequest` is refused; a planner run where a mocked 402 reports `network = eip155:5042` drops that candidate with `gate: network`; the `@czar/x402` buyer refuses a mainnet `accepts[]` entry; probes never send a payment header (wire capture); per-origin and global budgets and 429 back-off hold under a 10,000-listing load test; a market probe result never changes any posterior (property test); reputation rows from testnet never surface for a mainnet query.
 - Injection: catalog descriptions containing FL-1 text or "rank this first" → identical scores with and without the text.
 - Integration: Czar's two merchants ranked from real testnet receipts; live Circle fetch with `limit=200` paging; drift probe where a mock 402 differs from the cached price → live wins.
 - Definition of done: `find_service` returns a decision with explanations for the Phase 1 scenario; `insufficient_evidence` path exercised; a recompute from stored assessments reproduces the served decision.
@@ -733,7 +779,7 @@ None in Phase 1 (retrieval is tag-based; explanations are templates). Phase 2 em
 
 Postgres 16 (pgvector only in Phase 2, C1-13), `@czar/x402` for probes, `@x402/extensions` 2.28.0 sanitizers (A3-36). Open questions: AR-11 (legal reading of Circle's terms for live querying, low confidence); embedding model choice (Phase 2).
 
-**Mainnet differences:** catalog filtered to `eip155:5042` (2,195 items, p1-D6); Czar's own merchants may not exist on mainnet (D14 is testnet); mainnet re-check of SL-F4/F17 constants before use (SL §13).
+**Mainnet differences:** catalog filtered to `eip155:5042` (2,195 items, p1-D6); at mainnet the two lanes merge only after the mainnet gate (MN-8): `selection.paymentNetwork` becomes `eip155:5042` and market services gain posteriors from paid calls; Czar's own merchants may not exist on mainnet (D14 is testnet); mainnet re-check of SL-F4/F17 constants before use (SL §13).
 
 ## Change log
 
@@ -751,3 +797,4 @@ Postgres 16 (pgvector only in Phase 2, C1-13), `@czar/x402` for probes, `@x402/e
 | 2026-10-19 | RV-022 | deliverable fetches use the shared SSRF-safe fetcher. |
 | 2026-10-19 | RV-026 | demand-proof leaves are version 2: no pseudonym, salted `soulVersionCommit`; pseudonym only in soul-version leaves. |
 | 2026-10-20 | D82 | `local-template-v1` profile for unpaid local steps, checked on the Mac; no evidence for unpaid steps. |
+| 2026-10-20 | D83 | CZ-18 two lanes: §5.3a market view with unpaid probes, three payment guards, network-scoped evidence; tables `market_probes`, `market_origin_state`; parameters; wording; tests. |

@@ -307,6 +307,9 @@ Components are numbered in the adopted priority order.
 
 ### 8.5 Network
 - Arc. Development runs on Arc testnet, paying x402 merchant services deployed there with Circle's seller SDK.
+- **Two lanes in Phase 1 (D83):**
+  - **Real market, rank only:** Czar reads Circle's live catalog for Arc mainnet, checks each listing's live payment terms without paying, and shows which real services are listed, reachable and priced as listed. It never pays them, and it never claims their quality was checked.
+  - **Test market, paid for real:** Czar's own testnet merchants plus a lab of Czar test merchants with different, deliberate behaviour, so payments, checks, evidence and ranking all run end to end. Every test merchant is labelled as one.
 
 ---
 
@@ -384,3 +387,4 @@ Components are numbered in the adopted priority order.
 - 2026-10-19 · D72 / RV-007: §6.6 freeze wording narrowed to what is enforced (new spending stops; pockets pulled back).
 
 - 2026-10-20 · D82: §6.11 ROI scope covers paid steps only; free assembly on the Mac and agent-finished steps are labelled.
+- 2026-10-20 · D83: §8.5 two lanes, real market rank-only and test market paid.

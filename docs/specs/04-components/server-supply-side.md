@@ -14,7 +14,7 @@
 | CZ ID, name | CZ-20, Czar x402 merchants |
 | Phase | 1 |
 | Product / roadmap | product §8.5 (testnet merchants), §6.21 sources ("merchants registering directly with Czar"); roadmap §3 Phase 1 proof loop |
-| Decisions | D13 (testnet), D14 (Czar runs its own merchants with Circle's seller SDK), D15 (index serves both shapes), D22 (both payment paths must be exercised), D35 (no Czar-paid credits for third parties) |
+| Decisions | D83 (test-merchant lab), D13 (testnet), D14 (Czar runs its own merchants with Circle's seller SDK), D15 (index serves both shapes), D22 (both payment paths must be exercised), D35 (no Czar-paid credits for third parties) |
 | Package | `apps/merchants` (`@czar/merchants`), uses `@czar/x402` |
 
 ### 2. Responsibilities and non-responsibilities
@@ -141,6 +141,30 @@ stateDiagram-v2
 - One item per route (vanilla and Gateway), exactly the 02 §12.2 shape with both the spec fields and Circle's `metadata` object; `metadata.supportsVanillax402` / `supportsCircleGateway` are set from the live 402 of each route, not typed by hand (p1-D7); `extensions.czar.source = "czar-registered"`; `extensions.bazaar.info.input` declares the query or body schema used in §5.7.
 - Registered with CZ-18 at startup and re-crawled by CZ-18 every 24 h (SL-C2 refresh). `/.well-known/agent-registration.json` (A5-05) and ERC-8004 registration (A5-03, A5-04) are Phase 2.
 
+#### 5.8a Test-merchant lab (D83 Lane B)
+
+**Why.** On testnet almost no real sellers exist (p1-D6), so with only Czar's three services every candidate looks the same and ranking cannot show anything. The lab adds Czar-run sellers whose behaviour differs on purpose, so paid evidence, posteriors and ranking differ for real reasons. Every lab service is labelled a Czar test merchant and is never presented as a real business.
+
+**Shape.** Same process (`apps/merchants`), route group `/lab/<serviceName>/…`, same x402 seller code, same idempotency, refunds (§5.6) and input rules (§5.7). Each lab service has its own `payTo` (K10-lab key per service, created by T-105's script), its own index entry with `extensions.czar.source = "czar-test-merchant"` and `extensions.czar.testMerchant = true`, and vanilla x402 only (the Gateway rail stays on the three core services, which already cover it).
+
+**Data.** Lab handlers wrap free public data sources (search over a fixed Czar-hosted corpus, public-domain page text, public price feeds), never paid APIs and never personal data. The source list is chosen in T-106 and recorded in `merchants.labSources`.
+
+**Behaviour profiles (Phase 1 set; each a named parameter group `merchants.lab.<service>.*`):**
+
+| Service | Capability | Profile | Behaviour | What the Selection Layer should learn |
+|---|---|---|---|---|
+| `lab-search-steady` | `web-search` | reliable | always delivers; schema exact; p95 0.4 s | high delivery and structural LCB; ranks top once `n_eff ≥ 5` |
+| `lab-search-flaky` | `web-search` | flaky | handler fails `failRate` 0.3 (5xx, no settle, buyer not charged) | delivery LCB falls; drops below `steady` |
+| `lab-search-slow` | `web-search` | slow | delivers correctly with `delayMs` 6,000 (inside `maxTimeoutSeconds`) | latency term lowers its score |
+| `lab-extract-schemabreak` | `page-extract` | schema-breaking | `schemaBreakRate` 0.2 returns JSON missing `text` | structural LCB falls; acceptance `fail`; Czar refund policy runs |
+| `lab-extract-drift` | `page-extract` | price-drifting | the live 402 price differs from its index entry with `driftRate` 0.33 by `driftBps` +2,000 | `price_match` falls; CZ-13 probe-before-plan catches the drift (p1-D7) |
+| `lab-spot-payee-swap` | `price-lookup` | payee-changing | every `payeeSwapEveryDays` 7 the live 402 names a second Czar-owned `payTo` not in the index | attribution `payto-unlinked`; CZ-13 drops it as unclaimed drift |
+
+- Profiles are deterministic given `merchants.lab.seed`, so the acceptance scenario is repeatable; a profile can be switched off with `merchants.lab.<service>.enabled`.
+- Profiles change behaviour only through these parameters, never by reading who the buyer is: lab services treat every buyer the same, so Czar cannot tune results for its own agent.
+- **Same rules for ranking:** lab services are ranked by the identical `pol_default_v1`. They share one operator cluster with Czar's three core services, so none of their evidence counts as independent of another's (SL operator row).
+- **Never on mainnet:** the lab has no mainnet configuration; `merchants.lab.enabled` is forced `false` when the payment network is a mainnet.
+
 #### 5.9 Named parameters
 
 | Parameter | Default | Reason |
@@ -161,6 +185,11 @@ stateDiagram-v2
 | `merchants.spotRefreshSeconds` | 300 | |
 | `merchants.perPayerPerMin` / `perRoutePerMin` | 60 / 600 | abuse bound |
 | `merchants.drainTimeoutMs` | 30,000 | never abandon a settle mid-flight |
+| `merchants.lab.enabled` | `true` (testnet only) | D83 Lane B |
+| `merchants.lab.seed` | fixed integer | deterministic profiles for repeatable runs |
+| `merchants.lab.priceAtomic` | 20,000 to 100,000 per service | spread around the catalog median so price matters in ranking |
+| `merchants.lab.<service>.failRate` / `delayMs` / `schemaBreakRate` / `driftRate` / `driftBps` / `payeeSwapEveryDays` | as in §5.8a | each profile's behaviour |
+| `merchants.labSources` | chosen in T-106 | free public sources only |
 
 ### 6. Behaviour
 
@@ -235,6 +264,7 @@ Merchant responses are machine-facing. Human-facing text appears only through CZ
 - **Integration (local `arc-anvil` fork + mocked Facilitator/Gateway):** full `authorization` flow; handler failure → no settle; `settlement_pending` path; Gateway route through the real middleware against a mocked API.
 - **Fixtures:** `a1-erc1271-usdc/x402-flow.mjs` (seller side, keyless proof, 402 shape; A1-17) and `a2-gateway-e2e/seller.ts` (Gateway seller) are the reference encodings.
 - **Testnet smoke (read-mostly):** one keyless `/verify` against the deployed 402 (costs nothing, A1-15); one real nanopayment of 0.001 USDC in the Phase 1 scenario with Zaryab's approval.
+- **Lab (D83):** each profile produces its behaviour at the configured rate over 1,000 seeded calls (±5%); lab index entries carry `czar-test-merchant` and `testMerchant: true`; after 50 paid calls per lab service on a fork, `pol_default_v1` orders `steady` above `slow` and `flaky` for `web-search`; the drift and payee-swap services are excluded by CZ-13's probe; lab routes return 404 when `merchants.lab.enabled` is false.
 - **Definition of done:** all three services answer 402 on both routes with valid shapes; CZ-15 can pay each on both paths in the Phase 1 scenario; index items validate against 02 §12.2; a sweep moved a Gateway balance on testnet; refund policy exercised once end to end; no raw input in logs (log corpus test).
 
 ### 15. Dependencies
@@ -292,3 +322,4 @@ Mocked GitHub API fixtures for admin / non-admin / renamed repo; `arc-anvil` tes
 | 2026-10-18 | D49 | `czar-spot` source rule cited |
 | 2026-10-18 | D50 | automatic refunds of Czar's own sales with a daily cap |
 | 2026-10-19 | RV-022 | `czar-extract` uses the shared `safeFetch`; the guard is no longer local to this merchant. |
+| 2026-10-20 | D83 | CZ-20 §5.8a test-merchant lab: six behaviour profiles, labels, parameters, tests. |

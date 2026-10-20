@@ -1101,7 +1101,8 @@ How the planner is kept from reading it raw (C3-04, C3-06, C3-09, FD-28):
 |---|---|---|
 | SL-C5 Receipt SDK | Lives inside CZ-15/CZ-17 on the server, not in a buyer library. Receipts for vault-direct are signed under ERC-1271 for the vault (SL §5.8 allows it); the vault's `isValidSignature` recognises the `Receipt` typehash as a non-spending digest kind. | Czar's paying agent is the buyer. |
 | SL-C7 validators | Phase 1 and 2: Czar's own validator only (`assignment = buyer-local`, `conflict_flags = self-reported-checks`, weight 0.25 for `structural`). Independent validators and salt assignment are Phase 3. | Honest labelling; no default set exists yet. |
-| SL-C6 probers | Phase 1: none. Phase 2: one Czar prober with commit/reveal on Czar's own merchants and claimed services. Phase 3: open prober set. | Budget and scope. |
+| Two lanes (D83) | Phase 1 ranks and pays only on Arc testnet (`selection.paymentNetwork`); a separate `MarketView` lists Arc mainnet services checked by unpaid 402 probes, never payable and never scored. Evidence is keyed by network. A Czar test-merchant lab with set behaviour profiles gives the testnet ranking real differences to learn. | Testnet has almost no real sellers (p1-D6); real sellers cannot be paid with test money. |
+| SL-C6 probers | Phase 1: none (D83's unpaid market probes only read the 402 and never feed posteriors). Phase 2: one Czar prober with commit/reveal on Czar's own merchants and claimed services. Phase 3: open prober set. | Budget and scope. |
 | SL-C11 anchoring | Phase 1: hourly `EVIDENCE_BATCH`; snapshots daily. Phase 2: 15-minute batches, 5-minute snapshots as in SL. | Cost and simplicity at low volume. |
 | Leaf types | Two Czar-specific leaf schemas inside `EVIDENCE_BATCH`: `demand-proof` and `soul-version`. No new `Kind` enum values, so the contract is unchanged. | Avoids a contract fork. |
 | SL §4.2 "SL is never an ERC-8183 evaluator" | Czar **is** the evaluator for its own jobs (D27). Escrow evidence from Czar-evaluated jobs is flagged `evaluator-affiliated` and is correctness-ineligible in the ranking, exactly as SL-C8 step 2 prescribes. | Locked decision D27; the SL rule is kept by flagging. |
@@ -1163,7 +1164,7 @@ How the planner is kept from reading it raw (C3-04, C3-06, C3-09, FD-28):
 | Gateway API | keyless on testnet (A2-30) | may need a key (slot K12) |
 | Facilitator | keyless trial for `exact` (A1-15) | Console API key (p1-F4); same base URL |
 | ERC-8183 | Circle's instance, admin EOA (A4-08) | Czar-owned `CzarJobEscrow` (D27, A4-13) |
-| Merchants | Czar's own (D14) plus 134 catalog entries on testnet, mostly RPC (p1-D6) | 2,195 catalog entries on Arc mainnet (p1-D6) |
+| Merchants | Lane B (paid): Czar's own (D14), the Czar test-merchant lab (D83), and the non-RPC entries of the 134 testnet listings (p1-D6). Lane A (rank-only, never paid): the 2,195 Arc mainnet listings, checked by unpaid 402 probes (D83) | one lane after the mainnet gate (MN-8): mainnet listings become payable and gain posteriors from paid calls |
 | Vault-direct proof | live (A1-17) | simulation only (A1-11); re-run before mainnet |
 | Delegate nanopayment rules | tested (A2-10) | untested (GAP A2-G3); pullback path assumed same |
 | Circle spending policies | not available (F3-01) | still not used (D11) |
@@ -1438,3 +1439,4 @@ No new agent-directed text was encountered in this session beyond what the groun
 | 2026-10-19 | D70 | Phase 1 runs on Zaryab's Mac with a local software signer (encrypted keystore); Google Cloud (KMS, Cloud Run, e2-micro VM) moves to stage 2. |
 - 2026-10-19 · D31 wording: §1 no longer says raw work data never leaves the machine.
 - 2026-10-20 · D82: §12 walkthrough step 6 and 11, the table-build step runs on the Mac in the CZ-11 assembler.
+- 2026-10-20 · D83: §15.3 two-lane row; merchant row in the testnet/mainnet table.

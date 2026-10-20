@@ -87,6 +87,7 @@
 - **Description:** Asks Czar's server for ranked services for a capability through `findService` (`POST /v1/services/search`, AM-01), which runs the Selection Layer query (spec 01 §15.5). Returns structured candidates only: ids, prices, evidence bounds and badges. Never returns merchant description text.
 - **Annotations:** `readOnlyHint: true`, `destructiveHint: false`, `idempotentHint: true`, `openWorldHint: true` (it queries Circle's catalog live, D15).
 - **Elicitation:** none.
+- **Two lanes (D83):** `ranked[]` and `unverified[]` hold payable services on the payment network only. `marketView` (when asked for) lists real-market services checked without paying; the agent must present them as "real market, not paid, quality not checked" and can never pass them to `quote` or `pay` (the server refuses).
 - **Input schema:**
 
 ```json
@@ -98,9 +99,10 @@
     "capability": { "type": "string", "maxLength": 64, "description": "Capability tag, lowercase kebab-case, e.g. web-search." },
     "taskClass": { "type": "string", "maxLength": 64 },
     "maxPrice": { "type": "string", "pattern": "^(0|[1-9][0-9]*)$", "description": "Amount6 cap per call." },
-    "network": { "type": "string", "pattern": "^eip155:[0-9]+$", "default": "eip155:5042002" },
+    "network": { "type": "string", "pattern": "^eip155:[0-9]+$", "default": "eip155:5042002", "description": "Must be the payment network; anything else is refused with network-not-payable (D83)." },
     "rails": { "type": "array", "items": { "type": "string", "enum": ["x402-exact", "gateway-batched", "erc8183-job"] } },
-    "allowUnverified": { "type": "boolean", "default": false }
+    "allowUnverified": { "type": "boolean", "default": false },
+    "includeMarketView": { "type": "boolean", "default": false, "description": "Also return real-market services checked without paying (D83 Lane A). Never payable." }
   }
 }
 ```
@@ -132,6 +134,7 @@
       }
     },
     "unverified": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["serviceId", "nEff"], "properties": { "serviceId": { "type": "string" }, "nEff": { "type": "number" } } } },
+    "marketView": { "$ref": "https://czar.dev/schemas/market-view.schema.json" },
     "insufficientEvidence": { "type": "boolean" },
     "policyVersion": { "type": "string" },
     "snapshotId": { "type": "string" }
@@ -401,3 +404,4 @@ Declarative Web Push JSON (iOS/iPadOS 18.4+, D2-06). Every push shows a visible 
 | 2026-10-19 | RV-027 | `get_objectives` uses the one status enum (plus the local `candidate`). |
 | 2026-10-19 | RV-050 | `payRequestId` (per call, client) vs `paymentId` (per index, server). |
 | 2026-10-19 | D76, D78 | Quarantined results carry no field values; Phase 1 URLs are `http://localhost`. |
+| 2026-10-20 | D83 | `find_service`: payment network only, `includeMarketView`, `marketView` output. |

@@ -105,6 +105,8 @@
 | T-103 | Release security gates | M8 | M | T-101 |
 | T-104 | Phase 1 sign-off | M8 | S | T-102, T-103 |
 | T-105 | Create Phase 1 server keys in the local keystore (RV-016) | M1 | S | T-004 |
+| T-106 | Czar test-merchant lab (D83) | M4 | M | T-051, T-105 |
+| T-107 | Market view: unpaid market probes, `getMarketView`, `marketReference` (D83) | M7 | M | T-090, T-042 |
 
 ---
 
@@ -461,6 +463,7 @@
   - `deployments/arc-testnet-keys.json` validates: seven distinct checksummed addresses, no field named `key`, `secret`, `private` or `mnemonic`.
   - `ps -o args` captured during key creation contains no passphrase; the process environment of the CLI contains no `CZAR_SIGNER_PASSPHRASE`-style variable (test in `apps/signer/test/no-secret-in-argv-env.test.ts`).
 - **Note (D80):** all seven keys sit on one Mac in Phase 1; this is the accepted testnet exception. Dual control for K6 and K20 arrives with Cloud KMS (`stage-2-backlog.md` §6).
+- **D83 (2026-10-20):** the script also creates one K10-lab `payTo` key per lab service in `merchants.lab.*` plus the second payee-swap key; addresses only in `deployments/arc-testnet-keys.json`.
 
 ---
 
@@ -739,6 +742,8 @@
   - The stored receipt verifies under `SL_RECEIPT` against the live vault (`arc-cast call <vault> "isValidSignature(bytes32,bytes)(bytes4)"` returns `0x1626ba7e`).
 - **D82 (2026-10-20):** unpaid steps per CZ-13 step 1: `planner.localTemplates`, `planner.agentAssistCapabilities`, the no-agent drop into `Plan.droppedSteps`, `unitAmount = stepCap = "0"`, no payee leaf. Test: a plan with an `agent-assist` step for a device whose latest `IngestReport.hosts` is empty drops it with `reason: no-agent`.
 - **D82 (2026-10-20):** CZ-15 `handed_off` for unpaid steps: build `Result.assembly[]` from accepted dependencies' `StepResult.fields`; mark the step `done` on `ackResult.assembly[]`. Test: an unpaid step never reserves, signs or calls a merchant.
+- **D83 (2026-10-20):** the buyer refuses any `accepts[]` entry whose network is not in `x402.allowedPaymentNetworks` (`[eip155:5042002]`). Test: a mainnet-only 402 yields no payable offer and a typed error.
+- **D83 (2026-10-20):** candidates only on `selection.paymentNetwork`; drop a live 402 without a payment-network entry (`gate: network`); shadow plans carry `marketReference` once T-107 exists (until then, absent).
 
 ---
 
@@ -869,6 +874,24 @@
   - Write the run report.
 - **Acceptance tests:**
   - On testnet, every event in Stages 4–6 is present, the pocket pullback confirms, and T-058 verifies the anchored batch (exit 0).
+
+---
+
+### T-106 Czar test-merchant lab: six behaviour profiles on testnet (D83)
+- **Milestone / group / who:** M4 / M4-a / agent. **Size:** M. **Deps:** T-051, T-105.
+- **Spec refs:** `S04/server-supply-side.md` CZ-20 §5.8a, §5.9, §14; `S04/server-acceptance-evidence-selection.md` CZ-18 §5.2, §12; D83.
+- **Outputs:** `apps/merchants/src/lab/` (route group `/lab/<service>/…`), profile parameters in `@czar/config` `merchants.lab.*`, index entries with `czar-test-merchant`.
+- **Inputs:** merchant core from T-051; lab `payTo` addresses from T-105.
+- **Steps:**
+  - Choose the free public data sources and record them in `merchants.labSources`.
+  - Build the six services on the shared seller code; implement each profile from seeded parameters.
+  - Register index entries with the test-merchant source and flag.
+- **Acceptance tests:**
+  - Each profile hits its configured rate over 1,000 seeded calls (±5%).
+  - The flaky profile never settles a failed call (buyer not charged).
+  - Index entries validate (02 §12.2) and carry `extensions.czar.source = "czar-test-merchant"` and `testMerchant: true`.
+  - With `merchants.lab.enabled = false`, every lab route returns 404; on a mainnet payment network the flag is forced off.
+  - Lab services never vary behaviour by buyer (test with two buyer vaults).
 
 ---
 
@@ -1276,6 +1299,27 @@
   - Rebuilding the ledger from the indexer gives identical rows (idempotent rebuild).
   - Gateway receipts count at `received` and show `pending` until `completed`; statements show `$` only.
 - **Review fixes (2026-10-19):** Built before T-086, which now depends on it (RV-053).
+- **D83 (2026-10-20):** reputation rows keyed by network; `findService` refuses a non-payment network with 422 `network-not-payable`; `includeMarketView` returns the T-107 view.
+
+---
+
+### T-107 Market view: unpaid market probes, `getMarketView`, `marketReference` (D83)
+- **Milestone / group / who:** M7 / M7-b / agent. **Size:** M. **Deps:** T-090, T-042.
+- **Spec refs:** `S04/server-acceptance-evidence-selection.md` CZ-18 §5.3a, §5.5 (`market_probes`, `market_origin_state`), §5.6, §12, §14; `S02/data-and-protocol.md` §4.22; `S02/schemas/market-view.schema.json`; OpenAPI `getMarketView`; D83; p1-D1, p1-D2, p1-D6, p1-D7, p1-D8.
+- **Outputs:** `apps/server/src/selection/market/`, the route, the background refresher, `Plan.marketReference` for CZ-13 shadow plans.
+- **Inputs:** catalog intake from T-090; `safeFetch` and 402 parsing from T-042.
+- **Steps:**
+  - Build the market view per §5.3a steps 1–6.
+  - Enforce the probe budget, concurrency and back-off.
+  - Store only `market_probes` and `market_origin_state`; never catalog text.
+  - Attach `marketReference` to shadow plans.
+- **Acceptance tests:**
+  - Every row has `payable: false` and no score; output validates against `market-view.schema.json`.
+  - Wire capture: no probe ever carries a payment header.
+  - Budget test: 10,000 mocked listings never exceed per-origin, global and concurrency caps; a 429 pauses the origin with doubling back-off.
+  - Property test: no market probe changes any posterior or `RankingDecision`.
+  - A market `serviceId` passed to `createQuote` or `createPayRequest` returns 422 `network-not-payable`.
+  - Live read-only check on testnet hosting (no funds): one real `getMarketView(web-search)` against Circle's catalog returns tiered rows with the fixed labels.
 
 ---
 
@@ -1414,3 +1458,4 @@
 | 2026-10-19 | G0-01 review (Pass A) | M1 acceptance criteria for RV-001…RV-015, RV-030…RV-037, RV-049, RV-056, RV-061 (named tests in `S03/security-and-testing.md` §3.7); T-105 key creation before T-027 (RV-016); T-027 no version registration (D73). |
 | 2026-10-19 | G0-01 review (Pass B/C) | T-036, T-040 rewritten for local hosting (RV-028); review-fix acceptance criteria on T-003…T-102; deps: T-035←T-105, T-046←G0-16, T-062←G0-17, T-086←T-095 and M5 exit (RV-053). |
 | 2026-10-20 | D82 | T-073 extended with the assembler (size L); notes on T-045, T-048, T-069. |
+| 2026-10-20 | D83 | New T-106 (test-merchant lab) and T-107 (market view); notes on T-042, T-045, T-091, T-105. |
