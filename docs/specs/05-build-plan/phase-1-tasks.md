@@ -240,7 +240,7 @@
 
 ## M1 Contracts
 
-- **D88 (2026-10-20):** every M1 contract task is built from the step-by-step PRDs in `docs/specs/07-contract-build/` (start with `00-conventions.md`; the README there maps PRDs to tasks). `S03/czar-vault.md` §15 is binding for callers, errors, check order, events, reentrancy and boundaries. Where a task's Outputs say "functions in `CzarVault.sol`", the functions go in the module file under `contracts/src/vault/` that the PRD names; `contracts/src/CzarVault.sol` stays the concrete contract that inherits the modules.
+- **D88 (2026-10-20):** every M1 contract task is built from the step-by-step PRDs in `docs/specs/07-contract-build/` (start with `00-conventions.md`; the README there maps PRDs to tasks). `S03/czar-vault.md` §15 is binding for callers, errors, check order, events, reentrancy and boundaries. Where a task's Outputs say "functions in `CzarVault.sol`", the logic goes in the linked library under `contracts/src/vault/logic/` that the PRD names, and `contracts/src/CzarVault.sol` gets the thin wrapper (D89).
 
 ### T-010 Contract test mocks: USDC honouring ERC-1271 like NativeFiatTokenV2_2, Gateway mock, ERC-8183 mocks (both ABIs)
 - **Milestone / group / who:** M1 / M1-a / agent. **Size:** M. **Deps:** T-003.
@@ -337,7 +337,7 @@
 ### T-018 Job adapter (CircleTestnet kind) and openJob/fundJob/syncJob/claimJobRefund
 - **Milestone / group / who:** M1 / M1-d / agent. **Size:** L. **Deps:** T-014.
 - **Spec refs:** `S03/job-escrow-adapter.md` §2–§9 (JOB-1..5); `S03/czar-vault.md` §15 (D88); `S03/czar-vault.md` §5.5, §8.4, §9.1 (`JobSynced.state` mapping, AM-19); D27, D32; A4-03, A4-05, A4-07.
-- **Outputs:** `contracts/src/libraries/JobEscrowAdapter.sol` (internal library; path per `S03/job-escrow-adapter.md` §3 and 07 conventions §3), job functions in `contracts/src/vault/VaultJobs.sol`; `contracts/test/JobTest.t.sol` against both mocks.
+- **Outputs:** `contracts/src/libraries/JobEscrowAdapter.sol` (internal library; path per `S03/job-escrow-adapter.md` §3 and 07 conventions §3), job functions in `contracts/src/vault/logic/JobLogic.sol` (D89); `contracts/test/JobTest.t.sol` against both mocks.
 - **Steps:** tests first: budget read and `fund` in one tx; fee check (both 0 on the Circle kind); `BudgetExceedsReserved`; `fundJob` gated by freeze, pause, envelope state and expiry (RV-006); per-step `stepUsed` (RV-002); description is exactly `"czar:" + 64 hex`; `optParams` empty; `syncJob` from `Opened` (`Released`), refunds from escrow status only, Czar-kind refunds of `budget − settledAmount` (RV-009); refunds credit the envelope (bounded, RV-011) or free balance.
 - **Inputs:** `contracts/src/CzarVault.sol` with envelopes from T-014; ERC-8183 mocks from T-010.
 - **Acceptance tests:**
@@ -361,11 +361,12 @@
 ### T-020 Size build and D42 library split decision
 - **Milestone / group / who:** M1 / M1-e / agent. **Size:** S. **Deps:** T-017, T-018, T-019, G0-08.
 - **Spec refs:** D42, D88; `S02/data-and-protocol.md` §15.1 AR-16; `S03/czar-vault-factory.md` §11; `S03/czar-vault.md` §15.12; G0-08 result.
-- **Outputs:** `contracts/SIZE.md` (measured runtime size, limit from G0-08, decision); if needed `contracts/src/VaultLib.sol` (external library) with tests unchanged.
-- **Steps:** `arc-forge build --sizes`; if `CzarVault` exceeds the limit, move WebAuthn and Gateway hashing into an external library; rerun all M1 tests.
+- **Outputs:** `contracts/SIZE.md` (measured sizes of the vault, the factory and each logic library, the limit from G0-08, and gas per vault call). The library split itself is already in place from 07 PRD 03 (D89); no `VaultLib.sol`.
+- **Steps:** clean build with `--sizes`; record the numbers; rerun all M1 tests (07 PRD 11). **Superseded by D89:** "if `CzarVault` exceeds the limit, move WebAuthn and Gateway hashing into an external library".
 - **Inputs:** complete `contracts/src/CzarVault.sol` from T-017, T-018, T-019; size limit record `docs/specs/05-build-plan/gate-0-results/G0-08.md`.
 - **Acceptance tests:**
   - `arc-forge build --sizes` shows `CzarVault` **and `CzarVaultFactory`** runtime sizes ≤ the limit recorded in G0-08 and both initcode sizes ≤ 49,152 bytes (the factory embeds the vault's creation code, so it hits the limit first; D88, G-47).
+  - Every logic library's runtime size ≤ the same limit (D89).
   - All tests from T-011..T-019 still pass.
 
 ### T-021 Fuzz and Foundry invariant suites (INV-1..16, FAC-1..5, JOB-1..5, OEL-1..6)
@@ -453,7 +454,7 @@
   - Deploy `OpenEvidenceLog` and `CzarVaultFactory` through `0x4e59b44847b379578588920cA78FbF26c0B4956C` with fixed salts.
   - Constructor `defaults` (K3, K5, K7), guardian (K6) and admin (K20) are the addresses T-105 recorded in `deployments/arc-testnet-keys.json`; never placeholders (RV-016).
   - No ownership step: the factory constructor sets the admin directly (`Ownable(_nonZero(admin_))`, D88), and `acceptOwnership` would revert with no pending owner. (Superseded: "Admin accepts ownership" (D88) and "register vault version 1" (D73 / RV-015).)
-  - If 07 PRD 11 introduced linked libraries, deploy them first through the same deployer with salts `keccak256("czar.lib.<LibraryName>.v1")` (`S03/security-and-testing.md` §4 step 1a).
+  - Deploy the eight vault logic libraries first through the same deployer with salts `keccak256("czar.lib.<LibraryName>.v1")`, `OwnerActionLogic` last (`S03/security-and-testing.md` §4 step 1a, D89).
   - Verify sources on the testnet explorer (keyless, rate-limited).
 - **Inputs:** tested contracts from T-021..T-025; `packages/vault-client` from T-026; Zaryab's written funds approval.
 - **Acceptance tests:**
@@ -1527,3 +1528,4 @@
 | 2026-10-20 | Job-path review PR 3 (D87: N1, N2, H6, H7, N12) | New T-108 (two-instance test provider); T-059 depends on it; notes on T-035, T-045, T-046, T-055, T-073, T-084, T-091, T-101, T-105. |
 | 2026-10-20 | D88 (contract build readiness, plus its independent review) | T-012 steps (guardian apply, cancel, constructor checks); T-013/T-015 full vector values; T-019 owner actions 1–17; T-027 no ownership step, linked-library deployment; M1 note pointing at `docs/specs/07-contract-build/`; T-017 vector reproduced as a digest through `CzarVaultHarness`; T-018 JOB-1..5 and §15; T-020 also measures the factory; T-021 ranges, fuzz runs and handlers; T-023 six on-chain digests and `fs_permissions`; T-105 key count; T-011 OEL test follow-up (G-61). |
 | 2026-10-20 | 07 contract PRDs | M1 note: vault functions live in modules under `contracts/src/vault/`; T-018 adapter path `contracts/src/libraries/JobEscrowAdapter.sol`. |
+| 2026-10-20 | D89 | M1 note and T-018 outputs: vault logic in linked libraries under `contracts/src/vault/logic/`; T-020 output is the size record (the split is already in place); T-027 deploys the eight libraries first. |
