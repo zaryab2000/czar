@@ -513,6 +513,19 @@ Approved by Zaryab. Each entry cites the review finding it resolves.
 - **Left to Zaryab:** Gate 0 checks G0-08 and G0-09 (need testnet RPC) and SCR-101 (Arc hardfork name).
 - **Amends:** D42 (the size rule now covers the factory), D73 (factory constructor and change lifecycle), RV-030 (adds `setCategoryLimits`).
 
+## 12f. Vault code split into linked libraries (2026-10-20, from the contract build)
+
+### D89. The vault's logic runs in linked external libraries
+- **Source:** the reference build behind `docs/specs/07-contract-build/` PRDs 06–10. With every module inside one contract the vault measured 46,505 B runtime and the factory, which embeds the vault's creation code, 52,957 B (limit 24,576 B each, EIP-170). `via_ir` alone gave 38,178 B. D88 item 10 had already said the split would be into linked libraries.
+- **Decided:**
+  1. All vault storage is one struct, `VaultState`, held by the single variable `_s` at slot 0. Its fields are the `czar-vault.md` §4 variables, grouped so that small fields share a slot; the field order printed in `07-contract-build/03-factory-and-vault-skeleton.md` §7.1 is binding.
+  2. The vault's logic is in eight linked external libraries (`CoreLogic`, `EnvelopeLogic`, `ReservationLogic`, `SignatureLogic`, `PocketLogic`, `JobLogic`, `AutonomyLogic`, `OwnerActionLogic`). Each external library function takes `VaultState storage`, a memory copy of the vault's immutables (`VaultConfig`) and, where a caller rule applies, the caller. The vault calls them by `DELEGATECALL`, so they act on the vault's storage and balance and their events are the vault's.
+  3. `CzarVault` keeps the immutables, the getters and one thin wrapper per state-changing function; the `nonReentrant` guard stays on the wrapper (`czar-vault.md` §15.5). The passkey path calls the same library functions with `caller = owner`.
+  4. Measured (Arc Foundry v0.8.0-2, legacy pipeline, no `via_ir`): vault 14,540 B runtime and 16,233 B initcode; factory 20,747 B and 38,225 B; largest library `JobLogic` 11,867 B. All four limits hold.
+  5. The library addresses are fixed in the vault bytecode; there is no way to change them, so this is not a proxy and D33 holds. Each library is deployed through the Arachnid CREATE2 deployer with salt `keccak256("czar.lib.<LibraryName>.v1")` before the factory (`security-and-testing.md` §4 step 1a).
+- **Cost:** about 6,000 gas more per vault call (the `DELEGATECALL` and the copied arguments), about 0.00012 USDC at 20 Gwei. The x402 path pays it in `reserve`, in `isValidSignature` and in `settle`.
+- **Amends:** D42 and D88 item 10 (the split is now decided, not conditional); 07 PRDs 03–05 rewritten to this layout before any later PRD.
+
 ---
 
 ## 13. Open items (deferred)

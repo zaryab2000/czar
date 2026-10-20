@@ -119,6 +119,7 @@ Matches spec 01 §7.1 exactly.
 - No arrays indexed by user input. Every loop is bounded by a constant (`FINALIZE_CHUNK`, `MAX_AUTHORIZATIONS_PER_RESERVATION`).
 - Saturating helper `sat(a, b) = a > b ? a − b : 0` is used wherever a remaining amount is computed from two counters that can legitimately cross (free balance, remaining allowance); a plain `−` is used only where an invariant guarantees no underflow (RV-008, RV-011).
 - Reentrancy: `ReentrancyGuardTransient` on every function that calls USDC, GatewayWallet, GatewayMinter, the job escrow, or sends native value (`grantPocketGas`: the pocket EOA may carry EIP-7702 code, §12; RV-006). `isValidSignature` is `view` and makes no external calls except `view` reads, so it needs no guard. The exact list of guarded functions is §15.5 (D88).
+- **Code layout (D89):** the variables in the table above are the fields of one struct `VaultState` held by the single storage variable `_s` at slot 0, grouped so that small fields share a slot (the binding field order is printed in `07-contract-build/03-factory-and-vault-skeleton.md` §7.1). The vault's logic runs in eight linked external libraries that receive `VaultState storage`; `CzarVault` keeps the immutables, the getters, the reentrancy guard and one wrapper per function (§15.12; `07-contract-build/00-conventions.md` §3).
 
 ## 5. Functions
 
@@ -665,7 +666,7 @@ These rules close the gaps the 2026-10-20 contract gap audit found (ids G-nn). T
 ### 15.5 Reentrancy, effects order and external reverts (G-23, G-24, G-25)
 
 - **Guarded (`nonReentrant`, OpenZeppelin `ReentrancyGuardTransient`):** `withdraw`, `openEnvelope`, `settle`, `finalize`, `grantPocketGas`, `fundPocket`, `confirmPullback`, `cancelPullback`, `recordManualReturn`, `openJob`, `fundJob`, `cancelJob`, `syncJob`, `claimJobRefund`, `executeOwnerAction`, `sync`. Every other function is not guarded: `receive()`, every view, and the state-changing functions that make no external call other than the factory's `guardianPaused()` view (`setCategoryLimits`, `freeze`, `unfreeze`, `rotateSigners`, `setPasskey`, `setMaxPullbackFee`, `closeEnvelope`, `forceCloseEnvelope`, `reserve`, `reserveWithDigests`, `registerPocket`, `requestPullback`, `writeOffPocket`, `raiseAutoLimit`, `lowerAutoLimit`).
-- **Passkey dispatch:** every guarded external function is a thin wrapper around an internal `_name(caller, …)`. `executeOwnerAction` is itself guarded and calls the internal forms, so it never re-enters a guarded external function.
+- **Passkey dispatch:** every state-changing external function is a thin wrapper that passes `msg.sender` as `caller` to a logic-library function (D89). `executeOwnerAction` is itself guarded and calls the same library functions with `caller = owner`, so it never re-enters a guarded external function.
 - **Effects before interactions**, with these exact orders:
   - `openJob`: checks → `reserved`, `stepUsed`, `openJobs` → adapter `create` → store `jobs[jobKey]` (it needs the returned `jobId`) → events.
   - `fundJob`: checks (including the adapter view reads) → effects → adapter `fund`, which itself does `forceApprove(jobEscrow, b)` → the escrow's `fund` → `forceApprove(jobEscrow, 0)` → event.
@@ -728,7 +729,7 @@ These rules close the gaps the 2026-10-20 contract gap audit found (ids G-nn). T
 ### 15.12 Size limits (G-47)
 
 - The factory embeds the vault's creation code (`new CzarVault{salt: …}`), so **the factory's runtime size**, not only the vault's, must stay under 24,576 bytes. The factory limit binds first.
-- T-020 measures both runtime sizes and both initcode sizes. 07 PRD 11 moves vault logic into external linked libraries until both runtimes and both initcodes are under their limits.
+- T-020 measures both runtime sizes and both initcode sizes. The vault's logic is in linked external libraries from 07 PRD 03 on (D89). Measured with every function built (2026-10-20, Arc Foundry v0.8.0-2): vault runtime 14,540 B and initcode 16,233 B; factory runtime 20,747 B and initcode 38,225 B; the largest library, `JobLogic`, 11,867 B. 07 PRD 11 is the size and gas gate that keeps all four, and every library, under the limits.
 
 ## Change log
 
@@ -758,3 +759,4 @@ These rules close the gaps the 2026-10-20 contract gap audit found (ids G-nn). T
 | 2026-10-20 | H1, H2, M1-b (job-path review) | `syncJob` releases `Opened` jobs whose escrow reached `Submitted`/`Completed` unfunded; new `cancelJob` (owner action 17); `fundJob(jobKey, expectedBudget)`; `JobCancelled`, `JobNotCancellable`, `BudgetChanged`; INV-16; state machine. |
 | 2026-10-20 | D88 (contract build readiness) | Contract gap audit closed: binding caller table (§2, §15.1); full constant values and the missing constants (§3); typed records and getters in `ICzarVault.sol` (§4); `GATEWAY_DOMAIN` in the replay hash; exact-length `isValidSignature` parsing; fallback expiry check; `WebAuthnAuth` order note; INV-7 and INV-12 restated; gas figures aligned; new §15 build rules (errors, check order, events, reentrancy and effects order, ids, description format, time boundaries, constructor, owner-action dispatch, autonomy, size limits). |
 | 2026-10-20 | D88 (independent review) | `isValidSignature` range checks on narrow head words and a minimum length for `SL_RECEIPT`; `raiseAutoLimit` check order and errors; unguarded functions listed; `claimJobRefund` gate uses the escrow status; `Job.expiredAt`; `setCategoryLimits` in the nonce rows and INV-10; role-table rows for `setCategoryLimits` and `forceCloseEnvelope`; citations fixed. |
+| 2026-10-20 | D89 | Storage held in one `VaultState` struct (packed field order, printed in 07 PRD 03); logic in linked libraries; §4 code-layout note; §15.5 passkey-dispatch wording; §15.12 measured sizes. |
