@@ -407,6 +407,24 @@ Approved by Zaryab. Each entry cites the review finding it resolves.
 - **Why:** the server only holds redacted values, so it cannot build a usable table; a model on the server would put merchant text in front of a model (against D74) and add cost the envelope cannot see; plain code on the Mac is cheap, private and testable.
 - **Amends:** CZ-11 (gains the assembler), CZ-13 step 1 and step 8, CZ-15 `local_running`, P-03 rule 4, spec 02 §4.6.
 
+## 12b. Merchant supply on testnet (2026-10-20)
+
+### D83. Two lanes: the real market is ranked but never paid; the test market is paid for real
+- **Context:** Circle's catalog on 2026-10-18 lists 2,195 endpoints payable on Arc mainnet and 134 on Arc testnet, 132 of them Quicknode RPC (ground truth p1-D6). Phase 1 pays only on testnet (D13). So the testnet catalog has about two real merchants to rank, and real merchants cannot be paid with testnet USDC. The specs filtered every Selection Layer query by the plan's network, which would leave the ranking almost empty, and said nothing about mainnet listings.
+- **Decided:**
+  1. **Two networks, kept apart.** `selection.paymentNetwork` = `eip155:5042002` (Arc testnet) in Phase 1; `selection.marketNetwork` = `eip155:5042` (Arc mainnet). Every plan, payee leaf, reservation, pocket and job uses the payment network only.
+  2. **Lane A, the market view (rank-only).** CZ-18 queries Circle's live catalog for the market network (D15, no mirroring, p1-D8), probes each candidate's 402 without paying, and returns a `MarketView`: real services, their live price and payee, and what the unpaid probe showed (reachable, well-formed 402, live price and payee match the listing, response time). It is ordered by readiness tier, then price. It is **not a quality ranking** and says so, because quality needs paid calls.
+  3. **Lane A is never payable in Phase 1.** Three independent guards: (a) CZ-18 never puts a market-network service in `RankingDecision.ranked[]` or `unverified[]` for a plan; (b) CZ-13 drops any candidate whose live 402 `network` is not the payment network before a payee leaf exists; (c) `@czar/x402`'s buyer refuses to build a payment for an `accepts[]` entry on any network other than the payment network. Even if all three failed, the vault and USDC on testnet cannot move mainnet funds.
+  4. **Lane B, the test market (paid for real).** The real loop (reserve, pay, check, evidence, reputation) runs against: Czar's three merchants (CZ-20, D14); the non-RPC testnet catalog entries that pass a live probe; and the **Czar test-merchant lab**, 6 to 10 Czar-run services that wrap free public data sources and have deliberately different, configured behaviour (reliable, flaky, slow, price-drifting, schema-breaking, payee-changing). The lab exists so the Selection Layer's evidence and ranking show real differences between sellers on testnet.
+  5. **Honest labels everywhere.** Lab services carry `extensions.czar.source = "czar-test-merchant"` and `testMerchant: true`; every surface shows "Czar test merchant". Market-view rows show "Real market (Arc mainnet). Listed and reachable; not paid, quality not checked." Lab and Czar-run merchants are one operator for every independence rule (SL operator cluster), so their evidence never counts as independent of each other.
+  6. **Evidence is scoped by network.** Reputation rows are keyed by network. Testnet evidence never appears as mainnet quality, and market-view probe results never enter quality posteriors (`delivery`, `structural`, `requirement`); they feed only the readiness fields of `MarketView`.
+  7. **Shadow mode uses the real market for prices.** A shadow plan carries `marketReference` (per capability: ready count, lowest and median live price on the market network), so "Czar would have paid about $X" uses real prices. Paid testnet amounts are shown separately.
+  8. **Probing is polite and bounded.** Unpaid 402 probes identify Czar in `User-Agent`, are capped per origin per day and globally, use only GET or a body-less POST, never follow a payment, and back off on 429 or 5xx.
+  9. **Mainnet quality evidence is a mainnet-gate item.** Paying real merchants with a small real budget to build mainnet posteriors waits for the mainnet gate and Zaryab's explicit multi-step confirmation (`stage-2-backlog.md` MN-8).
+- **Why:** it shows discovery and ranking on the real market with real signals, proves payments and evidence end to end on testnet, never pays a real merchant with test money, and never presents test data as real.
+- **Open:** AR-11 (legal reading of Circle's terms for live querying and probing) stays open; persisted data is limited to Czar's own probe outcomes keyed by `(resource, payTo, network)`.
+- **Amends:** CZ-13 steps 2–3, CZ-18 §5.3, CZ-20 (adds the lab), CZ-08 shadow wording, product §8.5.
+
 ---
 
 ## 13. Open items (deferred)

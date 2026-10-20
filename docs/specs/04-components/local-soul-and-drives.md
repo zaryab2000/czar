@@ -573,7 +573,7 @@ In-process; uses CZ-07's outbox for `shadowQuote` calls (kind `shadow-quote`).
 
 ### 5. Internal design
 
-- Report rows: one per candidate: minutes (from §5.4 of CZ-06, summed over the detector's events), `Plan.cap` as the price, `Plan.steps[].kind` for path labels, timestamp.
+- Report rows: one per candidate: minutes (from §5.4 of CZ-06, summed over the detector's events), `Plan.cap` as the price (the testnet plan), plus the market line from `Plan.marketReference` when present (D83), `Plan.steps[].kind` for path labels, timestamp.
 - Totals: minutes, price, count; the ratio "hours of your time per dollar".
 - Transition: the app's "Start Czar" tap sets `mode = live` on the server (`Me.mode`); the daemon reads it on the next sync and re-offers shadowed candidates (`shadowed → candidate` with a fresh quote).
 - Parameters: `shadow.days` 7 (roadmap 1.5 "first week"), `shadow.maxReportRows` 50, `shadow.quoteTtlHours` 24.
@@ -608,6 +608,7 @@ Rows, quotes, failures (counts).
 |---|---|
 | Report header | "What you missed this week" |
 | Row | "You spent 3h 10m on competitor research. Czar could have done it for $0.62." |
+| Row market line (D83, when `Plan.marketReference` exists) | "On the real market (Arc mainnet), 4 listed services do this from $0.04 per call. Czar has not paid or checked them yet." |
 | Row path label | "Paid per call (checked before the next step)" / "Escrowed job (money back if rejected)" |
 | Totals | "This week: 6h 20m of your time · Czar estimate $2.14 · nothing was spent" |
 | Transition | "Start Czar: approve objectives one tap at a time. Nothing is spent until you approve." |
@@ -635,3 +636,4 @@ CZ-06, CZ-07, server planner (CZ-13 in dry-run).
 | 2026-10-19 | D69 | soul pointer and shadow summary wording refer to the desktop web app; no push in Phase 1. |
 | 2026-10-19 | RV-027 | §5.7: local `status` and `serverStatus` are separate; `serverStatus` uses the one canonical enum. |
 | 2026-10-20 | D82 | Objective publisher stores the local marker map at layer 2. |
+| 2026-10-20 | D83 | CZ-08 shadow rows show the real-market price line from `Plan.marketReference`. |

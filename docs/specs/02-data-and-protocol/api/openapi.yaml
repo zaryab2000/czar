@@ -667,9 +667,19 @@ components:
         capability: { type: string, maxLength: 64, description: "Capability tag, lowercase kebab-case, e.g. web-search." }
         taskClass: { type: string, maxLength: 64 }
         maxPrice: { $ref: "#/components/schemas/Amount6", description: Amount6 cap per call. }
-        network: { type: string, pattern: "^eip155:[0-9]+$", default: "eip155:5042002" }
+        network: { type: string, pattern: "^eip155:[0-9]+$", default: "eip155:5042002", description: "Must be selection.paymentNetwork; any other value returns 422 network-not-payable (D83)." }
         rails: { type: array, items: { type: string, enum: [x402-exact, gateway-batched, erc8183-job] } }
         allowUnverified: { type: boolean, default: false }
+        includeMarketView: { type: boolean, default: false, description: "Also return the D83 Lane A MarketView for this capability (rank-only, never payable)." }
+    MarketViewRequest:
+      type: object
+      description: "Lane A of D83 (spec 02 §4.22)."
+      x-privacyClass: redacted-to-server
+      additionalProperties: false
+      required: [capability]
+      properties:
+        capability: { type: string, maxLength: 64 }
+        maxPrice: { $ref: "#/components/schemas/Amount6" }
     FindServiceResponse:
       type: object
       description: "Same as the MCP `find_service` output (§2.2). Structured fields only; no merchant text."
@@ -677,6 +687,7 @@ components:
       additionalProperties: false
       required: [ranked, unverified, insufficientEvidence, policyVersion, snapshotId]
       properties:
+        marketView: { $ref: "../schemas/market-view.schema.json", description: "Present when includeMarketView was true (D83)." }
         ranked:
           type: array
           items:
@@ -1009,6 +1020,20 @@ paths:
         content: { application/json: { schema: { $ref: "#/components/schemas/FindServiceRequest" } } }
       responses:
         "200": { description: Ranked candidates, content: { application/json: { schema: { $ref: "#/components/schemas/FindServiceResponse" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /v1/services/market-view:
+    post:
+      tags: [daemon]
+      summary: Real-market services for a capability, probed without paying (D83 Lane A). Never payable in Phase 1.
+      operationId: getMarketView
+      security: [ { DeviceToken: [] }, { AppSession: [] } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/MarketViewRequest" } } }
+      responses:
+        "200": { description: MarketView, content: { application/json: { schema: { $ref: "../schemas/market-view.schema.json" } } } }
         "400": { $ref: "#/components/responses/Problem" }
         "429": { $ref: "#/components/responses/RateLimited" }
 
@@ -1456,3 +1481,4 @@ paths:
 # - D52 mscaBalance described as the "Network fee reserve".
 # x-changeLog: 2026-10-19 D69 — app tag is the desktop browser web app in Phase 1; push subscription routes and schemas tagged stage 2 (x-stage: 2); kept defined.
 # - D82 (2026-10-20): Result.assembly and ResultAck.assembly for unpaid local and agent-assist steps.
+# - D83 (2026-10-20): getMarketView route and MarketViewRequest; FindServiceRequest.network must be the payment network; includeMarketView and FindServiceResponse.marketView.

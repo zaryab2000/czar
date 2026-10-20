@@ -146,6 +146,62 @@
           }
         }
       }
+    },
+    "marketReference": {
+      "type": "object",
+      "description": "Shadow plans only (D83 point 7): real-market prices per capability from the MarketView; never used for payment.",
+      "x-privacyClass": "server-only",
+      "additionalProperties": false,
+      "required": [
+        "network",
+        "perCapability"
+      ],
+      "properties": {
+        "network": {
+          "$ref": "common.schema.json#/$defs/Caip2",
+          "description": "selection.marketNetwork.",
+          "x-privacyClass": "server-only"
+        },
+        "perCapability": {
+          "type": "array",
+          "maxItems": 64,
+          "description": "One row per paid capability.",
+          "x-privacyClass": "server-only",
+          "items": {
+            "type": "object",
+            "description": "Market prices for one capability.",
+            "x-privacyClass": "server-only",
+            "additionalProperties": false,
+            "required": [
+              "capability",
+              "ready"
+            ],
+            "properties": {
+              "capability": {
+                "$ref": "common.schema.json#/$defs/CapabilityTag",
+                "description": "Capability.",
+                "x-privacyClass": "server-only"
+              },
+              "ready": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Tier-ready services.",
+                "x-privacyClass": "server-only"
+              },
+              "low": {
+                "$ref": "common.schema.json#/$defs/Amount6",
+                "description": "Lowest live price.",
+                "x-privacyClass": "server-only"
+              },
+              "median": {
+                "$ref": "common.schema.json#/$defs/Amount6",
+                "description": "Median live price.",
+                "x-privacyClass": "server-only"
+              }
+            }
+          }
+        }
+      }
     }
   },
   "required": [
