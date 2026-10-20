@@ -26,9 +26,9 @@
 
 | # | Step | Component | Pass check |
 |---|---|---|---|
-| 2.1 | In Claude Code with the `czar-observer` plugin (`claude plugin validate --strict` passes, B1-39), the tester edits `pricing.md` adding `[Add competitor prices]` and runs `curl competitor.example/pricing` three times | CZ-01, CZ-02 | ≥ 4 `ActivityEvent`s stored; `summary` of the curl event shows `[[R:S:…]]` for a planted fake API key (layer 1); no raw path stored (`projectRef` is a hash) |
+| 2.1 | In Claude Code with the `czar-observer` plugin (`claude plugin validate --strict` passes, B1-39), the tester edits `pricing.md` to hold a table under `## Competitor pricing` with header `Competitor | Starter price (USD/month) | Notes` and five rows (Billora, InvoiceKite, Ledgerline, PayStub Pro, Quillbill), each price cell `[Add price]`; the five companies are Czar-hosted test sites with known prices (D84); the tester edits the file again 24 h later and runs `curl competitor.example/pricing` three times | CZ-01, CZ-02 | ≥ 4 `ActivityEvent`s stored; `summary` of the curl event shows `[[R:S:…]]` for a planted fake API key (layer 1); no raw path stored (`projectRef` is a hash) |
 | 2.2 | Run the soul compiler on demand (`czar soul compile --now`) | CZ-04, CZ-26 | `soul.json` version increments; a `mission` belief exists with ≥ 1 receipt; the excerpt sent through the proxy ≤ 20,000 chars and contains no `local-only` field (D31); `submitSoulVersion` → `202` |
-| 2.3 | Run the drives engine | CZ-06 | one `Objective` from the `placeholder` detector with capabilities `["web-search","page-extract"]`, `observationHashes` length ≥ 1, ROI ≥ `drives.roiMultiple` |
+| 2.3 | Run the drives engine | CZ-06 | one `Objective` from the `placeholder` detector with capabilities `["web-search","page-extract"]`, `observationHashes` length ≥ 1, ROI ≥ `drives.roiMultiple`; **`taskSpec.kind = table-fill`, `subjects` = the five names in file order, `fields = ["Starter price (USD/month)"]`, and the goal names all five (D84)** |
 | 2.4 | Publish | CZ-07 | `submitObjective` → `ObjectiveStatus.status = planning`; the server recomputes `objectiveHash` equal to the daemon's (02 §5.2); tampering the goal in the harness yields `422 hash-mismatch` |
 
 ## Stage 3: Plan and approve
@@ -87,6 +87,7 @@
 | 7.1c | Alternate retry (RV-054): step 0's payee returns 500 on a third objective | `unpaid`; CZ-15 retries step 0 against its alternate under the same `stepCap` (`stepUsed` never exceeds it, RV-002) |
 | 7.1d | MCP pay path (RV-054, D75): Claude Code calls `quote`, approves in the app, then `pay(planId, stepIndex)` until the step's `expectedCalls` are used; one more `pay` | each call `accepted`; the extra call is `rejected: step-calls-exhausted`; `pay` with a key outside `inputTemplate.inputKeys` is refused before any network call (RV-021) |
 | 7.1e | Mid-step freeze (RV-054, D72): freeze while a pocket step is paying | the signer refuses further nanopayments; CZ-15 requests the pocket pullback at once; vault-direct `reserve` reverts `FrozenVault` |
+| 7.2a | **Outcome check (D84, D85)** | `pricing.md` itself now has every `[Add price]` replaced by that company's known test price and the Notes column unchanged (byte-compare outside the filled cells); the result file in `.czar/results/` holds the same table with sources; `czar undo-fill` restores the five placeholders; the delivered table has one row per company in file order, and every price cell equals that company's known test price (at most one "not found" allowed only when its test site is deliberately down); the approval screen in stage 3 listed the five companies; editing the list to four companies produced a new plan with four `callInputs` per paid step |
 | 7.2 | Result rendered and written back | `getResult` body with provenance spans per merchant; the daemon writes `.czar/results/<objectiveId>-competitor-prices.md`; `ackResult` → `204`; the next Claude Code `SessionStart` prints the pointer line (B1-14) |
 | 7.3 | `closeEnvelope(envelopeId)` | `EnvelopeClosed(spent = 50,000 + 20,000 gas grant + 185,000 + 300,000 = 555,000, released = 836,250 − 555,000 = 281,250)`; `getMe.balances.free` increased by `released` |
 | 7.4 | Result shown in the app | the objective reads "Delivered" and the receipts screen lists the step amounts (the `result-delivered` push is stage 2, D69) |
@@ -123,3 +124,5 @@
 | 2026-10-19 | RV-054 | Stages 7.1–7.1e: injection on a vault-direct step, deliverable injection, screen unavailable, alternate retry, MCP pay path, mid-step freeze. |
 | 2026-10-19 | D74, D78, RV-026, RV-030, RV-031 | Planner assertion, archive URI, demand-proof v2, freeze and raise checks. |
 | 2026-10-20 | D83 | Stage 8 rows 8.6 (two lanes) and 8.7 (test-merchant lab). |
+| 2026-10-20 | D84 | Stage 2.1 realistic table with named rows; 2.3 checks `TaskSpec`; new 7.2a outcome check. |
+| 2026-10-20 | D85 | 7.2a checks the in-place fill of `pricing.md` and undo. |

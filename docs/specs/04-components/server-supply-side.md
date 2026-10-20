@@ -20,7 +20,7 @@
 ### 2. Responsibilities and non-responsibilities
 
 - **Does:** run three small paid HTTP services on Arc testnet so the full loop (plan → pay → accept → prove) runs against real sellers; expose each service on **both** rails (vanilla x402 settled by Circle's Facilitator, and Gateway nanopayments) so vault-direct and pocket paths are both exercised; publish discovery-index entries in the 02 §12.2 shape; sweep Gateway balances to the payout wallets; refund Czar's own bad sales by policy.
-- **Does not:** rank itself above others (CZ-18 applies the same evidence rules to Czar's merchants, SL §10 operator-misconduct row); hold the agent, evaluator or publisher keys; read any user data (it sees only the structured `input` of a step, never user text, 02 §4.6 `inputTemplate`, spec 01 §11.2 layer 3); pay anyone.
+- **Does not:** rank itself above others (CZ-18 applies the same evidence rules to Czar's merchants, SL §10 operator-misconduct row); hold the agent, evaluator or publisher keys; read any user data beyond the step's approved `callInputs` (the person's subjects and fields, D84; 02 §4.6); pay anyone.
 
 ### 3. Runtime
 
@@ -59,7 +59,7 @@
 |---|---|---|---|---|
 | `czar-spot` | `GET /v1/spot?pair=` | `{pair, price, asOf, source}` | the 02 §12.4 example; deterministic, cheap, structurally checkable by CZ-16 (`price` is a decimal string, `asOf` RFC 3339) | `merchants.spotPriceAtomic` = 50000 / `merchants.gatewayNanoPriceAtomic` = 1000 |
 | `czar-extract` | `POST /v1/extract` body `{url}` | `{title, text, links[]}` with `text ≤ merchants.extractMaxChars` (20,000) and `links ≤ 50` | the planner's `page-extract` capability; exercises untrusted-input handling | `merchants.extractPriceAtomic` = 100000 / 1000 |
-| `czar-search` | `GET /v1/search?q=` | `{results: [{title, url, snippet}] ≤ 10}` from a fixed index Czar controls | the planner's `web-search` capability; deterministic results make the Phase 1 acceptance scenario repeatable | `merchants.searchPriceAtomic` = 50000 / 1000 |
+| `czar-search` | `GET /v1/search?q=` | `{results: [{title, url, snippet}] ≤ 10}` from a **live web search backend** (`merchants.searchBackend = live`; the source is chosen in the build plan, T-043) so real queries return real pages; the fixed index Czar controls is kept only as `merchants.searchBackend = fixture` for CI (D84) | the planner's `web-search` capability; the fixture mode makes CI repeatable | `merchants.searchPriceAtomic` = 50000 / 1000 |
 
 - **Testnet honesty:** `czar-spot` on testnet serves either a server-side cache of one public free price source refreshed every `merchants.spotRefreshSeconds` (300) or, when that source is unreachable, a deterministic synthetic series flagged `source: "synthetic-testnet"`. The `source` field is always present so acceptance checks and users are never misled. Decided by D49 (public source, cache, synthetic fallback, always a `source` field); which free source is used is chosen in the build plan.
 - **Why both rails per service:** D22 names two payment paths; the Phase 1 scenario (`phase-1-acceptance-scenario.md`) needs a vault-direct payment and a pocket payment against real sellers. Each service therefore has two resource URLs: `/v1/<svc>` (vanilla `exact`, `payTo` = K10 key) and `/nano/v1/<svc>` (Gateway `gateway.require`). They share the handler.
@@ -131,7 +131,7 @@ stateDiagram-v2
 | Rule | Detail |
 |---|---|
 | Input is data | parsed strictly against the declared `bazaar` schema; unknown keys rejected (400); never interpolated into shell, SQL or prompts |
-| `czar-extract` URL allowlist | every fetch goes through the shared `safeFetch` in `@czar/x402` (`cross-cutting.md` §2.1, RV-022: https only, pinned DNS, private/loopback/link-local/ULA/CGNAT blocked, redirects re-checked); on top of that the hostname must match `merchants.extractAllowlist` (a short list of public documentation and news domains chosen in the build plan) or be a Czar-owned test page; max `merchants.extractMaxRedirects` 3; response ≤ `merchants.extractMaxBytes` 2 MiB; timeout `merchants.extractTimeoutMs` 8,000. **Superseded by RV-022:** the guard living only here |
+| `czar-extract` URL allowlist | every fetch goes through the shared `safeFetch` in `@czar/x402` (`cross-cutting.md` §2.1, RV-022: https only, pinned DNS, private/loopback/link-local/ULA/CGNAT blocked, redirects re-checked); **any public https page** (D84; **superseded:** the `merchants.extractAllowlist` domain list, which blocked the pages users actually need, such as competitors' pricing pages); max `merchants.extractMaxRedirects` 3; response ≤ `merchants.extractMaxBytes` 2 MiB; timeout `merchants.extractTimeoutMs` 8,000. **Superseded by RV-022:** the guard living only here |
 | Returned text | plain text (tags stripped), truncated; it is **untrusted** to the buyer and is labelled so in the response (`"untrusted": true`) |
 | Agent-directed text in fetched pages | returned verbatim as data (for example Circle and Arc doc headers, FL-1, FL-2); the seller never acts on page content |
 | Rate limits | per `payer` address: `merchants.perPayerPerMin` 60; global per route `merchants.perRoutePerMin` 600 |
@@ -216,7 +216,7 @@ None. The merchants run no model. (`czar-search` is a fixed index; `czar-extract
 | fetched page content (`czar-extract`) | server-only, transient | not stored after the response; the response cache keeps it 24 h under the payment id |
 | seller proofs, Console key | secret | KMS / secret store |
 
-No user text ever reaches a merchant: CZ-13 sends only the structured `inputTemplate` (spec 01 §11.2 layer 3).
+A merchant receives only the step's approved `callInputs` (the subjects and fields the person saw on the approval screen, D84), never the goal text, soul or file contents.
 
 ### 9. Security
 
@@ -323,3 +323,4 @@ Mocked GitHub API fixtures for admin / non-admin / renamed repo; `arc-anvil` tes
 | 2026-10-18 | D50 | automatic refunds of Czar's own sales with a daily cap |
 | 2026-10-19 | RV-022 | `czar-extract` uses the shared `safeFetch`; the guard is no longer local to this merchant. |
 | 2026-10-20 | D83 | CZ-20 §5.8a test-merchant lab: six behaviour profiles, labels, parameters, tests. |
+| 2026-10-20 | D84 | `czar-search` live backend (fixture mode for CI only); `czar-extract` domain allowlist removed, `safeFetch` still applies. |

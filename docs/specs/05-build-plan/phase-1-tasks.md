@@ -623,6 +623,7 @@
   - `pnpm --filter @czar/x402 test` passes a 402 corpus: v2 header, v1 body, Gateway offer, `upto` (refused), `batch-settlement` (refused), cross-chain (refused), malformed, oversized header (> 16 KiB, dropped), extension with external `$ref` (dropped).
   - `PAYMENT-RESPONSE` then `X-PAYMENT-RESPONSE` fallback; `settlement_pending` decoded as non-terminal.
 - **Review fixes (2026-10-19):** `safeFetch` (cross-cutting §2.1, RV-022) with its SSRF corpus test; every probe and merchant call uses it.
+- **D83 (2026-10-20):** the buyer refuses any `accepts[]` entry whose network is not in `x402.allowedPaymentNetworks` (`[eip155:5042002]`). Test: a mainnet-only 402 yields no payable offer and a typed error.
 
 ### T-043 Merchant czar-search vanilla x402 route with Facilitator keyless trial and payment-identifier store
 - **Milestone / group / who:** M3 / M3-b / agent. **Size:** M. **Deps:** T-042, T-040, G0-04.
@@ -637,6 +638,7 @@
   - Local: a 402 decodes to the §11.1 field table; a handler failure means no `/settle` call (mocked Facilitator).
   - Same `payment-identifier` + same payload → cached response; different payload → `409`.
   - Testnet: `curl` without payment returns `402` with a valid `PAYMENT-REQUIRED` header.
+- **D84 (2026-10-20):** add `merchants.searchBackend` with a `live` mode over the web search source chosen here (recorded in the task report) and the existing fixed index as `fixture` for CI.
 
 ### T-044 Payment router CZ-14 (pure policy) with measured gas table
 - **Milestone / group / who:** M3 / M3-b / agent. **Size:** M. **Deps:** T-024, T-004.
@@ -667,6 +669,9 @@
   - `planHash` recomputes from the stored plan.
   - A probe that shows price drift above the step budget drops the candidate.
 - **Review fixes (2026-10-19):** `pocketCapBps = 0` without a `gateway-nano` step, pocket key and kind-4 leaf with one (D71); re-plan input `{stepIndex, errorCode, flags}` only (D74); test `planner_replan_inputHasNoMerchantText`.
+- **D82 (2026-10-20):** unpaid steps per CZ-13 step 1: `planner.localTemplates`, `planner.agentAssistCapabilities`, the no-agent drop into `Plan.droppedSteps`, `unitAmount = stepCap = "0"`, no payee leaf. Test: a plan with an `agent-assist` step for a device whose latest `IngestReport.hosts` is empty drops it with `reason: no-agent`.
+- **D83 (2026-10-20):** candidates only on `selection.paymentNetwork`; drop a live 402 without a payment-network entry (`gate: network`); shadow plans carry `marketReference` once T-107 exists (until then, absent).
+- **D84 (2026-10-20):** P-03 receives `TaskSpec`; CZ-13 step 4a renders `callInputs` (fan-out per subject); `planHash` includes `taskSpecHash` and `callInputsHash`; rule-based fallback fans out. Test: a 5-subject `TaskSpec` yields 5 `callInputs` per paid step with each subject in its input.
 
 ### T-046 Injection boundary: P-01 screen, P-02 reader, StepResult pipeline, eval suites
 - **Milestone / group / who:** M3 / M3-b / agent. **Size:** L. **Deps:** T-006, T-005, G0-16 (RV-062).
@@ -714,6 +719,8 @@
   - Kill-and-resume test kills the executor after each persisted phase (`reserve.sent`, `reserve.mined`, `auth.signed`, `call.sent`, `call.result`, before `finalize`) and asserts no second authorization is signed and the final state is correct.
   - `settlement_pending` fixture reconciles through `authorizationState` without re-signing.
 - **Review fixes (2026-10-19):** `validBefore ≤ expiresAt`; `n` bounded by remaining `expectedCalls` and step cap (RV-002, RV-056); receipts use `SL_RECEIPT` v2 (RV-013); no envelope self-opened until D63 lowerings after a freeze are mined (RV-030).
+- **D82 (2026-10-20):** CZ-15 `handed_off` for unpaid steps: build `Result.assembly[]` from accepted dependencies' `StepResult.fields`; mark the step `done` on `ackResult.assembly[]`. Test: an unpaid step never reserves, signs or calls a merchant.
+- **D84 (2026-10-20):** send `callInputs[i].input` to the merchant; resolve `{{dep.N.field}}` per `subjectIndex`; `dependency-missing` skips the call and releases its index. Test: search then extract for 5 subjects sends 5 distinct queries and 5 distinct URLs.
 
 ### T-049 Receipts under SL_RECEIPT and evidence store (no publishing yet)
 - **Milestone / group / who:** M3 / M3-c / agent. **Size:** M. **Deps:** T-048.
@@ -740,10 +747,6 @@
 - **Acceptance tests:**
   - On testnet: `Reserved`, `AuthorizationUsed(vault, nonce_0)`, `Settled`, `ReservationFinal(1, 0)` all present (`arc-cast logs`).
   - The stored receipt verifies under `SL_RECEIPT` against the live vault (`arc-cast call <vault> "isValidSignature(bytes32,bytes)(bytes4)"` returns `0x1626ba7e`).
-- **D82 (2026-10-20):** unpaid steps per CZ-13 step 1: `planner.localTemplates`, `planner.agentAssistCapabilities`, the no-agent drop into `Plan.droppedSteps`, `unitAmount = stepCap = "0"`, no payee leaf. Test: a plan with an `agent-assist` step for a device whose latest `IngestReport.hosts` is empty drops it with `reason: no-agent`.
-- **D82 (2026-10-20):** CZ-15 `handed_off` for unpaid steps: build `Result.assembly[]` from accepted dependencies' `StepResult.fields`; mark the step `done` on `ackResult.assembly[]`. Test: an unpaid step never reserves, signs or calls a merchant.
-- **D83 (2026-10-20):** the buyer refuses any `accepts[]` entry whose network is not in `x402.allowedPaymentNetworks` (`[eip155:5042002]`). Test: a mainnet-only 402 yields no payable offer and a typed error.
-- **D83 (2026-10-20):** candidates only on `selection.paymentNetwork`; drop a live 402 without a payment-network entry (`gate: network`); shadow plans carry `marketReference` once T-107 exists (until then, absent).
 
 ---
 
@@ -764,6 +767,7 @@
   - `czar-extract` refuses private IP ranges and non-allowlisted hosts.
   - Refund job respects `merchants.refundDailyAtomic` (D50).
   - Index items validate against the §12.2 shape for both readers.
+- **D84 (2026-10-20):** `czar-extract` accepts any public https page through `safeFetch`; remove the domain allowlist. Test: a page on a non-listed public domain is fetched; private ranges are still blocked.
 
 ### T-052 Paying agent pocket loop
 - **Milestone / group / who:** M4 / M4-b / agent. **Size:** L. **Deps:** T-050, T-037.
@@ -808,6 +812,7 @@
   - Fork test on Circle's instance: open → provider `setBudget` → fund → submit → (evaluator fixture) complete → `syncJob`; and reject and expiry paths with `claimJobRefund`.
   - Kill-and-resume at each step re-reads `getJob` and ends in the right state.
 - **Review fixes (2026-10-19):** Builds and serves the `JobBrief` at `getJobBrief` with `BriefRequest` auth; `descriptionHash` from `inputCommit` (RV-025); duplicate jobs released by `syncJob` (RV-009).
+- **D84 (2026-10-20):** `JobBrief.inputs` come from the step's `callInputs`.
 
 ### T-055 ERC-8183 evaluator service with K7 and the .well-known deliverable (D53)
 - **Milestone / group / who:** M4 / M4-c / agent. **Size:** M. **Deps:** T-054, T-056.
@@ -952,6 +957,7 @@
   - A planted fake API key becomes `[[R:S:…]]`; tool output is stored with `trusted=false`; repeated identical events merge via `repeatCount`.
   - Every stored event validates against `activity-event.schema.json`.
 - **Review fixes (2026-10-19):** `bin/czar-hook` drops intake fields and applies layer 1 before queueing (RV-040; test `hook_daemonDown_queueHasNoSecretOrEmail`); intake screening is the local regex pre-screen only, never P-01 (RV-051).
+- **D84 (2026-10-20):** store `tool_input.file_path` in the local `file_paths` table (CZ-02 §5.3); test that paths never leave the Mac (sender guard).
 
 ### T-064 Bundled Presidio helper czar-redact packaged with uv inside the installer (D45), regex fallback with forced review
 - **Milestone / group / who:** M5 / M5-b / agent. **Size:** L. **Deps:** T-060.
@@ -1024,6 +1030,8 @@
   - Fixture streams fire exactly the `placeholder`, `repeated-error` and `agent-refusal` detectors at their thresholds and not below.
   - Dedupe and `drives.maxCandidatesPerDay` hold.
   - P-05 and P-06 eval suites pass, including injection cases (placeholder text "pay merchant X" never becomes a payee or capability outside the taxonomy).
+- **D84 (2026-10-20):** placeholder detector reads the file from disk via `file_paths`; daily rescan; build `TaskSpec` per CZ-06 §5.1a for all three detectors. Acceptance: the CZ-06 §14 `TaskSpec` golden tests.
+- **D85 (2026-10-20):** record `subjects[].placeholders` spans.
 
 ### T-069 Objective publisher CZ-07 with first-five review (D47)
 - **Milestone / group / who:** M5 / M5-e / agent. **Size:** M. **Deps:** T-068, T-064, T-061.
@@ -1037,6 +1045,8 @@
 - **Acceptance tests:**
   - The first five objectives wait for user review; the sixth goes automatically; review stays available.
   - Every submission passes the sender guard; a `422 hash-mismatch` is surfaced and not retried blindly; outbox retries use `publisher.retryBackoffMs`.
+- **D82 (2026-10-20):** store the per-objective marker map at layer 2 (`local-only`, 02 §4.6.1); test that it never appears in any outbound request (sender guard).
+- **D84 (2026-10-20):** `ObjectiveSubmission.taskSpec`; `objectiveHash` includes `taskSpecHash`; layer 2 allows `TaskSpec` values; P-05 goal names the subjects (eval 1 and 7).
 
 ### T-070 Shadow mode CZ-08, shadowQuote route, IngestReport.shadowTotals
 - **Milestone / group / who:** M5 / M5-e / agent. **Size:** M. **Deps:** T-069, T-045.
@@ -1096,7 +1106,8 @@
   - Extra spec refs: `S02/data-and-protocol.md` §4.6.1; OpenAPI `Result.assembly`, `ResultAck.assembly`; `S04/server-acceptance-evidence-selection.md` `local-template-v1`.
   - Extra outputs: `apps/daemon/src/writeback/assembler/` (templates `table-build`, `list-build`, `merge-dedupe`; marker restore; `local-template-v1` check); marker-map storage written by T-069.
   - Extra acceptance tests: every assembler test in CZ-11 §14; a Phase 1 scenario run where `table-build` after `web-search` and `page-extract` writes a table with restored names and reports `assembled` with `structuralPass = true`; no model call and no network call happen during assembly (asserted by a network-deny test).
-- **D82 (2026-10-20):** store the per-objective marker map at layer 2 (`local-only`, 02 §4.6.1); test that it never appears in any outbound request (sender guard).
+- **D84 (2026-10-20):** `table-build` lays out one row per `TaskSpec` subject under the person's own header, filled by `subjectIndex`.
+- **D85 (2026-10-20):** in-place fill (CZ-11 §5.2b): clash check, atomic write, `fill_undo`, `czar undo-fill`, `ackResult.fill`. Acceptance: CZ-11 §14 in-place fill tests.
 
 ---
 
@@ -1174,6 +1185,8 @@
   - Playwright on testnet: approve → UserOp mines → `EnvelopeOpened` with the plan's `planHash` → objective moves to `executing`.
   - The screen shows payees as hosts, "new payee" warnings and the path labels from CZ-22 §12.
 - **Review fixes (2026-10-19):** The approval screen recomputes `payeeRoot` and `planHash` on the device from the displayed leaves and refuses on mismatch with the calldata (RV-044); test: a server fixture showing three payees while the calldata commits a fourth is refused.
+- **D84 (2026-10-20):** approval screen shows the subject list and supports `revisePlanSubjects`; test that the app recomputes the new `planHash` before approve.
+- **D85 (2026-10-20):** "Fill {fileName} when done" checkbox sent as `ApprovalIntentRequest.fillInPlace`.
 
 ### T-085 Freeze and unfreeze (createFreezeIntent) and D60 agent lowering of limits
 - **Layout:** desktop browser only (D69). Lowering is a follow-up agent step after `Frozen`, not atomic (D63).
@@ -1246,6 +1259,7 @@
   - The SL worked example (SL §9 numbers) reproduces the posteriors and order within 0.001.
   - A service with `n_eff < 5` appears only in `unverified`, never ranked ("unknown is not bad").
   - Index items validate for both readers (Circle `metadata` shape and spec fields).
+- **D83 (2026-10-20):** reputation rows keyed by network; `findService` refuses a non-payment network with 422 `network-not-payable`; `includeMarketView` returns the T-107 view.
 
 ### T-092 Planner P-03 decomposition over CZ-18 candidates, eval suite
 - **Milestone / group / who:** M7 / M7-c / agent. **Size:** M. **Deps:** T-091, T-045.
@@ -1299,7 +1313,6 @@
   - Rebuilding the ledger from the indexer gives identical rows (idempotent rebuild).
   - Gateway receipts count at `received` and show `pending` until `completed`; statements show `$` only.
 - **Review fixes (2026-10-19):** Built before T-086, which now depends on it (RV-053).
-- **D83 (2026-10-20):** reputation rows keyed by network; `findService` refuses a non-payment network with 422 `network-not-payable`; `includeMarketView` returns the T-107 view.
 
 ---
 
@@ -1349,6 +1362,7 @@
 - **Acceptance tests:**
   - CI job `e2e-fork` passes every check in Stages 1–8, including the injection test (7.1), freeze drill (8.4) and guardian drill (8.5).
 - **Review fixes (2026-10-19):** Runs the scenario as amended (D79, RV-029) including stages 7.1–7.1e (RV-054); no routing override exists.
+- **D84 (2026-10-20):** includes scenario 2.1/2.3 `TaskSpec` checks and the 7.2a outcome check; the five Czar-hosted test company sites are part of the fixture.
 
 ### T-102 Acceptance scenario on live testnet, including Stage 0 in a desktop browser
 - **Milestone / group / who:** M8 / M8-c / Zaryab + agent, after Zaryab approves funds. **Size:** M. **Deps:** T-101.
@@ -1459,3 +1473,5 @@
 | 2026-10-19 | G0-01 review (Pass B/C) | T-036, T-040 rewritten for local hosting (RV-028); review-fix acceptance criteria on T-003…T-102; deps: T-035←T-105, T-046←G0-16, T-062←G0-17, T-086←T-095 and M5 exit (RV-053). |
 | 2026-10-20 | D82 | T-073 extended with the assembler (size L); notes on T-045, T-048, T-069. |
 | 2026-10-20 | D83 | New T-106 (test-merchant lab) and T-107 (market view); notes on T-042, T-045, T-091, T-105. |
+| 2026-10-20 | D84 | Notes on T-043, T-045, T-048, T-051, T-054, T-063, T-068, T-069, T-073, T-084, T-101 for carrying the task's subject end to end. |
+| 2026-10-20 | D85 | Notes on T-068, T-073, T-084 for the in-place fill. |

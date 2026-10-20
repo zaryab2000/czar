@@ -924,6 +924,19 @@ sequenceDiagram
 
 ## 11. Data flows and privacy
 
+### 11.0 Core-value rule and data lineage (D84)
+
+- **Rule.** In Phase 1 the order is: (a) the task delivers what the person needs; (b) money guards hold (payees only from the approved `payeeRoot`; amounts bounded by cap, `stepCap` and the vault; envelopes only with approval or earned allowance); (c) data minimisation and injection hardening. A class (c) rule that removes an input the task needs is changed, not kept.
+- **Lineage of the task's subject.** Every spec change must keep this table true.
+
+| Detector | Source of the subject | On the Mac | To the server | To the planner | To the merchant | Back to the person |
+|---|---|---|---|---|---|---|
+| `placeholder` (table) | the person's file on disk, read through `file_paths` (CZ-02) | CZ-06 §5.1a builds `TaskSpec` (row labels, column headers); layer 1 only | `ObjectiveSubmission.taskSpec` (in `objectiveHash`) | P-03 gets `TaskSpec`; CZ-13 step 4a renders `callInputs` (in `planHash`); the approval screen shows and edits the subjects | `callInputs[i].input`, for example `q = "Billora starter price pricing"`; then `url` from the search result (`{{dep.0.url}}`) | CZ-11 assembler: one row per subject under the person's own header |
+| `placeholder` (list, code) | the file on disk | `list-fill` / `line-fill` lines | same | same | same | result file |
+| `repeated-error` | the error text (tool output) | `error-fix`, layer 1 | same | same | error text as the query | result file |
+| `agent-refusal` | the person's prompt before the refusal | `refused-task` | same | same | the prompt as the query | result file |
+
+
 ### 11.1 Data inventory
 
 | Item | Origin | Stored where | Encrypted | Leaves machine? | Who can see | Retention |
@@ -934,7 +947,7 @@ sequenceDiagram
 | `user_email` and other identity fields in hook payloads (Cursor) | observers | dropped at intake | n/a | never | nobody | 0 |
 | Soul (`SOUL.md`, `soul.json`, versions) | CZ-04 | local store | yes | never; only `soulVersionHash` | user | until deleted by user |
 | Observation hashes | CZ-06 | local; hash list sent with objectives | n/a | hashes only | server, chain (inside batches) | server: life of objective + 1 year audit; chain: forever |
-| Objective (redacted goal text, capabilities, deadline, minutes saved, hourly-value band) | CZ-07 after layer 2 | server Postgres | at rest (provider disk encryption) | yes | Czar server, planner LLM, user | 1 year, then goal text deleted, hashes kept |
+| Objective (goal text, `TaskSpec` subjects and fields (D84), capabilities, deadline, minutes saved, hourly-value band) | CZ-07 after layers 1–2 (layer 2 keeps `TaskSpec` values) | server Postgres | at rest (provider disk encryption) | yes | Czar server, planner LLM, user | 1 year, then goal text deleted, hashes kept |
 | Plan, payees, prices, step results metadata | CZ-13, CZ-15 | server | at rest | n/a | Czar, user | 1 year |
 | Merchant response bodies | merchants | server object store, keyed by step | at rest | n/a | acceptance checker, user (delivered); never the planner raw | 30 days unless the user keeps the result |
 | Receipts, acceptance reports | CZ-16, CZ-17 | server; hashes on-chain | at rest | n/a | public as hash-only (SL §11) | permanent |
@@ -962,7 +975,7 @@ flowchart LR
 
 - Layer 1 runs on every payload before anything is written (C2-06). Hits are replaced with typed placeholders such as `[SECRET:aws]`.
 - Layer 2 runs on objective text before upload (C2-01 to C2-05). Presidio makes no completeness promise (C2-03), so the user sees a preview of exactly what will be sent the first few times and can set "always review".
-- Layer 3 (product §6.12) is partial in Phase 1 (planner sends merchants only the structured task input) and full in Phase 2.
+- Layer 3 (product §6.12): merchants receive the approved `callInputs` (the person's subjects and fields, D84). Phase 2 minimisation may trim surrounding context but never removes an approved subject.
 - trufflehog is not linked (AGPL, C2-07) and its live verification is never used on user data.
 - Non-English users: Presidio needs per-language models (C2-04); Phase 1 is English, flagged in §22.
 
@@ -989,7 +1002,7 @@ Scenario: Priya, a product manager, works in Claude Code on a pricing doc for tw
 1. **Observe.** Claude Code's `PostToolUse` hook fires on an `Edit` of `pricing.md` and on a `Bash` call `curl competitor.com/pricing` three times. Payloads go to `czard` over the local HTTP hook. Handoff: CZ-01 → CZ-02.
 2. **Redact and remember.** Layer 1 finds an API key in a tool response and replaces it with `[SECRET:generic]`. Two `ActivityEvent`s are stored: `file-edit pricing.md (placeholder "[Add competitor prices]")` and `repeated-fetch competitor.com (3)`. Handoff: CZ-26 → CZ-03.
 3. **Understand.** Nightly, CZ-04 writes soul v12: Mission "Pricing refresh, due Friday"; Friction "manual competitor price checks". `soulVersionHash = 0x7a…` is sent to the server.
-4. **Want.** CZ-06's placeholder detector produces objective "Fill competitor price table for 5 named competitors", capabilities `web-search`, `page-extract`, `table-build`, minutes saved 95, hourly band B. ROI 95 min × $60/h = $95 vs expected $0.80 → shown. Observation hashes `0x11…`, `0x12…`. Handoff: CZ-06 → CZ-07.
+4. **Want.** CZ-06's placeholder detector reads `pricing.md` from disk (D84) and builds a `TaskSpec`: `table-fill`, topic "Competitor pricing", subjects = the 5 row labels, field "Starter price (USD/month)". P-05 writes the objective "Find the starter monthly price for Billora, InvoiceKite, Ledgerline, PayStub Pro and Quillbill and fill the Competitor pricing table in pricing.md", capabilities `web-search`, `page-extract`, `table-build`, minutes saved 95, hourly band B. ROI 95 min × $60/h = $95 vs expected $0.80 → shown. Observation hashes `0x11…`, `0x12…`. Handoff: CZ-06 → CZ-07.
 5. **Publish.** Layer 2 finds no PII. `objectiveHash = keccak(canonical objective)` = `0x9c…`. Sent with the device token. Handoff: CZ-07 → CZ-12.
 6. **Price.** CZ-13 asks CZ-18 for `web-search` and `page-extract` services. CZ-18 queries Circle Discovery live (cached ≤ 1 h) and Czar's index, probes the top candidates' 402s, and returns a `RankingDecision`. Plan: step 1 search ($0.05, vault-direct, Czar merchant A), steps 2–6 five page extracts ($0.10 each, Gateway-only merchant B → pocket), step 7 table build (`local`, free; runs on Priya's Mac in the CZ-11 assembler, D82). Cap $0.70 with 25% slack = $0.88. `planHash = 0x3e…`, `payeeRoot` over {A's payTo, B's payTo}. Category `research`.
 7. **Approve.** Priya's `autoAllowance[research]` is $0.50 this week, so approval is needed. She opens the Czar web app in her desktop browser and sees the objective in the pending-approvals list; she clicks "Approve $0.88". The app builds a UserOp `openEnvelope(880000, research, expiry, 0x9c…, 0x3e…, payeeRoot, maxStep 150000)`; her passkey signs it; Circle's bundler submits it; her MSCA calls the vault. Signature 1: passkey over the UserOp. Event `EnvelopeOpened(#4411, …, approver = MSCA)`.
@@ -1012,7 +1025,7 @@ Scenario: Priya, a product manager, works in Claude Code on a pricing doc for tw
 | **Pocket key leaks (K4)** | Spend that pocket on any Gateway seller; sign a burn intent that sends the whole balance to any address; `removeDelegate` to block pullback | That pocket's balance plus gas dust | Per-pocket keys; drain at end; vault pulls back immediately on alert; cap 25%. On-chain, a revoked delegate's intents still pass, even ones signed after revocation; only Circle's API refuses them (A2-05, RV-063). |
 | **Malicious merchant or agent** | Take payment and deliver nothing or garbage; serve injection text; settle `upfront` flows early; for jobs, submit junk | One step per bad call (x402), bounded by `maxStepAmount`; zero for ERC-8183 (reject → refund) | Probe before paying (p1-D7); step caps; stop-on-fail; evidence and rank; refuse `upfront` from untrusted merchants; evaluator rejects jobs. |
 | **Poisoned catalog or seller text** (descriptions, bazaar schemas, `Agent Instructions` pages, FL-1, FL-2) | Steer the planner toward itself, embed instructions in `description`, oversize schemas | Same bound as "model hijacked" | Text affects retrieval only, never score (SL-C3); schemas validated and sanitized, no external `$ref` (A3-36); reader/planner split (§13.1); small-model screen (C3-04). |
-| **Malicious observer input** (memory poisoning, OWASP ASI06, C3-02) | A tool output or page plants fake "TODOs" or fake deadlines that become objectives | Spend within whatever the user approves, or within auto-allowance for the category | Every belief carries provenance and receipts; detectors weight repeated, multi-source signals; objectives show their evidence; the user edits or deletes any line; auto-approved objectives need positive history in that category; injection screen on observed text before it becomes a drive. |
+| **Malicious observer input** (memory poisoning, OWASP ASI06, C3-02) | A tool output or page plants fake "TODOs" or fake deadlines that become objectives; since D84, text an agent writes into a project file can also choose what Czar looks up | Spend within whatever the user approves, or within auto-allowance for the category | Every belief carries provenance and receipts; detectors weight repeated, multi-source signals; objectives show their evidence; the user edits or deletes any line; auto-approved objectives need positive history in that category; injection screen on observed text before it becomes a drive. |
 | **Circle or a dependency contract upgraded against Czar** (USDC, GatewayWallet, ERC-8183, ERC-8004; A1-02, A2-23, A4-08, A5-12) | Change signature checking, fees, delegate rules, or take funds in Gateway balances | Pocket balances (Gateway); job budgets (ERC-8183); vault-direct payments only if USDC's ERC-1271 check changed | Pin implementations and alert on `Upgraded` (FD-18); halt the affected path; keep pockets small; migrate jobs to `CzarJobEscrow`. The vault's own USDC balance is native USDC, so a USDC upgrade is a chain-level risk shared by everyone on Arc. |
 | **The claim server lies** (D17) | Approve a false builder claim | Unclaimed tips for that repo | Timelocked, public releases; admin cancel; small escrow by design (D24); GitHub admin check plus `FUNDING.json` fallback leaves an audit trail. |
 | **Phished user approval** | Trick the user into approving a bad plan or a large cap | That envelope's cap | Plain-language plan summary with payees and amounts in USD (D51, D65); the app rebuilds `payeeRoot` and `planHash` from the leaves it displays with `@czar/hashing` and refuses to sign on any mismatch with the calldata, so a compromised server cannot show benign payees and approve others (CZ-22, RV-044); new-payee and over-threshold warnings; per-category `userMax`; freeze in one tap; history visible. Passkeys stop credential phishing, not consent phishing (D1-08). |
@@ -1440,3 +1453,4 @@ No new agent-directed text was encountered in this session beyond what the groun
 - 2026-10-19 · D31 wording: §1 no longer says raw work data never leaves the machine.
 - 2026-10-20 · D82: §12 walkthrough step 6 and 11, the table-build step runs on the Mac in the CZ-11 assembler.
 - 2026-10-20 · D83: §15.3 two-lane row; merchant row in the testnet/mainnet table.
+- 2026-10-20 · D84: new §11.0 core-value rule and subject lineage table; §11.2 layer 3; §12 walkthrough step 4; §13 ASI06 row.

@@ -1,0 +1,74 @@
+{
+  "schemaVersion": "1.0",
+  "kind": "table-fill",
+  "topic": "Competitor pricing",
+  "fileName": "pricing.md",
+  "fileExt": "md",
+  "subjects": [
+    {
+      "label": "Billora",
+      "sourceLine": 12,
+      "placeholders": [
+        {
+          "field": "Starter price (USD/month)",
+          "token": "[Add price]",
+          "column": 1
+        }
+      ]
+    },
+    {
+      "label": "InvoiceKite",
+      "sourceLine": 13,
+      "placeholders": [
+        {
+          "field": "Starter price (USD/month)",
+          "token": "[Add price]",
+          "column": 1
+        }
+      ]
+    },
+    {
+      "label": "Ledgerline",
+      "sourceLine": 14,
+      "placeholders": [
+        {
+          "field": "Starter price (USD/month)",
+          "token": "[Add price]",
+          "column": 1
+        }
+      ]
+    },
+    {
+      "label": "PayStub Pro",
+      "sourceLine": 15,
+      "placeholders": [
+        {
+          "field": "Starter price (USD/month)",
+          "token": "[Add price]",
+          "column": 1
+        }
+      ]
+    },
+    {
+      "label": "Quillbill",
+      "sourceLine": 16,
+      "placeholders": [
+        {
+          "field": "Starter price (USD/month)",
+          "token": "[Add price]",
+          "column": 1
+        }
+      ]
+    }
+  ],
+  "fields": [
+    "Starter price (USD/month)"
+  ],
+  "columns": [
+    "Competitor",
+    "Starter price (USD/month)",
+    "Notes"
+  ],
+  "context": "## Competitor pricing\n| Competitor | Starter price (USD/month) | Notes |",
+  "sourceTrust": "user-file"
+}

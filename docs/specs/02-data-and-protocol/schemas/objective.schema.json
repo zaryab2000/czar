@@ -144,6 +144,11 @@
       ],
       "description": "Local lifecycle status: candidate, dismissed, shadowed (priced in shadow mode, never sent for payment), published.",
       "x-privacyClass": "local-only"
+    },
+    "taskSpec": {
+      "$ref": "task-spec.schema.json",
+      "description": "The task's real subject (D84, §4.3.1).",
+      "x-privacyClass": "redacted-to-server"
     }
   },
   "required": [
@@ -157,7 +162,8 @@
     "evidence",
     "observationHashes",
     "roi",
-    "status"
+    "status",
+    "taskSpec"
   ],
   "$comment": "Change log: 2026-10-18 AM-14 status enum now candidate|dismissed|shadowed|published."
 }

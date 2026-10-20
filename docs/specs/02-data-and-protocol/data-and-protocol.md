@@ -181,8 +181,29 @@ Each object: purpose, fields (name, type, required, privacy class, description, 
 | `minutesSaved` | integer | yes | RS | estimate |
 | `evidence` | array of `{eventId, beliefId?}` ≤ 50 | yes | L | local links |
 | `observationHashes` | array of `Hash32` ≤ 50 | yes | HC | `keccak256(jcs(ActivityEvent minus eventId))` per linked event (§5.2) |
+| `taskSpec` | `TaskSpec` (§4.3.1) | yes | RS | the task's real subject, built by code (D84) |
 | `roi` | object `{hourlyBand: enum A..E, ratio: number}` | yes | RS (band only) | value-of-time filter output |
 | `status` | enum `candidate` \| `dismissed` \| `shadowed` \| `published` | yes | L | `shadowed` = priced in shadow mode only, never sent for payment (AM-14) |
+
+#### 4.3.1 `TaskSpec` (D84)
+
+- **Purpose:** carry the task's real subject (what to look up, for which items, which fields) from the person's own file, prompt or error to the merchant call. Built by **code** in CZ-06 (§5.1a), never by a model.
+- **Schema:** `schemas/task-spec.schema.json`. Example: `examples/task-spec.example.json`.
+
+| Field | Type | R | PC | Description |
+|---|---|---|---|---|
+| `kind` | enum `table-fill` \| `list-fill` \| `line-fill` \| `error-fix` \| `refused-task` | yes | RS | shape of the task |
+| `topic` | string ≤ 300 | yes | RS | nearest heading or caption; error class; prompt gist |
+| `fileName`, `fileExt` | string ≤ 255, ≤ 16 | no | RS | base name only, never a path |
+| `subjects` | array ≤ 50 of `{label ≤ 200, sourceLine?, addedByUser?, placeholders?: [{field, token, column?}] ≤ 20}` | yes | RS | for a table, the row label of each row that has a placeholder; `placeholders` are the exact spans CZ-11 fills in place (D85) |
+| `fields` | array ≤ 20 of string ≤ 64 | yes | RS | what to find per subject (placeholder column headers or placeholder text) |
+| `columns` | array ≤ 20 of string ≤ 64 | no | RS | the full header row, so the assembled table matches the person's table |
+| `context` | string ≤ 2,000 | no | RS | surrounding text, error text or the person's prompt, after layer 1 |
+| `sourceTrust` | enum `user-file` \| `user-prompt` \| `tool-output` | yes | RS | `tool-output` only for `error-fix` |
+| `editedByUser` | boolean | no | RS | subjects changed on the approval screen |
+
+- **Redaction:** layer 1 (secrets) runs on every string. Layer 2 (PII) runs on `goal` but treats every value present in `TaskSpec` as allowed, so it never replaces a subject with a marker (D84 point 3). The person sees `TaskSpec` on the approval screen.
+- **Invariant:** `taskSpecHash = H({hashRule:"czar-hash-v1", kind:"task-spec", …TaskSpec})` (§5.2) is part of `objectiveHash` and `planHash`.
 
 ### 4.4 `ObjectiveSubmission`
 
@@ -196,6 +217,7 @@ Each object: purpose, fields (name, type, required, privacy class, description, 
 | `soulVersionHash` | `Hash32` | yes | HC | §5.2 |
 | `observationHashes` | array of `Hash32` | yes | HC | |
 | `detector`, `goal`, `capabilities`, `deadline`, `minutesSaved` | as §4.3 | yes/no | RS | |
+| `taskSpec` | `TaskSpec` (§4.3.1) | yes | RS | D84 |
 | `hourlyBand` | enum `A`..`E` | yes | RS | A < $25/h … E > $200/h; the exact amount stays local |
 | `constraints` | object `{maxTotal?: Amount6, categoriesAllowed?: string[], noNewPayees?: boolean}` | no | RS | from soul constraints |
 | `redaction` | object `{layer2: {hits: integer, entities: string[]}}` | yes | RS | counts and entity names only |
@@ -203,7 +225,7 @@ Each object: purpose, fields (name, type, required, privacy class, description, 
 | `submittedAt` | `Timestamp` | yes | RS | |
 
 - **Invariants:** `objectiveHash` recomputes from the fields in §5.2; `goal` contains no unmarked PII per layer 2 (best effort, C2-03).
-- **Example (invented):** `{"schemaVersion":"1.0","objectiveId":"obj_01K7ZTA0B1C2D3E4F5G6H7J8K9","objectiveHash":"0x9c…","soulVersionHash":"0x7a…","observationHashes":["0x11…","0x12…"],"detector":"placeholder","goal":"Fill the competitor price table for 5 named competitors","capabilities":["web-search","page-extract","table-build"],"deadline":"2026-10-23T17:00:00.000Z","minutesSaved":95,"hourlyBand":"C","redaction":{"layer2":{"hits":0,"entities":[]}},"deviceId":"dev_01K7…","submittedAt":"2026-10-18T09:30:00.000Z"}`
+- **Example (invented):** `{"schemaVersion":"1.0","objectiveId":"obj_01K7ZTA0B1C2D3E4F5G6H7J8K9","objectiveHash":"0x9c…","soulVersionHash":"0x7a…","observationHashes":["0x11…","0x12…"],"detector":"placeholder","goal":"Find the starter monthly price for 5 competitors (Billora, InvoiceKite, Ledgerline, PayStub Pro, Quillbill) and fill the Competitor pricing table in pricing.md.","taskSpec":{"kind":"table-fill","topic":"Competitor pricing","fileName":"pricing.md","subjects":[{"label":"Billora"},{"label":"InvoiceKite"},{"label":"Ledgerline"},{"label":"PayStub Pro"},{"label":"Quillbill"}],"fields":["Starter price (USD/month)"],"sourceTrust":"user-file"},"capabilities":["web-search","page-extract","table-build"],"deadline":"2026-10-23T17:00:00.000Z","minutesSaved":95,"hourlyBand":"C","redaction":{"layer2":{"hits":0,"entities":[]}},"deviceId":"dev_01K7…","submittedAt":"2026-10-18T09:30:00.000Z"}`
 
 ### 4.5 `Plan`
 
@@ -229,6 +251,8 @@ Each object: purpose, fields (name, type, required, privacy class, description, 
 | `rankingDecisionIds` | array of string | no | SO | SL `query_id`s used |
 | `shadow` | boolean | yes | SO | true for shadow-mode pricing (no envelope) |
 | `marketReference` | object `{network, perCapability[{capability, ready, low?, median?}]}` | no | SO | shadow plans only: real-market prices from the `MarketView` (D83 point 7); never used for payment |
+| `taskSpec` | `TaskSpec` | yes | SO | copy from the objective, including approval-screen edits (D84); `taskSpecHash` is in `planHash` |
+| `fillInPlace` | boolean, default `true` | no | SO | fill the person's file at the recorded placeholders when done (D85); set by `createApprovalIntent`'s `ApprovalIntentRequest`; not in `planHash` (it moves no money) |
 | `droppedSteps` | array of `{capability, reason: no-agent}` ≤ 64 | no | SO | steps removed before approval (D82); shown to the person with the plan |
 | `createdAt` | `Timestamp` | yes | SO | |
 
@@ -251,7 +275,9 @@ Each object: purpose, fields (name, type, required, privacy class, description, 
 | `stepCap` | `Amount6` | yes | HC | ≥ `unitAmount × expectedCalls` |
 | `routingReason` | string | yes | SO | for example `below-pocket-threshold` |
 | `acceptanceProfileId` | SL `ProfileId` | yes | SO | |
-| `inputTemplate` | object | no | SO | structured input only, never user text (spec 01 §11.2 layer 3); optional `inputTemplate.expectedKeys: string[]` (≤ 50, each ≤ 64) names the output keys the `requirement` check (CZ-16) and the reader's `expectedFields` (P-02) look for (AM-09); `inputTemplate.inputKeys: [{name, type: string\|number\|boolean, maxLength?, enum?}]` (≤ 20) names the only input keys a `pay` call may send for this step (RV-021) |
+| `fanOut` | enum `none` \| `subjects` | no | SO | `subjects`: one call per `TaskSpec` subject; `expectedCalls = subjects × callsPerSubject` (D84) |
+| `callInputs` | array ≤ 128 of `{callIndex, subjectIndex?, input}` | no | SO | concrete input per call, rendered by CZ-13 from `inputTemplate` and `TaskSpec`; `callInputsHash = H(jcs(callInputs))` is in `planHash` (D84) |
+| `inputTemplate` | object | no | SO | keys from the taxonomy template; values may reference `{{subject}}`, `{{topic}}`, `{{field}}`, `{{fields}}` (from `TaskSpec`) and `{{dep.<stepIndex>.<fieldName>}}` (a dependency's accepted `StepResult` field for the same subject, filled by CZ-15 at run time) (D84). **Superseded by D84:** "never user text"; optional `inputTemplate.expectedKeys: string[]` (≤ 50, each ≤ 64) names the output keys the `requirement` check (CZ-16) and the reader's `expectedFields` (P-02) look for (AM-09); `inputTemplate.inputKeys: [{name, type: string\|number\|boolean, maxLength?, enum?}]` (≤ 20) names the only input keys a `pay` call may send for this step (RV-021) |
 | `dependsOn` | array of `stepIndex` | no | SO | |
 
 #### 4.6.1 Unpaid steps (`local`, `agent-assist`; D82)
@@ -504,9 +530,10 @@ type PaymentRef =
 | Hash | Preimage (`jcs` of this object) | Notes |
 |---|---|---|
 | `observationHash` | `{hashRule:"czar-hash-v1", kind:"observation", host, sessionRef, projectRef, eventType, occurredAt, toolName?, summary, fileRefs?, errorClass?, provenance}` from an `ActivityEvent` | excludes `eventId`, `redaction`, `durationMs`, `agentRef`, `mcp`, `hostVersion`; the daemon keeps the preimage; the server sees only the hash |
-| `objectiveHash` | `{hashRule:"czar-hash-v1", kind:"objective", objectiveId, soulVersionHash, observationHashes (sorted ascending), detector, goal, capabilities (as given), deadline?, minutesSaved, hourlyBand}` | `goal` is the redacted text; the server can recompute from the submission |
+| `taskSpecHash` | `{hashRule:"czar-hash-v1", kind:"task-spec", …TaskSpec}` | D84 |
+| `objectiveHash` | `{hashRule:"czar-hash-v1", kind:"objective", objectiveId, soulVersionHash, observationHashes (sorted ascending), detector, goal, capabilities (as given), deadline?, minutesSaved, hourlyBand, taskSpecHash}` | `goal` is the redacted text; the server can recompute from the submission |
 | `soulVersionHash` | `{hashRule:"czar-hash-v1", kind:"soul", version, compiledAt, previousHash?, sectionHashes}` where `sectionHashes[s] = H({section:s, beliefs:[{beliefId, text, confidence, firstSeen, lastSeen, receipts(sorted)}]})` | belief `text` never leaves; only the hash does; the person can prove any belief later by revealing it |
-| `planHash` | `{hashRule:"czar-hash-v1", kind:"plan", planId, objectiveHash, network, category, cap, slackBps, maxStepAmount, pocketCapBps, expiresAt, payeeRoot, steps:[{stepIndex, kind, payee?, alternates?, unitAmount, expectedCalls, stepCap, acceptanceProfileId, serviceId?}]}` | excludes `resource` URLs and `inputTemplate` (server-only) |
+| `planHash` | `{hashRule:"czar-hash-v1", kind:"plan", planId, objectiveHash, network, category, cap, slackBps, maxStepAmount, pocketCapBps, expiresAt, payeeRoot, taskSpecHash, steps:[{stepIndex, kind, payee?, alternates?, unitAmount, expectedCalls, stepCap, acceptanceProfileId, serviceId?, fanOut?, callInputsHash?}]}` | excludes `resource` URLs and `inputTemplate`; includes `taskSpecHash` and each step's `callInputsHash`, so what runs is what was approved (D84) |
 | `reportHash` | `jcs(AcceptanceReport minus reportHash)` | the ERC-8183 `reason` |
 | `paymentRefHash` | SL §5.2 (`PaymentRef` without ★ fields) | |
 | `descriptionHash` | `H({hashRule:"czar-hash-v1", kind:"job-description", planHash, stepIndex, acceptanceProfileId, inputCommit})` | the ERC-8183 `description` string is `"czar:" + descriptionHash` |
@@ -740,7 +767,7 @@ Hook configuration shape in the plugin's `hooks/hooks.json` (B1-08, B1-09, B1-38
 | common (every event) | — | `session_id` → `sessionRef` (keccak256); `cwd` → `projectRef` (keccak256 of git root); `hook_event_name` → `provenance.hookEvent`; `agent_id` → `agentRef` (keccak256) when present | B1-02, B1-26 |
 | `PreToolUse` (`Skill`) | `skill-use` | `tool_input.skill` → `toolName`; `tool_input.args` → `summary` (redacted, ≤ 2,000) | B1-05, B1-21, B1-23 |
 | `PreToolUse` (`mcp__.*`, `mcp__plugin_.*`) | `mcp-call` | `tool_name` → `toolName` and parsed `mcp` (§8.5); `tool_input` → `summary` (redacted) | B1-05, B1-25 |
-| `PostToolUse` (`*`) | `tool-result`, or `file-read` / `file-write` / `command` / `search` by `tool_name` (`Read`→file-read, `Edit`/`Write`/`NotebookEdit`→file-write, `Bash`→command, `Grep`/`Glob`/`WebSearch`→search), `mcp-call` for `mcp__*` | `tool_name` → `toolName`; `tool_input.file_path` (if present) → `fileRefs[]` (keccak256); `tool_response` → `summary` (redacted, ≤ 2,000, `trusted=false`); `duration_ms` → `durationMs`; `tool_use_id` dropped | B1-05 |
+| `PostToolUse` (`*`) | `tool-result`, or `file-read` / `file-write` / `command` / `search` by `tool_name` (`Read`→file-read, `Edit`/`Write`/`NotebookEdit`→file-write, `Bash`→command, `Grep`/`Glob`/`WebSearch`→search), `mcp-call` for `mcp__*` | `tool_name` → `toolName`; `tool_input.file_path` (if present) → `fileRefs[]` (keccak256) and the daemon's local `file_paths` map (`fileRef → absolute path`, `local-only`; D84: lets the placeholder detector read the current file from disk); `tool_response` → `summary` (redacted, ≤ 2,000, `trusted=false`); `duration_ms` → `durationMs`; `tool_use_id` dropped | B1-05 |
 | `PostToolUseFailure` (`*`) | `tool-failure` (or `agent-refusal` when `is_interrupt` is false and `error` matches the refusal detector's patterns) | `tool_name` → `toolName`; `error` → `errorClass` (normalized) and `summary`; `is_interrupt` → kept as `summary` suffix; `duration_ms` → `durationMs` | B1-05 |
 | `UserPromptSubmit` | `prompt` | `prompt` → `summary` (redacted, ≤ 2,000, `trusted=true`) | B1-04 |
 | `UserPromptExpansion` | `skill-use` | `command_name` → `toolName`; `command_source` → `provenance.hookSource`; `command_args` → `summary` (redacted); `expansion_type` kept in `summary` prefix; `prompt` dropped | B1-04, B1-22 |
@@ -848,6 +875,7 @@ Full definition: `api/openapi.yaml` (OpenAPI 3.1; 28 paths, 29 operations; parse
 | POST | `/v1/shadow/quotes` | key required | `ShadowQuoteRequest` → `Plan` with `shadow: true` | no envelope, no payment (CZ-08) |
 | POST | `/v1/pay/requests` | key + `payRequestId` | `PayRequest` `{payRequestId, objectiveId, planId, stepIndex, calls?, maxAmount?, input?}` → `PayResponse` (`executing` \| `approval-required` + `elicitationUrl` \| `accepted` \| `rejected` \| `failed`) | canonical shape; the MCP `pay` tool mirrors it (D75). Pays only a step of an approved plan with an open envelope, within the step's `expectedCalls` (RV-019); `409` on a reused `payRequestId` with a different request (§7.4) |
 | POST | `/v1/hooks/ingest-report` | key required | `IngestReport` (counts only, optional `shadowTotals`, AM-04) → `204` | no events, no text |
+| POST | `/v1/approvals/{planId}/subjects` (`revisePlanSubjects`) | key required | `SubjectsRevision` → `Plan` | D84: edit subjects on the approval screen; re-plan; old plan `superseded`; `409` if the plan is already approved |
 | POST | `/v1/services/search` (`findService`) | key required | `FindServiceRequest` → `FindServiceResponse` | backs MCP `find_service` (AM-01); `network` other than `selection.paymentNetwork` → 422 `network-not-payable` (D83) |
 | POST | `/v1/services/market-view` (`getMarketView`) | key required | `MarketViewRequest {capability, maxPrice?}` → `MarketView` (§4.22) | Lane A of D83; read-only; backs MCP `find_service` with `includeMarketView` and the app's market screen |
 | POST | `/v1/quotes` (`createQuote`) | key required | `QuoteRequest` → `QuoteResponse` | backs MCP `quote`; moves no money (AM-01) |
@@ -920,7 +948,7 @@ Full definition: `api/openapi.yaml` (OpenAPI 3.1; 28 paths, 29 operations; parse
 
 | Link | Never sent | Why |
 |---|---|---|
-| Daemon → server | raw hook payloads, `ActivityEvent`s, soul text, `transcript_path` contents, file paths, `user_email`, the hourly value amount (band only) | D25, D31, B1-30, B3-04; schemas carry no `local-only` field |
+| Daemon → server | raw hook payloads, `ActivityEvent`s, soul text, `transcript_path` contents, file paths, `user_email`, the hourly value amount (band only). **Sent (D84):** `TaskSpec` (subjects, fields, topic, base file name, context) inside `ObjectiveSubmission` | D25, D31, B1-30, B3-04, D84; schemas carry no `local-only` field |
 | Server → daemon | other users' data, merchant bodies beyond the labelled `Result`, keys | spec 01 §11.1 |
 | App ↔ server | passkey private material (assertions only), soul contents (D34), merchant raw bodies | D26, D34 |
 | Server → push (stage 2) | anything beyond title, amount and a navigate URL | D2-06, §9.6 |
@@ -1254,3 +1282,5 @@ Agent-directed text met this session (not followed): the Circle and Arc doc head
 | 2026-10-19 | RV-018 / D74 | §4.15 `StepResult` never reaches the planner. |
 | 2026-10-20 | D82 | §4.6 kind `agent-assist`; §4.6.1 unpaid steps, `AssemblyRecord`, marker map; §5.3 empty-tree rule; OpenAPI `Result.assembly`, `ResultAck.assembly`. |
 | 2026-10-20 | D83 | §4.5 `marketReference`; §4.19 payment network only; new §4.22 `MarketView`; schema and example; OpenAPI `getMarketView`; `FindServiceRequest.network` must be the payment network. |
+| 2026-10-20 | D84 | §4.3 `taskSpec`; new §4.3.1 `TaskSpec`; §4.4 field and example; §4.5 `taskSpec`; §4.6 `fanOut`, `callInputs`, `inputTemplate` references ("never user text" superseded); §5.2 `taskSpecHash`, `objectiveHash`, `planHash`; §8.2 `file_paths` map; §9.7. |
+| 2026-10-20 | D85 | §4.3.1 `subjects[].placeholders`; §4.5 `fillInPlace`; OpenAPI `ApprovalIntentRequest`, `Result.fillInPlace`, `ResultAck.fill`. |

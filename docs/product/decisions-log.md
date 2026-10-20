@@ -425,6 +425,34 @@ Approved by Zaryab. Each entry cites the review finding it resolves.
 - **Open:** AR-11 (legal reading of Circle's terms for live querying and probing) stays open; persisted data is limited to Czar's own probe outcomes keyed by `(resource, payTo, network)`.
 - **Amends:** CZ-13 steps 2–3, CZ-18 §5.3, CZ-20 (adds the lab), CZ-08 shadow wording, product §8.5.
 
+## 12c. The task must carry its subject (2026-10-20)
+
+### D84. Function first: every objective carries its real subject from Sam's files to the merchant call
+- **Context:** for the flagship objective (fill a competitor price table), the specs removed the task's subject before any payment. Three rules, each added for safety, combined to do this: (1) the Claude Code mapping kept only `tool_response` for file writes and marked it untrusted, so the placeholder detector could never fire; (2) the detector record dropped the surrounding text, so the competitor names were lost; (3) "`inputTemplate` is never user text" left no way for real values to reach a merchant. Czar would charge for searches that could not know what to look up. Root-cause review: the specs were written threat-first, component by component, with no end-to-end data trace for the core task and no acceptance check of the outcome.
+- **Decided:**
+  1. **Priority order for Phase 1 (the core-value rule).** (a) The task delivers what the person needs. (b) Money guards stay: payees only from the approved `payeeRoot`, amounts bounded by cap, `stepCap` and the vault, envelopes only with approval or earned allowance. (c) Data minimisation and injection hardening come after (a). A class (c) rule that removes an input the task needs is changed, not kept. Class (b) guards are kept because they cost the task nothing.
+  2. **Detection reads the user's file.** The placeholder detector is triggered by any file event in a project and reads the **current file from disk** through a local `file_paths` map (`local-only`). Text in the person's own project file is `user-file` trust. `tool_response` stays untrusted and is no longer needed for detection. Files edited outside Claude Code are rescanned daily once they are known.
+  3. **New `TaskSpec` object carries the subject.** Built by code (no model) at detection: `kind`, `topic`, `fileName`, `subjects[]` (for a table, the row labels of rows with placeholders), `fields[]` (the placeholder column headers), `context` (surrounding text), `sourceTrust`. It travels in `ObjectiveSubmission` and `Plan` and is part of `objectiveHash` and `planHash`. Layer 1 (secrets) runs on it; layer 2 (PII) does **not** remove values that are in `TaskSpec`, because they are the task.
+  4. **All three Phase 1 detectors carry a subject.** `placeholder` → the table rows, list lines or comment text; `repeated-error` → the error text, tool and file name; `agent-refusal` → the person's last prompt before the refusal (`user-prompt` trust).
+  5. **Plans bind real inputs.** Steps can fan out per subject (`fanOut: "subjects"`); CZ-13 renders `inputTemplate` with `{{subject}}`, `{{topic}}`, `{{field}}` into concrete `callInputs[]` at plan time, committed in `planHash`. Values a step needs from an earlier step (for example the URL a search returned) use `{{dep.<stepIndex>.<fieldName>}}` and are filled by CZ-15 at run time from that dependency's accepted `StepResult` for the same subject.
+  6. **Approval shows and edits the subjects.** The approval screen lists "Czar will look up: …". The person can remove or add subjects; the server re-plans (new `planHash`) and the old plan is `superseded`. Approval is the trust step for subjects.
+  7. **Merchants must be able to do the job.** `czar-extract` fetches any public https page through `safeFetch` (the domain allowlist is removed). `czar-search` gets a live backend (`merchants.searchBackend = live`, source chosen in the build plan) with the fixed index kept only for CI fixtures.
+  8. **Outcome checks.** The Phase 1 acceptance scenario uses a realistic file with named rows and passes only if the delivered table has those rows filled. Spec 01 gains a data-lineage table per detector. Every spec change gets a "does it still do the job" review, separate from the security review (Gate check G0-18).
+- **What still holds for money:** text in a file can now choose *what* Czar looks up. It still cannot choose *who* is paid, *how much*, or open an envelope; those come only from ranked candidates, the approved `payeeRoot`, caps and the vault.
+- **Accepted risk:** an injected file edit could make Czar look up the wrong things. Bounded by approval (the subjects are shown) and the money guards above.
+- **Amends:** spec 01 §11.2 layer 3 and §13 ASI06 row; spec 02 §4.3, §4.4, §4.5, §4.6, §5.2, §8.2, §9.7; CZ-02, CZ-06, CZ-11, CZ-12, CZ-13, CZ-15, CZ-20, CZ-22; P-03, P-05. Does not amend D74: merchant text still never reaches the planner.
+
+### D85. Czar fills the person's own file in place, with four guards
+- **Context:** under D82/D84 the finished table went only to `.czar/results/`, leaving the person to copy values into their own file and merge their own notes by hand. The objective is "fill the table", so that left the core task unfinished.
+- **Decided:**
+  1. **Fill in place.** For `table-fill`, `list-fill` and `line-fill` objectives, the CZ-11 write-back adapter writes the found values into the person's file, replacing **only** the exact placeholder spans the detector recorded (row `sourceLine`, column, token). No other cell, line or file is changed.
+  2. **Clash check.** Before writing, the adapter re-reads the file and fills a placeholder only if that exact token is still at that row and column. Anything that moved or was already filled is skipped and reported. The write is atomic (temp file, then rename).
+  3. **Receipt and undo.** The result file in `.czar/results/` stays as the receipt, with the source of each value. The daemon keeps a local undo record; "Undo fill" in the local viewer, or `czar undo-fill <objectiveId>`, restores the placeholders if those cells still hold Czar's values.
+  4. **The person chooses.** The approval screen has "Fill {fileName} when done", ticked by default (`Plan.fillInPlace`). Unticked, the person gets the result file only.
+  - A value Czar could not find leaves its placeholder in place, so the gap stays visible and the detector can try again.
+- **Why:** the task is complete only when the person's own file is filled; their notes and formatting are kept.
+- **Amends:** CZ-11 "Does not: modify user files" (now: only the recorded placeholder spans, under these guards); D82 point 6; spec 02 `Plan`, `Result`, `ResultAck`, `createApprovalIntent`.
+
 ---
 
 ## 13. Open items (deferred)

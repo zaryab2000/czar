@@ -3,7 +3,7 @@
   "objectiveId": "obj_3YWRPWNS3245WP6SZWX8S7SW02",
   "soulVersion": 1,
   "detector": "placeholder",
-  "goal": "example",
+  "goal": "Find the starter monthly price for 5 competitors (Billora, InvoiceKite, Ledgerline, PayStub Pro, Quillbill) and fill the Competitor pricing table in pricing.md.",
   "capabilities": [
     "6w8"
   ],
@@ -20,5 +20,44 @@
     "hourlyBand": "A",
     "ratio": 0
   },
-  "status": "candidate"
+  "status": "candidate",
+  "taskSpec": {
+    "schemaVersion": "1.0",
+    "kind": "table-fill",
+    "topic": "Competitor pricing",
+    "fileName": "pricing.md",
+    "fileExt": "md",
+    "subjects": [
+      {
+        "label": "Billora",
+        "sourceLine": 12
+      },
+      {
+        "label": "InvoiceKite",
+        "sourceLine": 13
+      },
+      {
+        "label": "Ledgerline",
+        "sourceLine": 14
+      },
+      {
+        "label": "PayStub Pro",
+        "sourceLine": 15
+      },
+      {
+        "label": "Quillbill",
+        "sourceLine": 16
+      }
+    ],
+    "fields": [
+      "Starter price (USD/month)"
+    ],
+    "columns": [
+      "Competitor",
+      "Starter price (USD/month)",
+      "Notes"
+    ],
+    "context": "## Competitor pricing\n| Competitor | Starter price (USD/month) | Notes |",
+    "sourceTrust": "user-file"
+  }
 }
