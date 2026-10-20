@@ -456,14 +456,14 @@ Approved by Zaryab. Each entry cites the review finding it resolves.
 - **Why:** the task is complete only when the person's own file is filled; their notes and formatting are kept.
 - **Amends:** CZ-11 "Does not: modify user files" (now: only the recorded placeholder spans, under these guards); D82 point 6; spec 02 `Plan`, `Result`, `ResultAck`, `createApprovalIntent`.
 
-### D86. No file sharing in Phase 1; the job path and brief stay type-agnostic; demo job types decided later
+### D86. No file sharing in Phase 1; the job path and brief stay type-agnostic; Phase 1 job types for the acceptance run decided later
 - **Decided:**
   1. **No file sharing in Phase 1.** Approved file attachments for jobs (C1-b) are a stage-2 item, specified in full in `stage-2-backlog.md` (P2-17) so they can be built without redesign.
   2. **C1-a.** The job brief carries the approved `TaskSpec` (topic, subjects, fields, columns, context). `JobBrief.inputs` come from the step's `callInputs`; "never free user text" is removed from spec 02 §4.21.
   3. **Type-agnostic.** There is no job-kind allowlist in `JobBrief`, CZ-13, CZ-14, CZ-15 or CZ-16. The capability taxonomy and `TaskSpec.kind` say what a job is about. A job is planned only when a listed provider claims the capability. Nothing in the specs limits the job path to research, report, summary or non-code work.
   4. **The limit is shown, not enforced by type.** Each Phase 1 job step carries `contextNotice = task-description-only`, and the approval screen says "This job gets only the task description and up to 2,000 characters of context, no files." The person decides.
   5. **Ready for attachments.** `JobBrief` is version 2, with an optional `attachments[]` field reserved and absent in Phase 1; providers ignore optional fields they don't use, so adding it later is backward-compatible.
-  6. **Demo job types are open (OD-41).** The Czar test provider (T-108, CZ-20 §5.11) implements whichever modes are chosen; the acceptance scenario names modes, not job types.
+  6. **Phase 1 acceptance-run job types are open (OD-41).** The Czar test provider (T-108, CZ-20 §5.11) implements whichever modes are chosen; the acceptance scenario names modes, not job types.
 - **Referenced from:** CZ-20 §5.11, CZ-13 step 6b, spec 02 §4.21.
 
 ## 12d. ERC-8183 job path (2026-10-20, from the Flow 6 review)
@@ -493,7 +493,7 @@ Approved by Zaryab. Each entry cites the review finding it resolves.
 
 ## 13. Open items (deferred)
 
-- **OD-41 Phase 1 demo job types:** to be chosen later from the I-R-2 findings (agent job market landscape); not constrained by the architecture (D86). T-108 implements the chosen modes; scenario steps 6.2–6.7 name the mode.
+- **OD-41 Phase 1 acceptance-run job types:** to be chosen later from the I-R-2 findings (agent job market landscape); not constrained by the architecture (D86). T-108 implements the chosen modes; scenario steps 6.2–6.7 name the mode.
 
 - **Tool manipulation:** tools that try to get agents to call them more often. To be researched.
 - **Conflict of interest:** Czar both recommends tools and routes money to them. An AI dispute judge may be added later.
