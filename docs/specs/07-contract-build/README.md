@@ -28,7 +28,7 @@
 | 11 | `11-size-and-gas.md` | T-020 | `SizeTest` (2 tests) and `contracts/SIZE.md` (sizes and measured gas); the split itself is done in PRD 03 (D89) | 10, G0-08 | Ready (verified) |
 | 12 | `12-test-suites.md` | T-021, T-023, T-024 (+ deferred T-016, T-017, T-019 items) | `InvariantVault` (both escrow kinds), `InvariantFactory`, 3 fuzz suites, `AbiTest`, `VectorsTest`, `ExposureTest`, `GasTest`, `.gas-snapshot`, `gas-table.json` | 11 | Ready (verified: 419 tests, mutations checked) |
 | 13 | `13-analysis-and-deployment.md` | T-025, T-027 (T-105 and the testnet broadcast wait for approval) | Slither gate (42 findings triaged), `Deploy.s.sol` and `deploy.sh` (three-pass CREATE2 with linked libraries) | 12 | Ready (verified on a local arc-anvil) |
-| 14 | `14-vault-client.md` | T-026 | `@czar/vault-client` | 10 | Planned |
+| 14 | `14-vault-client.md` | T-026 | `@czar/vault-client`: generated ABI, the four envelope encoders, revert decoding, P-256 low-s, fee floor; unit tests and an arc-anvil integration test (deploys with PRD 13) | 13 | Ready (verified: 80 tests) |
 
 ## 3. Fixtures
 - `fixtures/payee-tree.mjs` generates `fixtures/payee-tree.json`: four-leaf and three-leaf `payeeRoot` trees under the `czar-merkle-v1` rules (`02-data-and-protocol` §5.3). PRD 01's tests hold the values as literals.
@@ -48,3 +48,4 @@
 | 2026-10-20 | Independent review and a pilot build of PRD 09: fixes in 00, 03, 04, 06–11 (event order per §15.5, T-018 command, deferrals to PRD 12, shorthand rules, pinned gas seed). Open items: fork tests, arithmetic panics. |
 | 2026-10-20 | PRD 12 Ready (verified). Measured routing gas raises `pocketThreshold(1)` from 39,600 to 84,980 atomic. T-022 fork tests split out. |
 | 2026-10-20 | PRD 13 Ready (verified: Slither gate, local CREATE2 deployment, idempotent rerun, chain guard). |
+| 2026-10-20 | PRD 14 Ready (verified). Every PRD in the build order is Ready; T-022 fork tests, T-105 keys and the testnet broadcast remain, each gated (§4). |
