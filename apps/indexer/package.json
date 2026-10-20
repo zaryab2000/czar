@@ -4,19 +4,26 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./rpc": "./src/rpc/arc-transport.ts"
+    "./rpc": "./src/rpc/arc-transport.ts",
+    "./handlers": "./src/handlers.ts",
+    "./schema": "./ponder.schema.ts",
+    "./mirrors": "./src/mirrors.ts",
+    "./chain": "./src/chain.ts"
   },
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json && tsc -p test/fixtures/resume/tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json && tsc -p test/fixtures/resume/tsconfig.json && tsc -p test/fixtures/replay/tsconfig.json",
     "test": "vitest run"
   },
   "dependencies": {
     "@czar/config": "workspace:*",
     "@czar/logging": "workspace:*",
+    "@czar/vault-client": "workspace:*",
     "ponder": "0.18.2",
     "viem": "2.57.7"
   },
   "devDependencies": {
+    "@czar/hashing": "workspace:*",
+    "ajv": "8.20.0",
     "hono": "4.13.13"
   }
 }
