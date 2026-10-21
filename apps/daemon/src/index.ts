@@ -14,3 +14,5 @@ export { Launchctl, renderLaunchAgentPlist } from "./launchd.ts";
 export { install, uninstall, update, UnsupportedPlatformError } from "./install.ts";
 export { macosPaths, LAUNCH_AGENT_LABEL } from "./paths.ts";
 export { readStatus, describe as describeStatus, STATUS_TEXT } from "./status.ts";
+export { pairDevice, PairingError } from "#src/pairing/pair-device";
+export type { PairDeviceInput, PairDeviceResult, PairingFetch } from "#src/pairing/pair-device";

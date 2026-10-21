@@ -3,6 +3,7 @@
 import { execFile } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
+import { createInterface } from "node:readline/promises";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { Entry } from "@napi-rs/keyring";
@@ -13,6 +14,7 @@ import { osKeychain } from "./keychain.ts";
 import { Launchctl, type CommandRunner } from "./launchd.ts";
 import { macosPaths } from "./paths.ts";
 import { readStatus } from "./status.ts";
+import { pairDevice } from "#src/pairing/pair-device";
 
 const runCommand: CommandRunner = (program, args) =>
   new Promise((resolve) => {
@@ -29,7 +31,7 @@ function deps(): InstallDeps {
     platform: process.platform,
     paths,
     launchctl: new Launchctl(runCommand, process.getuid?.() ?? -1),
-    keychain: osKeychain((service, account) => new Entry(service, account)),
+    keychain: createOsKeychain(),
     fs: {
       mkdir: (path, mode) => mkdirSync(path, { recursive: true, mode }),
       writeFile: (path, contents, mode) => {
@@ -42,6 +44,19 @@ function deps(): InstallDeps {
     },
     programArguments: [process.execPath, fileURLToPath(import.meta.url), "daemon"],
   };
+}
+
+function createOsKeychain() {
+  return osKeychain((service, account) => new Entry(service, account));
+}
+
+async function promptDeviceName(): Promise<string> {
+  const prompt = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    return (await prompt.question("Name this device: ")).trim();
+  } finally {
+    prompt.close();
+  }
 }
 
 async function main(argv: readonly string[]): Promise<number> {
@@ -62,6 +77,21 @@ async function main(argv: readonly string[]): Promise<number> {
     case "uninstall":
       await uninstall(deps(), { deleteMemory: rest.includes("--delete-memory") });
       return 0;
+    case "pair": {
+      const code = rest[0];
+      if (process.platform !== "darwin") throw new Error("Pairing is supported on macOS only.");
+      if (rest.length !== 1 || code === undefined)
+        throw new Error("usage: czar pair <8-digit-code>");
+      const deviceName = await promptDeviceName();
+      const result = await pairDevice({
+        code,
+        deviceName,
+        platform: "macos",
+        keychain: createOsKeychain(),
+      });
+      process.stdout.write(`Paired device ${result.deviceId}.\n`);
+      return 0;
+    }
     case "daemon": {
       const d = deps();
       const daemon = new Daemon({
@@ -86,7 +116,7 @@ async function main(argv: readonly string[]): Promise<number> {
       break;
   }
   process.stderr.write(
-    "usage: czar status | install | update | uninstall [--delete-memory] | daemon | config dump\n",
+    "usage: czar status | install | update | uninstall [--delete-memory] | pair <code> | daemon | config dump\n",
   );
   return 2;
 }
