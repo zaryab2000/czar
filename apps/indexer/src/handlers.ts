@@ -14,7 +14,7 @@ import {
 } from "ponder:schema";
 import { czarVaultAbi } from "@czar/vault-client";
 import { derivedNonce } from "@czar/hashing";
-import { loadConfig } from "@czar/config";
+import { envVarName, loadConfig, PARAMETERS } from "@czar/config";
 import { createLogger } from "@czar/logging";
 import type { Address, Hex } from "viem";
 import "#src/register-external-events";
@@ -40,7 +40,15 @@ type Meta = {
   logIndex: number;
 };
 
-const alertConfig = loadConfig({ env: process.env });
+const alertConfig = loadConfig({
+  env: Object.fromEntries(
+    PARAMETERS.flatMap((parameter) => {
+      const name = envVarName(parameter.key);
+      const value = process.env[name];
+      return value === undefined ? [] : [[name, value]];
+    }),
+  ),
+});
 const reportAlert = createAlertReporter(createLogger({ service: "indexer", component: "CZ-19" }));
 const minuteBuckets = 60n;
 

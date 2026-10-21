@@ -399,7 +399,7 @@ async function indexedMirrors(): Promise<{
   steps: Record<string, unknown>[];
 }> {
   pgliteDir = mkdtempSync(join(tmpdir(), "czar-t031-replay-"));
-  ponder = spawn(
+  const ponderProcess = spawn(
     PONDER,
     ["--root", PONDER_ROOT, "start", "--port", String(API_PORT), "--schema", "t031_replay"],
     {
@@ -414,16 +414,36 @@ async function indexedMirrors(): Promise<{
       stdio: ["ignore", "pipe", "pipe"],
     },
   );
-  ponder.stdout?.on("data", (chunk: Buffer) => {
+  ponder = ponderProcess;
+  ponderProcess.stdout?.on("data", (chunk: Buffer) => {
     ponderLogs += chunk.toString();
   });
+  ponderProcess.on("error", (error) => {
+    ponderLogs += `ponder spawn error=${error.message}\n`;
+  });
+  ponderProcess.stderr?.on("data", (chunk: Buffer) => {
+    ponderLogs += chunk.toString();
+  });
+  ponderProcess.once("exit", (code, signal) => {
+    ponderLogs += `ponder exited code=${String(code)} signal=${String(signal)}\n`;
+  });
   await waitFor(async () => {
+    if (ponderProcess.exitCode !== null) {
+      throw new Error(`Ponder exited with ${String(ponderProcess.exitCode)}`);
+    }
     try {
-      return (await fetch(`${API}/health`)).ok;
+      return await Promise.race([
+        fetch(`${API}/health`, { signal: AbortSignal.timeout(1_000) }).then(
+          (response) => response.ok,
+        ),
+        new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 1_000)),
+      ]);
     } catch {
       return false;
     }
-  }, "Ponder HTTP server");
+  }, "Ponder HTTP server").catch((error: unknown) => {
+    throw new Error(`${String(error)}\n${ponderLogs}`);
+  });
   await test.mine({ blocks: 10 });
   let mirrors: Awaited<ReturnType<typeof indexedMirrors>> | undefined;
   await waitFor(async () => {
