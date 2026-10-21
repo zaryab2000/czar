@@ -1,6 +1,6 @@
 # S1 — CZ-12 server skeleton and objective store
 
-**Task:** T-041 · **Milestone:** M3-a · **Status:** implementation PRD, reviewed 2026-10-21. Buildable in one pass once the §2.1 gate is green (T-006 and T-009 merged; SCR-113 and SCR-115 accepted and applied) · **Updated:** 2026-10-21.
+**Task:** T-041 · **Milestone:** M3-a · **Status:** implementation PRD, reviewed 2026-10-21 against merged T-006 (#25), T-009 (#27) and SCR-113/115 (#24). Ready to build in one pass · **Updated:** 2026-10-21.
 
 ## 1. Scope and authority
 
@@ -23,12 +23,12 @@ Also out of S1, because T-040 owns them and no config key for them exists yet: t
 
 ### 2.1 Start gate (all must be true before the builder starts)
 
-Checked against `build-v1` at `6572592` on 2026-10-21. Two task dependencies are **not built**, so T-041 is not the next task. The builder runs the three tasks in this order, each as its own PR:
+Status on 2026-10-21: every dependency is merged and both SCRs are applied, so the gate is expected to be green. The builder still runs the §12 step 0 check to confirm it.
 
 | Order | Task | State on 2026-10-21 | Why S1 needs it |
 |---|---|---|---|
-| 1 | T-006 `@czar/schemas` | `packages/schemas/` holds only `.gitkeep` | `ObjectiveSubmission` validator, `assertNoLocalOnly`, generated types |
-| 2 | T-009 `@czar/api-contract` | package absent | per-`operationId` request and response validators and the route-test helper |
+| 1 | T-006 `@czar/schemas` | merged (PR #25) | `ObjectiveSubmission` validator, `assertNoLocalOnly`, generated types |
+| 2 | T-009 `@czar/api-contract` | merged (PR #27) | per-`operationId` request and response validators and the route-test helper |
 | 3 | T-041 (this PRD) | `apps/server/` holds only `.gitkeep` | — |
 
 T-004 `@czar/config`, T-005 `@czar/logging` and T-007 `@czar/hashing` exist. The builder rules require a stop if a dependency is missing; this PRD does not waive that. Import the *actual* exports of T-006 and T-009 once merged; never write a second schema loader or OpenAPI parser in the server.
@@ -40,7 +40,23 @@ Two spec changes must be **accepted by Zaryab and applied to the canonical files
 | [SCR-113](../06-review/change-requests/SCR-113-pairing-token-replay-and-lifetime.md) | Pair replay would re-reveal the bearer; `PairResponse.expiresAt` has no meaning | Appendix A items 1–2 |
 | [SCR-115](../06-review/change-requests/SCR-115-s1-routes-responses-and-parameters.md) | The four routes do not declare the error codes S1 must return; two time limits have no config key | Appendix A items 3–4 |
 
-T-009 must be built **after** both SCRs are applied, so its fixtures carry the final `PairResponse` and response lists. If T-009 lands first, re-run its tests after the OpenAPI edit.
+SCR-113 and SCR-115 were accepted and applied in PR #24, before T-009 was built.
+
+### 2.3 What the two packages actually provide (read before coding)
+
+**`@czar/schemas`** (T-006):
+- `assertNoLocalOnly(value, "objective-submission")` validates the schema **and** rejects any `local-only` field. It throws `SchemaValidationError` or `LocalOnlyFieldError`; map both to `400 validation`.
+- `validateObjectiveSubmission(value)` is a type guard if only a boolean is needed.
+- Types: `ObjectiveSubmission`, `TaskSpec`, `ObjectiveStatusValue` and the rest, from `@czar/schemas`.
+
+**`@czar/api-contract`** (T-009):
+- `validateRecordedExchange(operationId, {requestBody, responseStatus, responseBody})` returns `{valid, errors}`. It checks:
+  - the request body, for operations that have one; **always pass `requestBody` for POSTs**, or the check fails;
+  - that the status is declared for the operation;
+  - the response body against that status's schema.
+- `apiContracts.get(operationId)` gives `{request, responses, responseStatuses}` for direct use.
+- `resolveReference(pointer)` resolves any JSON pointer into `openapi.yaml`, for example `"#/components/parameters/Limit"`.
+- **It does not check:** path parameters, query parameters, headers (`Idempotency-Key`, `RateLimit-*`, `Authorization`) or `Content-Type`. The server checks these itself (§6), and the tests assert them directly.
 
 ### 2.2 Gaps found and how they are resolved
 
@@ -81,9 +97,11 @@ The only tables beyond CZ-12's list are `schema_migrations`, `pairing_codes`, `o
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "imports": {
+    "#src/*": "./src/*.ts"
+  },
   "exports": {
-    ".": "./src/index.ts",
-    "./*": "./src/*.ts"
+    ".": "./src/index.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
@@ -92,7 +110,7 @@ The only tables beyond CZ-12's list are `schema_migrations`, `pairing_codes`, `o
 }
 ```
 
-Add the dependencies with `pnpm --filter @czar/server add -E ...`. Copy `tsconfig.json` and `vitest.config.ts` from `apps/signer` and adjust only paths. Imports inside the package use the self-reference `@czar/server/<path>` through the `exports` map, the same pattern `@czar/indexer/mirrors` uses. Never `../`. Node 22.18+ runs `.ts` directly, so no build step.
+Add the dependencies with `pnpm --filter @czar/server add -E ...`. Copy `tsconfig.json` and `vitest.config.ts` from `apps/signer` and adjust only paths. Imports inside the package use an `imports` map, `"imports": {"#src/*": "./src/*.ts"}`, the same as `@czar/schemas` and `@czar/api-contract`. **Never `#/*`**: Node 22 rejects it with `ERR_INVALID_MODULE_SPECIFIER`. Vitest accepts it, so the bug hides in tests; it was fixed in both packages in PR #27. Never `../`. Node 22.18+ runs `.ts` directly, so no build step.
 
 ## 4. File map
 
@@ -111,7 +129,6 @@ Create only these S1-owned files (split a file if a function exceeds the reposit
 | `apps/server/src/devices/pair.ts` | Internal code issuance and consumption, and the pair handler. |
 | `apps/server/src/routes/daemon.ts` | The four S1 handlers only. Keep them thin. |
 | `apps/server/test/compose.yaml`, `test/db.ts`, `test/fixtures.ts`, `test/*.test.ts` | Local PostgreSQL 16 for tests; per-test-file database setup; fixtures; tests in §11. |
-| `.github/workflows/ci.yml` | Add the `postgres` service to the `node` job (§13). No other CI change. |
 
 `packages/api-contract` owns the OpenAPI validators; `packages/schemas` owns `ObjectiveSubmission`, generated types and the sender guard. The server may define private row types but never hand-copies a wire interface.
 
@@ -300,11 +317,14 @@ The cursor given to a client is 32 random bytes encoded base64url; only its SHA-
 Run middleware in this order on the four S1 routes:
 
 1. Generate a 32-hex-character `traceId` from the injected random source and start a monotonic timer. Log one `http_request` line with `traceId`, `method`, `route` (= `operationId`), `httpStatus`, `durationMs` and, on error, `czarCode` and `retryable` (§3 Logging). Never log the request body, URL query, token, pairing code, goal, device name or address.
-2. Check content type and parse JSON for POST; apply T-009's operation request validator and T-006's schema/sender guard. Reject unknown fields. `GET` query/path validation comes from the same operation validator.
+2. Validate the request in `http/validate.ts`:
+   - POST: require `Content-Type: application/json`, parse JSON, then run `apiContracts.get(operationId).request`. For `submitObjective`, also call `assertNoLocalOnly` (§9.2). Unknown fields are rejected by the schemas.
+   - Parameters, which T-009 does not check: `Idempotency-Key` is a UUID v4; path `objectiveId` matches `^obj_[0-9A-HJKMNP-TV-Z]{26}$`; `status` is one of the `ObjectiveStatusValue` enum; `limit` is an integer from 1 to 200, default 50; `cursor` is at most 512 characters.
+   - Keep these rules as named constants. Test `params_matchOpenApi` reads the same values with `resolveReference` (for example `"#/components/parameters/Limit"`, `"#/components/schemas/ObjectiveStatusValue"` and the inline `getObjective` path parameter) and fails if the two drift.
 3. Authenticate `DeviceToken` on objective routes (§8). Pairing is unauthenticated because the code is the credential. Keep `AppSession` verifier available to later route modules, but do not register an app route in S1.
 4. Apply the appropriate rate limit (§7): a paired device uses its device ID; pairing uses one global `pair` bucket (§7.3); an invalid bearer uses the presented token's digest as a provisional principal so repeated failures count. Emit the three specified `RateLimit-*` headers on success and failure, including 401 and 429.
 5. On creating POSTs, validate `Idempotency-Key` as UUID v4 and enter the atomic replay guard (§7). `pairDevice` stores no replayable response (§7.1). Treat malformed or missing keys as `400 validation`.
-6. Run the handler. Validate the final status, content type and response body against T-009's operation response validator **before** committing the idempotent response. A 204 has no body.
+6. Run the handler. Before committing an idempotent response, check it with `validateRecordedExchange(operationId, {requestBody, responseStatus, responseBody})`; if it is invalid, roll back and return `503 upstream-unavailable` (a server bug must never be stored as a replayable answer). Success bodies use `application/json`; problems use `application/problem+json`.
 7. Map failures to a fixed RFC 9457 `application/problem+json` response (§10). Never expose raw SQL errors, stack traces, schema payloads or user input in `detail`.
 
 No health endpoint in S1 (T-040 adds it). `migrate(pool)` throws on an edited or failed migration, so a launcher that calls it cannot start on a bad schema; there is no in-memory fallback. Graceful shutdown belongs to T-040's launcher; S1's only obligation is that every transaction is short and never awaits network I/O. Reserve outbox names for later event owners; S1 emits only `objective.received` and does not predefine an unapproved event vocabulary.
@@ -367,7 +387,7 @@ Terminal states have no outgoing transition in S1. The transition repository use
 
 ### 9.2 `POST /v1/objectives` (`submitObjective`)
 
-1. Require DeviceToken, UUID v4 idempotency key and JSON body. Validate against T-009's operation schema and T-006's `ObjectiveSubmission` validator and `assertNoLocalOnly`. Ensure `body.deviceId === authenticated.deviceId`; a mismatch is `400 validation` and does not reveal another device.
+1. Require DeviceToken, UUID v4 idempotency key and JSON body. Validate against T-009's operation schema, then call `assertNoLocalOnly(body, "objective-submission")` from `@czar/schemas` (merged in PR #25). It validates the schema and rejects any `local-only` field in one call; map its `SchemaValidationError` and `LocalOnlyFieldError` to `400 validation`. Types come from `@czar/schemas` (`ObjectiveSubmission`, `TaskSpec`). Ensure `body.deviceId === authenticated.deviceId`; a mismatch is `400 validation` and does not reveal another device.
 2. Use the corrected `@czar/hashing` functions to recompute `taskSpecHash` and `objectiveHash` exactly as spec 02 §5.2: observation hashes sorted ascending, capabilities in supplied order, absent `deadline` omitted, `goal` as redacted text, and `taskSpecHash` included. A mismatch is `422 hash-mismatch`; no row or event is inserted. Do not trust a submitted hash for storage without recomputation.
 3. Inside the idempotency transaction, check global uniqueness of `objectiveId`. The same ID from a different device is rejected without disclosing the other record. Never overwrite an objective on conflict. Insert `objectives` with `state='received'`, full validated submission JSONB, authenticated user/device IDs and recomputed hash. Insert `objective.received` in `outbox_events` with `objectiveId` and hash only.
 4. Return `202 ObjectiveStatus` with `status='received'` and UTC `updatedAt`. A byte-identical retry returns the same body and original `updatedAt`, with no second outbox row.
@@ -411,7 +431,7 @@ Rules for the whole suite:
 - **Randomness.** IDs, tokens, codes, cursors and trace IDs come from the injected `random` source so tests are deterministic.
 - **Database.** `test/db.ts` connects to the fixed test URL `postgres://postgres@127.0.0.1:15432/postgres`, creates a fresh database per test file (`czar_t_<random hex>`), runs `migrate`, and drops it in `afterAll`. Vitest runs files in parallel, so files never share a database. If the server is unreachable, fail with one clear message naming `apps/server/test/compose.yaml`; never skip.
 - **Fixtures.** Start from `docs/specs/02-data-and-protocol/examples/objective-submission.example.json`, set `objectiveId`/`deviceId` from the fixture device, and **recompute `objectiveHash`** with the corrected `@czar/hashing`; the example's stored hash was not computed with `taskSpecHash`.
-- **Contracts.** Route tests call the in-process app with `app.request()` and pass every request and response through T-009's helper.
+- **Contracts.** Route tests call the in-process app with `app.request()` and assert `validateRecordedExchange(...).valid === true` for every request and response, including errors. They also assert `Content-Type` and the three `RateLimit-*` headers directly, because T-009 does not check headers.
 - No chain, RPC, wallet, Circle or model service appears in this suite.
 
 ### 11.1 Migration and repository tests
@@ -464,35 +484,20 @@ Do the steps in order. Each step writes its failing tests first.
 
 0. **Gate and hashing fix.** Confirm every row of §2.1: `packages/schemas` and `packages/api-contract` exist with passing tests, and `openapi.yaml` already carries the SCR-113 and SCR-115 changes (no `expiresAt` in `PairResponse`; `401`/`503` on the four routes; `api.cursorTtlMinutes` and `api.goalRetentionDays` in `@czar/config`). If any row is false, stop and report which. Then fix S1-P1 in `@czar/hashing`: write the subject-label vector test, watch it fail, add `taskSpecHash` and include it in `objectiveHash`, update the existing `named.test.ts` expectations, run `pnpm --filter @czar/hashing test`. Run `pnpm lint` and `pnpm -r typecheck` to record any pre-existing failures.
 1. **Package and SQL.** Create the package (§3), add pinned dependencies, run `pnpm audit --audit-level=moderate`. Write `0001-cz12.sql`, `test/db.ts` and the migration tests; implement `migrate` and the repository layer.
-2. **HTTP boundary.** Write contract tests for the four `operationId`s through T-009's helper. Implement `createApp`, the middleware pipeline (§6), RFC 9457 mapping, rate headers and allowlisted logging. Register only the four routes.
+2. **HTTP boundary.** Write contract tests for the four `operationId`s with `validateRecordedExchange`, plus `params_matchOpenApi`. Implement `createApp`, the middleware pipeline (§6), RFC 9457 mapping, rate headers and allowlisted logging. Register only the four routes.
 3. **Authentication and pairing.** Write the single-use, expiry, replay and concurrency tests; implement token hashing, `issuePairingCode`, pair consumption, device auth and seeded app-session verification.
 4. **Objectives.** Write status, replay, hash, device-isolation, cursor and retention tests; implement the state guard, atomic submission plus outbox insert, keyset pagination, the get route and `purgeExpiredGoals`.
-5. **CI.** Add the Postgres service to `.github/workflows/ci.yml` (§13). Push and confirm the `node` job runs the server tests green.
+5. **Full local run.** Run every command in §13 on Zaryab's Mac (OrbStack provides Docker) and paste the output. GitHub CI is not used for this project; do not edit `.github/workflows/` or wait for CI.
 6. **Adversarial pass.** Run the malformed-body, foreign-device, same-key race, DB outage and privacy-corpus tests. Search the log sink and every table for a raw token, code or goal. Re-read each changed file for unused code and undocumented behaviour.
 7. **Task report** (format in `CLAUDE.md`): files, exact commands and pass/fail counts, dependency versions and audit output, the Postgres image digest used, SCRs filed, limitations. Do not mark T-041 done while any §13 box is unchecked.
 
 ## 13. Commands and definition of done
 
-**Test database.** `apps/server/test/compose.yaml` runs one service: image `postgres:16.15@sha256:<digest>`, port `127.0.0.1:15432:5432`, `POSTGRES_HOST_AUTH_METHOD: trust`, `tmpfs: /var/lib/postgresql/data`, healthcheck `pg_isready -U postgres`, no named volume. Resolve the digest once with `docker buildx imagetools inspect postgres:16.15` (multi-arch index digest) and use the same pinned reference in compose and CI. Trust auth is allowed **only** for this loopback, tmpfs, throwaway test server: it holds no credential and no product data. T-040's product database uses its own authentication.
+**Test database.** `apps/server/test/compose.yaml` runs one service: image `postgres:16.15@sha256:<digest>`, port `127.0.0.1:15432:5432`, `POSTGRES_HOST_AUTH_METHOD: trust`, `tmpfs: /var/lib/postgresql/data`, healthcheck `pg_isready -U postgres`, no named volume. Resolve the digest once with `docker buildx imagetools inspect postgres:16.15` (multi-arch index digest) and pin it in `compose.yaml`. Trust auth is allowed **only** for this loopback, tmpfs, throwaway test server: it holds no credential and no product data. T-040's product database uses its own authentication.
 
-**CI.** In `.github/workflows/ci.yml`, add to the `node` job, with the same pinned image reference:
+**CI.** Not used. All verification is the local command run below.
 
-```yaml
-    services:
-      postgres:
-        image: postgres:16.15@sha256:<digest>
-        env:
-          POSTGRES_HOST_AUTH_METHOD: trust
-        ports:
-          - 127.0.0.1:15432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 2s --health-timeout 5s --health-retries 30
-```
-
-Nothing else in CI changes. `actionlint` and `zizmor` must stay green.
-
-**Local machine.** Docker must be running on Zaryab's Mac (T-040 already requires it for product Postgres). If it is not installed, stop and ask; installing Docker is a step that needs Zaryab's approval.
+**Local machine.** Docker must be running on Zaryab's Mac; OrbStack is installed and provides `docker compose` and `docker buildx`. If `docker info` fails, stop and ask.
 
 Commands from the repo root:
 
@@ -506,6 +511,7 @@ pnpm --filter @czar/api-contract test
 docker compose -f apps/server/test/compose.yaml up -d --wait
 pnpm --filter @czar/server typecheck
 pnpm --filter @czar/server test
+(cd apps/server && node -e "import('@czar/server').then(() => console.log('server package loads under node'))")
 pnpm lint
 pnpm -r typecheck
 docker compose -f apps/server/test/compose.yaml down
@@ -520,7 +526,8 @@ No pass count is prewritten; the task report records the actual counts. T-041 is
 - [ ] `ObjectiveSubmission` rejects local-only extras; one outbox event accompanies one stored objective; `objectiveStatus_onlyCanonicalValuesStored` passes.
 - [ ] Device isolation, single-use pairing, token hashing, 24-hour idempotency, cursor expiry, retention and rate-limit boundaries pass, all read from `@czar/config`.
 - [ ] Database-outage and concurrent-retry tests prove no partial write or duplicate event; no bearer, code or user text appears in logs or problem bodies.
-- [ ] `pnpm lint`, `pnpm -r typecheck` and the CI `node` job pass with zero warnings. The task report contains the outputs.
+- [ ] `@czar/server` imports under plain `node` (the load check above), not only under Vitest.
+- [ ] `pnpm lint`, `pnpm -r typecheck` and the full §13 command list pass locally with zero warnings. The task report contains the outputs.
 
 ## 14. Handoff to later server PRDs
 
