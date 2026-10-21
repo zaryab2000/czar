@@ -2,8 +2,10 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 import { validateRecordedExchange } from "@czar/api-contract";
 import { loadConfig } from "@czar/config";
+import { createLogger } from "@czar/logging";
 import type { Pool } from "pg";
 import { setupDatabase } from "#test/db";
+import { completeBoundaryModelCall } from "#src/models/proxy";
 import {
   createTestContext,
   seedDevice,
@@ -42,6 +44,59 @@ const modelResponse = {
 describe("completeModelCall route", () => {
   beforeAll(async () => {
     await seedDevice(getPool());
+  });
+
+  it("charges internal P-02 calls through the owner's model budget", async () => {
+    const modelClient = {
+      complete: vi.fn(async () => ({
+        output: { status: "unknown", fields: [], flags: [], missing: ["price"] },
+        usage: { inputTokens: 11, outputTokens: 4 },
+      })),
+    };
+    const body = {
+      prompt: "P-02" as const,
+      promptHash,
+      input: {
+        expectedFields: [{ name: "price", type: "number", required: true as const }],
+        structuralResult: "pass" as const,
+        source: {
+          origin: "https://merchant.example",
+          payTo: "0x1111111111111111111111111111111111111111",
+          paymentRefHash: promptHash,
+        },
+        body: JSON.stringify({ price: "12.50" }),
+      },
+      schema: { type: "object" },
+    };
+    const result = await completeBoundaryModelCall(
+      getPool(),
+      loadConfig(),
+      createLogger({ service: "server", component: "CZ-15", sink: () => undefined }),
+      modelClient,
+      {
+        body,
+        rawBody: Buffer.from(JSON.stringify(body)),
+        key: "8f4e8c7d-94a3-4c6a-8f77-6db94f240c31",
+        deviceId: TEST_DEVICE_ID,
+        userId: TEST_USER_ID,
+        now: new Date("2026-10-21T00:00:00.000Z"),
+      },
+    );
+
+    expect(result.status).toBe(200);
+    expect(modelClient.complete).toHaveBeenCalledTimes(1);
+    const usage = await getPool().query<{
+      prompt: string;
+      input_tokens: number;
+      output_tokens: number;
+    }>(
+      "SELECT prompt,input_tokens::int,output_tokens::int FROM model_usage WHERE user_id=$1 AND prompt='P-02'",
+      [TEST_USER_ID],
+    );
+    expect(usage.rows).toEqual([{ prompt: "P-02", input_tokens: 11, output_tokens: 4 }]);
+    await getPool().query("DELETE FROM model_usage WHERE user_id=$1 AND prompt='P-02'", [
+      TEST_USER_ID,
+    ]);
   });
 
   it("returns the injected model result and stores and logs counts without either body", async () => {
