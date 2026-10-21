@@ -6,7 +6,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildTree, payeeLeaf, pocketLeaf, PAYEE_KIND } from "@czar/hashing";
+import { buildTree, derivedNonce, payeeLeaf, pocketLeaf, PAYEE_KIND } from "@czar/hashing";
 import { czarVaultAbi, czarVaultFactoryAbi, withFeeFloor } from "@czar/vault-client";
 import { envelopeMirror, jobMirror, pocketMirror, reservationMirror } from "@czar/indexer/mirrors";
 import Ajv2020 from "ajv/dist/2020.js";
@@ -66,6 +66,7 @@ const test = createTestClient({ chain, transport, mode: "anvil" });
 const HASH = `0x${"a".repeat(64)}` as Hex;
 const ZERO = `0x${"0".repeat(64)}` as Hex;
 const TEST_TIMEOUT = 180_000;
+let replayedReservationId = 0n;
 const gatewayAbi = parseAbi(["function addDelegate(address token, address delegate)"]);
 const externalEmitterAbi = parseAbi([
   "function emitTransfer(address from,address to,uint256 value)",
@@ -222,7 +223,7 @@ async function installGatewayMocks(): Promise<void> {
   await test.setBalance({ address: ACTORS.pocket, value: parseEther("1") });
 }
 
-async function emitExternalTransfers(): Promise<void> {
+async function emitExternalTransfers(reservationId: bigint): Promise<void> {
   const bytecode = execFileSync(
     "arc-forge",
     ["inspect", "MockExternalEventEmitter", "deployedBytecode"],
@@ -233,7 +234,8 @@ async function emitExternalTransfers(): Promise<void> {
   ).trim() as Hex;
   await test.setCode({ address: USDC, bytecode });
   await test.setCode({ address: SYSTEM_EMITTER, bytecode });
-  const nonce = `0x${"7".repeat(64)}` as Hex;
+  // The derived nonce of authorization index 0, so the authorizations projection marks it used.
+  const nonce = derivedNonce(vault, reservationId, 0);
   const authorizationReceipt = await sendTo(
     SENDER,
     USDC,
@@ -438,7 +440,7 @@ async function indexedMirrors(): Promise<{
       if (
         !relevant("AuthorizationUsed", USDC, {
           authorizer: vault.toLowerCase(),
-          nonce: `0x${"7".repeat(64)}`,
+          nonce: derivedNonce(vault, replayedReservationId, 0),
         }) ||
         !relevant("Transfer", USDC, {
           from: vault.toLowerCase(),
@@ -478,7 +480,8 @@ it(
     await installCircleMock();
     await installGatewayMocks();
     const { envelopeId, reservationId, pullbackId, jobKey, approvalTx } = await replay();
-    await emitExternalTransfers();
+    replayedReservationId = reservationId;
+    await emitExternalTransfers(reservationId);
     const mirrors = await indexedMirrors();
     expect(mirrors.vaults).toEqual([vault.toLowerCase()]);
     const envelopeEventBlock = BigInt(String(mirrors.envelopes[0]?.["lastEventBlock"]));
@@ -601,8 +604,50 @@ it(
       externalEvents.find((event) => event.name === "AuthorizationUsed")?.payload,
     ).toMatchObject({
       authorizer: vault.toLowerCase(),
-      nonce: `0x${"7".repeat(64)}`,
+      nonce: derivedNonce(vault, reservationId, 0),
     });
+
+    // T-034: every CZ-19 §5.4 query through the real Ponder/Postgres API process.
+    const query = async (path: string) => {
+      const response = await fetch(`${API}/q${path}`);
+      expect(response.status, path).toBe(200);
+      return (await response.json()) as Record<string, unknown>;
+    };
+    const envelopeRef = String(mirrors.envelopes[0]?.["envelopeRef"]);
+    const byRef = await query(`/envelopes/${encodeURIComponent(envelopeRef)}`);
+    expect(byRef).toEqual({
+      envelope: mirrors.envelopes[0],
+      reservations: mirrors.reservations,
+      pockets: mirrors.pockets,
+      jobs: mirrors.jobs,
+    });
+    const receipts = (await query(`/receipts?vault=${vault.toLowerCase()}`)) as {
+      items: { rail: string; status: string; reservationId: string | null; index: number | null }[];
+      nextCursor: string | null;
+    };
+    // Two authorizations, finalized unsettled (index 0 was used but never settled); one job,
+    // cancelled before funding.
+    expect(receipts.items.map((item) => [item.rail, item.status, item.index])).toEqual([
+      ["x402-exact", "released", 0],
+      ["x402-exact", "released", 1],
+      ["erc8183-job", "released", null],
+    ]);
+    expect(receipts.nextCursor).toBeNull();
+    const vaultQuery = `vault=${vault.toLowerCase()}`;
+    const head = await pub.getBlockNumber();
+    for (const path of [
+      `/reservations/needing-settle?${vaultQuery}`,
+      `/reservations/needing-finalize?now=${(await pub.getBlock()).timestamp}`,
+      "/pullbacks/to-confirm",
+      `/pullbacks/to-cancel?block=${head}`,
+      "/jobs/to-sync",
+      "/jobs/awaiting-evaluation",
+    ]) {
+      expect(await query(path), path).toEqual({ items: [], nextCursor: null });
+    }
+    expect(
+      await query(`/anchors/latest?publisher=${ACTORS.admin.toLowerCase()}&kind=1`),
+    ).toBeNull();
   },
   TEST_TIMEOUT,
 );
