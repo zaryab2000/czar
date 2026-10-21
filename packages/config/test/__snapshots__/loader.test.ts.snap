@@ -129,6 +129,24 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 24,
   },
   {
+    "key": "api.pageDefaultLimit",
+    "source": "default",
+    "unit": "items",
+    "value": 50,
+  },
+  {
+    "key": "api.pageMaxLimit",
+    "source": "default",
+    "unit": "items",
+    "value": 200,
+  },
+  {
+    "key": "api.pageMinLimit",
+    "source": "default",
+    "unit": "items",
+    "value": 1,
+  },
+  {
     "key": "api.planTtlHours",
     "source": "default",
     "unit": "hours",
@@ -678,6 +696,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "source": "default",
     "unit": "ms",
     "value": 1000,
+  },
+  {
+    "key": "indexer.pullbackCancelDelayBlocks",
+    "source": "default",
+    "unit": "blocks",
+    "value": 3000,
   },
   {
     "key": "indexer.reserveRateAlertPerMin",
