@@ -127,6 +127,9 @@ importers:
       '@czar/schemas':
         specifier: workspace:*
         version: link:../../packages/schemas
+      '@czar/x402':
+        specifier: workspace:*
+        version: link:../../packages/x402
       ajv:
         specifier: 8.20.0
         version: 8.20.0
