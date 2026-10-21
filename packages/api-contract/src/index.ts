@@ -1,13 +1,13 @@
-import { compileContracts } from "#/openapi";
+import { compileContracts } from "#src/openapi";
 
-export { compileContracts, contractDocuments, resolveReference } from "#/openapi";
-export { validateRecordedExchange } from "#/recorded-exchange";
+export { compileContracts, contractDocuments, resolveReference } from "#src/openapi";
+export { validateRecordedExchange } from "#src/recorded-exchange";
 export type {
   ApiContracts,
   ContractDocument,
   OperationContract,
   RecordedExchange,
   ValidationResult,
-} from "#/types";
+} from "#src/types";
 
 export const apiContracts = compileContracts();

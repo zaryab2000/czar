@@ -1,7 +1,7 @@
 import type { AnySchema } from "ajv";
-import { allSchemas } from "#/schema-source";
-import { getCompiledValidator, getSchema, validateSchema } from "#/validator";
-import type { SchemaName, SchemaTypes } from "#/generated/types";
+import { allSchemas } from "#src/schema-source";
+import { getCompiledValidator, getSchema, validateSchema } from "#src/validator";
+import type { SchemaName, SchemaTypes } from "#src/generated/types";
 
 export type PrivacyClass =
   | "local-only"

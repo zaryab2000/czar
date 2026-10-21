@@ -1,5 +1,5 @@
 // Generated from docs/specs/02-data-and-protocol/schemas. Do not edit.
-import { validateSchema } from "#/validator";
+import { validateSchema } from "#src/validator";
 import type { AcceptanceReport, ActivityEvent, CapabilityCard, DemandProofLeaf, DemandProofLeafV2, Envelope, EvidenceBatch, InterviewSubmission, JobBrief, JobRecord, MarketView, ObjectiveSubmission, Objective, PaymentRef, Plan, PocketRecord, ProposedBelief, RankingDecision, Receipt, Reservation, SoulVersionLeaf, Soul, SourceReceipt, SourceScan, StepError, StepResult, TaskSpec } from "./types.ts";
 
 export function validateAcceptanceReport(value: unknown): value is AcceptanceReport {

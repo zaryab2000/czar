@@ -1,5 +1,5 @@
-import { apiContracts } from "#/index";
-import type { ApiContracts, RecordedExchange, ValidationResult } from "#/types";
+import { apiContracts } from "#src/index";
+import type { ApiContracts, RecordedExchange, ValidationResult } from "#src/types";
 
 function errorsFor(
   validate: ((data: unknown) => boolean) | undefined,

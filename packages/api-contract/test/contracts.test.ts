@@ -9,8 +9,8 @@ import {
   compileContracts,
   resolveReference,
   validateRecordedExchange,
-} from "#/index";
-import type { ContractDocument } from "#/types";
+} from "#src/index";
+import type { ContractDocument } from "#src/types";
 
 describe("OpenAPI contracts", () => {
   it("resolves every internal and file reference in both documents", () => {

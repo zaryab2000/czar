@@ -1,8 +1,8 @@
 import { Ajv2020 } from "ajv/dist/2020.js";
 import type { AnySchema, ErrorObject, Plugin, ValidateFunction } from "ajv";
 import * as formats from "ajv-formats";
-import { allSchemas, schemas } from "#/schema-source";
-import type { SchemaName, SchemaTypes } from "#/generated/types";
+import { allSchemas, schemas } from "#src/schema-source";
+import type { SchemaName, SchemaTypes } from "#src/generated/types";
 
 const ajv = new Ajv2020({ allErrors: true, strict: false });
 const addFormats = formats.default as unknown as Plugin<undefined>;

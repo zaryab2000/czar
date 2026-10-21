@@ -5,7 +5,7 @@ import { Ajv2020 } from "ajv/dist/2020.js";
 import * as formats from "ajv-formats";
 import { load } from "js-yaml";
 import type { Plugin } from "ajv";
-import type { ApiContracts, ContractDocument } from "#/types";
+import type { ApiContracts, ContractDocument } from "#src/types";
 
 const apiDirectory = fileURLToPath(
   new URL("../../../docs/specs/02-data-and-protocol/api/", import.meta.url),
@@ -142,7 +142,7 @@ function recordOperations(
   path: string,
   root: JsonObject,
   files: Map<string, unknown>,
-  contracts: Map<string, import("#/types").OperationContract>,
+  contracts: Map<string, import("#src/types").OperationContract>,
 ): void {
   const paths = root["paths"] as JsonObject;
   for (const pathItem of Object.values(paths)) {
@@ -183,7 +183,7 @@ function findContentSchema(container?: JsonObject): unknown {
 }
 
 export function compileContracts(): ApiContracts {
-  const contracts = new Map<string, import("#/types").OperationContract>();
+  const contracts = new Map<string, import("#src/types").OperationContract>();
   for (const [document, path] of contractDocuments) {
     const root = parseFile(path) as JsonObject;
     const state: ResolverState = { files: new Map([[path, root]]), unresolved: new Set() };

@@ -1,8 +1,8 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { AnySchema } from "ajv";
-import { schemaMetadata } from "#/generated/metadata";
-import type { SchemaName } from "#/generated/metadata";
+import { schemaMetadata } from "#src/generated/metadata";
+import type { SchemaName } from "#src/generated/metadata";
 
 const schemaDirectory = new URL(
   "../../../docs/specs/02-data-and-protocol/schemas/",
