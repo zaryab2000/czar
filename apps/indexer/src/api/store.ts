@@ -26,6 +26,7 @@ import {
   pockets,
   pullbacks,
   reservations,
+  vaults,
 } from "@czar/indexer/schema";
 
 /**
@@ -105,6 +106,8 @@ export interface Keyed {
 export type QueryDb = any;
 
 export interface QueryStore {
+  vaultByOwner(owner: string): Promise<Row | null>;
+  envelopesForVault(vault: string, cursor: IdCursor | null, limit: number): Promise<Keyed[]>;
   envelopeByRef(envelopeRef: string): Promise<{
     envelope: Row;
     reservations: Row[];
@@ -142,6 +145,24 @@ const mirrorOf = (row: { mirror: unknown }): Row => row.mirror as Row;
 
 export function createQueryStore(db: QueryDb): QueryStore {
   return {
+    async vaultByOwner(owner) {
+      const [vault] = await db.select().from(vaults).where(eq(vaults.owner, owner)).limit(1);
+      return vault ?? null;
+    },
+
+    async envelopesForVault(vault, cursor, limit) {
+      const rows = await db
+        .select()
+        .from(envelopes)
+        .where(and(eq(envelopes.vault, vault), afterId(envelopes.id, cursor)))
+        .orderBy(asc(envelopes.id))
+        .limit(limit);
+      return rows.map((row: { id: string; mirror: unknown }) => ({
+        key: row.id,
+        item: row.mirror as Row,
+      }));
+    },
+
     async envelopeByRef(envelopeRef) {
       const [envelope] = await db
         .select()
