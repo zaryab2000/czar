@@ -80,6 +80,10 @@ stateDiagram-v2
 ```
 
 - **Stage 2 (D69, `stage-2-backlog.md` §2 M-1, M-3, M-4):** the states `Installed` (Home Screen install), `PushOn` and `PushOff` (permission after a tap, `createPushSubscription`), and the `PasskeyUnsupported` branch for the installed iPhone web app (D1-11, the D28 native switch) are added back when mobile ships.
+- **Enrolment and sign-in (SCR-125):**
+  - Sign-up: `createAuthChallenge({purpose: register})` → passkey create → `registerPasskey`. The server recomputes the counterfactual MSCA from the credential key and opens a session, which reaches `PasskeyCreated`.
+  - Later sign-ins: `createAuthChallenge({purpose: session})` → assertion → `createSession`.
+  - `VaultReady` means `Me.vaultCreated = true`. Before that, `Me.vault` is the factory's predicted address.
 - `PasskeyCreated`: the Circle MSCA address is counterfactual until its first UserOp (p1-W2 for Agent Wallets; AR-2 for MSCA). The vault must exist before any payment (A1-13, A1-19), which is why `createVault` is the first UserOp.
 - `VaultPending`: gas is paid in native USDC by the MSCA; whether Circle sponsors MSCA gas on Arc is a GAP (A6-08 lists no Arc paymaster; A6-19 says the client URL is bundler and paymaster). If the UserOp is rejected for gas, the app sends the user to "Add money" first (a small amount to the MSCA, then the vault).
 - `Funded`: on testnet the faucet gives 20 USDC per request (p1-A11) but whether it can target an MSCA address is a GAP (A6-26, AR-6); the app shows the address and the faucet link and polls `getMe`. Onramp (Phase 2): the Arc Onramp Kit widget decides availability; the app never promises a country (F5-02 to F5-05, FD-36).
@@ -145,6 +149,8 @@ sequenceDiagram
 | `app.bundlerOrder` | `circle, pimlico, alchemy, zerodev` | A6-15 to A6-19 |
 | display currency | USD only (D51) | the server supplies `capDisplay` / `amountDisplay` as USD strings, USDC 1:1 (for example `"$0.88"`); no exchange-rate provider in Phase 1; local currency is a later option |
 | `app.pairingCodeTtlMinutes` | 5 | 02 §9.1 |
+| `app.challengeTtlSeconds` | 300 | WebAuthn challenge lifetime for `createAuthChallenge`: long enough for a passkey prompt, short enough that a leaked challenge is useless (SCR-125) |
+| `app.bundlerEndpoints` | `{}` | bundler name → URL; empty until the testnet stage (D92); tests point `circle` at the local mock bundler (SCR-125) |
 
 ### 6. Behaviour
 
@@ -283,6 +289,12 @@ Idempotency: every creating call sends `Idempotency-Key`; `notifySubmitted` with
 - **Phase 1 passkey test:** passkey create and assert in desktop Safari and desktop Chrome on macOS. Pass = `PasskeyCreated` reached and a later `createSession` succeeds in each browser. **Stage 2 (D69):** the installed iPhone Home Screen test (D1-11, D28).
 - **Unit:** calldata re-encode check; wording map covers every `LedgerReceipt.status` and every decoded vault error; currency strings come only from the server.
 - **Integration (Playwright, local `arc-anvil` + mocked bundler):** onboarding end to end; approval → `EnvelopeOpened`; freeze/unfreeze; decline; expired plan; frozen and paused banners; session expiry. All on desktop layouts.
+  - **Setup (SCR-125):**
+    - `arc-anvil --network arc`, forked read-only from `https://rpc.testnet.arc.io` at a pinned block. This brings EntryPoint v0.7 and Circle's MSCA factory and modules, with no testnet transaction, funds or key.
+    - Czar contracts are deployed onto the fork with `deploy.sh`.
+    - A test-only mock bundler implements the Circle SDK 1.0.16 transport's methods and submits `handleOps` from an impersonated beneficiary.
+    - The MSCA's gas comes from `anvil_setBalance`.
+    - The passkey is Playwright's CDP virtual authenticator.
 - **Injection/phishing:** a plan with an unknown payee shows the "New payee" badge; a tampered `calldata` is refused; a cap above the warn threshold shows the warning.
 - **Browser matrix (Phase 1):** Safari and Chrome on macOS (D1-01, D1-04). **Stage 2:** iOS 16.4, 18.4 (Declarative Web Push, D2-06), 26 (D1-10); Android Chrome (D1-03).
 - **Definition of done:** the desktop passkey test passes in Safari and Chrome on macOS; every wording row rendered in a snapshot test; one testnet approval opened an envelope through Circle's bundler and one through a secondary bundler.
@@ -376,3 +388,4 @@ K17 VAPID private key in the secret store; a leak lets an attacker spam notifica
 | 2026-10-20 | N1, N2 | Wording: unverified provider badge; files held for review. |
 | 2026-10-20 | D90 | `getSoulPointer` message before the first soul version points to the optional desktop interview; no soul data in the app. Approval display for confirmed objectives is held in SCR-030. |
 | 2026-10-20 | D91 | Approval screen shows each step's reason, each losing alternative, and the result format. |
+| 2026-10-21 | SCR-125 | Passkey enrolment and challenge routes (§5.2), `Me.vaultCreated`, `app.challengeTtlSeconds`, `app.bundlerEndpoints`, local fork + mock bundler test setup. |
