@@ -10,6 +10,7 @@
   - **Who:** "agent" runs alone. "agent, after Zaryab approves …" waits for written approval in the task report thread. "Zaryab" is a human step.
 - **Size:** S = half a session or less; M = one session; L = one long session. Anything bigger is split before it starts.
 - **Network:** local `arc-anvil --network arc`, an `arc-anvil` fork of Arc testnet, or live Arc testnet (`eip155:5042002`, `https://rpc.testnet.arc.io`). Never mainnet.
+- **D92 (2026-10-21): live Arc testnet comes last.** Until T-121, every M1–M7 step or acceptance test that says "on testnet" runs on a local `arc-anvil --network arc` deployment (`contracts/script/deploy.sh` → `deployments/arc-local.json`), with Circle contracts and APIs replaced by the T-010 mocks and recorded fixtures. No task before T-121 sends a transaction to Arc testnet, needs testnet funds or creates testnet keys' gas balances. An `arc-anvil` fork of testnet (T-022) stays allowed: it reads the public RPC and spends nothing. The live-testnet versions of those tests (T-050, T-059, T-082, T-084, T-085, T-087, T-106, T-107's live check, T-108, T-118) run in M8 after T-121, before T-102. **Risk accepted:** real Circle Facilitator, Gateway and ERC-8183 behaviour is first exercised in M8.
 - **Money tasks** (anything that reserves, signs, pays, settles, funds, pulls back or refunds) write tests first and include a kill-and-resume recovery test.
 
 ## Summary
@@ -42,16 +43,16 @@
 | T-024 | Gas snapshot and gas table | M1 | S | T-020 |
 | T-025 | Slither and static checks | M1 | M | T-020 |
 | T-026 | `@czar/vault-client` | M1 | L | T-020, T-007 |
-| T-027 | Testnet deployment | M1 | M | T-021..T-026 |
+| T-027 | Testnet deployment — **moved to M8 (D92)** | M8 | M | T-021..T-026, T-105, T-101 |
 | T-030 | Indexer setup | M2 | M | T-027 |
 | T-031 | Vault and factory projections | M2 | L | T-030 |
 | T-032 | External event ingestion | M2 | L | T-030 |
 | T-033 | Alerts and halt flags | M2 | M | T-031, T-032 |
 | T-034 | Indexer query API | M2 | M | T-031, T-032 |
 | T-035 | Signer service | M2 | L | T-026, G0-13 |
-| T-036 | KMS policies on testnet | M2 | M | T-035, T-027 |
+| T-036 | Signer policies on the local chain (D92) | M2 | M | T-035, T-105 |
 | T-037 | Pocket key lifecycle | M2 | M | T-035 |
-| T-040 | Testnet hosting | M3 | M | T-034, T-036 |
+| T-040 | Local hosting on the local chain (D92) | M3 | M | T-034, T-036 |
 | T-041 | Server skeleton | M3 | L | T-006, T-009, T-004, T-005 |
 | T-042 | `@czar/x402` | M3 | L | T-006 |
 | T-043 | `czar-search` vanilla route | M3 | M | T-042, T-040, G0-04 |
@@ -101,7 +102,8 @@
 | T-095 | ROI ledger | M7 | M | T-049, T-071 |
 | T-100 | End-to-end harness | M8 | L | M3..M7 exits |
 | T-101 | Scenario in CI on a fork | M8 | M | T-100 |
-| T-102 | Scenario on live testnet (desktop browser) | M8 | M | T-101 |
+| T-121 | Testnet go-live: deploy, signer evidence, hosting overlay (D92) | M8 | M | T-027, T-101 |
+| T-102 | Scenario on live testnet (desktop browser) | M8 | M | T-121 |
 | T-103 | Release security gates | M8 | M | T-101 |
 | T-104 | Phase 1 sign-off | M8 | S | T-102, T-103 |
 | T-105 | Create Phase 1 server keys in the local keystore (RV-016) | M1 | S | T-004 |
@@ -458,7 +460,8 @@
 - **Job-path review (2026-10-20):** `fundJob(jobKey, expectedBudget)`, `cancelJob`, errors `JobNotCancellable` and `BudgetChanged`, event `JobCancelled`.
 
 ### T-027 Testnet deployment via Arachnid CREATE2, bytecode hash publication, verified sources
-- **Milestone / group / who:** M1 / M1-f / agent, after Zaryab approves funds. **Size:** M. **Deps:** T-021..T-026, T-105 (RV-016).
+- **Milestone / group / who:** M8 / M8-c / agent, after Zaryab approves funds. **Size:** M. **Deps:** T-021..T-026, T-105 (RV-016), T-101 (D92).
+- **D92 (2026-10-21):** moved to the end of Phase 1. Until then every task deploys to local `arc-anvil --network arc` with `contracts/script/deploy.sh` and reads `deployments/arc-local.json`; nothing touches Arc testnet before T-121.
 - **Spec refs:** `S03/security-and-testing.md` §4 steps 1–4; `S03/czar-vault-factory.md` §3, §12; A9-10, A9-15.
 - **Outputs:** `contracts/script/Deploy.s.sol`, `deployments/arc-testnet.json` (addresses, constructor args, creation-code hash, runtime hash).
 - **Steps:**
@@ -578,11 +581,12 @@
 - **N8 (2026-10-20):** K7 `reject` is signed whatever the vault's freeze or pause state; test it.
 - **H7 (2026-10-20):** `provider-call` policy for K21a/K21b.
 
-### T-036 Signer policies tested on testnet, rate limits, relayer gas key in the `local-keystore` backend (D62, D70)
-- **Milestone / group / who:** M2 / M2-c / agent, after Zaryab approves funds. **Size:** M. **Deps:** T-035, T-027.
+### T-036 Signer policies tested on the local chain, rate limits, relayer gas key in the `local-keystore` backend (D62, D70, D92)
+- **Milestone / group / who:** M2 / M2-c / agent. **Size:** M. **Deps:** T-035, T-105.
+- **D92 (2026-10-21):** runs against a local `arc-anvil --network arc` deployment from `contracts/script/deploy.sh` (`deployments/arc-local.json`). Gas for K3, K7, K8 comes from the local chain (`anvil_setBalance` through the test client), so no funds approval is needed. Read "testnet" below as "the local chain"; the same checks are repeated on testnet in T-121.
 - **Spec refs:** CZ-27 §5.2, §14; D61, D62.
 - **Outputs:** signer policy evidence on testnet using the keys T-105 created (K3, K5, K7, K8, the relayer) plus K10; gas balances for K3, K7, K8 per CZ-27 §5.5 (RV-017). **Superseded by RV-016/RV-028:** "KMS keys … created here"; keys are created by T-105 in M1.
-- **Inputs:** `apps/server/src/signer/` from T-035; `deployments/arc-testnet.json` from T-027; Zaryab's funds approval.
+- **Inputs:** `apps/server/src/signer/` from T-035; `deployments/arc-local.json` from a local `deploy.sh` run (D92).
 - **Steps:**
   - Load the T-105 keystore; add K10 keys for the merchants.
   - Fund K3, K7, K8 with native gas up to `signer.gas.<key>.targetAtomic` from the relayer (after Zaryab's approval) and start the `gas-refill` job (RV-017).
@@ -610,11 +614,12 @@
 
 ## M3 First money path
 
-### T-040 Local testnet hosting on Zaryab's Mac: server, indexer, merchants, Postgres, local object store (D70, D78)
+### T-040 Local hosting on Zaryab's Mac against the local chain: server, indexer, merchants, Postgres, local object store (D70, D78, D92)
 - **Milestone / group / who:** M3 / M3-a / agent. **Size:** M. **Deps:** T-034, T-036.
 - **Spec refs:** `S01/system-architecture.md` §5; `S04/shared/cross-cutting.md` §2.1, §3.1, §3.3; CZ-27 §3; D70, D78.
 - **Outputs:** `ops/local/` (launchd plists or a process manager file for server, indexer, merchants; Docker Compose for Postgres), `env/testnet.toml` with parameter overlays only, a local object-store directory outside the repository.
 - **Inputs:** indexer query API from T-034; the signer and keystore from T-035/T-105.
+- **D92 (2026-10-21):** the default overlay is `env/local.toml`: RPC is a local `arc-anvil --network arc` started by `ops/local/`, contracts come from `deployments/arc-local.json`. `env/testnet.toml` is written in T-121, not here. Read `env/testnet.toml` below as `env/local.toml`.
 - **Steps:**
   - Run the server (API and web app on origin `http://localhost`), indexer and merchants (`127.0.0.1` ports listed in `fetch.localMerchantOrigins`) as local processes; Postgres in Docker bound to `127.0.0.1`.
   - Write `env/testnet.toml` with parameter overlays only; no secret, passphrase or key reference in env or argv (D78).
@@ -1563,8 +1568,19 @@
 - **D84 (2026-10-20):** includes scenario 2.1/2.3 `TaskSpec` checks and the 7.2a outcome check; the five Czar-hosted test company sites are part of the fixture.
 - **H7, N1, N2, N12 (2026-10-20):** scenario 6.2–6.10 and 8.8 with both test-provider instances.
 
+### T-121 Testnet go-live: deploy, signer evidence on testnet, testnet hosting overlay (D92)
+- **Milestone / group / who:** M8 / M8-c / agent, after Zaryab approves funds. **Size:** M. **Deps:** T-027, T-101.
+- **Spec refs:** as T-027, T-036 and T-040.
+- **Outputs:** `deployments/arc-testnet.json` (from T-027); testnet signer evidence; `env/testnet.toml`.
+- **Steps:**
+  - After T-027 deploys, repeat T-036's acceptance tests on Arc testnet, with real gas funding after Zaryab approves funds.
+  - Write `env/testnet.toml` (parameter overlays only, D78) pointing the T-040 stack at Arc testnet and `deployments/arc-testnet.json`.
+- **Acceptance tests:**
+  - T-036's three acceptance tests pass on Arc testnet.
+  - T-040's health checks and argv/env scan pass with `env/testnet.toml`.
+
 ### T-102 Acceptance scenario on live testnet, including Stage 0 in a desktop browser
-- **Milestone / group / who:** M8 / M8-c / Zaryab + agent, after Zaryab approves funds. **Size:** M. **Deps:** T-101.
+- **Milestone / group / who:** M8 / M8-c / Zaryab + agent, after Zaryab approves funds. **Size:** M. **Deps:** T-121.
 - **Spec refs:** `S04/shared/phase-1-acceptance-scenario.md` Stages 0–8.
 - **Outputs:** `reports/phase-1-acceptance.md` (every event hash, `planHash`, `payeeRoot`, batch root, archive URL, T-058 output).
 - **Inputs:** CI pass of T-101; Zaryab's funds approval; a Mac with desktop Safari.
@@ -1688,3 +1704,4 @@
 | 2026-10-20 | 07 PRD 13 | T-025 pins Slither 0.11.3; T-105 keys-file shape (`address`, `ref`). |
 | 2026-10-20 | D90 | New M5 tasks T-109 to T-114 (T-114 blocked on SCR-030); notes on T-065 (P-07 allowlist) and T-067; coverage rows. |
 | 2026-10-20 | D91 | New T-115 to T-119; T-090 hands index loading and the live lead fetch to T-115; T-092 note; coverage and notes. |
+| 2026-10-21 | D92 (Zaryab) | Arc testnet moves to the end of Phase 1: T-027 to M8 (deps add T-101); T-036 and T-040 run on a local `arc-anvil` deployment (`deployments/arc-local.json`, `env/local.toml`); new T-121 does the testnet deploy, signer evidence and `env/testnet.toml`; T-102 depends on T-121; every earlier "on testnet" step runs on the local chain with Circle mocks and fixtures. |
