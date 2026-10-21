@@ -5,7 +5,7 @@ import { USDC_ADDRESS, type PaymentRequirements } from "@czar/x402";
 import { describe, expect, it } from "vitest";
 import { createPlanner } from "#src/planner/index";
 import { createSafeProber } from "#src/planner/probe";
-import { route, routingParamsFromConfig, cVd } from "#src/router/index";
+import { route, routingParamsFromConfig, cVd, pocketWorthIt } from "#src/router/index";
 import type { PlannerService } from "#src/planner/ports";
 
 const taskSpec = {
@@ -116,6 +116,29 @@ describe("planner fallback", () => {
     expect(built?.approvalNeeded).toBe(true);
   });
 
+  it("drops live price drift above the configured unit budget", async () => {
+    const built = await makePlanner({ proberOffers: [{ ...offer, amount: "1000001" }] });
+    expect(built).toBeNull();
+  });
+
+  it("drops fallback capabilities without a default template", async () => {
+    const built = await makePlanner({ capabilities: ["data-lookup"] });
+    expect(built?.plan.droppedSteps).toEqual([{ capability: "data-lookup", reason: "no-template" }]);
+  });
+
+  it("plans claimed job providers with listed price, duration and task-only notice", async () => {
+    const service = fakeService();
+    const jobService: PlannerService = {
+      ...service, providerAddress: `0x${"4".repeat(40)}`, listedPrice: "1000000",
+      jobDurationSeconds: 5 * 24 * 60 * 60,
+      extensions: { czar: { ...service.extensions.czar, card: { rail: "erc8183-job", inputFields: [{ name: "query", type: "string" }] } } },
+    };
+    const built = await makePlanner({ service: jobService });
+    expect(built?.plan.steps[0]).toMatchObject({ kind: "erc8183-job", contextNotice: "task-description-only", unitAmount: "1000000" });
+    expect(Date.parse(built!.plan.expiresAt)).toBeGreaterThan(Date.parse("2026-10-23T00:00:00.000Z"));
+    expect(built?.plan.payeeLeaves[0]).toMatchObject({ payee: jobService.providerAddress, kind: 2 });
+  });
+
   it("probes a local HTTP 402 through the configured safe fetch", async () => {
     const server = createServer((_request, response) => {
       response.statusCode = 402;
@@ -142,13 +165,24 @@ describe("planner fallback", () => {
     for (let index = 0; index < 10_000; index += 1) {
       state = (Math.imul(state, 1_664_525) + 1_013_904_223) >>> 0;
       const amount = BigInt(state % 5_000_000 + 1);
+      const volume = BigInt((Math.imul(state, 2_246_822_519) >>> 0) % 20_000_000);
+      const gatewayOnly = index % 2 === 0;
+      const offers = gatewayOnly ? [{ ...offer, extra: { name: "GatewayWalletBatched" } }] : [offer];
       const step = { stepIndex: 0, stepId: "stp_01K7ZT9P4N5Q6R7S8T9V0W1X2Y", capability: "web-search",
         kind: "x402-exact" as const, unitAmount: amount.toString(), expectedCalls: 1,
         stepCap: amount.toString(), routingReason: "test", acceptanceProfileId: `prof_${"b".repeat(32)}` };
-      const decision = route({ step, offers: [offer], planNetwork: offer.network, unitAmount: amount,
-        expectedCalls: 1, V: 10_000_000_000n, supplierIsAgent: false,
+      const decision = route({ step, offers, planNetwork: offer.network, unitAmount: amount,
+        expectedCalls: 1, V: volume, supplierIsAgent: false,
         needsAcceptanceBeforePayment: false, eth_gasPrice: 20_000_000_000n, params });
-      if ("kind" in decision && decision.kind === "x402-exact") expect(cVd(decision.calls, 20_000_000_000n, params)).toBeLessThanOrEqual(amount);
+      const hasCostCoverage = !gatewayOnly && cVd(1, 20_000_000_000n, params) <= amount;
+      const pocketIsWorthIt = pocketWorthIt(volume, 20_000_000_000n, params);
+      if ("kind" in decision && decision.kind === "x402-exact") {
+        expect(cVd(decision.calls, 20_000_000_000n, params)).toBeLessThanOrEqual(amount);
+      } else if ("kind" in decision && decision.kind === "gateway-nano") {
+        expect(pocketIsWorthIt).toBe(true);
+      } else {
+        expect(hasCostCoverage || (gatewayOnly && pocketIsWorthIt)).toBe(false);
+      }
     }
   });
 });

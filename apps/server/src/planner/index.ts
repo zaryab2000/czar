@@ -45,6 +45,7 @@ interface Candidate {
   readonly amount: bigint;
   readonly rank: number;
   readonly fromExploration: boolean;
+  readonly unprobed?: boolean;
 }
 
 export function createPlanner(dependencies: PlannerDependencies) {
@@ -86,6 +87,10 @@ async function buildPlan(
     }
     if (unpaid.drop) {
       droppedSteps.push({ capability, reason: unpaid.drop });
+      continue;
+    }
+    if (capability !== "web-search" && capability !== "page-extract") {
+      droppedSteps.push({ capability, reason: "no-template" });
       continue;
     }
     const result = await selectCandidate(capability, input, config, ports, network);
@@ -199,9 +204,13 @@ async function selectCandidate(
   });
   const probed: Candidate[] = [];
   const failures: string[] = [];
-  for (const [rank, row] of decision.ranked.slice(0, Number(config.get("planner.probeTopK"))).entries()) {
-    if (input.excludedServices?.has(row.service_id)) continue;
-    const service = await ports.directory.get(row.service_id);
+  const topK = Number(config.get("planner.probeTopK"));
+  const ranked = decision.ranked.slice(0, topK).map((row) => ({ serviceId: row.service_id }));
+  const exploration = decision.exploration_slot?.service_id;
+  if (exploration && !ranked.some((row) => row.serviceId === exploration)) ranked.push({ serviceId: exploration });
+  for (const [rank, row] of ranked.entries()) {
+    if (input.excludedServices?.has(row.serviceId)) continue;
+    const service = await ports.directory.get(row.serviceId);
     if (!service || !/^svc_[0-9a-f]{32}$/.test(service.serviceId)) continue;
     const probe = await ports.prober.probe(service.resource);
     if (!probe.ok) { failures.push(probe.reason); continue; }
@@ -212,15 +221,16 @@ async function selectCandidate(
     if (amount > max || (service.extensions.czar.claim.status !== "claimed" &&
       service.accepts.some((old) => old.payTo.toLowerCase() !== offer.payTo.toLowerCase()))) continue;
     probed.push({ service, offer, offers, amount, rank,
-      fromExploration: service.extensions.czar.source === "exploration_slot" });
+      fromExploration: row.serviceId === exploration || service.extensions.czar.source === "exploration_slot" });
   }
   if (!probed.length && failures.length && failures.every((value) => value === "timeout")) {
-    for (const [rank, row] of decision.ranked.slice(0, Number(config.get("planner.probeTopK"))).entries()) {
-      if (input.excludedServices?.has(row.service_id)) continue;
-      const service = await ports.directory.get(row.service_id);
+    for (const [rank, row] of ranked.entries()) {
+      if (input.excludedServices?.has(row.serviceId)) continue;
+      const service = await ports.directory.get(row.serviceId);
       const offer = service?.accepts.find((item) => item.network === network);
       if (service && offer && BigInt(offer.amount) <= max) {
-        probed.push({ service, offer, offers: [offer], amount: BigInt(offer.amount), rank, fromExploration: false });
+        probed.push({ service, offer, offers: [offer], amount: BigInt(offer.amount), rank,
+          fromExploration: false, unprobed: true });
       }
     }
   }
@@ -279,9 +289,9 @@ async function makePaidStep(
     resource: candidate.service.resource, kind: decision.kind, payee: paidTo,
     ...(pays.length > 1 ? { alternates: pays.slice(1) } : {}),
     unitAmount: baseAmount.toString(), expectedCalls, stepCap: stepCap.toString(),
-    routingReason: `${decision.routingReason}${candidate.fromExploration ? "" : ";fallback-planner"}`,
+    routingReason: candidate.unprobed ? "unprobed;fallback-planner" : `${decision.routingReason};fallback-planner`,
     acceptanceProfileId: profile,
-    inputTemplate: { inputKeys: [{ name: oneStringKey, type: "string", maxLength: 1000 }] },
+    inputTemplate: { [oneStringKey]: template, inputKeys: [{ name: oneStringKey, type: "string", maxLength: 1000 }] },
     fanOut: subjects.length ? "subjects" : "none", callInputs,
     ...(job ? { contextNotice: "task-description-only" as const } : {}),
   };
