@@ -15,6 +15,8 @@ import {
   type SignerBackend,
   type SignerNetwork,
   type StoredPlan,
+  type TransactionPreparer,
+  type AuditSink,
 } from "../src/index.ts";
 
 export const VAULT: Address = "0x00000000000000000000000000000000000c2a21";
@@ -296,13 +298,21 @@ export function spyBackend(inner: SignerBackend) {
       calls.push(`tx:${ref}`);
       return inner.signTransaction(ref, tx);
     },
-    createKey: (id) => inner.createKey(id),
+    createKey: (id, service) => inner.createKey(id, service),
     destroyKey: (ref) => inner.destroyKey(ref),
   };
   return { backend, calls };
 }
 
-export async function harness(options: { config?: Record<string, unknown> } = {}) {
+export async function harness(
+  options: {
+    config?: Record<string, unknown>;
+    network?: SignerNetwork;
+    projection?: Partial<Projection>;
+    prepareTransaction?: TransactionPreparer;
+    auditSink?: AuditSink;
+  } = {},
+) {
   const fs = memoryFs();
   const inner = await openLocalKeystore({
     path: "/keystore",
@@ -311,8 +321,9 @@ export async function harness(options: { config?: Record<string, unknown> } = {}
     git: async () => undefined,
     kdf: FAST_KDF,
   });
-  for (const id of ["K3", "K5", "K6", "K7", "K8", "K10", "K20", "relayer"] as const)
+  for (const id of ["K3", "K5", "K6", "K7", "K8", "K20", "relayer"] as const)
     await inner.createKey(id);
+  await inner.createKey("K10", "czar-search");
   const { address: pocket } = await inner.createKey("K4");
   const { backend, calls } = spyBackend(inner);
   const state = defaultState(pocket);
@@ -320,29 +331,33 @@ export async function harness(options: { config?: Record<string, unknown> } = {}
   const audit = memoryAudit();
   let nowMs = NOW * 1000;
   const prepared: TransactionSerializableEIP1559[] = [];
+  const network = options.network ?? NETWORK;
+  const projection = Object.assign(fakeProjection(state), options.projection ?? {});
   const signer = createSigner({
     backend,
-    projection: fakeProjection(state),
-    network: NETWORK,
+    projection,
+    network,
     config: loadConfig({ envFile: options.config ?? {} }),
-    audit,
+    audit: options.auditSink ?? audit,
     callers: CALLERS,
     nowMs: () => nowMs,
-    prepareTransaction: async (_from, call) => {
-      const tx: TransactionSerializableEIP1559 = {
-        type: "eip1559",
-        chainId: NETWORK.chainId,
-        nonce: 0,
-        gas: 200_000n,
-        maxFeePerGas: 20_000_000_000n,
-        maxPriorityFeePerGas: 1n,
-        to: call.to,
-        data: call.data,
-        value: call.value,
-      };
-      prepared.push(tx);
-      return tx;
-    },
+    prepareTransaction:
+      options.prepareTransaction ??
+      (async (_from, call) => {
+        const tx: TransactionSerializableEIP1559 = {
+          type: "eip1559",
+          chainId: network.chainId,
+          nonce: 0,
+          gas: 200_000n,
+          maxFeePerGas: 20_000_000_000n,
+          maxPriorityFeePerGas: 1n,
+          to: call.to,
+          data: call.data,
+          value: call.value,
+        };
+        prepared.push(tx);
+        return tx;
+      }),
   });
   return {
     signer,

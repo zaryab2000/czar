@@ -47,5 +47,6 @@ docs-internal/
 contracts/broadcast/*/31337/
 contracts/slither-out.json
 deployments/local.json
+deployments/arc-local.json
 
 deployments/.vault-client-test*.json

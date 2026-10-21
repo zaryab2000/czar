@@ -621,6 +621,7 @@ describe("merchant-seller-proof (K10)", () => {
       kind: "merchant-seller-proof",
       payload: proofPayload(),
     });
+    expect(t.calls).toEqual(["digest:K10:czar-search"]);
   });
 
   it("denies another network, a long or past expiry, and an unknown service", async () => {

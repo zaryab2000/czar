@@ -82,11 +82,11 @@ export interface SignerOptions {
 
 const RATE_WINDOW_MS = 60_000;
 
-/** `kms.maxSignaturesPerMin.<key>`; K4 counts per pocket. Tuning is T-036's. */
+/** `signer.maxSignaturesPerMin.<key>`; K4 counts per pocket. */
 function rateLimitFor(config: Config, keyId: KeyId): number {
   const key = keyId === "relayer" ? "relayer" : keyId;
-  const name = `kms.maxSignaturesPerMin.${key}` as Parameters<Config["get"]>[0];
-  return config.has(name) ? Number(config.get(name)) : 0;
+  const name = `signer.maxSignaturesPerMin.${key}` as Parameters<Config["get"]>[0];
+  return Number(config.get(name));
 }
 
 export interface Signer {
@@ -104,7 +104,7 @@ export function createSigner(options: SignerOptions): Signer {
   const windows = new Map<string, number[]>();
   const retiring = new Map<string, number>();
 
-  const keyAddress = (key: "K3" | "K7" | "K8" | "K10"): Address => {
+  const keyAddress = (key: "K3" | "K7" | "K8"): Address => {
     const address = backend.address(key);
     if (address === undefined) throw new Denied("unknown-key");
     return address;
@@ -115,6 +115,11 @@ export function createSigner(options: SignerOptions): Signer {
     now: () => Math.floor(nowMs() / 1000),
     freezeStateMaxAgeSec: Number(config.get("signer.freezeStateMaxAgeSec")),
     keyAddress,
+    merchantKeyAddress: (service) => {
+      const address = backend.address(`K10:${service}`);
+      if (address === undefined) throw new Denied("unknown-key");
+      return address;
+    },
     gasMaxAtomic: {
       K3: BigInt(config.get("signer.gas.K3.maxAtomic") as number),
       K7: BigInt(config.get("signer.gas.K7.maxAtomic") as number),
@@ -157,8 +162,14 @@ export function createSigner(options: SignerOptions): Signer {
         throw new Denied("shape");
       }
       if (keyId === "K4") keyRef = `K4:${parsed["pocket"] as string}`;
+      if (keyId === "K10") {
+        const service = parsed["service"] as string;
+        if (!network.merchantServices.includes(service)) throw new Denied("unknown-service");
+        keyRef = `K10:${service}`;
+      }
       const from = backend.address(keyRef);
       if (from === undefined) throw new Denied("unknown-key");
+      if (retiring.has(keyRef)) throw new Denied("pocket-key-retiring");
 
       const decision = await decide(ctx, kind, parsed);
       purpose = decision.purpose;

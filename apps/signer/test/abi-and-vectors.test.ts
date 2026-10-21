@@ -43,6 +43,7 @@ const ctx = (state = defaultState("0x000000000000000000000000000000000000b0c0"))
   now: () => 1_760_800_000,
   freezeStateMaxAgeSec: 30,
   keyAddress: () => VAULT,
+  merchantKeyAddress: () => VAULT,
   gasMaxAtomic: { K3: 0n, K7: 0n, K8: 0n },
 });
 

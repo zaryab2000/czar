@@ -5,6 +5,7 @@ import type { Address, Hash32 } from "@czar/hashing";
 import type { KeyId } from "./kinds.ts";
 
 export type BackendName = "local-keystore" | "gcp-kms";
+export type MerchantServiceId = string;
 
 export interface SignerBackend {
   readonly name: BackendName;
@@ -14,6 +15,9 @@ export interface SignerBackend {
   /** 65-byte `r ‖ s ‖ v` signature, low s, v ∈ {27, 28}. */
   signDigest(keyRef: string, digest: Hash32): Promise<Hex>;
   signTransaction(keyRef: string, tx: TransactionSerializableEIP1559): Promise<Hex>;
-  createKey(keyId: KeyId): Promise<{ keyRef: string; address: Address }>;
+  createKey(
+    keyId: KeyId,
+    merchantService?: MerchantServiceId,
+  ): Promise<{ keyRef: string; address: Address }>;
   destroyKey(keyRef: string): Promise<void>;
 }

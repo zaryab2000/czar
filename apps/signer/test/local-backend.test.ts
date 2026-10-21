@@ -105,6 +105,25 @@ describe("keystore location (D78)", () => {
 });
 
 describe("local-keystore backend", () => {
+  it("creates a distinct scoped K10 key for each merchant service", async () => {
+    const fs = memoryFs();
+    const store = await openLocalKeystore({
+      path: "/ks",
+      passphrase: testPassphrase(),
+      fs,
+      git: async () => undefined,
+      kdf: FAST_KDF,
+    });
+    const search = await store.createKey("K10", "czar-search");
+    const research = await store.createKey("K10", "czar-research");
+
+    expect(search.keyRef).toBe("K10:czar-search");
+    expect(research.keyRef).toBe("K10:czar-research");
+    expect(search.address).not.toBe(research.address);
+    expect(fs.files.get("/ks/K10-czar-search.json")?.mode).toBe(0o600);
+    await expect(store.createKey("K10")).rejects.toMatchObject({ rule: "bad-merchant-service" });
+  });
+
   it("creates keys 0600, reopens them, and signs a known digest that recovers to the key's address", async () => {
     const fs = memoryFs();
     const pass = testPassphrase();
