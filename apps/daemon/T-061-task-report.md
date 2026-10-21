@@ -40,6 +40,7 @@ Runtime: Node `22.22.0`, pnpm `10.28.0`; Docker Compose ran through the local Or
 | `fnm exec --using=22.22.0 pnpm lint` | PASS, oxlint and oxfmt, zero warnings |
 | `git diff --check` | PASS |
 | `docker compose -f apps/server/test/compose.yaml down` | PASS |
+| `prek run` | NOT CONFIGURED, repository has no `prek.toml` or `.pre-commit-config.yaml` |
 
 PostgreSQL test image: `postgres:16.15@sha256:ca0bd484cb98bf4b24eb1010e73fb3fcbd6714d240fbc1a10eea5b7dbecb641d`.
 
