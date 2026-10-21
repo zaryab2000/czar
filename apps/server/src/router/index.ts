@@ -9,7 +9,6 @@ export const FINALIZE_CHUNK = 32n;
 export const POCKET_CAP_BPS = 2_500n;
 const ATOMIC_PER_WEI = 1_000_000_000_000n;
 const BPS = 10_000n;
-const NETWORK = "eip155:5042002";
 
 export interface RoutingParams {
   readonly gas: {
@@ -181,7 +180,8 @@ function usableOffers(offers: readonly PaymentRequirements[], planNetwork: strin
   let hasGateway = false;
   let hadCandidate = false;
   for (const offer of offers) {
-    if (!isUsableOffer(offer) || offer.network !== planNetwork || planNetwork !== NETWORK) continue;
+    // planNetwork is selection.paymentNetwork, set by the planner from @czar/config (D83).
+    if (!isUsableOffer(offer) || offer.network !== planNetwork) continue;
     if (offer.asset.toLowerCase() !== USDC_ADDRESS.toLowerCase()) continue;
     const gateway = offer.extra["name"] === GATEWAY_EXTRA_NAME;
     hasExact ||= !gateway;
