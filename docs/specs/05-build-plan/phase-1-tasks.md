@@ -581,6 +581,7 @@
 - **Review fixes (2026-10-19):** Policies exactly CZ-27 §5.2, including the full never-signable list for K3 (`withdraw`, `unfreeze`, `rotateSigners`, `setCategoryLimits`, `setPasskey`, `recordManualReturn`, `forceCloseEnvelope`, `setMaxPullbackFee`, `raiseAutoLimit`, `executeOwnerAction`, factory selectors) (RV-055); plan-checked `openEnvelope`/`reserve`/`openJob`/`registerPocket` args (RV-032); freeze/pause checks failing closed for `gateway-nano` and evaluator `complete` (D72); vault-bound `sl-receipt` (RV-013); K5 never sends a transaction (RV-017); keystore outside the repository, passphrase only from the keychain, refuse to start otherwise (D78); interactive confirmation for K6/K20 (D80); record whether the keychain item's ACL names the signer binary (RV-045). Named tests in CZ-27 §14 and `S03/security-and-testing.md` §3.8 pass.
 - **N8 (2026-10-20):** K7 `reject` is signed whatever the vault's freeze or pause state; test it.
 - **H7 (2026-10-20):** `provider-call` policy for K21a/K21b.
+- **SCR-126 (2026-10-21):** the "separate process" output is `apps/signer/src/main.ts`: a Unix socket at `signer.socketPath` (0600), per-service keychain tokens, the Postgres audit sink and the gas-refill job started with the process, plus `createSignerClient` for callers.
 
 ### T-036 Signer policies tested on the local chain, rate limits, relayer gas key in the `local-keystore` backend (D62, D70, D92)
 - **Milestone / group / who:** M2 / M2-c / agent. **Size:** M. **Deps:** T-035, T-105.
@@ -822,6 +823,7 @@
   - Fork integration: register → gas → `addDelegate` → fund → four nanopayments to a local Gateway seller; ledger shows `pending` then `completed` from a recorded Gateway fixture.
   - Kill-and-resume after `pocket.registered`, gas sent, `fundPocket` sent, and a nanopayment sent: no double funding, no double charge.
 - **Review fixes (2026-10-19):** Register with the pocket-leaf proof (D71); pull back every funded pocket on `Frozen`/`GuardianPaused` (D72); close with the gas sweep (RV-004).
+- **SCR-126 (2026-10-21):** the pocket address for a plan comes from the server table `plan_pocket_keys`, which CZ-13 writes with the plan; this task adds the table if T-045's plan store has not.
 
 ### T-053 Pullback: burn intent, /v1/transfer, relayer gatewayMint, confirm, cancel and re-request, API-down fallback
 - **Milestone / group / who:** M4 / M4-b / agent. **Size:** L. **Deps:** T-052, G0-05.
