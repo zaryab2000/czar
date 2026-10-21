@@ -35,9 +35,9 @@ function fakeService(id = serviceId, accepted = offer): PlannerService {
     accepts: [accepted],
     extensions: {
       czar: {
-        claim: { status: "claimed" },
+        claim: { status: "domain-verified" },
         evidence: { deliveryLcb: 0.9, structuralLcb: 0.9, nEff: 8, badges: [] },
-        source: "verified",
+        source: "circle-live",
         card: { inputFields: [{ name: "query", type: "string" }] },
       },
     },
@@ -255,6 +255,7 @@ describe("planner fallback", () => {
       extensions: {
         czar: {
           ...service.extensions.czar,
+          claim: { status: "wallet-verified" },
           card: { rail: "erc8183-job", inputFields: [{ name: "query", type: "string" }] },
         },
       },
@@ -272,6 +273,28 @@ describe("planner fallback", () => {
       payee: jobService.providerAddress,
       kind: 2,
     });
+  });
+
+  it("never plans a job for a provider address the provider has not proven (SCR-121)", async () => {
+    const service = fakeService();
+    const unproven: PlannerService = {
+      ...service,
+      providerAddress: `0x${"4".repeat(40)}`,
+      listedPrice: "1000000",
+      jobDurationSeconds: 3600,
+      extensions: {
+        czar: {
+          ...service.extensions.czar,
+          claim: { status: "domain-verified" },
+          source: "circle-live",
+          card: { rail: "erc8183-job", inputFields: [{ name: "query", type: "string" }] },
+        },
+      },
+    };
+    const built = await makePlanner({ service: unproven, capabilities: ["price-lookup"] });
+    expect(
+      (built?.plan.payeeLeaves ?? []).some((leaf) => leaf.payee === unproven.providerAddress),
+    ).toBe(false);
   });
 
   it("probes a local HTTP 402 through the configured safe fetch", async () => {

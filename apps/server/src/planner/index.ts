@@ -309,6 +309,8 @@ async function selectCandidate(
   };
 }
 
+const TRUSTED_JOB_CLAIMS: ReadonlySet<string> = new Set(["wallet-verified", "erc8004-claimed"]);
+
 async function probeRanked(args: {
   readonly ranked: readonly { serviceId: string }[];
   readonly input: PlannerRequest;
@@ -329,10 +331,14 @@ async function probeRanked(args: {
       !/^svc_[0-9a-f]{32}$/.test(service.serviceId)
     )
       continue;
+    // SCR-121: a job provider's address is trusted only when the provider proved control of it
+    // (wallet-verified or ERC-8004 claim) or it is one of Czar's own registered providers.
     const jobProvider =
       service.extensions.czar.card["rail"] === "erc8183-job" &&
       service.providerAddress !== undefined &&
-      service.listedPrice !== undefined;
+      service.listedPrice !== undefined &&
+      (TRUSTED_JOB_CLAIMS.has(service.extensions.czar.claim.status) ||
+        service.extensions.czar.source === "czar-registered");
     if (jobProvider) {
       const amount = BigInt(service.listedPrice as string);
       if (amount <= max) {
