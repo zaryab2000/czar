@@ -210,7 +210,7 @@ Each object: purpose, fields (name, type, required, privacy class, description, 
 | `output` | object `{format: markdown-table \| csv \| json \| markdown-list \| prose, formatSource: file \| interview \| default}` | no | RS | result format (D91); built by code: the person's file first, then interview `taste.outputFormat`, then the default for `kind`; in `taskSpecHash` when present |
 
 - **Redaction:** layer 1 (secrets) runs on every string. Layer 2 (PII) runs on `goal` but treats every value present in `TaskSpec` as allowed, so it never replaces a subject with a marker (D84 point 3). The person sees `TaskSpec` on the approval screen.
-- **Invariant:** `taskSpecHash = H({hashRule:"czar-hash-v1", kind:"task-spec", …TaskSpec})` (§5.2) is part of `objectiveHash` and `planHash`.
+- **Invariant:** `taskSpecHash = H({hashRule:"czar-hash-v1", kind:"task-spec", taskSpec})` (§5.2; `TaskSpec` nested whole, SCR-116) is part of `objectiveHash` and `planHash`.
 
 ### 4.4 `ObjectiveSubmission`
 
@@ -629,7 +629,7 @@ type PaymentRef =
 | Hash | Preimage (`jcs` of this object) | Notes |
 |---|---|---|
 | `observationHash` | `{hashRule:"czar-hash-v1", kind:"observation", host, sessionRef, projectRef, eventType, occurredAt, toolName?, summary, fileRefs?, errorClass?, provenance}` from an `ActivityEvent` | excludes `eventId`, `redaction`, `durationMs`, `agentRef`, `mcp`, `hostVersion`; the daemon keeps the preimage; the server sees only the hash |
-| `taskSpecHash` | `{hashRule:"czar-hash-v1", kind:"task-spec", …TaskSpec}` | D84 |
+| `taskSpecHash` | `{hashRule:"czar-hash-v1", kind:"task-spec", taskSpec}` where `taskSpec` is the whole `TaskSpec` object, nested (not spread), with absent optional fields omitted | D84; nested by SCR-116 because `TaskSpec.kind` would otherwise overwrite the `kind` discriminator |
 | `objectiveHash` | `{hashRule:"czar-hash-v1", kind:"objective", objectiveId, soulVersionHash, observationHashes (sorted ascending), detector, goal, capabilities (as given), deadline?, minutesSaved, hourlyBand, taskSpecHash}` | `goal` is the redacted text; the server can recompute from the submission |
 | `soulVersionHash` | `{hashRule:"czar-hash-v1", kind:"soul", version, compiledAt, previousHash?, sectionHashes}` where `sectionHashes[s] = H({section:s, beliefs:[{beliefId, text, confidence, firstSeen, lastSeen, receipts(sorted)}]})` | belief `text` never leaves; only the hash does; the person can prove any belief later by revealing it |
 | `planHash` | `{hashRule:"czar-hash-v1", kind:"plan", planId, objectiveHash, network, category, cap, slackBps, maxStepAmount, pocketCapBps, expiresAt, payeeRoot, taskSpecHash, steps:[{stepIndex, kind, payee?, alternates?, unitAmount, expectedCalls, stepCap, acceptanceProfileId, serviceId?, fanOut?, callInputsHash?}]}` | excludes `resource` URLs and `inputTemplate`; includes `taskSpecHash` and each step's `callInputsHash`, so what runs is what was approved (D84) |
