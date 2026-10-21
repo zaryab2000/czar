@@ -632,6 +632,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 300,
   },
   {
+    "key": "indexer.gatewayPageSize",
+    "source": "default",
+    "unit": "count",
+    "value": 100,
+  },
+  {
     "key": "indexer.gatewayPollFailMax",
     "source": "default",
     "unit": "count",
@@ -654,6 +660,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "source": "default",
     "unit": "blocks",
     "value": 120,
+  },
+  {
+    "key": "indexer.merchantPayoutAddresses",
+    "source": "default",
+    "unit": "",
+    "value": [],
   },
   {
     "key": "indexer.pocketStaleHours",

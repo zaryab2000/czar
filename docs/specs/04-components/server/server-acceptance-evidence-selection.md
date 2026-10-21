@@ -129,6 +129,9 @@ stateDiagram-v2
 #### 5.6 Gateway API polling
 
 - Every `indexer.gatewayPollSeconds` (30 s; the first status `received` lands in ~1.2 s and `completed` 0–16 min later, A2-24 to A2-26) the indexer calls `GET /v1/x402/transfers?from=<pocket>` for every pocket in `Funded`/`Draining` and `?to=<payout>` for Czar merchant payout addresses (A2-28). `pageSize` max 100, cursor in the `link` header (p1-G10).
+- (SCR-118) Page size is `indexer.gatewayPageSize` (100, the API maximum); each request uses `fetch.timeoutMs`. Payout addresses come from `indexer.merchantPayoutAddresses` (lowercase addresses; set by the T-040 local overlay for Czar's own merchants; empty means no `?to=` polling). The same list feeds the `Transfer` filter in §5.2.
+- (SCR-118) `gateway_transfers` is an indexer-internal table, not a wire shape: `amount` is an `Amount6` string, `createdAt`/`updatedAt` are stored as the RFC 3339 strings the API returns, `status` is one of the five above. Status is monotonic by rank `received` < `batched` < `confirmed` < `completed`; `failed` may replace any status except `completed`; an update with a lower rank, or any update to `completed`/`failed`, is ignored and logged as `gateway_status_regression`. The pocket payment status shown downstream is the row's current status.
+- (SCR-118) A malformed page, or a `link` cursor already seen in the same walk, ends that walk without writing the rest and counts as one Gateway API error toward `indexer.gatewayPollFailMax`.
 - A `txHash` on a `completed` row is cross-checked against `BatchProcessed` (A2-27). API-only rows are graded `rail-api`; when the API is down, `onchain-netted` from batch deltas with flag `rail-api-unavailable` (SL-C8 step 2).
 
 ### 6. Behaviour

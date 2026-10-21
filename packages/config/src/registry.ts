@@ -777,6 +777,14 @@ export const PARAMETERS = [
     source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:127",
   },
   {
+    key: "indexer.gatewayPageSize",
+    type: "integer",
+    default: 100,
+    unit: "count",
+    reason: "Gateway transfers API page size; 100 is the API maximum (p1-G10, SCR-118)",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:132",
+  },
+  {
     key: "indexer.gatewayPollSeconds",
     type: "integer",
     default: 30,
@@ -792,6 +800,15 @@ export const PARAMETERS = [
     reason: "Arc caps eth_getLogs at 10,000 (A9-06)",
     source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:60",
     notes: "first named line 36",
+  },
+  {
+    key: "indexer.merchantPayoutAddresses",
+    type: "string[]",
+    default: [],
+    unit: "",
+    reason:
+      "Czar merchant payout addresses for Transfer filtering and Gateway ?to= polling (SCR-118)",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:132",
   },
   {
     key: "indexer.maxLagBlocks",
