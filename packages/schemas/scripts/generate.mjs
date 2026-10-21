@@ -81,7 +81,7 @@ await writeFile(
 await writeFile(
   path.join(generatedDirectory, "validators.ts"),
   `// Generated from docs/specs/02-data-and-protocol/schemas. Do not edit.\n` +
-    `import { validateSchema } from "#/validator";\n` +
+    `import { validateSchema } from "#src/validator";\n` +
     `import type { ${schemaExports.map(({ typeName }) => typeName).join(", ")} } from "./types.ts";\n\n` +
     `${validatorExports}\n`,
 );

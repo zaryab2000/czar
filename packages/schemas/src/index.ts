@@ -3,10 +3,10 @@ export {
   LocalOnlyFieldError,
   privacyClassOf,
   SchemaValidationError,
-} from "#/privacy";
-export { validateSchema, validationErrors } from "#/validator";
-export { schemaMetadata } from "#/generated/metadata";
-export type { PrivacyClass } from "#/privacy";
-export type { SchemaName } from "#/generated/types";
-export type * from "#/generated/types";
-export * from "#/generated/validators";
+} from "#src/privacy";
+export { validateSchema, validationErrors } from "#src/validator";
+export { schemaMetadata } from "#src/generated/metadata";
+export type { PrivacyClass } from "#src/privacy";
+export type { SchemaName } from "#src/generated/types";
+export type * from "#src/generated/types";
+export * from "#src/generated/validators";
