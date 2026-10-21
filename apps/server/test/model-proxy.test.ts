@@ -100,17 +100,15 @@ describe("completeModelCall route", () => {
     expect(idempotency.rows[0]?.response_hash).toBeNull();
 
     const usage = await getPool().query<{
+      prompt: string;
       input_tokens: number;
       output_tokens: number;
-      source_extractor_tokens: number;
     }>(
-      `SELECT input_tokens::int,output_tokens::int,source_extractor_tokens::int
+      `SELECT prompt,input_tokens::int,output_tokens::int
        FROM model_usage WHERE user_id=$1`,
       [TEST_USER_ID],
     );
-    expect(usage.rows).toEqual([
-      { input_tokens: 17, output_tokens: 5, source_extractor_tokens: 0 },
-    ]);
+    expect(usage.rows).toEqual([{ prompt: "P-01", input_tokens: 17, output_tokens: 5 }]);
   });
 
   it("modelProxy_sameKeyReturnsReplayNotStoredEvenForDifferentBody", async () => {
@@ -269,19 +267,148 @@ describe("completeModelCall route", () => {
       timeoutMs: 2_000,
     });
     const usage = await getPool().query<{
+      prompt: string;
       input_tokens: number;
       output_tokens: number;
-      source_extractor_tokens: number;
     }>(
-      `SELECT input_tokens::int,output_tokens::int,source_extractor_tokens::int
-       FROM model_usage WHERE user_id=$1`,
+      `SELECT prompt,input_tokens::int,output_tokens::int
+       FROM model_usage WHERE user_id=$1 ORDER BY prompt`,
       [capUserId],
     );
     expect(usage.rows).toEqual([
-      { input_tokens: 9, output_tokens: 11, source_extractor_tokens: 10 },
+      { prompt: "P-01", input_tokens: 5, output_tokens: 5 },
+      { prompt: "P-07", input_tokens: 4, output_tokens: 6 },
     ]);
+    const reservations = await getPool().query(
+      "SELECT 1 FROM model_reservations WHERE user_id=$1",
+      [capUserId],
+    );
+    expect(reservations.rowCount).toBe(0);
+  });
+
+  it("modelProxy_capsEachCallAndEachPromptMonthlyBudget", async () => {
+    const userId = "usr_01K7ZT9P4N5Q6R7S8T9V0W1X2B";
+    const token = Buffer.alloc(32, 11).toString("base64url");
+    await seedModelDevice(getPool(), userId, "dev_01K7ZT9P4N5Q6R7S8T9V0W1X2B", token);
+    const config = loadConfig({ envFile: { "models.screenMonthlyTokens": 30 } });
+    const modelClient = {
+      complete: vi.fn(async (_request: unknown, _options: unknown) => ({
+        output: { answer: "screened" },
+        usage: { inputTokens: 10, outputTokens: 10 },
+      })),
+    };
+    const context = createTestContext(getPool(), { modelClient, config });
+    const first = await postModelCall(
+      context.app,
+      modelRequest,
+      "8f4e8c7d-94a3-4c6a-8f77-6db94f240c21",
+      token,
+    );
+    const second = await postModelCall(
+      context.app,
+      modelRequest,
+      "8f4e8c7d-94a3-4c6a-8f77-6db94f240c22",
+      token,
+    );
+    const third = await postModelCall(
+      context.app,
+      modelRequest,
+      "8f4e8c7d-94a3-4c6a-8f77-6db94f240c23",
+      token,
+    );
+    // First call: the 30-token P-01 monthly cap is below the 4,000 per-call cap.
+    expect(modelClient.complete.mock.calls[0]?.[1]).toMatchObject({ maxTotalTokens: 30 });
+    expect(first.status).toBe(200);
+    // Second call: 10 tokens left in the P-01 month; the model used 20, so it is refused.
+    expect(modelClient.complete.mock.calls[1]?.[1]).toMatchObject({ maxTotalTokens: 10 });
+    expect(second.status).toBe(503);
+    // Third call: the P-01 month is spent; the provider is not called.
+    expect(third.status).toBe(503);
+    expect(modelClient.complete).toHaveBeenCalledTimes(2);
+
+    const perCall = createTestContext(getPool(), { modelClient });
+    await postModelCall(perCall.app, modelRequest, "8f4e8c7d-94a3-4c6a-8f77-6db94f240c24");
+    expect(modelClient.complete.mock.calls[2]?.[1]).toMatchObject({ maxTotalTokens: 4000 });
+  });
+
+  it("modelProxy_holdsNoLockDuringTheProviderCallAndReservesConcurrentBudget", async () => {
+    const userId = "usr_01K7ZT9P4N5Q6R7S8T9V0W1X2C";
+    const token = Buffer.alloc(32, 12).toString("base64url");
+    await seedModelDevice(getPool(), userId, "dev_01K7ZT9P4N5Q6R7S8T9V0W1X2C", token);
+    const config = loadConfig({ envFile: { "models.screenMonthlyTokens": 6000 } });
+    const firstGate = deferred();
+    const releaseFirst = firstGate.resolve;
+    const modelClient = {
+      complete: vi
+        .fn()
+        .mockImplementationOnce(async () => {
+          await firstGate.promise;
+          return { output: { answer: "slow" }, usage: { inputTokens: 1, outputTokens: 1 } };
+        })
+        .mockImplementationOnce(async () => ({
+          output: { answer: "fast" },
+          usage: { inputTokens: 1, outputTokens: 1 },
+        })),
+    };
+    const context = createTestContext(getPool(), { modelClient, config });
+    const slow = postModelCall(
+      context.app,
+      modelRequest,
+      "8f4e8c7d-94a3-4c6a-8f77-6db94f240c25",
+      token,
+    );
+    await vi.waitFor(() => expect(modelClient.complete).toHaveBeenCalledTimes(1));
+    // While the first call is in flight, its reservation is visible and no lock blocks a second call.
+    const inFlight = await getPool().query<{ tokens: string }>(
+      "SELECT tokens FROM model_reservations WHERE user_id=$1",
+      [userId],
+    );
+    expect(inFlight.rows.map((row) => Number(row.tokens))).toEqual([4000]);
+    const fast = await postModelCall(
+      context.app,
+      modelRequest,
+      "8f4e8c7d-94a3-4c6a-8f77-6db94f240c26",
+      token,
+    );
+    expect(fast.status).toBe(200);
+    expect(modelClient.complete.mock.calls[1]?.[1]).toMatchObject({ maxTotalTokens: 2000 });
+    releaseFirst();
+    expect((await slow).status).toBe(200);
+    const left = await getPool().query("SELECT 1 FROM model_reservations WHERE user_id=$1", [
+      userId,
+    ]);
+    expect(left.rowCount).toBe(0);
+  });
+
+  it("modelProxy_sameKeyWhileInFlightGetsReplayNotStored", async () => {
+    const gate = deferred();
+    const release = gate.resolve;
+    const modelClient = {
+      complete: vi.fn(async () => {
+        await gate.promise;
+        return modelResponse;
+      }),
+    };
+    const context = createTestContext(getPool(), { modelClient });
+    const key = "8f4e8c7d-94a3-4c6a-8f77-6db94f240c27";
+    const first = postModelCall(context.app, modelRequest, key);
+    await vi.waitFor(() => expect(modelClient.complete).toHaveBeenCalledTimes(1));
+    const again = await postModelCall(context.app, modelRequest, key);
+    expect(again.status).toBe(409);
+    expect(((await again.json()) as { czarCode: string }).czarCode).toBe("replay-not-stored");
+    release();
+    expect((await first).status).toBe(200);
+    expect(modelClient.complete).toHaveBeenCalledTimes(1);
   });
 });
+
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  const handle: { resolve?: () => void } = {};
+  const promise = new Promise<void>((done) => {
+    handle.resolve = done;
+  });
+  return { promise, resolve: () => handle.resolve?.() };
+}
 
 async function postModelCall(
   app: ReturnType<typeof createTestContext>["app"],

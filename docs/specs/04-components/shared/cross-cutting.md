@@ -171,6 +171,7 @@ Decoded by `@czar/vault-client` to the names in 03 `czar-vault.md` §9.2 and `cz
 | **Total** | | | **≈ 4.6 M tokens** | `models.userMonthlyTokens` (hard cap 6 M, unchanged) |
 
 - When a cap is hit the component falls back per its "AI usage" section (no model); it never silently continues.
+- Per-call caps (the "Tokens / call" column, SCR-117): `models.screen.maxTokensPerCall` 4,000, `models.reader.maxTokensPerCall` 6,000, `models.planner.maxTokensPerCall` 12,000, `models.soul-compiler.maxTokensPerCall` 24,000, `models.drives-helper.maxTokensPerCall` 2,000, `models.refusal-classifier.maxTokensPerCall` 1,000, `models.sourceExtractor.maxTokensPerCall` 6,000. Before a provider call the server proxy reserves `min(per-call cap, remaining prompt monthly cap, remaining models.userMonthlyTokens)` in a short transaction, calls the provider with that as the token ceiling and no database lock held, then settles the actual usage and releases the reservation. A reservation left by a crash expires after the prompt timeout plus `models.reservationGraceSeconds` (60).
 - Latency budgets: P-01 ≤ 2 s, P-02 ≤ 8 s, P-03 ≤ 20 s, P-04 ≤ 60 s, P-05 ≤ 5 s, P-06 ≤ 2 s, P-07 ≤ 10 s (`models.<name>.timeoutMs`; P-07 is `models.sourceExtractor.timeoutMs`, D90).
 - P-01 calls on soul-source excerpts draw from the existing P-01 allocation (`models.screenMonthlyTokens`); when it or the P-07 cap is reached, soul-source extraction stops with a visible local message and the interview keeps working (D90).
 

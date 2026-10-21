@@ -1,5 +1,5 @@
 import { Ajv2020 } from "ajv/dist/2020.js";
-import type { Config } from "@czar/config";
+import type { Config, ParameterKey } from "@czar/config";
 import { validateRecordedExchange } from "@czar/api-contract";
 import type { Logger } from "@czar/logging";
 import type { Pool, PoolClient } from "pg";
@@ -37,6 +37,50 @@ export interface ModelProxyResult {
   readonly usage?: { readonly inputTokens: number; readonly outputTokens: number };
 }
 
+const PROMPT_PARAMS: Readonly<
+  Record<ModelPrompt, { monthly: ParameterKey; perCall: ParameterKey; timeout: ParameterKey }>
+> = {
+  "P-01": {
+    monthly: "models.screenMonthlyTokens",
+    perCall: "models.screen.maxTokensPerCall",
+    timeout: "models.screen.timeoutMs",
+  },
+  "P-04": {
+    monthly: "models.soulMonthlyTokens",
+    perCall: "models.soul-compiler.maxTokensPerCall",
+    timeout: "models.soul-compiler.timeoutMs",
+  },
+  "P-05": {
+    monthly: "models.drivesMonthlyTokens",
+    perCall: "models.drives-helper.maxTokensPerCall",
+    timeout: "models.drives-helper.timeoutMs",
+  },
+  "P-06": {
+    monthly: "models.refusalMonthlyTokens",
+    perCall: "models.refusal-classifier.maxTokensPerCall",
+    timeout: "models.refusal-classifier.timeoutMs",
+  },
+  "P-07": {
+    monthly: "models.sourceExtractorMonthlyTokens",
+    perCall: "models.sourceExtractor.maxTokensPerCall",
+    timeout: "models.sourceExtractor.timeoutMs",
+  },
+};
+
+/** HTTP 102 marks a key whose provider call is in flight; any reuse gets 409 replay-not-stored. */
+const IN_FLIGHT_STATUS = 102;
+
+type Reservation =
+  | { readonly kind: "replay" }
+  | { readonly kind: "exhausted" }
+  | { readonly kind: "reserved"; readonly reservationId: string; readonly maxTotalTokens: number };
+
+/**
+ * Three steps so no database lock or pooled connection is held during the provider call (SCR-117):
+ * 1. short transaction: claim the idempotency key and reserve budget;
+ * 2. provider call with the reserved ceiling and the prompt timeout;
+ * 3. short transaction: release the reservation, record actual counts, finalize the key.
+ */
 export async function completeModelCall(
   pool: Pool,
   config: Config,
@@ -53,42 +97,54 @@ export async function completeModelCall(
 ): Promise<ModelProxyResult> {
   const validateOutput = compileOutputValidator(input.body.schema);
   if (!validateOutput) return { status: 400, code: "validation", body: {} };
-  const client = await pool.connect();
+  const scope = `completeModelCall:${input.deviceId}`;
+  const monthStart = `${input.now.toISOString().slice(0, 7)}-01`;
+  const params = PROMPT_PARAMS[input.body.prompt];
+  const timeoutMs = Number(config.get(params.timeout));
+
+  const reservation = await inTransaction(pool, (client) =>
+    reserve(client, config, input, scope, monthStart, timeoutMs),
+  );
+  if (reservation.kind === "replay") return { status: 409, code: "replay-not-stored", body: {} };
+  if (reservation.kind === "exhausted")
+    return { status: 503, code: "upstream-unavailable", body: {} };
+
+  let completion: ModelCompletion | undefined;
   try {
-    await client.query("BEGIN");
-    const result = await completeWithinTransaction(
-      client,
-      config,
-      input,
-      modelClient,
-      validateOutput,
-    );
-    await client.query("COMMIT");
-    if (result.usage) {
-      logger.info(result.status === 200 ? "model_call_completed" : "model_call_rejected", {
-        promptHash: input.body.promptHash,
-        inputTokens: result.usage.inputTokens,
-        outputTokens: result.usage.outputTokens,
-      });
-    }
-    return result;
-  } catch (error) {
-    await client.query("ROLLBACK");
-    throw error;
-  } finally {
-    client.release();
+    const signal = AbortSignal.timeout(timeoutMs);
+    const pending = modelClient.complete(input.body, {
+      maxTotalTokens: reservation.maxTotalTokens,
+      timeoutMs,
+      signal,
+    });
+    const result: unknown = await raceWithAbort(pending, signal);
+    if (validCompletion(result)) completion = result;
+  } catch {
+    completion = undefined;
   }
+
+  const result = await inTransaction(pool, (client) =>
+    settle(client, input, scope, monthStart, reservation, completion, validateOutput),
+  );
+  if (result.usage) {
+    logger.info(result.status === 200 ? "model_call_completed" : "model_call_rejected", {
+      promptHash: input.body.promptHash,
+      inputTokens: result.usage.inputTokens,
+      outputTokens: result.usage.outputTokens,
+    });
+  }
+  return result;
 }
 
-async function completeWithinTransaction(
+async function reserve(
   client: PoolClient,
   config: Config,
   input: Parameters<typeof completeModelCall>[4],
-  modelClient: ModelClient,
-  validateOutput: (value: unknown) => boolean,
-): Promise<ModelProxyResult> {
+  scope: string,
+  monthStart: string,
+  timeoutMs: number,
+): Promise<Reservation> {
   const fingerprint = fingerprintRequest(input.rawBody);
-  const scope = `completeModelCall:${input.deviceId}`;
   const idempotency = await findOrCreateIdempotency(client, config, {
     scope,
     key: input.key,
@@ -97,83 +153,97 @@ async function completeWithinTransaction(
     replayStored: false,
   });
   if (idempotency.status !== null || !idempotency.fingerprint.equals(fingerprint)) {
-    return { status: 409, code: "replay-not-stored", body: {} };
+    return { kind: "replay" };
   }
-
-  const monthStart = `${input.now.toISOString().slice(0, 7)}-01`;
-  await client.query(
-    `INSERT INTO model_usage (user_id,month_start) VALUES ($1,$2)
-     ON CONFLICT (user_id,month_start) DO NOTHING`,
-    [input.userId, monthStart],
+  // One budget writer per user at a time; held only for this short transaction.
+  await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
+    `model-budget:${input.userId}`,
+  ]);
+  const totals = await client.query<{ user_total: string; prompt_total: string }>(
+    `SELECT
+       COALESCE((SELECT SUM(input_tokens + output_tokens) FROM model_usage
+                 WHERE user_id=$1 AND month_start=$2), 0)
+     + COALESCE((SELECT SUM(tokens) FROM model_reservations
+                 WHERE user_id=$1 AND month_start=$2 AND expires_at > $4), 0) AS user_total,
+       COALESCE((SELECT SUM(input_tokens + output_tokens) FROM model_usage
+                 WHERE user_id=$1 AND month_start=$2 AND prompt=$3), 0)
+     + COALESCE((SELECT SUM(tokens) FROM model_reservations
+                 WHERE user_id=$1 AND month_start=$2 AND prompt=$3 AND expires_at > $4), 0)
+       AS prompt_total`,
+    [input.userId, monthStart, input.body.prompt, input.now],
   );
-  const usageResult = await client.query<{
-    input_tokens: string;
-    output_tokens: string;
-    source_extractor_tokens: string;
-  }>(
-    `SELECT input_tokens,output_tokens,source_extractor_tokens FROM model_usage
-     WHERE user_id=$1 AND month_start=$2 FOR UPDATE`,
-    [input.userId, monthStart],
+  const row = totals.rows[0];
+  if (!row) throw new Error("Model budget totals query returned no row.");
+  const params = PROMPT_PARAMS[input.body.prompt];
+  const maxTotalTokens = Math.min(
+    Number(config.get(params.perCall)),
+    Number(config.get(params.monthly)) - Number(row.prompt_total),
+    Number(config.get("models.userMonthlyTokens")) - Number(row.user_total),
   );
-  const usage = usageResult.rows[0];
-  if (!usage) throw new Error("Monthly model usage row was not created.");
-  const totalUsed = Number(usage.input_tokens) + Number(usage.output_tokens);
-  const sourceUsed = Number(usage.source_extractor_tokens);
-  const sourceCap = Number(config.get("models.sourceExtractorMonthlyTokens"));
-  const userCap = Number(config.get("models.userMonthlyTokens"));
-  const remainingUserTokens = userCap - totalUsed;
-  const remainingSourceTokens = sourceCap - sourceUsed;
-  const maxTotalTokens =
-    input.body.prompt === "P-07"
-      ? Math.min(remainingUserTokens, remainingSourceTokens)
-      : remainingUserTokens;
   if (maxTotalTokens <= 0) {
     await markIdempotencyResult(client, scope, input.key, 503);
-    return { status: 503, code: "upstream-unavailable", body: {} };
+    return { kind: "exhausted" };
   }
+  const expiresAt = new Date(
+    input.now.getTime() + timeoutMs + Number(config.get("models.reservationGraceSeconds")) * 1000,
+  );
+  const inserted = await client.query<{ reservation_id: string }>(
+    `INSERT INTO model_reservations (user_id,month_start,prompt,tokens,expires_at)
+     VALUES ($1,$2,$3,$4,$5) RETURNING reservation_id`,
+    [input.userId, monthStart, input.body.prompt, maxTotalTokens, expiresAt],
+  );
+  const reservationId = inserted.rows[0]?.reservation_id;
+  if (!reservationId) throw new Error("Model budget reservation was not created.");
+  await markIdempotencyResult(client, scope, input.key, IN_FLIGHT_STATUS);
+  return { kind: "reserved", reservationId, maxTotalTokens };
+}
 
-  let result: unknown;
-  try {
-    const timeoutMs = promptTimeoutMs(config, input.body.prompt);
-    const signal = AbortSignal.timeout(timeoutMs);
-    const pending = modelClient.complete(input.body, { maxTotalTokens, timeoutMs, signal });
-    result = await raceWithAbort(pending, signal);
-  } catch {
+async function settle(
+  client: PoolClient,
+  input: Parameters<typeof completeModelCall>[4],
+  scope: string,
+  monthStart: string,
+  reservation: Extract<Reservation, { kind: "reserved" }>,
+  completion: ModelCompletion | undefined,
+  validateOutput: (value: unknown) => boolean,
+): Promise<ModelProxyResult> {
+  await client.query("DELETE FROM model_reservations WHERE reservation_id=$1", [
+    reservation.reservationId,
+  ]);
+  if (!completion) {
     await markIdempotencyResult(client, scope, input.key, 503);
     return { status: 503, code: "upstream-unavailable", body: {} };
   }
-  if (!validCompletion(result)) {
-    await markIdempotencyResult(client, scope, input.key, 503);
-    return { status: 503, code: "upstream-unavailable", body: {} };
-  }
-  const completion = result;
-
-  const nextTotal = totalUsed + completion.usage.inputTokens + completion.usage.outputTokens;
-  const nextSource =
-    sourceUsed +
-    (input.body.prompt === "P-07"
-      ? completion.usage.inputTokens + completion.usage.outputTokens
-      : 0);
   await recordUsage(client, input, completion.usage, monthStart);
-  const outputValid = validateOutput(completion.output);
-  const withinBudgets =
-    nextTotal <= userCap && (input.body.prompt !== "P-07" || nextSource <= sourceCap);
-  const status = outputValid && withinBudgets ? 200 : 503;
-  await recordIdempotencyUsage(client, scope, input.key, status, completion.usage);
-  if (!outputValid || !withinBudgets) {
-    return { status: 503, code: "upstream-unavailable", body: {}, usage: completion.usage };
-  }
+  const used = completion.usage.inputTokens + completion.usage.outputTokens;
   const body = { output: completion.output, usage: completion.usage };
-  const contract = validateRecordedExchange("completeModelCall", {
-    requestBody: input.body,
-    responseStatus: 200,
-    responseBody: body,
-  });
-  if (!contract.valid) {
-    await markIdempotencyResult(client, scope, input.key, 503);
-    return { status: 503, code: "upstream-unavailable", body: {}, usage: completion.usage };
-  }
+  const ok =
+    used <= reservation.maxTotalTokens &&
+    validateOutput(completion.output) &&
+    validateRecordedExchange("completeModelCall", {
+      requestBody: input.body,
+      responseStatus: 200,
+      responseBody: body,
+    }).valid;
+  const status = ok ? 200 : 503;
+  await recordIdempotencyUsage(client, scope, input.key, status, completion.usage);
+  if (!ok) return { status: 503, code: "upstream-unavailable", body: {}, usage: completion.usage };
   return { status: 200, body, usage: completion.usage };
+}
+
+async function inTransaction<T>(pool: Pool, work: (client: PoolClient) => Promise<T>): Promise<T> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await work(client);
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 function compileOutputValidator(
@@ -235,33 +305,19 @@ function raceWithAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> 
   });
 }
 
-function promptTimeoutMs(config: Config, prompt: ModelPrompt): number {
-  switch (prompt) {
-    case "P-01":
-      return Number(config.get("models.screen.timeoutMs"));
-    case "P-04":
-      return Number(config.get("models.soul-compiler.timeoutMs"));
-    case "P-05":
-      return Number(config.get("models.drives-helper.timeoutMs"));
-    case "P-06":
-      return Number(config.get("models.refusal-classifier.timeoutMs"));
-    case "P-07":
-      return Number(config.get("models.sourceExtractor.timeoutMs"));
-  }
-}
-
 async function recordUsage(
   client: PoolClient,
   input: Parameters<typeof completeModelCall>[4],
   usage: ModelCompletion["usage"],
   monthStart: string,
 ): Promise<void> {
-  const sourceTokens = input.body.prompt === "P-07" ? usage.inputTokens + usage.outputTokens : 0;
   await client.query(
-    `UPDATE model_usage SET input_tokens=input_tokens+$3,output_tokens=output_tokens+$4,
-       source_extractor_tokens=source_extractor_tokens+$5
-     WHERE user_id=$1 AND month_start=$2`,
-    [input.userId, monthStart, usage.inputTokens, usage.outputTokens, sourceTokens],
+    `INSERT INTO model_usage (user_id,month_start,prompt,input_tokens,output_tokens)
+     VALUES ($1,$2,$3,$4,$5)
+     ON CONFLICT (user_id,month_start,prompt) DO UPDATE
+       SET input_tokens=model_usage.input_tokens+EXCLUDED.input_tokens,
+           output_tokens=model_usage.output_tokens+EXCLUDED.output_tokens`,
+    [input.userId, monthStart, input.body.prompt, usage.inputTokens, usage.outputTokens],
   );
 }
 

@@ -5,7 +5,7 @@
 | ID | SCR-117 |
 | Filed by | Codex, 2026-10-21 |
 | Spec and section | `docs/specs/02-data-and-protocol/api/openapi.yaml` `completeModelCall`; `docs/specs/04-components/shared/ai-prompts.md` common rules and P-01/P-04/P-05/P-06/P-07; `docs/specs/04-components/shared/cross-cutting.md` §6.2 |
-| Status | Open |
+| Status | Accepted (Zaryab, 2026-10-21); budget rule applied to cross-cutting §6.2 and `@czar/config` |
 
 ## Problem
 
@@ -31,4 +31,8 @@ Specify the internal client input/output contract, prompt asset source and hash-
 
 ## Decision
 
-- Pending.
+- 2026-10-21: **Accepted**, ruled by the architect under Zaryab's delegation:
+  - **Client interface:** `ModelClient.complete(request, {maxTotalTokens, timeoutMs, signal})` returning `{output, usage:{inputTokens, outputTokens}}`, as in `apps/server/src/models/proxy.ts`. The proxy owns allowlist, idempotency, budget and validation; the client owns only the provider call.
+  - **Budget (applied):** reserve before the call, settle after, no database lock or pooled connection held during the provider call. Reservation = `min(per-call cap, remaining prompt monthly cap, remaining models.userMonthlyTokens)`. New keys `models.<name>.maxTokensPerCall` (values from the §6.2 "Tokens / call" column) and `models.reservationGraceSeconds` 60. Per-prompt monthly caps (`models.screenMonthlyTokens`, `soulMonthlyTokens`, `drivesMonthlyTokens`, `refusalMonthlyTokens`, `sourceExtractorMonthlyTokens`) are enforced, not only the user total.
+  - **Timeouts:** `models.<name>.timeoutMs`, aborted through the signal.
+  - **Model selection and prompt assets (T-040):** the real client maps prompts to the §6.1 model classes, loads `models/<id>.md`, and returns a failure (proxy answers `503 upstream-unavailable`) if `promptHash` does not match the file. Writing the prompt files is part of T-040's client work, from `ai-prompts.md`. K18 loading stays in T-040.
