@@ -82,10 +82,10 @@ export interface SignerOptions {
 
 const RATE_WINDOW_MS = 60_000;
 
-/** `signer.maxSignaturesPerMin.<key>`; K4 counts per pocket. */
+/** `kms.maxSignaturesPerMin.<key>`; K4 counts per pocket. */
 function rateLimitFor(config: Config, keyId: KeyId): number {
   const key = keyId === "relayer" ? "relayer" : keyId;
-  const name = `signer.maxSignaturesPerMin.${key}` as Parameters<Config["get"]>[0];
+  const name = `kms.maxSignaturesPerMin.${key}` as Parameters<Config["get"]>[0];
   return Number(config.get(name));
 }
 

@@ -575,13 +575,4 @@ export const WILDCARDS: Readonly<Record<string, readonly string[]>> = {
     "acceptance.deliverableRefetchTries",
     "acceptance.deliverableRefetchDelayMs",
   ],
-  "signer.maxSignaturesPerMin": [
-    "signer.maxSignaturesPerMin.K3",
-    "signer.maxSignaturesPerMin.K4",
-    "signer.maxSignaturesPerMin.K5",
-    "signer.maxSignaturesPerMin.K7",
-    "signer.maxSignaturesPerMin.K8",
-    "signer.maxSignaturesPerMin.K10",
-    "signer.maxSignaturesPerMin.relayer",
-  ],
 };

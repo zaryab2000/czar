@@ -74,3 +74,7 @@ dependencies, and job startup together. Define the runtime owner and startup wir
 
 - `db49b14` — `Add signer-scoped signature rate limits`
 - `08eab95` — `Build signer policies, gas refill, and pocket keys`
+
+## Architect review fix (2026-10-21)
+
+- Rate limits now read the existing spec keys `kms.maxSignaturesPerMin.*` (CZ-27 §5.2, §5.4). The duplicate `signer.maxSignaturesPerMin.*` registry keys and wildcard were removed; the spec has no such name.

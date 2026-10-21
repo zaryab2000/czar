@@ -36,8 +36,8 @@ describe("signer service", () => {
     }
   });
 
-  it("enforces signer.maxSignaturesPerMin per key and recovers after the window", async () => {
-    const t = await harness({ config: { "signer.maxSignaturesPerMin.K3": 2 } });
+  it("enforces kms.maxSignaturesPerMin per key and recovers after the window", async () => {
+    const t = await harness({ config: { "kms.maxSignaturesPerMin.K3": 2 } });
     await t.signer.sign("cz-15", { keyId: "K3", kind: "usdc-3009", payload: usdc });
     await t.signer.sign("cz-15", {
       keyId: "K3",

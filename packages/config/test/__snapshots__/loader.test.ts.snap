@@ -2036,48 +2036,6 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": "~/Library/Application Support/Czar/signer/keystore/",
   },
   {
-    "key": "signer.maxSignaturesPerMin.K10",
-    "source": "default",
-    "unit": "count",
-    "value": 300,
-  },
-  {
-    "key": "signer.maxSignaturesPerMin.K3",
-    "source": "default",
-    "unit": "count",
-    "value": 600,
-  },
-  {
-    "key": "signer.maxSignaturesPerMin.K4",
-    "source": "default",
-    "unit": "count",
-    "value": 120,
-  },
-  {
-    "key": "signer.maxSignaturesPerMin.K5",
-    "source": "default",
-    "unit": "count",
-    "value": 10,
-  },
-  {
-    "key": "signer.maxSignaturesPerMin.K7",
-    "source": "default",
-    "unit": "count",
-    "value": 60,
-  },
-  {
-    "key": "signer.maxSignaturesPerMin.K8",
-    "source": "default",
-    "unit": "count",
-    "value": 10,
-  },
-  {
-    "key": "signer.maxSignaturesPerMin.relayer",
-    "source": "default",
-    "unit": "count",
-    "value": 120,
-  },
-  {
     "key": "signer.pocketDustAtomic",
     "source": "default",
     "unit": "atomic",
