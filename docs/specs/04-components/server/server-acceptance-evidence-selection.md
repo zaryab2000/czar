@@ -106,7 +106,7 @@ stateDiagram-v2
 | `reservationsNeedingSettle(vault)` | CZ-15 | reservations `Active`/`Finalizing` whose derived nonces appear in `AuthorizationUsed` but are not in `settledMask` |
 | `reservationsNeedingFinalize(now)` | CZ-15 | reservations with `validBefore < now` and `state != Final` |
 | `pullbacksToConfirm()` | CZ-15 | `Pending` pullbacks whose `transferSpecHash` appears in `AttestationUsed` |
-| `pullbacksToCancel(block)` | CZ-15 | `Pending` pullbacks with `requestedAtBlock + 3000 ≤ block` and no `AttestationUsed` (03 `czar-vault.md` §3 `PULLBACK_CANCEL_DELAY_BLOCKS`) |
+| `pullbacksToCancel(block)` | CZ-15 | `Pending` pullbacks with `maxBlockHeight + 3000 ≤ block` and no `AttestationUsed` (03 `czar-vault.md` §3 `PULLBACK_CANCEL_DELAY_BLOCKS`; the contract's `cancelPullback` checks `maxBlockHeight`, RV-036 — corrected 2026-10-21 from `requestedAtBlock`, which would make the agent call too early and revert `TooEarly`) |
 | `jobsToSync()` | CZ-15 | vault jobs whose escrow status (from events) differs from the vault's `JobSynced` state |
 | `jobsAwaitingEvaluation()` | CZ-16 | jobs with `JobSubmitted` and no `JobCompleted`/`JobRejected` |
 | `receiptsForLedger(user, cursor)` | CZ-12 (`listReceipts`), CZ-25 | `LedgerReceipt` rows with `status` from settlement state (`reserved, settled, pending, completed, released, refunded, failed`) |
