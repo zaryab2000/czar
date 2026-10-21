@@ -73,7 +73,7 @@ components:
       name: Idempotency-Key
       in: header
       required: true
-      description: UUID v4. Same key + same body returns the stored response; same key + different body returns 409.
+      description: "UUID v4. Same key + same body returns the stored response; same key + different body returns 409. Exceptions: pairDevice and completeModelCall return 409 replay-not-stored instead of replaying (02 §9.3)."
       schema:
         type: string
         format: uuid
@@ -181,11 +181,10 @@ components:
       type: object
       x-privacyClass: server-only
       additionalProperties: false
-      required: [deviceId, deviceToken, expiresAt]
+      required: [deviceId, deviceToken]
       properties:
         deviceId: { type: string, pattern: "^dev_[0-9A-HJKMNP-TV-Z]{26}$" }
-        deviceToken: { type: string, description: Opaque bearer; store in the OS keychain (K15). Shown once. }
-        expiresAt: { $ref: "#/components/schemas/Timestamp" }
+        deviceToken: { type: string, description: "Opaque bearer; store in the OS keychain (K15). Shown once. Valid until the device is revoked; no expiry in Phase 1 (SCR-113)." }
 
     ObjectiveStatus:
       type: object
@@ -919,7 +918,7 @@ paths:
     post:
       tags: [daemon]
       summary: Exchange an 8-digit pairing code for a device token.
-      description: "The code is single-use and valid for 5 minutes. The token in the response is returned once and never again (AM-18)."
+      description: "The code is single-use and valid for 5 minutes. The token in the response is returned once and never again (AM-18). Retrying with the same Idempotency-Key after success returns 409 replay-not-stored (SCR-113)."
       operationId: pairDevice
       parameters: [ { $ref: "#/components/parameters/IdempotencyKey" } ]
       requestBody:
@@ -930,6 +929,7 @@ paths:
         "400": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
         "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/Problem" }
 
   /v1/objectives:
     post:
@@ -945,8 +945,10 @@ paths:
         "202": { description: Accepted for planning, content: { application/json: { schema: { $ref: "#/components/schemas/ObjectiveStatus" } } } }
         "400": { $ref: "#/components/responses/Problem" }
         "409": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
         "422": { description: objectiveHash does not recompute (spec 02 §5.2), content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
         "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/Problem" }
     get:
       tags: [daemon]
       summary: List this device's objectives.
@@ -955,7 +957,7 @@ paths:
       parameters:
         - name: status
           in: query
-          schema: { type: string }
+          schema: { $ref: "#/components/schemas/ObjectiveStatusValue" }
         - { $ref: "#/components/parameters/Cursor" }
         - { $ref: "#/components/parameters/Limit" }
       responses:
@@ -969,7 +971,10 @@ paths:
                   - type: object
                     properties:
                       items: { type: array, items: { $ref: "#/components/schemas/ObjectiveStatus" } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
         "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/Problem" }
 
   /v1/objectives/{objectiveId}:
     get:
@@ -984,7 +989,11 @@ paths:
           schema: { type: string, pattern: "^obj_[0-9A-HJKMNP-TV-Z]{26}$" }
       responses:
         "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/ObjectiveStatus" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
         "404": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/Problem" }
 
   /v1/objectives/{objectiveId}/results/ack:
     post:

@@ -140,7 +140,7 @@ export function reservationMirror(vault: Address, reservationId: bigint, view: R
   };
 }
 
-// SCR-112: keyRef is server-owned and is joined by T-034, not indexed from chain.
+// SCR-114: keyRef is server-owned and is joined by T-034, not indexed from chain.
 export function pocketMirror(input: {
   vault: Address;
   pocket: Address;

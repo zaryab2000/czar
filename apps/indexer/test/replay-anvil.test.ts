@@ -72,9 +72,10 @@ const schemaUrl = (name: string) =>
 for (const name of ["common", "envelope", "reservation", "pocket-record", "job-record"]) {
   ajv.addSchema(JSON.parse(readFileSync(schemaUrl(name), "utf8")) as object, name);
 }
-const pocketProjectionSchema = JSON.parse(
-  readFileSync(schemaUrl("pocket-record"), "utf8"),
-) as { $id: string; required: string[] };
+const pocketProjectionSchema = JSON.parse(readFileSync(schemaUrl("pocket-record"), "utf8")) as {
+  $id: string;
+  required: string[];
+};
 pocketProjectionSchema.$id = "https://czar.dev/schemas/pocket-record-projection.schema.json";
 pocketProjectionSchema.required = pocketProjectionSchema.required.filter(
   (field) => field !== "keyRef",

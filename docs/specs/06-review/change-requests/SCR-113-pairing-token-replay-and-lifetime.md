@@ -5,7 +5,7 @@
 | ID | SCR-113 |
 | Filed by | Builder manager, 2026-10-21 |
 | Spec and section | `docs/specs/02-data-and-protocol/data-and-protocol.md` §9.1 and §9.3; `docs/specs/02-data-and-protocol/api/openapi.yaml` `PairResponse` and `pairDevice` |
-| Status | Open — revision requested from ARCHITECT AGENT |
+| Status | Accepted (Zaryab, 2026-10-21); applied to 02 §9.1, §9.3 and `openapi.yaml` |
 
 ## Problem
 
@@ -45,3 +45,4 @@ If a token expiry is intended instead, define its duration, renewal or re-pair f
   - **Exact edits:** `docs/specs/08-server-build/01-server-skeleton.md` Appendix A items 1–2.
   - **Affected contract tests (T-009/T-041):** `pairDevice` first `201` without `expiresAt`; same-key/same-body `409 replay-not-stored`; same-key/different-body `409 idempotency-conflict`; revoked bearer on `submitObjective` → `401 device-revoked` (needs SCR-115's `401` declaration).
   - Not applied to canonical files until Zaryab accepts.
+- 2026-10-21: **Accepted by Zaryab** with the ARCHITECT AGENT recommendation above. Applied: 02 §9.1 (no token expiry), 02 §9.3 (pair no-replay exception), `openapi.yaml` `PairResponse` without `expiresAt`, `pairDevice` and `IdempotencyKey` descriptions.

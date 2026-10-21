@@ -115,6 +115,22 @@ export const PARAMETERS = [
     notes: "Not named in docs/specs/04; T-004 review fix. Also openapi.yaml:54 (300).",
   },
   {
+    key: "api.cursorTtlMinutes",
+    type: "integer",
+    default: 60,
+    unit: "minutes",
+    reason: "opaque list cursors expire after 1 h (02 §9.5; SCR-115)",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:75",
+  },
+  {
+    key: "api.goalRetentionDays",
+    type: "integer",
+    default: 365,
+    unit: "days",
+    reason: "objective goal text is deleted after 1 year (01 §11.1, CZ-12 §8; SCR-115)",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:75",
+  },
+  {
     key: "api.idempotencyTtlHours",
     type: "integer",
     default: 24,

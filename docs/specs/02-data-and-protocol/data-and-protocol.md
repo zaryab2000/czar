@@ -954,7 +954,7 @@ Full definition: `api/openapi.yaml` (OpenAPI 3.1; 28 paths, 29 operations; parse
 
 | Surface | Credential | How it is issued | Where it lives | Revocation |
 |---|---|---|---|---|
-| Daemon → server | `DeviceToken` bearer (K15) | Pairing: the app shows an 8-digit code (valid 5 min); the daemon posts it to `POST /v1/devices/pair` with a device label and platform; the server returns `deviceId` and the token once | OS keychain through `@napi-rs/keyring` (K14, K15; B6-17) | the app lists devices and revokes; a revoked token gets `401` with `czarCode: device-revoked` |
+| Daemon → server | `DeviceToken` bearer (K15) | Pairing: the app shows an 8-digit code (valid 5 min); the daemon posts it to `POST /v1/devices/pair` with a device label and platform; the server returns `deviceId` and the token once; in Phase 1 the token has no expiry and is valid until the person revokes the device in the app (SCR-113) | OS keychain through `@napi-rs/keyring` (K14, K15; B6-17) | the app lists devices and revokes; a revoked token gets `401` with `czarCode: device-revoked` |
 | App → server | `AppSession` bearer | `POST /v1/auth/session` with a WebAuthn assertion over a server challenge; the same passkey owns the MSCA (D26) | browser session storage of the installed web app | 24 h expiry, refreshed on use; `DELETE` not needed, sessions expire |
 | Claim server (P2) | `GitHubOAuth` authorization code | D23 default path; admin permission on the repo is checked server-side | server session during the claim | GitHub app settings; token discarded after the check (E1-12: no resale of personal data) |
 
@@ -1033,6 +1033,7 @@ Full definition: `api/openapi.yaml` (OpenAPI 3.1; 28 paths, 29 operations; parse
 
 - Every creating `POST` requires `Idempotency-Key` (UUID). The server stores the key with a fingerprint of the body for 24 h. Same key and same body → the stored response is replayed with the original status code. Same key and different body → `409` with `czarCode: idempotency-conflict`.
 - **Exception (RV-043):** `POST /v1/models/complete` never stores or replays a response, because D31 lets the proxy keep only token counts. It stores the key and fingerprint only; any second request with the same key gets `409 replay-not-stored`, and the daemon retries with a new key if it still needs the output.
+- **Exception (SCR-113):** `POST /v1/devices/pair` never stores or replays its response, because the device token is shown once (AM-18). The server stores the key and fingerprint only. The same key and same body after a successful pair returns `409 replay-not-stored`; a different body returns `409 idempotency-conflict`. A daemon that lost the first response asks the person for a new pairing code.
 - `POST /v1/pay/requests` is additionally keyed by `payRequestId` (§7.4, RV-050); a different request under the same `payRequestId` is `409`.
 - `GET` and `DELETE` are naturally idempotent.
 
