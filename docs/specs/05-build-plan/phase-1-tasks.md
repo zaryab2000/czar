@@ -1321,6 +1321,7 @@
   - Add contract tests.
 - **Acceptance tests:**
   - Contract tests pass for all six operations; `getMe.balances.pocketOutstanding` equals the sum over open envelopes from the indexer; `getSoulPointer` returns `available: false`.
+- **SCR-125 (2026-10-21):** also build `createAuthChallenge` and `registerPasskey`, the tables `auth_challenges` and `passkey_credentials`, and `Me.vaultCreated`. `getMe` reads chain fields through `@czar/vault-client` pinned to one block, and envelope data from the indexer. This task may add the read-only indexer routes `GET /vaults?owner=` and `GET /envelopes?vault=`.
 
 ### T-082 Onboarding in the desktop browser: passkey MSCA, createVault UserOp, funding, limits, Network fee reserve (D52)
 - **Milestone / group / who:** M6 / M6-b / agent. **Size:** L. **Deps:** T-080, T-081, T-026, G0-03.
@@ -1338,6 +1339,7 @@
   - Zaryab completes the passkey ceremony once in desktop Safari and once in desktop Chrome on macOS (real Touch ID or iCloud Keychain); both sign-ins succeed (D69).
   - `grep -r` finds no test-keystore owner code path outside `tests/`; no testnet vault in the scenario is owned by the test keystore (D64).
 - **Review fixes (2026-10-19):** Passkey ceremony on RP ID `localhost`; `setPasskey(rpIdHash = sha256("localhost"))`; client normalises P-256 `s` to low-s before `executeOwnerAction` (RV-034).
+- **SCR-125 (2026-10-21):** enrolment is `createAuthChallenge` + `registerPasskey`; the server recomputes the MSCA from the credential key. Playwright runs on `arc-anvil` forked read-only from Arc testnet at a pinned block, with a test-only mock bundler and the CDP virtual authenticator. No Circle client key until the testnet stage.
 
 ### T-083 Notifications CZ-23 and createPushSubscription with Declarative Web Push — moved to stage 2 (D69)
 - **Status:** moved to stage 2 (D69). Not part of Phase 1; no Phase 1 task depends on it. Kept here for stage 2 (`S05/stage-2-backlog.md` §2, M-4). When scheduled it also needs the stage-2 checks G0-02 and G0-15.
@@ -1372,6 +1374,7 @@
 - **D85 (2026-10-20):** "Fill {fileName} when done" checkbox sent as `ApprovalIntentRequest.fillInPlace`.
 - **D86, D87 (2026-10-20):** job context notice and job-paid wording (H5).
 - **N1, N2 (2026-10-20):** unverified-provider badge; files-held-for-review notice.
+- **SCR-125 (2026-10-21):** UserOp tests use the same fork and mock-bundler setup as T-082.
 
 ### T-085 Freeze and unfreeze (createFreezeIntent) and D60 agent lowering of limits
 - **Layout:** desktop browser only (D69). Lowering is a follow-up agent step after `Frozen`, not atomic (D63).
@@ -1401,6 +1404,7 @@
 - **Acceptance tests:**
   - A snapshot test renders every `LedgerReceipt.status` value (including `pending` and `quarantined`) with the exact wording from CZ-22 §12.
   - Czar-merchant refunds show "Refunded by Czar" only when `merchantIsCzar` is true (AM-05, D35, D50).
+- **SCR-125 (2026-10-21):** this task builds the screens, the wording and the `listReceipts`/`listEnvelopes`/`getEnvelope` routes. The statement page and the shadow card render from schema-valid fixtures. The `getMonthlyStatement` route is T-095's output and live shadow totals are T-070's; both are wired when those tasks land. Acceptance tests unchanged.
 
 ### T-087 Secondary bundler fallback
 - **Milestone / group / who:** M6 / M6-c / agent. **Size:** S. **Deps:** T-082, G0-14.

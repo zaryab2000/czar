@@ -462,17 +462,48 @@ components:
       properties:
         sessionToken: { type: string }
         expiresAt: { $ref: "#/components/schemas/Timestamp" }
+    AuthChallengeRequest:
+      type: object
+      description: Ask for a single-use WebAuthn challenge (SCR-125).
+      x-privacyClass: server-only
+      additionalProperties: false
+      required: [purpose]
+      properties:
+        purpose: { type: string, enum: [register, session] }
+    AuthChallenge:
+      type: object
+      description: Single-use, purpose-bound, expires after app.challengeTtlSeconds; only sha256(challenge) is stored (SCR-125).
+      x-privacyClass: server-only
+      additionalProperties: false
+      required: [challengeId, challenge, expiresAt]
+      properties:
+        challengeId: { type: string, maxLength: 64 }
+        challenge: { type: string, maxLength: 64, description: base64url of 32 random bytes }
+        expiresAt: { $ref: "#/components/schemas/Timestamp" }
+    PasskeyRegistration:
+      type: object
+      description: WebAuthn registration over a `register` challenge. The server reads the P-256 key from attestedCredentialData and recomputes the counterfactual MSCA from it; mismatch → 422 (SCR-125).
+      x-privacyClass: server-only
+      additionalProperties: false
+      required: [challengeId, credentialId, clientDataJSON, attestationObject, msca]
+      properties:
+        challengeId: { type: string, maxLength: 64 }
+        credentialId: { type: string, maxLength: 1024, description: base64url }
+        clientDataJSON: { type: string, maxLength: 4096, description: base64url }
+        attestationObject: { type: string, maxLength: 8192, description: base64url }
+        msca: { $ref: "#/components/schemas/Address" }
 
     Me:
       type: object
       description: The signed-in user's accounts and limits (mirror of chain state).
       x-privacyClass: server-only
       additionalProperties: false
-      required: [userId, msca, vault, network, balances, limits, frozen, paused]
+      required: [userId, msca, vault, vaultCreated, network, balances, limits, frozen, paused]
       properties:
         userId: { type: string, pattern: "^usr_[0-9A-HJKMNP-TV-Z]{26}$" }
         msca: { $ref: "#/components/schemas/Address" }
-        vault: { $ref: "#/components/schemas/Address" }
+        vault: { $ref: "#/components/schemas/Address", description: "factory predictVault(msca) until VaultCreated is indexed, then the created vault (SCR-125)." }
+        vaultCreated: { type: boolean, description: "true once VaultCreated is indexed (SCR-125)." }
         network: { type: string, pattern: "^eip155:[0-9]+$" }
         balances:
           type: object
@@ -1286,6 +1317,35 @@ paths:
       responses:
         "201": { description: Session, content: { application/json: { schema: { $ref: "#/components/schemas/SessionResponse" } } } }
         "401": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /v1/auth/challenge:
+    post:
+      tags: [app]
+      summary: Issue a single-use WebAuthn challenge for registration or sign-in (SCR-125).
+      operationId: createAuthChallenge
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/AuthChallengeRequest" } } }
+      responses:
+        "201": { description: Challenge, content: { application/json: { schema: { $ref: "#/components/schemas/AuthChallenge" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /v1/auth/passkey:
+    post:
+      tags: [app]
+      summary: Register the owner's passkey, create the user and open a session (SCR-125). Phase 1, one passkey per user.
+      operationId: registerPasskey
+      parameters: [ { $ref: "#/components/parameters/IdempotencyKey" } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/PasskeyRegistration" } } }
+      responses:
+        "201": { description: Session, content: { application/json: { schema: { $ref: "#/components/schemas/SessionResponse" } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
         "429": { $ref: "#/components/responses/RateLimited" }
 
   /v1/me:

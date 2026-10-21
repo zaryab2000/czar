@@ -955,7 +955,7 @@ Full definition: `api/openapi.yaml` (OpenAPI 3.1; 28 paths, 29 operations; parse
 | Surface | Credential | How it is issued | Where it lives | Revocation |
 |---|---|---|---|---|
 | Daemon → server | `DeviceToken` bearer (K15) | Pairing: the app shows an 8-digit code (valid 5 min); the daemon posts it to `POST /v1/devices/pair` with a device label and platform; the server returns `deviceId` and the token once; in Phase 1 the token has no expiry and is valid until the person revokes the device in the app (SCR-113) | OS keychain through `@napi-rs/keyring` (K14, K15; B6-17) | the app lists devices and revokes; a revoked token gets `401` with `czarCode: device-revoked` |
-| App → server | `AppSession` bearer | `POST /v1/auth/session` with a WebAuthn assertion over a server challenge; the same passkey owns the MSCA (D26) | browser session storage of the installed web app | 24 h expiry, refreshed on use; `DELETE` not needed, sessions expire |
+| App → server | `AppSession` bearer | `POST /v1/auth/challenge` issues a single-use, purpose-bound challenge; at sign-up `POST /v1/auth/passkey` registers the passkey and opens a session; afterwards `POST /v1/auth/session` with a WebAuthn assertion over a `session` challenge; the same passkey owns the MSCA (D26, SCR-125) | browser session storage of the installed web app | 24 h expiry, refreshed on use; `DELETE` not needed, sessions expire |
 | Claim server (P2) | `GitHubOAuth` authorization code | D23 default path; admin permission on the repo is checked server-side | server session during the claim | GitHub app settings; token discarded after the check (E1-12: no resale of personal data) |
 
 ### 9.2 Routes
@@ -1407,3 +1407,4 @@ Agent-directed text met this session (not followed): the Circle and Arc doc head
 | 2026-10-20 | D88 | §6.2 `OwnerAction` action list adds `17 CANCEL_JOB` (H2); job `description` format stated exactly (69 characters, no `0x`). |
 | 2026-10-20 | D90 | §4.2 `Belief` source fields and typed receipts (schema 1.2); new §4.23 `SourceReceipt`, §4.24 `ProposedBelief`, §4.25 `InterviewSubmission`, §4.26 `SourceScan`; §5.2 interim soul-hash note (v2 rules held in SCR-030); §7.1 `src_`, `prop_`, `scan_`, `cns_`; §9.2 local soul-input routes; §9.7; §10 `propose_soul_context`; §13.1 confirmed lines; §15.3 gaps. |
 | 2026-10-20 | D91 | §4.3.1 `TaskSpec.output` (schema 1.1); §4.3 `dismissReason` (objective schema 1.1); §4.5 `steps[].why`, `untestedOptions` (schema 1.2); §4.14 conflict flag `czar-test-buyer`; §4.25 `taste.outputFormat` (schema 1.1); new §4.27 `CapabilityCard`; §12.2 `extensions.czar.card`; §15.3 gaps. |
+| 2026-10-21 | SCR-125 | §9.1 app credential row: challenge and passkey-registration routes; `Me.vaultCreated` and the two auth routes in `api/openapi.yaml`. |
