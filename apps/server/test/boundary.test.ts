@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 import { readFile } from "node:fs/promises";
 import { loadConfig } from "@czar/config";
 import { createLogger } from "@czar/logging";
+import { computePromptHash } from "#src/models/proxy";
 import type { Step } from "@czar/schemas";
 import type { AcceptanceResult } from "#src/acceptance/types";
 import { createAcceptanceChecker } from "#src/acceptance/index";
@@ -17,7 +18,10 @@ const source = {
   payTo: "0x1111111111111111111111111111111111111111",
   paymentRefHash: `0x${"a".repeat(64)}`,
 };
-const promptHashes = { "P-01": `0x${"1".repeat(64)}`, "P-02": `0x${"2".repeat(64)}` } as const;
+const promptHashes = {
+  "P-01": await computePromptHash("P-01"),
+  "P-02": await computePromptHash("P-02"),
+} as const;
 const p01Fixtures = JSON.parse(
   await readFile(new URL("../../../models/evals/P-01/cases.json", import.meta.url), "utf8"),
 ) as { cases: { id: number; recordedReply: Record<string, unknown> }[] };

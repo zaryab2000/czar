@@ -308,6 +308,25 @@ describe("vault-direct executor", () => {
     await expect(executeVaultDirectStep(input, dependencies)).rejects.toThrow(
       "simulated worker death after reserve.mined",
     );
+    await getPool().query(`CREATE FUNCTION fail_call_sent() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.phase = 'call.sent' THEN
+          RAISE EXCEPTION 'simulated worker death between auth.signed and call.sent';
+        END IF;
+        RETURN NEW;
+      END;
+    $$`);
+    await getPool().query(
+      "CREATE TRIGGER fail_call_sent BEFORE INSERT ON step_executions FOR EACH ROW EXECUTE FUNCTION fail_call_sent()",
+    );
+    try {
+      await expect(executeVaultDirectStep(input, dependencies)).rejects.toThrow(
+        "simulated worker death between auth.signed and call.sent",
+      );
+    } finally {
+      await getPool().query("DROP TRIGGER fail_call_sent ON step_executions");
+      await getPool().query("DROP FUNCTION fail_call_sent()");
+    }
     await expect(executeVaultDirectStep(input, dependencies)).rejects.toThrow(
       "simulated worker death after call.sent",
     );
@@ -345,12 +364,11 @@ describe("vault-direct executor", () => {
     });
     expect(sign.mock.calls.filter(([, request]) => request.kind === "usdc-3009")).toHaveLength(2);
     expect(successfulAuthorizationSignatures).toBe(1);
-    expect(safeFetch.mock.calls[5]?.[1]).toMatchObject({
-      headers: { "payment-signature": expect.any(String) },
-    });
-    expect(safeFetch.mock.calls[3]?.[1]?.headers?.["payment-signature"]).toBe(
-      safeFetch.mock.calls[5]?.[1]?.headers?.["payment-signature"],
-    );
+    const paymentSignatures = safeFetch.mock.calls
+      .map(([, options]) => options?.headers?.["payment-signature"])
+      .filter((signature): signature is string => typeof signature === "string");
+    expect(paymentSignatures.length).toBeGreaterThan(1);
+    expect(new Set(paymentSignatures).size).toBe(1);
     await getPool().query("UPDATE steps SET calls_used=0 WHERE plan_id=$1 AND step_index=0", [
       PLAN_ID,
     ]);

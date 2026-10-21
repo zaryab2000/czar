@@ -1,11 +1,18 @@
 import { Ajv2020 } from "ajv/dist/2020.js";
+import { readFile } from "node:fs/promises";
 import type { Config, ParameterKey } from "@czar/config";
 import { validateRecordedExchange } from "@czar/api-contract";
 import type { Logger } from "@czar/logging";
 import type { Pool, PoolClient } from "pg";
+import { keccak256 } from "viem";
 import { findOrCreateIdempotency, fingerprintRequest } from "#src/http/idempotency";
 
 export type ModelPrompt = "P-01" | "P-02" | "P-04" | "P-05" | "P-06" | "P-07";
+
+export async function computePromptHash(prompt: ModelPrompt): Promise<string> {
+  const bytes = await readFile(new URL(`../../../../models/${prompt}.md`, import.meta.url));
+  return keccak256(bytes);
+}
 
 export interface ModelCallRequest {
   readonly prompt: ModelPrompt;
@@ -131,6 +138,8 @@ async function completeWithBudget(
   input: Parameters<typeof completeModelCall>[4],
   boundaryOnly: boolean,
 ): Promise<ModelProxyResult> {
+  if ((await computePromptHash(input.body.prompt)) !== input.body.promptHash.toLowerCase())
+    return { status: 503, code: "upstream-unavailable", body: {} };
   const validateOutput = compileOutputValidator(input.body.schema);
   if (!validateOutput) return { status: 400, code: "validation", body: {} };
   const scope = `completeModelCall:${input.deviceId}`;

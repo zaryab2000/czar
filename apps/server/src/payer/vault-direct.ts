@@ -124,6 +124,7 @@ export interface BoundaryInput {
   readonly index: number;
   readonly requestedAt: Date;
   readonly signedAt: Date;
+  readonly maxTimeoutSeconds: number;
 }
 
 export interface SettledReceiptContext extends BoundaryInput {
@@ -479,6 +480,7 @@ async function settleAndFinalize(
     paymentRef: PaymentRef;
     requestedAt: Date;
     signedAt: Date;
+    maxTimeoutSeconds: number;
   }[] = [];
   for (const call of calls) {
     const result = await authorizeAndCall(
@@ -491,7 +493,8 @@ async function settleAndFinalize(
       attempt,
       trace,
     );
-    if (result.response) completed.push(result.response);
+    if (result.response)
+      completed.push({ ...result.response, maxTimeoutSeconds: call.offer.maxTimeoutSeconds });
     else if (result.errorCode) {
       await appendExecutionPhase(dependencies.pool, {
         planId: input.planId,
@@ -551,6 +554,7 @@ async function settleAndFinalize(
       index: entry.index,
       requestedAt: entry.requestedAt,
       signedAt: entry.signedAt,
+      maxTimeoutSeconds: entry.maxTimeoutSeconds,
     };
     const stepResult = await dependencies.boundary(context);
     results.push(stepResult);

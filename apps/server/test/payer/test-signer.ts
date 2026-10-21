@@ -6,10 +6,21 @@ import {
   type Projection,
   type SignerBackend,
   type SignerNetwork,
+  type TransactionPreparer,
 } from "@czar/signer";
 import { generatePrivateKey, privateKeyToAccount, sign } from "viem/accounts";
 
-export async function testSigner() {
+export interface TestSignerOptions {
+  readonly projection?: Partial<Projection>;
+  readonly network?: Partial<SignerNetwork>;
+  readonly prepareTransaction?: TransactionPreparer;
+}
+
+export async function testSigner(options: TestSignerOptions = {}) {
+  return (await testSignerWithDetails(options)).signer;
+}
+
+export async function testSignerWithDetails(options: TestSignerOptions = {}) {
   const privateKey = generatePrivateKey();
   const account = privateKeyToAccount(privateKey);
   const backend: SignerBackend = {
@@ -17,7 +28,8 @@ export async function testSigner() {
     keyRefs: () => ["K3"],
     address: (keyRef) => (keyRef === "K3" ? account.address : undefined),
     signDigest: async (_keyRef, digest) => sign({ hash: digest, privateKey, to: "hex" }),
-    signTransaction: async () => {
+    signTransaction: async (_keyRef, transaction) => {
+      if (options.prepareTransaction) return account.signTransaction(transaction);
       throw new Error("test signer does not send transactions");
     },
     createKey: async () => {
@@ -68,17 +80,22 @@ export async function testSigner() {
       verifyingContract: "0x0077777d7eba4688bdef3e311b846f25870a19b9",
     },
     merchantServices: [],
+    ...options.network,
   };
+  Object.assign(projection, options.projection);
   const config = loadConfig({ envFile: { "kms.maxSignaturesPerMin.K3": 100 } });
-  return createSigner({
+  const signer = createSigner({
     backend,
     projection,
     network,
     config,
     audit: memoryAudit(),
     callers: { "cz-15": ["K3"] },
-    prepareTransaction: async () => {
-      throw new Error("test signer does not prepare transactions");
-    },
+    prepareTransaction:
+      options.prepareTransaction ??
+      (async () => {
+        throw new Error("test signer does not prepare transactions");
+      }),
   });
+  return { signer, k3Address: account.address };
 }

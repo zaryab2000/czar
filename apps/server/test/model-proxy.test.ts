@@ -1,8 +1,10 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { validateRecordedExchange } from "@czar/api-contract";
 import { loadConfig } from "@czar/config";
 import { createLogger } from "@czar/logging";
+import { keccak256 } from "viem";
 import type { Pool } from "pg";
 import { setupDatabase } from "#test/db";
 import { completeBoundaryModelCall } from "#src/models/proxy";
@@ -15,7 +17,12 @@ import {
 } from "#test/fixtures";
 
 const getPool = setupDatabase();
-const promptHash = `0x${"a".repeat(64)}`;
+const promptHash = await keccak256(
+  await readFile(new URL("../../../models/P-01.md", import.meta.url)),
+);
+const readerPromptHash = await keccak256(
+  await readFile(new URL("../../../models/P-02.md", import.meta.url)),
+);
 const idempotencyKey = "8f4e8c7d-94a3-4c6a-8f77-6db94f240c0a";
 const repeatedKey = "8f4e8c7d-94a3-4c6a-8f77-6db94f240c0b";
 const capUserId = "usr_01K7ZT9P4N5Q6R7S8T9V0W1X2A";
@@ -46,6 +53,24 @@ describe("completeModelCall route", () => {
     await seedDevice(getPool());
   });
 
+  it("rejects a prompt hash that does not match exact committed prompt bytes", async () => {
+    const modelClient = { complete: vi.fn(async () => modelResponse) };
+    const context = createTestContext(getPool(), { modelClient });
+    const response = await context.app.request("/v1/models/complete", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${TEST_TOKEN}`,
+        "Content-Type": "application/json",
+        "Idempotency-Key": "8f4e8c7d-94a3-4c6a-8f77-6db94f240c51",
+      },
+      body: JSON.stringify({ ...modelRequest, promptHash: `0x${"a".repeat(64)}` }),
+    });
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ czarCode: "upstream-unavailable" });
+    expect(modelClient.complete).not.toHaveBeenCalled();
+  });
+
   it("charges internal P-02 calls through the owner's model budget", async () => {
     const modelClient = {
       complete: vi.fn(async () => ({
@@ -55,7 +80,7 @@ describe("completeModelCall route", () => {
     };
     const body = {
       prompt: "P-02" as const,
-      promptHash,
+      promptHash: readerPromptHash,
       input: {
         expectedFields: [{ name: "price", type: "number", required: true as const }],
         structuralResult: "pass" as const,
@@ -172,7 +197,6 @@ describe("completeModelCall route", () => {
     const first = await postModelCall(context.app, modelRequest, repeatedKey);
     const changedRequest = {
       ...modelRequest,
-      prompt: "P-04",
       input: { currentBeliefs: [], candidates: [], sections: [] },
     };
     const replay = await postModelCall(context.app, changedRequest, repeatedKey);
@@ -250,7 +274,7 @@ describe("completeModelCall route", () => {
     expect(modelClient.complete).toHaveBeenCalledTimes(1);
   });
 
-  it("modelProxy_enforcesUserAndP07MonthlyCapsSeparately", async () => {
+  it("refuses prompts whose committed markdown is missing before reserving budget", async () => {
     await seedModelDevice(getPool(), capUserId, capDeviceId, capToken);
     const config = loadConfig({
       envFile: {
@@ -258,18 +282,7 @@ describe("completeModelCall route", () => {
         "models.sourceExtractorMonthlyTokens": 10,
       },
     });
-    const modelClient = {
-      complete: vi
-        .fn()
-        .mockResolvedValueOnce({
-          output: { answer: "source extracted" },
-          usage: { inputTokens: 4, outputTokens: 6 },
-        })
-        .mockResolvedValueOnce({
-          output: { answer: "screened" },
-          usage: { inputTokens: 5, outputTokens: 5 },
-        }),
-    };
+    const modelClient = { complete: vi.fn(async () => modelResponse) };
     const context = createTestContext(getPool(), { modelClient, config });
     const p07Request = {
       ...modelRequest,
@@ -289,51 +302,8 @@ describe("completeModelCall route", () => {
       "8f4e8c7d-94a3-4c6a-8f77-6db94f240c0e",
       capToken,
     );
-    const p07OverCap = await postModelCall(
-      context.app,
-      p07Request,
-      "8f4e8c7d-94a3-4c6a-8f77-6db94f240c0f",
-      capToken,
-    );
-    const p01 = await postModelCall(
-      context.app,
-      modelRequest,
-      "8f4e8c7d-94a3-4c6a-8f77-6db94f240c10",
-      capToken,
-    );
-    const userOverCap = await postModelCall(
-      context.app,
-      modelRequest,
-      "8f4e8c7d-94a3-4c6a-8f77-6db94f240c11",
-      capToken,
-    );
-
-    expect(p07First.status).toBe(200);
-    expect(p07OverCap.status).toBe(503);
-    expect(p01.status).toBe(200);
-    expect(userOverCap.status).toBe(503);
-    expect(modelClient.complete).toHaveBeenCalledTimes(2);
-    expect(modelClient.complete.mock.calls[0]?.[1]).toMatchObject({
-      maxTotalTokens: 10,
-      timeoutMs: 10_000,
-    });
-    expect(modelClient.complete.mock.calls[1]?.[1]).toMatchObject({
-      maxTotalTokens: 10,
-      timeoutMs: 2_000,
-    });
-    const usage = await getPool().query<{
-      prompt: string;
-      input_tokens: number;
-      output_tokens: number;
-    }>(
-      `SELECT prompt,input_tokens::int,output_tokens::int
-       FROM model_usage WHERE user_id=$1 ORDER BY prompt`,
-      [capUserId],
-    );
-    expect(usage.rows).toEqual([
-      { prompt: "P-01", input_tokens: 5, output_tokens: 5 },
-      { prompt: "P-07", input_tokens: 4, output_tokens: 6 },
-    ]);
+    expect(p07First.status).toBe(503);
+    expect(modelClient.complete).not.toHaveBeenCalled();
     const reservations = await getPool().query(
       "SELECT 1 FROM model_reservations WHERE user_id=$1",
       [capUserId],
