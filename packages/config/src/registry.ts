@@ -1189,8 +1189,7 @@ export const PARAMETERS = [
     type: "integer",
     default: null,
     unit: "atomic",
-    reason:
-      "20,000–100,000 per service; spread around catalog median so price matters in ranking",
+    reason: "20,000–100,000 per service; spread around catalog median so price matters in ranking",
     source: "docs/specs/04-components/server/server-supply-side.md:218",
     noDefault: true,
   },
@@ -2766,7 +2765,24 @@ export const PARAMETERS = [
   {
     key: "drives.capabilityTaxonomy",
     type: "object",
-    default: { version: 1, tags: ["web-search", "page-extract", "table-build", "summarize", "translate", "data-lookup", "price-lookup", "email-lookup", "company-lookup", "image-generate", "transcribe", "code-review", "chart-build"] },
+    default: {
+      version: 1,
+      tags: [
+        "web-search",
+        "page-extract",
+        "table-build",
+        "summarize",
+        "translate",
+        "data-lookup",
+        "price-lookup",
+        "email-lookup",
+        "company-lookup",
+        "image-generate",
+        "transcribe",
+        "code-review",
+        "chart-build",
+      ],
+    },
     unit: "taxonomy",
     reason: "Phase 1 versioned capability tag list shared by daemon and server (D91)",
     source: "docs/specs/04-components/local/local-soul-and-drives.md:450",
@@ -2842,7 +2858,8 @@ export const PARAMETERS = [
     type: "integer",
     default: 6,
     unit: "count",
-    reason: "Honest seeded jobs per test-provider before the scenario, so n_eff ≥ 5 on delivery (N1)",
+    reason:
+      "Honest seeded jobs per test-provider before the scenario, so n_eff ≥ 5 on delivery (N1)",
     source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:749",
   },
   {
@@ -2944,7 +2961,7 @@ export const PARAMETERS = [
   {
     key: "selection.matchEval.minRecallGain",
     type: "number",
-    default: 0.10,
+    default: 0.1,
     unit: "absolute-points",
     reason: "Embeddings must lift recall@10 by 10 points absolute to justify a new model",
     source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:764",
@@ -3008,7 +3025,10 @@ export const PARAMETERS = [
   {
     key: "selection.testBuyer.inputsByTaskClass",
     type: "object",
-    default: { "data-json.search": { q: "usdc price" }, "data-json.extract": { url: "https://www.circle.com/usdc" } },
+    default: {
+      "data-json.search": { q: "usdc price" },
+      "data-json.extract": { url: "https://www.circle.com/usdc" },
+    },
     unit: "test-input-map",
     reason: "Fixed, public, non-user inputs for test calls",
     source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:773",

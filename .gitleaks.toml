@@ -10,3 +10,18 @@ paths = [
   '''^packages/redaction/vendor/gitleaks-v8\.30\.1/''',
   '''^packages/redaction/src/generated/gitleaks-rules\.ts$''',
 ]
+
+[[allowlists]]
+description = "Config registry: `key:` fields hold parameter names (e.g. signer.gas.K3.minAtomic), not secrets (T-120)"
+paths = [
+  '''^packages/config/src/registry\.ts$''',
+  '''^packages/config/test/__snapshots__/loader\.test\.ts\.snap$''',
+]
+
+[[allowlists]]
+description = "EIP-712 test vectors and spec example JSON: bytes32 hashes, not secrets (T-120)"
+paths = [
+  '''^packages/hashing/fixtures/''',
+  '''^specs/02-data-and-protocol/examples/''',
+  '''^specs/02-data-and-protocol/vectors/''',
+]
