@@ -61,6 +61,8 @@ describe("CZ-12 migrations", () => {
       "acceptance_reports",
       "audit",
       "devices",
+      "evidence_receipts",
+      "executor_leases",
       "idempotency",
       "model_reservations",
       "model_usage",

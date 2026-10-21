@@ -21,6 +21,7 @@
     "@czar/hashing": "workspace:*",
     "@czar/logging": "workspace:*",
     "@czar/schemas": "workspace:*",
+    "@czar/signer": "workspace:*",
     "@czar/vault-client": "workspace:*",
     "@czar/x402": "workspace:*",
     "ajv": "8.20.0",
