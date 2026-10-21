@@ -1,6 +1,7 @@
 // Service-level checks: caller identity, key/kind table, rate limits, audit rows, pocket-key retirement.
 import { describe, expect, it } from "vitest";
-import { h, harness, PAYEE, VAULT } from "./helpers.ts";
+import { h, harness, OTHER, PAYEE, VAULT } from "./helpers.ts";
+import { postgresAudit } from "../src/postgres-audit.ts";
 
 const usdc = {
   vault: VAULT,
@@ -106,6 +107,33 @@ describe("signer service", () => {
       );
   });
 
+  it("writes a denied selector to PostgreSQL audit before any backend sign call", async () => {
+    let query: { sql: string; values: unknown[] } | undefined;
+    const t = await harness({
+      auditSink: postgresAudit({
+        async query(sql, values) {
+          query = { sql, values };
+        },
+      }),
+    });
+
+    await expect(
+      t.signer.sign("cz-15", {
+        keyId: "K3",
+        kind: "vault-call",
+        payload: { vault: VAULT, selector: "approve", args: { spender: OTHER, value: "1" } },
+      }),
+    ).rejects.toMatchObject({ rule: "selector-not-allowed" });
+
+    expect(t.calls).toEqual([]);
+    expect(query?.sql).toContain("INSERT INTO audit");
+    expect(query?.values[3]).toBe("kms_denied");
+    expect(JSON.parse(query?.values[2] as string)[0]).toMatchObject({
+      keyRef: "K3",
+      rule: "selector-not-allowed",
+    });
+  });
+
   it("refuses a prepared transaction that differs from the policy's call", async () => {
     const t = await harness();
     const signer = t.signer;
@@ -184,6 +212,26 @@ describe("pocket keys (K4, RV-004)", () => {
     expect(destroyAfterMs).toBeGreaterThan(0);
     expect(await t.signer.destroyRetiredPocketKeys()).toEqual([t.pocket]);
     expect(t.backend.address(`K4:${t.pocket}`)).toBeUndefined();
+  });
+
+  it("refuses pocket-key signing as soon as retirement begins", async () => {
+    const t = await harness();
+    await t.signer.retirePocketKey("cz-15", t.pocket);
+    await expect(
+      t.signer.sign("cz-15", {
+        keyId: "K4",
+        kind: "gateway-nano",
+        payload: {
+          pocket: t.pocket,
+          payTo: PAYEE,
+          amount: "1",
+          nonce: `0x${"00".repeat(32)}`,
+          validBefore: "1760800600",
+        },
+      }),
+    ).rejects.toMatchObject({ rule: "pocket-key-retiring" });
+    expect(t.calls).toEqual([]);
+    expect(t.audit.rows.at(-1)?.outcome).toBe("kms_denied");
   });
 
   it("keeps the key when a balance reappears during the retain window", async () => {

@@ -8,7 +8,8 @@
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:local": "CZAR_LOCAL_CHAIN=1 vitest run test/local-chain.test.ts"
   },
   "dependencies": {
     "@czar/config": "workspace:*",

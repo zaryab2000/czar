@@ -80,7 +80,8 @@ export interface PolicyContext {
   readonly now: () => number;
   readonly freezeStateMaxAgeSec: number;
   /** Addresses of the server keys, for checks that name them (K7 evaluator, K8 publisher, gas targets). */
-  readonly keyAddress: (key: "K3" | "K7" | "K8" | "K10") => Address;
+  readonly keyAddress: (key: "K3" | "K7" | "K8") => Address;
+  readonly merchantKeyAddress: (service: string) => Address;
   /** `signer.gas.<key>.maxAtomic` for the gas-refill targets. */
   readonly gasMaxAtomic: Readonly<Record<"K3" | "K7" | "K8", bigint>>;
 }
@@ -550,7 +551,7 @@ async function merchantSellerProof(ctx: PolicyContext, req: Req): Promise<Decisi
       method: req.method as string,
       bodyHash: req.bodyHash as Hash32,
       network,
-      payTo: ctx.keyAddress("K10"),
+      payTo: ctx.merchantKeyAddress(req.service as string),
       nonce: req.nonce as Hash32,
       issuedAt: expiresAt - BigInt(SELLER_PROOF_LIFETIME_SEC),
       expiresAt,

@@ -39,7 +39,7 @@ export interface KeystoreFile {
   };
 }
 
-const KEY_REF = /^(K3|K5|K6|K7|K8|K10|K20|relayer|K4:0x[0-9a-f]{40})$/;
+const KEY_REF = /^(K3|K5|K6|K7|K8|K20|relayer|K4:0x[0-9a-f]{40}|K10:[a-z0-9]+(?:-[a-z0-9]+)*)$/;
 
 const deriveKey = (passphrase: string, salt: Buffer, kdf: KdfParams) =>
   scryptSync(passphrase.normalize("NFKC"), salt, 32, {
@@ -243,10 +243,24 @@ export async function openLocalKeystore(options: LocalKeystoreOptions): Promise<
     async signTransaction(keyRef, tx: TransactionSerializableEIP1559) {
       return privateKeyToAccount(get(keyRef).privateKey).signTransaction(tx);
     },
-    async createKey(keyId) {
+    async createKey(keyId, merchantService) {
+      if (
+        keyId === "K10" &&
+        (merchantService === undefined || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(merchantService))
+      )
+        throw new KeystoreError(
+          "bad-merchant-service",
+          "K10 creation requires a kebab-case service id",
+        );
+      if (keyId !== "K10" && merchantService !== undefined)
+        throw new KeystoreError(
+          "unexpected-merchant-service",
+          "service scope is only valid for K10",
+        );
       const privateKey = generatePrivateKey();
       const address = privateKeyToAccount(privateKey).address.toLowerCase() as Address;
-      const keyRef = keyId === "K4" ? `K4:${address}` : keyId;
+      const keyRef =
+        keyId === "K4" ? `K4:${address}` : keyId === "K10" ? `K10:${merchantService}` : keyId;
       if (keys.has(keyRef)) throw new KeystoreError("key-exists", `key ${keyRef} already exists`);
       const file = encryptKey(keyRef, privateKey, passphrase, options.kdf ?? DEFAULT_KDF);
       await fs.create(join(path, fileName(keyRef)), `${JSON.stringify(file, null, 2)}\n`, 0o600);
