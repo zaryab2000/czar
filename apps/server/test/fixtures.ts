@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
 import { createLogger } from "@czar/logging";
+import type { Config } from "@czar/config";
 import { objectiveHash, taskSpecHash } from "@czar/hashing";
 import type { TaskSpec } from "@czar/schemas";
 import { loadConfig } from "@czar/config";
 import type { Pool } from "pg";
 import { createApp } from "#src/app";
+import type { ModelClient } from "#src/models/proxy";
 
 export const TEST_NOW = new Date("2026-10-21T00:00:00.000Z");
 export const TEST_USER_ID = "usr_01K7ZT9P4N5Q6R7S8T9V0W1X2Y";
@@ -12,7 +14,10 @@ export const TEST_DEVICE_ID = "dev_01K7ZT9P4N5Q6R7S8T9V0W1X2Y";
 export const TEST_TOKEN = Buffer.alloc(32, 7).toString("base64url");
 let contextRandomOffset = 0;
 
-export function createTestContext(pool: Pool) {
+export function createTestContext(
+  pool: Pool,
+  options: { modelClient?: ModelClient; config?: Config } = {},
+) {
   let currentTime = new Date(TEST_NOW);
   let randomCall = contextRandomOffset;
   contextRandomOffset += 32;
@@ -37,7 +42,14 @@ export function createTestContext(pool: Pool) {
     now: clock.now,
     sink: (line) => logLines.push(line),
   });
-  const app = createApp({ pool, config: loadConfig(), logger, clock, random });
+  const app = createApp({
+    pool,
+    config: options.config ?? loadConfig(),
+    logger,
+    clock,
+    random,
+    ...(options.modelClient ? { modelClient: options.modelClient } : {}),
+  });
   return { app, clock, random, logger, logLines };
 }
 

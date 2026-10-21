@@ -4,6 +4,7 @@ import type { Config } from "@czar/config";
 import { jcsString, objectiveHash, taskSpecHash } from "@czar/hashing";
 import type { ObjectiveSubmission } from "@czar/schemas";
 import type { Pool, PoolClient } from "pg";
+import { findOrCreateIdempotency, fingerprintRequest } from "#src/http/idempotency";
 
 export interface SubmissionResult {
   status: number;
@@ -45,29 +46,14 @@ async function submitWithinTransaction(
   config: Config,
   input: Parameters<typeof submitObjective>[2],
 ): Promise<SubmissionResult> {
-  const fingerprint = createHash("sha256").update(input.rawBody).digest();
+  const fingerprint = fingerprintRequest(input.rawBody);
   const scope = `submitObjective:${input.deviceId}`;
-  const expiresAt = new Date(
-    input.now.getTime() + Number(config.get("api.idempotencyTtlHours")) * 3_600_000,
-  );
-  await client.query("DELETE FROM idempotency WHERE expires_at <= $1", [input.now]);
-  await client.query(
-    `INSERT INTO idempotency (scope,key,fingerprint,expires_at)
-     VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`,
-    [scope, input.key, fingerprint, expiresAt],
-  );
-  const current = await client.query<{
-    fingerprint: Buffer;
-    status: number | null;
-    response_body: Record<string, unknown> | null;
-    response_hash: Buffer | null;
-  }>(
-    `SELECT fingerprint,status,response_body,response_hash FROM idempotency
-     WHERE scope=$1 AND key=$2 FOR UPDATE`,
-    [scope, input.key],
-  );
-  const row = current.rows[0];
-  if (!row) throw new Error("Idempotency record was not created.");
+  const row = await findOrCreateIdempotency(client, config, {
+    scope,
+    key: input.key,
+    fingerprint,
+    now: input.now,
+  });
   if (!row.fingerprint.equals(fingerprint)) {
     return { status: 409, code: "idempotency-conflict", body: {} };
   }

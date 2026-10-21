@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { Hono } from "hono";
 import type { Context } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
@@ -16,11 +15,14 @@ import {
   RequestValidationError,
 } from "#src/http/validate";
 import { problem, type CzarCode } from "#src/http/problem";
+import { findOrCreateIdempotency, fingerprintRequest } from "#src/http/idempotency";
 import { PairingRejected, consumePairingCode, type PairDependencies } from "#src/devices/pair";
 import { submitObjective } from "#src/objectives/service";
+import { completeModelCall, type ModelClient, type ModelCallRequest } from "#src/models/proxy";
 
 export interface AppDependencies extends PairDependencies {
   logger: Logger;
+  modelClient?: ModelClient;
 }
 
 interface RequestState {
@@ -92,6 +94,7 @@ export function createApp(dependencies: AppDependencies): Hono {
 
   app.post("/v1/devices/pair", (context) => pairRoute(context, dependencies));
   app.post("/v1/objectives", (context) => submitRoute(context, dependencies));
+  app.post("/v1/models/complete", (context) => modelRoute(context, dependencies));
   app.get("/v1/objectives", (context) => listRoute(context, dependencies));
   app.get("/v1/objectives/:objectiveId", (context) => getRoute(context, dependencies));
   return app;
@@ -115,33 +118,16 @@ async function pairRoute(context: ServerContext, deps: AppDependencies): Promise
   const client = await deps.pool.connect();
   try {
     await client.query("BEGIN");
-    await client.query("DELETE FROM idempotency WHERE expires_at <= $1", [deps.clock.now()]);
     const key = context.req.header("Idempotency-Key") as string;
     const scope = `pair:${digest(pairRequest.pairingCode).toString("hex")}`;
-    const fingerprint = createHash("sha256").update(raw.bytes).digest();
-    await client.query(
-      `INSERT INTO idempotency (scope,key,fingerprint,expires_at,replay_stored)
-       VALUES ($1,$2,$3,$4,false) ON CONFLICT DO NOTHING`,
-      [
-        scope,
-        key,
-        fingerprint,
-        new Date(
-          deps.clock.now().getTime() +
-            Number(deps.config.get("api.idempotencyTtlHours")) * 3_600_000,
-        ),
-      ],
-    );
-    const row = await client.query<{
-      fingerprint: Buffer;
-      status: number | null;
-      replay_stored: boolean;
-    }>(
-      "SELECT fingerprint,status,replay_stored FROM idempotency WHERE scope=$1 AND key=$2 FOR UPDATE",
-      [scope, key],
-    );
-    const existing = row.rows[0];
-    if (!existing) throw new Error("Idempotency row was not created.");
+    const fingerprint = fingerprintRequest(raw.bytes);
+    const existing = await findOrCreateIdempotency(client, deps.config, {
+      scope,
+      key,
+      fingerprint,
+      now: deps.clock.now(),
+      replayStored: false,
+    });
     if (!existing.fingerprint.equals(fingerprint))
       return await finishProblem(client, context, 409, "idempotency-conflict");
     if (existing.status !== null)
@@ -201,6 +187,36 @@ async function submitRoute(context: ServerContext, deps: AppDependencies): Promi
   });
   if (result.code) return problemResponse(context, result.status, result.code);
   return jsonResponse(context, result.status, result.body);
+}
+
+async function modelRoute(context: ServerContext, deps: AppDependencies): Promise<Response> {
+  const auth = await authenticateDevice(context, deps.pool);
+  const rate = await applyRateLimit(
+    deps.pool,
+    deps.config,
+    deps.clock.now(),
+    "daemon",
+    auth.principal?.deviceId ?? auth.digest,
+  );
+  setRateHeaders(context, rate);
+  if (!rate.allowed) return problemResponse(context, 429, "rate-limited", true);
+  if (!auth.principal) return problemResponse(context, 401, auth.code ?? "validation");
+  const raw = await readJson(context, "completeModelCall");
+  const body = raw.value as ModelCallRequest;
+  const key = parseIdempotencyKey(context.req.header("Idempotency-Key"));
+  if (!deps.modelClient) return problemResponse(context, 503, "upstream-unavailable", true);
+  const result = await completeModelCall(deps.pool, deps.config, deps.logger, deps.modelClient, {
+    body,
+    rawBody: raw.bytes,
+    key,
+    deviceId: auth.principal.deviceId,
+    userId: auth.principal.userId,
+    now: deps.clock.now(),
+  });
+  if (result.code) {
+    return problemResponse(context, result.status, result.code, result.status === 503);
+  }
+  return jsonResponse(context, 200, result.body);
 }
 
 async function listRoute(context: ServerContext, deps: AppDependencies): Promise<Response> {
@@ -430,6 +446,7 @@ async function safeCzarCode(response: Response): Promise<CzarCode | undefined> {
 function operationFor(path: string, method: string): string {
   if (method === "POST" && path === "/v1/devices/pair") return "pairDevice";
   if (method === "POST" && path === "/v1/objectives") return "submitObjective";
+  if (method === "POST" && path === "/v1/models/complete") return "completeModelCall";
   if (method === "GET" && path === "/v1/objectives") return "listObjectives";
   if (method === "GET" && path.startsWith("/v1/objectives/")) return "getObjective";
   return "unknown";
