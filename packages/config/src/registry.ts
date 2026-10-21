@@ -1897,6 +1897,15 @@ export const PARAMETERS = [
     source: "docs/specs/04-components/server/server-planning-and-payment.md:165",
   },
   {
+    key: "planner.envelopeTtlHours",
+    type: "integer",
+    default: 48,
+    unit: "hours",
+    reason:
+      "envelope lifetime: 24 h approval window (api.planTtlHours) plus 24 h to run; raised for job steps (SCR-120)",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:170",
+  },
+  {
     key: "planner.jobSlackBps",
     type: "integer",
     default: 1000,
