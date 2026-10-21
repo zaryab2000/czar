@@ -146,16 +146,21 @@ describe("named hashes (02 §5.2)", () => {
 
     const callInputs = [{ callIndex: 0, subjectIndex: 0, input: { query: "Billora prices" } }];
     expect(callInputsHash(callInputs)).toBe(H(callInputs));
+    expect(callInputsHash(callInputs)).toBe(
+      "0xe91c923f4e32dadf4742356020e6fd17b6a5048158d0b88a72aea7a35e63bfa5",
+    );
     const withInputs = {
       ...base,
-      steps: [{ ...step, fanOut: "subjects", callInputsHash: callInputsHash(callInputs) }],
+      steps: [{ ...step, fanOut: "subjects" as const, callInputsHash: callInputsHash(callInputs) }],
     };
     const changedInputs = [
       { callIndex: 0, subjectIndex: 0, input: { query: "InvoiceKite prices" } },
     ];
     const changed = {
       ...base,
-      steps: [{ ...step, fanOut: "subjects", callInputsHash: callInputsHash(changedInputs) }],
+      steps: [
+        { ...step, fanOut: "subjects" as const, callInputsHash: callInputsHash(changedInputs) },
+      ],
     };
     expect(planHash(changed)).not.toBe(planHash(withInputs));
   });

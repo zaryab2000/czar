@@ -130,6 +130,8 @@ export interface PlanStepInput {
   readonly stepCap: string;
   readonly acceptanceProfileId: string;
   readonly serviceId?: string;
+  readonly fanOut?: "none" | "subjects";
+  readonly callInputsHash?: string;
 }
 
 export interface PlanInput {
@@ -143,6 +145,7 @@ export interface PlanInput {
   readonly pocketCapBps: number;
   readonly expiresAt: string;
   readonly payeeRoot: string;
+  readonly taskSpecHash: string;
   readonly steps: readonly PlanStepInput[];
 }
 
@@ -161,6 +164,7 @@ export function planHash(p: PlanInput): Hash32 {
     pocketCapBps: p.pocketCapBps,
     expiresAt: p.expiresAt,
     payeeRoot: p.payeeRoot,
+    taskSpecHash: p.taskSpecHash,
     steps: p.steps.map((s) => ({
       stepIndex: s.stepIndex,
       kind: s.kind,
@@ -171,8 +175,15 @@ export function planHash(p: PlanInput): Hash32 {
       stepCap: s.stepCap,
       acceptanceProfileId: s.acceptanceProfileId,
       serviceId: s.serviceId,
+      fanOut: s.fanOut,
+      callInputsHash: s.callInputsHash,
     })),
   });
+}
+
+/** `callInputsHash = H(callInputs)`; `H` applies JCS exactly once (SCR-120). */
+export function callInputsHash(callInputs: readonly unknown[]): Hash32 {
+  return H(callInputs);
 }
 
 /** `reportHash = keccak256(jcs(AcceptanceReport minus reportHash))`. */
