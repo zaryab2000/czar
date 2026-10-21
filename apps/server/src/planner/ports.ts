@@ -18,12 +18,19 @@ export interface PlannerService {
   readonly providerAddress?: string;
   readonly listedPrice?: string;
   readonly jobDurationSeconds?: number;
-  readonly extensions: { readonly czar: {
-    readonly claim: { readonly status: string };
-    readonly evidence: readonly unknown[];
-    readonly card: Record<string, unknown>;
-    readonly source: string;
-  } };
+  readonly extensions: {
+    readonly czar: {
+      readonly claim: { readonly status: string };
+      readonly evidence: {
+        readonly deliveryLcb: number;
+        readonly structuralLcb: number;
+        readonly nEff: number;
+        readonly badges: readonly string[];
+      } | null;
+      readonly card: Record<string, unknown>;
+      readonly source: string;
+    };
+  };
 }
 
 export type ProbeResult =
