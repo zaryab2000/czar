@@ -91,3 +91,8 @@
   Their prompt files belong to their owning tasks.
 - Model prices and live evaluation remain pending G0-16 and K18 approval. T-050
   remains deferred under D92. No testnet, funds, provider calls or API keys were used.
+
+## Architect review fix (2026-10-21)
+
+- Resume after `reserve.sent` / `reserve.mined` now reuses the reservation's stored payee, unit amount, count and `validBefore` (persisted in `reserve.sent`) instead of a fresh probe and the current clock. Before the fix, a restart signed authorizations with a later `validBefore` than the reservation, which the vault rejects. The recovery test now advances the clock across the restart and asserts every `usdc-3009` request carries the reserved `validBefore`.
+- Follow-up (not blocking, money-safe because the vault enforces `stepUsed`): `n` uses the full `stepCap / unitAmount`, not the remaining step cap after earlier reservations (RV-002). A second reservation on the same step could revert `StepCapExceeded` instead of reserving fewer calls.

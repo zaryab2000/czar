@@ -308,6 +308,8 @@ describe("vault-direct executor", () => {
     await expect(executeVaultDirectStep(input, dependencies)).rejects.toThrow(
       "simulated worker death after reserve.mined",
     );
+    // The worker restarts later; the authorization must still use the reservation's validBefore.
+    current = new Date(current.getTime() + 10_000);
     await getPool().query(`CREATE FUNCTION fail_call_sent() RETURNS trigger LANGUAGE plpgsql AS $$
       BEGIN
         IF NEW.phase = 'call.sent' THEN
@@ -364,6 +366,9 @@ describe("vault-direct executor", () => {
     });
     expect(sign.mock.calls.filter(([, request]) => request.kind === "usdc-3009")).toHaveLength(2);
     expect(successfulAuthorizationSignatures).toBe(1);
+    const reservedValidBefore = String(Math.floor(Date.parse("2026-10-21T00:00:00Z") / 1000) + 30);
+    for (const [, request] of sign.mock.calls.filter(([, r]) => r.kind === "usdc-3009"))
+      expect((request.payload as Record<string, unknown>)["validBefore"]).toBe(reservedValidBefore);
     const paymentSignatures = safeFetch.mock.calls
       .map(([, options]) => options?.headers?.["payment-signature"])
       .filter((signature): signature is string => typeof signature === "string");

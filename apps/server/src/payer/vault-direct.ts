@@ -318,15 +318,21 @@ async function executeReservedCalls(
 ): Promise<VaultDirectResult> {
   const first = calls[0];
   if (!first) return { state: "failed", errorCode: "unsupported-offer" };
-  const payee = first.offer.payTo as `0x${string}`;
-  const amount = BigInt(first.offer.amount);
-  const count = Math.min(
-    calls.length,
-    input.step.expectedCalls,
-    Number(BigInt(input.step.stepCap) / amount),
-    MAX_AUTHORIZATIONS_PER_RESERVATION,
-  );
-  const validBefore = reservationExpiry(input, dependencies, first.offer.maxTimeoutSeconds);
+  // On resume, the reservation's own arguments win over a fresh probe and the current clock:
+  // authorizations must carry the reserved payee, unit amount and validBefore (CZ-15 §5.2 crash table).
+  const stored = storedReservationArgs(trace);
+  const payee = stored?.payee ?? (first.offer.payTo as `0x${string}`);
+  const amount = stored?.unitAmount ?? BigInt(first.offer.amount);
+  const count =
+    stored?.count ??
+    Math.min(
+      calls.length,
+      input.step.expectedCalls,
+      Number(BigInt(input.step.stepCap) / amount),
+      MAX_AUTHORIZATIONS_PER_RESERVATION,
+    );
+  const validBefore =
+    stored?.validBefore ?? reservationExpiry(input, dependencies, first.offer.maxTimeoutSeconds);
   const proof = buildPayeeProof(input, payee);
   const attempt = input.attempt ?? 0;
   const existingReservation = await findOrCreateReservation(
@@ -442,6 +448,9 @@ async function submitReserve(
       phase: "reserve.sent",
       payload: {
         count: reserve.count,
+        payee: reserve.payee,
+        unitAmount: reserve.unitAmount.toString(),
+        validBefore: reserve.validBefore.toString(),
         txHash: keccak256(reserve.signedTransaction),
         signedTransaction: reserve.signedTransaction,
       },
@@ -842,6 +851,32 @@ function makePaymentRef(
     settlementTx: settlement.transaction,
     reservationId: reservationNumber,
     index: call.index,
+  };
+}
+
+function storedReservationArgs(trace: readonly ExecutionPhaseRow[]):
+  | {
+      readonly payee: `0x${string}`;
+      readonly unitAmount: bigint;
+      readonly count: number;
+      readonly validBefore: bigint;
+    }
+  | undefined {
+  const sent = trace.findLast((row) => row.phase === "reserve.sent");
+  if (!sent) return undefined;
+  const { payee, unitAmount, count, validBefore } = sent.payload;
+  if (
+    typeof payee !== "string" ||
+    typeof unitAmount !== "string" ||
+    typeof count !== "number" ||
+    typeof validBefore !== "string"
+  )
+    throw new Error("Stored reserve.sent phase is missing its reservation arguments.");
+  return {
+    payee: payee as `0x${string}`,
+    unitAmount: BigInt(unitAmount),
+    count,
+    validBefore: BigInt(validBefore),
   };
 }
 
