@@ -55,7 +55,7 @@ importers:
         version: link:../../packages/vault-client
       ponder:
         specifier: 0.18.2
-        version: 0.18.2(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(hono@4.13.13)(typescript@6.0.3)(viem@2.57.7(typescript@6.0.3)(zod@3.25.76))(zod@3.25.76)
+        version: 0.18.2(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(@types/pg@8.23.1)(hono@4.13.13)(typescript@6.0.3)(viem@2.57.7(typescript@6.0.3)(zod@3.25.76))(zod@3.25.76)
       viem:
         specifier: 2.57.7
         version: 2.57.7(typescript@6.0.3)(zod@3.25.76)
@@ -87,6 +87,34 @@ importers:
       viem:
         specifier: 2.57.7
         version: 2.57.7(typescript@6.0.3)(zod@3.25.76)
+
+  apps/server:
+    dependencies:
+      '@czar/api-contract':
+        specifier: workspace:*
+        version: link:../../packages/api-contract
+      '@czar/config':
+        specifier: workspace:*
+        version: link:../../packages/config
+      '@czar/hashing':
+        specifier: workspace:*
+        version: link:../../packages/hashing
+      '@czar/logging':
+        specifier: workspace:*
+        version: link:../../packages/logging
+      '@czar/schemas':
+        specifier: workspace:*
+        version: link:../../packages/schemas
+      hono:
+        specifier: 4.13.13
+        version: 4.13.13
+      pg:
+        specifier: 8.23.1
+        version: 8.23.1
+    devDependencies:
+      '@types/pg':
+        specifier: 8.23.1
+        version: 8.23.1
 
   apps/signer:
     dependencies:
@@ -139,11 +167,18 @@ importers:
       js-yaml:
         specifier: 4.3.2
         version: 4.3.2
+    devDependencies:
+      '@types/js-yaml':
+        specifier: 4.0.9
+        version: 4.0.9
 
   packages/config: {}
 
   packages/hashing:
     dependencies:
+      '@czar/schemas':
+        specifier: workspace:*
+        version: link:../schemas
       viem:
         specifier: 2.57.7
         version: 2.57.7(typescript@6.0.3)(zod@3.25.76)
@@ -1043,6 +1078,9 @@ packages:
   '@types/estree@1.0.9':
     resolution: {integrity: sha512-GhdPgy1el4/ImP05X05Uw4cw2/M93BCUmnEvWZNStlCzEKME4Fkk+YpoA5OiHNQmoS7Cafb8Xa3Pya8m1Qrzeg==}
 
+  '@types/js-yaml@4.0.9':
+    resolution: {integrity: sha512-k4MGaQl5TGo/iipqb2UDG2UwjXziSWkh0uysQelTlJpX1qGlpUZYm8PnO4DxG1qBomtJUdYJ6qR6xdIah10JLg==}
+
   '@types/json-schema@7.0.15':
     resolution: {integrity: sha512-5+fP8P8MFNC+AyZCDxrB2pkZFPGzqQWUzpSeuuVLvm8VMcorNYavBqoFcxK8bQz4Qsbn4oUEEem4wDLfcysGHA==}
 
@@ -1051,6 +1089,9 @@ packages:
 
   '@types/node@22.20.5':
     resolution: {integrity: sha512-U2+DNr+wSjpsTS/wZGYHq7GcwfuSmKiKvoPvK22zwTlRhU91yOniN4qRR5KhIjvif7ysw/dz/hKmfDH0Ris4aA==}
+
+  '@types/pg@8.23.1':
+    resolution: {integrity: sha512-fKVHpikPdg4GKks3JuLEhvwSyvwzF23hnabPy6DD8ljVbC7+6J5dQzdv4arV6jqq57djnMgs1HKBxX4P8aBI3A==}
 
   '@types/react-dom@19.3.0':
     resolution: {integrity: sha512-ZI7bU42mZXXKHn/qNLEw2IrbiINU7X5+vfgdixBHkCNpYWXjKgfQ/P+uyGb5CjOLB9UcnTeg3rylQtV2hym44Q==}
@@ -2701,6 +2742,8 @@ snapshots:
 
   '@types/estree@1.0.9': {}
 
+  '@types/js-yaml@4.0.9': {}
+
   '@types/json-schema@7.0.15': {}
 
   '@types/lodash@4.17.26': {}
@@ -2708,6 +2751,12 @@ snapshots:
   '@types/node@22.20.5':
     dependencies:
       undici-types: 6.21.0
+
+  '@types/pg@8.23.1':
+    dependencies:
+      '@types/node': 22.20.5
+      pg-protocol: 1.16.1
+      pg-types: 2.2.0
 
   '@types/react-dom@19.3.0(@types/react@19.3.0)':
     dependencies:
@@ -2897,10 +2946,11 @@ snapshots:
 
   dotenv@16.6.1: {}
 
-  drizzle-orm@0.41.0(@electric-sql/pglite@0.2.13)(@opentelemetry/api@1.9.1)(pg@8.23.1):
+  drizzle-orm@0.41.0(@electric-sql/pglite@0.2.13)(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(pg@8.23.1):
     optionalDependencies:
       '@electric-sql/pglite': 0.2.13
       '@opentelemetry/api': 1.9.1
+      '@types/pg': 8.23.1
       pg: 8.23.1
 
   eastasianwidth@0.2.0: {}
@@ -3259,7 +3309,7 @@ snapshots:
     dependencies:
       playwright-core: 1.64.1
 
-  ponder@0.18.2(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(hono@4.13.13)(typescript@6.0.3)(viem@2.57.7(typescript@6.0.3)(zod@3.25.76))(zod@3.25.76):
+  ponder@0.18.2(@opentelemetry/api@1.9.1)(@types/node@22.20.5)(@types/pg@8.23.1)(hono@4.13.13)(typescript@6.0.3)(viem@2.57.7(typescript@6.0.3)(zod@3.25.76))(zod@3.25.76):
     dependencies:
       '@babel/code-frame': 7.29.7
       '@commander-js/extra-typings': 12.1.0(commander@12.1.0)
@@ -3274,7 +3324,7 @@ snapshots:
       commander: 12.1.0
       dataloader: 2.2.3
       dotenv: 16.6.1
-      drizzle-orm: 0.41.0(@electric-sql/pglite@0.2.13)(@opentelemetry/api@1.9.1)(pg@8.23.1)
+      drizzle-orm: 0.41.0(@electric-sql/pglite@0.2.13)(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(pg@8.23.1)
       glob: 10.5.0
       graphql: 16.8.2
       graphql-yoga: 5.17.1(graphql@16.8.2)

@@ -12,6 +12,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@czar/schemas": "workspace:*",
     "viem": "2.57.7"
   }
 }

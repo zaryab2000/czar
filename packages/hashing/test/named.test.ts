@@ -13,14 +13,24 @@ import {
   reportHash,
   soulVersionCommit,
   soulVersionHash,
+  taskSpecHash,
   type Hash32,
 } from "@czar/hashing";
 import { encodeAbiParameters, keccak256 } from "viem";
+import type { TaskSpec } from "@czar/schemas";
 
 const hash = (c: string) => `0x${c.repeat(64)}` as Hash32;
 const VAULT = "0x00000000000000000000000000000000000c2a21";
 
 describe("named hashes (02 §5.2)", () => {
+  const taskSpec: TaskSpec = {
+    schemaVersion: "1.1",
+    kind: "table-fill",
+    topic: "Competitor pricing",
+    subjects: [{ label: "Billora" }],
+    fields: ["Starter price"],
+    sourceTrust: "user-file",
+  };
   const objective = {
     objectiveId: "obj_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
     soulVersionHash: hash("1"),
@@ -30,7 +40,27 @@ describe("named hashes (02 §5.2)", () => {
     capabilities: ["web-search"],
     minutesSaved: 30,
     hourlyBand: "40-80",
+    taskSpecHash: taskSpecHash(taskSpec),
   };
+
+  it("taskSpecHash nests the complete TaskSpec", () => {
+    expect(taskSpecHash(taskSpec)).toBe(
+      "0x542b740f10539164b1edf7138632d511aadc5da1f5f4dc8df59e19800f669a2e",
+    );
+  });
+
+  it("objectiveHash binds subject-label changes through taskSpecHash", () => {
+    const changedTaskSpec = {
+      ...taskSpec,
+      subjects: [{ label: "InvoiceKite" }],
+    };
+    expect(objectiveHash(objective)).toBe(
+      "0x9e1b1c2c1df2ebf55064af01805ecf2eceea98af7dc795199cf6a7a9daec8422",
+    );
+    expect(objectiveHash({ ...objective, taskSpecHash: taskSpecHash(changedTaskSpec) })).toBe(
+      "0x5145624fb9c23804cd833386c3decde04f8cdef99b0e9ebdc63a25c2cc949d0a",
+    );
+  });
 
   it("objectiveHash sorts observation hashes and omits an absent deadline", () => {
     expect(objectiveHash(objective)).toBe(
