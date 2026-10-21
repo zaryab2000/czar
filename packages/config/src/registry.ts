@@ -1327,6 +1327,14 @@ export const PARAMETERS = [
     source: "docs/specs/04-components/server/server-supply-side.md:158",
   },
   {
+    key: "models.drives-helper.maxTokensPerCall",
+    type: "integer",
+    default: 2000,
+    unit: "tokens",
+    reason: "P-05 per-call token cap, in + out (§6.2, SCR-117)",
+    source: "docs/specs/04-components/shared/cross-cutting.md:174",
+  },
+  {
     key: "models.drives-helper.timeoutMs",
     type: "integer",
     default: 5000,
@@ -1345,6 +1353,14 @@ export const PARAMETERS = [
     reason: "monthly per-user token cap for the prompt (§6.2)",
     source: "docs/specs/04-components/shared/cross-cutting.md:161",
     notes: "spec writes it in M tokens",
+  },
+  {
+    key: "models.planner.maxTokensPerCall",
+    type: "integer",
+    default: 12000,
+    unit: "tokens",
+    reason: "P-03 per-call token cap, in + out (§6.2, SCR-117)",
+    source: "docs/specs/04-components/shared/cross-cutting.md:174",
   },
   {
     key: "models.planner.timeoutMs",
@@ -1367,6 +1383,14 @@ export const PARAMETERS = [
     notes: "spec writes it in M tokens",
   },
   {
+    key: "models.reader.maxTokensPerCall",
+    type: "integer",
+    default: 6000,
+    unit: "tokens",
+    reason: "P-02 per-call token cap, in + out (§6.2, SCR-117)",
+    source: "docs/specs/04-components/shared/cross-cutting.md:174",
+  },
+  {
     key: "models.reader.timeoutMs",
     type: "integer",
     default: 8000,
@@ -1382,6 +1406,14 @@ export const PARAMETERS = [
     reason: "monthly per-user token cap for the prompt (§6.2)",
     source: "docs/specs/04-components/shared/cross-cutting.md:158",
     notes: "spec writes it in M tokens",
+  },
+  {
+    key: "models.refusal-classifier.maxTokensPerCall",
+    type: "integer",
+    default: 1000,
+    unit: "tokens",
+    reason: "P-06 per-call token cap, in + out (§6.2, SCR-117)",
+    source: "docs/specs/04-components/shared/cross-cutting.md:174",
   },
   {
     key: "models.refusal-classifier.timeoutMs",
@@ -1404,6 +1436,23 @@ export const PARAMETERS = [
     notes: "spec writes it in M tokens",
   },
   {
+    key: "models.reservationGraceSeconds",
+    type: "integer",
+    default: 60,
+    unit: "s",
+    reason:
+      "extra life of a model-call budget reservation after the prompt timeout, so a crash cannot hold budget for long (SCR-117)",
+    source: "docs/specs/04-components/shared/cross-cutting.md:174",
+  },
+  {
+    key: "models.screen.maxTokensPerCall",
+    type: "integer",
+    default: 4000,
+    unit: "tokens",
+    reason: "P-01 per-call token cap, in + out (§6.2, SCR-117)",
+    source: "docs/specs/04-components/shared/cross-cutting.md:174",
+  },
+  {
     key: "models.screen.timeoutMs",
     type: "integer",
     default: 2000,
@@ -1419,6 +1468,14 @@ export const PARAMETERS = [
     reason: "monthly per-user token cap for the prompt (§6.2)",
     source: "docs/specs/04-components/shared/cross-cutting.md:157",
     notes: "spec writes it in M tokens",
+  },
+  {
+    key: "models.soul-compiler.maxTokensPerCall",
+    type: "integer",
+    default: 24000,
+    unit: "tokens",
+    reason: "P-04 per-call token cap, in + out (§6.2, SCR-117)",
+    source: "docs/specs/04-components/shared/cross-cutting.md:174",
   },
   {
     key: "models.soul-compiler.timeoutMs",
@@ -1438,6 +1495,14 @@ export const PARAMETERS = [
     reason: "monthly per-user token cap for the prompt (§6.2)",
     source: "docs/specs/04-components/shared/cross-cutting.md:160",
     notes: "spec writes it in M tokens; also ai-prompts.md:197 (0.72 M)",
+  },
+  {
+    key: "models.sourceExtractor.maxTokensPerCall",
+    type: "integer",
+    default: 6000,
+    unit: "tokens",
+    reason: "P-07 per-call token cap, in + out (§6.2, SCR-117)",
+    source: "docs/specs/04-components/shared/cross-cutting.md:174",
   },
   {
     key: "models.sourceExtractor.timeoutMs",

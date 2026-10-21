@@ -61,6 +61,8 @@ describe("CZ-12 migrations", () => {
       "audit",
       "devices",
       "idempotency",
+      "model_reservations",
+      "model_usage",
       "objective_cursors",
       "objectives",
       "outbox_events",

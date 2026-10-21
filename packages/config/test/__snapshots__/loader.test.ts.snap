@@ -1031,6 +1031,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 10000,
   },
   {
+    "key": "models.drives-helper.maxTokensPerCall",
+    "source": "default",
+    "unit": "tokens",
+    "value": 2000,
+  },
+  {
     "key": "models.drives-helper.timeoutMs",
     "source": "default",
     "unit": "ms",
@@ -1041,6 +1047,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "source": "default",
     "unit": "tokens",
     "value": 120000,
+  },
+  {
+    "key": "models.planner.maxTokensPerCall",
+    "source": "default",
+    "unit": "tokens",
+    "value": 12000,
   },
   {
     "key": "models.planner.timeoutMs",
@@ -1055,6 +1067,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 500000,
   },
   {
+    "key": "models.reader.maxTokensPerCall",
+    "source": "default",
+    "unit": "tokens",
+    "value": 6000,
+  },
+  {
     "key": "models.reader.timeoutMs",
     "source": "default",
     "unit": "ms",
@@ -1065,6 +1083,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "source": "default",
     "unit": "tokens",
     "value": 1800000,
+  },
+  {
+    "key": "models.refusal-classifier.maxTokensPerCall",
+    "source": "default",
+    "unit": "tokens",
+    "value": 1000,
   },
   {
     "key": "models.refusal-classifier.timeoutMs",
@@ -1079,6 +1103,18 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 20000,
   },
   {
+    "key": "models.reservationGraceSeconds",
+    "source": "default",
+    "unit": "s",
+    "value": 60,
+  },
+  {
+    "key": "models.screen.maxTokensPerCall",
+    "source": "default",
+    "unit": "tokens",
+    "value": 4000,
+  },
+  {
     "key": "models.screen.timeoutMs",
     "source": "default",
     "unit": "ms",
@@ -1091,6 +1127,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 1200000,
   },
   {
+    "key": "models.soul-compiler.maxTokensPerCall",
+    "source": "default",
+    "unit": "tokens",
+    "value": 24000,
+  },
+  {
     "key": "models.soul-compiler.timeoutMs",
     "source": "default",
     "unit": "ms",
@@ -1101,6 +1143,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "source": "default",
     "unit": "tokens",
     "value": 720000,
+  },
+  {
+    "key": "models.sourceExtractor.maxTokensPerCall",
+    "source": "default",
+    "unit": "tokens",
+    "value": 6000,
   },
   {
     "key": "models.sourceExtractor.timeoutMs",
