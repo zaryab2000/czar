@@ -24,7 +24,8 @@
     "@czar/x402": "workspace:*",
     "ajv": "8.20.0",
     "hono": "4.13.13",
-    "pg": "8.23.1"
+    "pg": "8.23.1",
+    "viem": "2.57.7"
   },
   "devDependencies": {
     "@types/pg": "8.23.1"

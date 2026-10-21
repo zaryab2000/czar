@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   burnSalt,
+  callInputsHash,
   demandSalt,
   descriptionHash,
   descriptionHashFromBrief,
@@ -100,6 +101,7 @@ describe("named hashes (02 §5.2)", () => {
       pocketCapBps: 0,
       expiresAt: "2026-10-20T00:00:00Z",
       payeeRoot: hash("3"),
+      taskSpecHash: taskSpecHash(taskSpec),
       steps: [step],
     };
     const withExtras = {
@@ -107,6 +109,60 @@ describe("named hashes (02 §5.2)", () => {
       steps: [{ ...step, resource: "https://x.example/api", inputTemplate: { q: "x" } }],
     };
     expect(planHash(withExtras)).toBe(planHash(plan));
+  });
+
+  it("binds callInputs and omits their hash when a step has no callInputs", () => {
+    const base = {
+      planId: "pln_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
+      objectiveHash: hash("2"),
+      network: "eip155:5042002",
+      category: "research",
+      cap: "5000",
+      slackBps: 1000,
+      maxStepAmount: "2000",
+      pocketCapBps: 0,
+      expiresAt: "2026-10-20T00:00:00Z",
+      payeeRoot: hash("3"),
+      taskSpecHash: taskSpecHash(taskSpec),
+    };
+    const step = {
+      stepIndex: 0,
+      kind: "x402-exact",
+      payee: VAULT,
+      unitAmount: "1000",
+      expectedCalls: 1,
+      stepCap: "2000",
+      acceptanceProfileId: "delivery",
+    };
+    const withoutInputs = { ...base, steps: [step] };
+    expect(planHash(withoutInputs)).toBe(
+      H({
+        hashRule: "czar-hash-v1",
+        kind: "plan",
+        ...base,
+        steps: [step],
+      }),
+    );
+
+    const callInputs = [{ callIndex: 0, subjectIndex: 0, input: { query: "Billora prices" } }];
+    expect(callInputsHash(callInputs)).toBe(H(callInputs));
+    expect(callInputsHash(callInputs)).toBe(
+      "0xe91c923f4e32dadf4742356020e6fd17b6a5048158d0b88a72aea7a35e63bfa5",
+    );
+    const withInputs = {
+      ...base,
+      steps: [{ ...step, fanOut: "subjects" as const, callInputsHash: callInputsHash(callInputs) }],
+    };
+    const changedInputs = [
+      { callIndex: 0, subjectIndex: 0, input: { query: "InvoiceKite prices" } },
+    ];
+    const changed = {
+      ...base,
+      steps: [
+        { ...step, fanOut: "subjects" as const, callInputsHash: callInputsHash(changedInputs) },
+      ],
+    };
+    expect(planHash(changed)).not.toBe(planHash(withInputs));
   });
 
   it("reportHash and paymentRefHash drop only their excluded fields", () => {
