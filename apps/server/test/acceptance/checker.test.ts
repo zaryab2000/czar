@@ -130,7 +130,7 @@ describe("acceptance checker", () => {
     expect(result.report.checks[0]).toMatchObject({ name: "delivery", result: "fail" });
   });
 
-  it("keeps no-schema/no-history structural results inconclusive and never passes them", async () => {
+  it("records no-schema/no-history structural as inconclusive while the CZ-16 §5.3 decision passes", async () => {
     const checker = await makeChecker({
       outputSchema: async () => null,
       history: async () => null,
@@ -141,7 +141,18 @@ describe("acceptance checker", () => {
       result: "inconclusive",
       detail: { parseOk: true },
     });
-    expect(result.report.decision).toBe("inconclusive");
+    expect(result.report.decision).toBe("pass");
+  });
+
+  it("fails the decision when structural is inconclusive but a required key is missing", async () => {
+    const checker = await makeChecker({
+      outputSchema: async () => null,
+      history: async () => null,
+    });
+    const result = await checker.check(inputFor(checker, 14, { bodyText: '{"other":"value"}' }));
+    expect(result.report.checks[1]?.result).toBe("inconclusive");
+    expect(result.report.checks[2]?.result).toBe("fail");
+    expect(result.report.decision).toBe("fail");
   });
 
   it("quarantines injection and unavailable screens without running any checks", async () => {
@@ -207,7 +218,7 @@ describe("acceptance checker", () => {
       result: "inconclusive",
       detail: { parseOk: true, schemaDropped: true },
     });
-    expect(result.report.decision).toBe("inconclusive");
+    expect(result.report.decision).toBe("pass");
   });
 
   it("uses the minimum of merchant and configured delivery timeouts", async () => {

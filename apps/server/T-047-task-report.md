@@ -35,7 +35,6 @@
 - `apps/server/test/acceptance/sandbox.test.ts`
 - `apps/server/test/migrate.test.ts`
 - `apps/server/T-047-task-report.md`
-- `docs/specs/06-review/change-requests/SCR-124-structural-inconclusive-decision.md`
 
 ## Verification
 
@@ -57,10 +56,12 @@ executor byte-hash recomputation.
 
 ## SCRs and open items
 
-- Filed proposed SCR-124 for the inconsistency between CZ-16 §5.3, which permits
-  pass when structural is inconclusive, and T-047/D55 acceptance, which requires
-  the no-schema/no-history case not to pass. Implementation follows the stricter
-  T-047 acceptance rule: any inconclusive check prevents pass. SCR-124 is pending.
+- Proposed SCR-124 (structural inconclusive blocks pass) was rejected in review. D55
+  governs the structural check result, which stays `inconclusive` and never enters
+  posteriors; the overall decision follows CZ-16 §5.3 (`delivery pass ∧ structural ∉
+  {fail} ∧ requirement ∉ {fail}`). The stricter rule would have stopped every first call
+  to a schemaless service and rejected every as-is markdown job. The builder's SCR file
+  under `docs/specs/` was removed; builders do not edit that folder.
 - No model calls or key access are used. The K7 validator identity, sanitized
   service schema and shape-history data remain constructor ports; their real
   providers belong to their owning tasks.

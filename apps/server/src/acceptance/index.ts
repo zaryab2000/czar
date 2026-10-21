@@ -197,6 +197,10 @@ function uncheckedChecks(): SandboxCheck[] {
   }));
 }
 
+// CZ-16 §5.3: Pass = delivery pass ∧ structural ∉ {fail} ∧ requirement ∉ {fail}.
+// A structural `inconclusive` (no schema and no history, or a dropped schema) does not block
+// the decision; D55 governs the check result, which stays `inconclusive` and so never enters
+// posteriors (SL-C7). Only quarantine, sandbox timeout or a non-passing delivery are inconclusive.
 function decide(
   checks: readonly SandboxCheck[],
   screenState: "screened" | "quarantined",
@@ -204,11 +208,7 @@ function decide(
 ): "pass" | "fail" | "inconclusive" {
   if (screenState === "quarantined" || timedOut) return "inconclusive";
   if (checks.some((check) => check.result === "fail")) return "fail";
-  if (
-    checks.some((check) => check.result === "inconclusive") ||
-    checks.find((check) => check.name === "delivery")?.result !== "pass"
-  )
-    return "inconclusive";
+  if (checks.find((check) => check.name === "delivery")?.result !== "pass") return "inconclusive";
   return "pass";
 }
 
