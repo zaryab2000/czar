@@ -60,6 +60,9 @@ importers:
       '@czar/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@czar/hashing':
+        specifier: workspace:*
+        version: link:../../packages/hashing
       '@czar/logging':
         specifier: workspace:*
         version: link:../../packages/logging
@@ -79,9 +82,9 @@ importers:
         specifier: 2.57.7
         version: 2.57.7(typescript@6.0.3)(zod@3.25.76)
     devDependencies:
-      '@czar/hashing':
-        specifier: workspace:*
-        version: link:../../packages/hashing
+      '@electric-sql/pglite':
+        specifier: 0.2.13
+        version: 0.2.13
       ajv:
         specifier: 8.20.0
         version: 8.20.0

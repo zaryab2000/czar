@@ -4,8 +4,8 @@ import {
   anchors,
   authorizations,
   externalEvents,
+  escrowJobs,
   gatewayTransfers,
-  jobs,
   pockets,
   pullbacks,
   vaults,
@@ -16,7 +16,7 @@ import { mirrorKey } from "@czar/indexer/mirrors";
 import { envVarName, loadConfig, PARAMETERS } from "@czar/config";
 import { createLogger } from "@czar/logging";
 import { normalizeTransferAmount } from "#src/amounts";
-import { externalEventId, isKnownTransfer, pocketDelegateState } from "#src/external-events";
+import { externalEventId, pocketDelegateState } from "#src/external-events";
 import { EXTERNAL_ADDRESSES } from "#src/external-events";
 import { pollGatewayTransfers } from "#src/gateway-poller";
 
@@ -76,18 +76,23 @@ async function save(context: Context, event: Event, name: string, payload: unkno
     .onConflictDoNothing();
 }
 
-async function knownAddresses(context: Context): Promise<Set<string>> {
-  const [knownVaults, knownPockets] = await Promise.all([
-    context.db.sql.select().from(vaults),
-    context.db.sql.select().from(pockets),
-  ]);
-  return new Set(
-    [
-      ...knownVaults.map((row) => row.id),
-      ...knownPockets.map((row) => (row.mirror as { pocket: string }).pocket),
-      ...normalizedPayoutAddresses,
-    ].map((address) => address.toLowerCase()),
-  );
+/** True when the address is a Czar vault, a Czar pocket or a configured merchant payout address.
+ * Uses indexed lookups; the USDC handlers see every transfer on the chain. */
+async function isKnownAddress(context: Context, address: string): Promise<boolean> {
+  const value = address.toLowerCase();
+  if (normalizedPayoutAddresses.includes(value)) return true;
+  if ((await context.db.find(vaults, { id: value })) !== null) return true;
+  const [pocket] = await context.db.sql
+    .select({ id: pockets.id })
+    .from(pockets)
+    .where(eq(pockets.pocket, value))
+    .limit(1);
+  return pocket !== undefined;
+}
+
+async function anyKnownAddress(context: Context, addresses: readonly string[]): Promise<boolean> {
+  for (const address of addresses) if (await isKnownAddress(context, address)) return true;
+  return false;
 }
 
 async function transfer(
@@ -96,7 +101,7 @@ async function transfer(
   emitter: "usdc" | "eip7708",
 ): Promise<void> {
   const args = event.args as unknown as TransferArgs;
-  if (!isKnownTransfer(args.from, args.to, await knownAddresses(context))) return;
+  if (!(await anyKnownAddress(context, [args.from, args.to]))) return;
   const amount: Amount6 = normalizeTransferAmount(emitter, args.value);
   await save(context, event, "Transfer", {
     from: args.from.toLowerCase(),
@@ -111,8 +116,7 @@ ponder.on("EIP7708System:Transfer", async ({ event, context }) =>
 );
 ponder.on("USDC:AuthorizationUsed", async ({ event, context }) => {
   const args = event.args as unknown as AuthArgs;
-  const vaultRows = await context.db.sql.select().from(vaults);
-  if (!vaultRows.some((row) => row.id.toLowerCase() === args.authorizer.toLowerCase())) return;
+  if ((await context.db.find(vaults, { id: args.authorizer.toLowerCase() })) === null) return;
   await save(context, event, "AuthorizationUsed", {
     authorizer: args.authorizer.toLowerCase(),
     nonce: args.nonce.toLowerCase(),
@@ -139,22 +143,23 @@ const genericEvents = [
   ["ERC8183", "EvaluatorFeePaid"],
 ] as const;
 
+// ERC-8183 events in the vocabulary of IJobEscrowAdapter.EscrowStatus, which syncJob reads.
+// PaymentReleased follows JobCompleted; Refunded follows JobRejected/JobExpired and does not
+// change the status the vault reacts to, so it is not listed.
 const ESCROW_STATUS: Readonly<Record<string, string>> = {
-  JobCreated: "Opened",
-  BudgetSet: "Opened",
+  JobCreated: "Open",
+  BudgetSet: "Open",
   JobFunded: "Funded",
   JobSubmitted: "Submitted",
   JobCompleted: "Completed",
+  PaymentReleased: "Completed",
   JobRejected: "Rejected",
   JobExpired: "Expired",
-  PaymentReleased: "Released",
-  Refunded: "Refunded",
 };
 
 ponder.on("OpenEvidenceLog:Committed", async ({ event, context }) => {
   const args = event.args;
-  const known = await knownAddresses(context);
-  if (!known.has(args.publisher.toLowerCase())) return;
+  if (!(await isKnownAddress(context, args.publisher))) return;
   const id = `${args.publisher.toLowerCase()}:${args.kind}:${args.seq}`;
   await context.db
     .insert(anchors)
@@ -176,7 +181,7 @@ ponder.on("OpenEvidenceLog:Committed", async ({ event, context }) => {
 
 ponder.on("OpenEvidenceLog:Revealed", async ({ event, context }) => {
   const args = event.args;
-  if (!(await knownAddresses(context)).has(args.publisher.toLowerCase())) return;
+  if (!(await isKnownAddress(context, args.publisher))) return;
   const [anchor] = await context.db.sql
     .select()
     .from(anchors)
@@ -218,11 +223,18 @@ for (const [contract, name] of genericEvents) {
   ponder.on(eventName, async (input) => {
     const { event, context } = input as unknown as { event: Event; context: Context };
     const args = event.args as unknown as Record<string, unknown>;
-    const known = await knownAddresses(context);
     const addresses = Object.values(args).filter(
       (value): value is Address => typeof value === "string" && /^0x[\da-fA-F]{40}$/.test(value),
     );
-    if (!addresses.some((address) => known.has(address.toLowerCase()))) return;
+    // ERC-8183 events after JobCreated name the job only by id (provider, evaluator or nothing),
+    // so a job is followed once its JobCreated named a Czar vault as client.
+    const followedJob =
+      contract === "ERC8183" &&
+      typeof args["jobId"] === "bigint" &&
+      (await context.db.find(escrowJobs, {
+        id: `${event.log.address.toLowerCase()}:${String(args["jobId"])}`,
+      })) !== null;
+    if (!followedJob && !(await anyKnownAddress(context, addresses))) return;
     const normalized = Object.fromEntries(
       Object.entries(args).map(([key, value]) => [
         key,
@@ -241,18 +253,18 @@ for (const [contract, name] of genericEvents) {
     }
     const escrowState = ESCROW_STATUS[name];
     if (escrowState && typeof normalized["jobId"] === "bigint") {
-      const jobRows = await context.db.sql
-        .select()
-        .from(jobs)
-        .where(
-          and(
-            eq(jobs.jobEscrow, event.log.address.toLowerCase()),
-            eq(jobs.jobId, String(normalized["jobId"])),
-          ),
-        );
-      for (const row of jobRows) {
-        await context.db.update(jobs, { id: row.id }).set({ escrowState });
-      }
+      const jobEscrow = event.log.address.toLowerCase();
+      const jobId = String(normalized["jobId"]);
+      await context.db
+        .insert(escrowJobs)
+        .values({
+          id: `${jobEscrow}:${jobId}`,
+          jobEscrow,
+          jobId,
+          status: escrowState,
+          block: event.block.number,
+        })
+        .onConflictDoUpdate({ status: escrowState, block: event.block.number });
     }
   });
 }

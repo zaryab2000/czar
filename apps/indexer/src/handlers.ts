@@ -122,12 +122,14 @@ async function refreshReservation(
       vault: event.vault.toLowerCase(),
       reservationId,
       envelopeId: BigInt(mirror.envelopeId),
+      stepIndex: mirror.stepIndex,
       state: mirror.state,
       validBefore: BigInt(mirror.validBefore),
       mirror,
     })
     .onConflictDoUpdate({
       envelopeId: BigInt(mirror.envelopeId),
+      stepIndex: mirror.stepIndex,
       state: mirror.state,
       validBefore: BigInt(mirror.validBefore),
       mirror,
@@ -160,6 +162,7 @@ async function refreshPocket(context: Context, event: Meta, pocket: Address): Pr
       id,
       vault: event.vault.toLowerCase(),
       envelopeId: view.envelopeId,
+      pocket: pocket.toLowerCase(),
       mirror,
     })
     .onConflictDoUpdate({ mirror });
@@ -232,6 +235,7 @@ async function refreshPullback(
     .values({
       id: projectionId,
       vault: event.vault.toLowerCase(),
+      pullbackId: BigInt(pullbackId),
       pocket: view.pocket.toLowerCase(),
       state,
       transferSpecHash: view.transferSpecHash.toLowerCase(),
@@ -282,8 +286,9 @@ async function refreshJob(
       envelopeId: view.envelopeId,
       jobEscrow: fromView.jobEscrow.toLowerCase(),
       jobId: fromView.jobId,
+      stepIndex: fromView.stepIndex,
       state: String(mirror.state),
-      escrowState: previous?.escrowState ?? null,
+      createdAt: new Date(Number(event.timestamp) * 1000).toISOString(),
       mirror,
     })
     .onConflictDoUpdate({

@@ -1,3 +1,5 @@
+// CZ-19 §5.4 query routes (T-034, SCR-119). Internal API for CZ-12, CZ-15, CZ-16, CZ-17 and CZ-25.
+// `dependencyState` is served by T-033 with `halt_flags` (SCR-119).
 import { Buffer } from "node:buffer";
 import { loadConfig, type Config } from "@czar/config";
 import {
@@ -5,400 +7,235 @@ import {
   validateJobRecord,
   validatePocketRecord,
   validateReservation,
+  validationErrors,
 } from "@czar/schemas";
-import { derivedNonce } from "@czar/hashing";
 import { Hono } from "hono";
 import type { Context } from "hono";
-import type { KeysetCursor, MirrorRecord, QueryDataSource, QueryRow } from "#src/api/types";
+import type { IdCursor, Keyed, QueryStore, ReceiptCursor } from "#src/api/store";
 
-const JOB_EVENT_STATE: Readonly<Record<string, string>> = {
-  JobCreated: "Opened",
-  BudgetSet: "Opened",
-  JobFunded: "Funded",
-  JobSubmitted: "Submitted",
-  JobCompleted: "Completed",
-  JobRejected: "Rejected",
-  JobExpired: "Expired",
-  Refunded: "Refunded",
-  PaymentReleased: "Released",
-};
-const PULLBACK_CANCEL_DELAY_BLOCKS = 3_000;
-export function createIndexerApi(source: QueryDataSource, config: Config = loadConfig()): Hono {
+type Validate = (value: unknown) => boolean;
+
+const ADDRESS = /^0x[0-9a-f]{40}$/;
+const HASH32 = /^0x[0-9a-f]{64}$/;
+const UINT = /^(0|[1-9][0-9]*)$/;
+
+export function createIndexerApi(store: QueryStore, config: Config = loadConfig()): Hono {
   const app = new Hono();
+  const clock = { now: () => Date.now() };
+
   app.get("/envelopes/:envelopeRef", async (context) => {
-    const ref = decodeURIComponent(context.req.param("envelopeRef"));
-    const envelopeRow = (await source.rows("envelopes")).find(
-      (row) => mirror(row)["envelopeRef"] === ref,
-    );
-    if (!envelopeRow) return context.json({ error: "not-found" }, 404);
-    const envelope = mirror(envelopeRow);
-    assertMirror(validateEnvelope, envelope, "Envelope");
-    const envelopeId = Number(envelope["envelopeId"]);
-    const vault = String(envelope["vault"]).toLowerCase();
-    const reservations = await validatedMirrors(
-      source,
-      "reservations",
-      validateReservation,
-      (item) =>
-        Number(item["envelopeId"]) === envelopeId && String(item["vault"]).toLowerCase() === vault,
-    );
-    const pockets = await validatedMirrors(
-      source,
-      "pockets",
-      validatePocketRecord,
-      (item) =>
-        Number(item["envelopeId"]) === envelopeId && String(item["vault"]).toLowerCase() === vault,
-    );
-    const jobs = await validatedMirrors(
-      source,
-      "jobs",
-      validateJobRecord,
-      (item) =>
-        Number(item["envelopeId"]) === envelopeId && String(item["vault"]).toLowerCase() === vault,
-    );
-    return context.json({ envelope, reservations, pockets, jobs });
+    const found = await store.envelopeByRef(context.req.param("envelopeRef"));
+    if (!found) return problem(context, 404, "not-found");
+    assertValid(validateEnvelope, found.envelope, "Envelope");
+    found.reservations.forEach((item) => assertValid(validateReservation, item, "Reservation"));
+    found.pockets.forEach(assertPocketProjection);
+    found.jobs.forEach((item) => assertValid(validateJobRecord, item, "JobRecord"));
+    return context.json(found);
   });
 
   app.get("/reservations/needing-settle", async (context) => {
     const vault = context.req.query("vault")?.toLowerCase();
-    if (!vault) return context.json({ error: "vault-required" }, 400);
-    const reservations = await validatedMirrors(
-      source,
-      "reservations",
-      validateReservation,
-      (item) =>
-        String(item["vault"]).toLowerCase() === vault &&
-        ["Active", "Finalizing"].includes(String(item["state"])),
-    );
-    const events = await source.rows("externalEvents");
-    const used = new Set(
-      events
-        .filter((row) => row.name === "AuthorizationUsed")
-        .map((row) => String(payload(row)["nonce"]).toLowerCase()),
-    );
-    const pending = reservations.filter((item) => {
-      const count = Number(item["count"]);
-      for (let index = 0; index < count; index += 1) {
-        const mask = BigInt(String(item["settledMask"]));
-        if (
-          ((mask >> BigInt(index)) & 1n) === 0n &&
-          used.has(
-            derivedNonce(vault as `0x${string}`, BigInt(String(item["reservationId"])), index),
-          )
-        )
-          return true;
-      }
-      return false;
-    });
-    return pageResponse(
+    if (!vault || !ADDRESS.test(vault)) return problem(context, 400, "validation");
+    return idPage(
       context,
       config,
+      clock,
       "reservations-needing-settle",
-      pending,
-      validateReservation,
+      (cursor, limit) => store.reservationsNeedingSettle(vault, cursor, limit),
+      (item) => assertValid(validateReservation, item, "Reservation"),
     );
   });
 
   app.get("/reservations/needing-finalize", async (context) => {
-    const now = integerQuery(context.req.query("now"));
-    if (now === null) return context.json({ error: "invalid-now" }, 400);
-    const limit = pageLimit(context, config);
-    if (limit === null) return context.json({ error: "invalid-limit" }, 400);
-    const route = cursorScope(context, "reservations-needing-finalize");
-    const cursor = decodeKeysetCursor(context.req.query("cursor"), route, config);
-    if (cursor === null) return context.json({ error: "invalid-cursor" }, 400);
-    const rows = await source.pageReservationsNeedingFinalize({
-      now,
-      cursor: cursor ?? null,
-      limit: limit + 1,
-    });
-    const page = rows.slice(0, limit).map(mirror);
-    page.forEach((item) => assertMirror(validateReservation, item, "Reservation"));
-    const last = rows.length > limit ? rows[limit - 1] : undefined;
-    const nextCursor = last
-      ? encodeKeysetCursor(
-          { validBefore: Number(last["validBefore"]), id: String(last.id) },
-          route,
-          config,
-        )
-      : null;
-    return context.json({ items: page, nextCursor });
+    const now = uintQuery(context.req.query("now"));
+    if (now === null) return problem(context, 400, "validation");
+    return idPage(
+      context,
+      config,
+      clock,
+      "reservations-needing-finalize",
+      (cursor, limit) => store.reservationsNeedingFinalize(now, cursor, limit),
+      (item) => assertValid(validateReservation, item, "Reservation"),
+    );
   });
 
-  app.get("/pullbacks/to-confirm", async (context) => {
-    const attested = new Set(
-      (await source.rows("externalEvents"))
-        .filter((row) => row.name === "AttestationUsed")
-        .map((row) => String(payload(row)["transferSpecHash"]).toLowerCase()),
-    );
-    const items = await pullbacks(
-      source,
-      (item) =>
-        item["state"] === "Pending" && attested.has(String(item["transferSpecHash"]).toLowerCase()),
-    );
-    return pageResponse(context, config, "pullbacks-to-confirm", items, validatePullbackSelection);
-  });
+  app.get("/pullbacks/to-confirm", async (context) =>
+    idPage(context, config, clock, "pullbacks-to-confirm", (cursor, limit) =>
+      store.pullbacksToConfirm(cursor, limit),
+    ),
+  );
 
   app.get("/pullbacks/to-cancel", async (context) => {
-    const block = integerQuery(context.req.query("block"));
-    if (block === null) return context.json({ error: "invalid-block" }, 400);
-    const attested = new Set(
-      (await source.rows("externalEvents"))
-        .filter((row) => row.name === "AttestationUsed")
-        .map((row) => String(payload(row)["transferSpecHash"]).toLowerCase()),
+    const block = uintQuery(context.req.query("block"));
+    if (block === null) return problem(context, 400, "validation");
+    return idPage(context, config, clock, "pullbacks-to-cancel", (cursor, limit) =>
+      store.pullbacksToCancel(block, cursor, limit),
     );
-    const items = await pullbacks(
-      source,
-      (item, pocket) =>
-        item["state"] === "Pending" &&
-        Number(item["maxBlockHeight"]) + PULLBACK_CANCEL_DELAY_BLOCKS <= block &&
-        !attested.has(String(item["transferSpecHash"]).toLowerCase()) &&
-        Boolean(pocket),
-    );
-    return pageResponse(context, config, "pullbacks-to-cancel", items, validatePullbackSelection);
   });
 
-  app.get("/jobs/to-sync", async (context) => {
-    const events = await source.rows("externalEvents");
-    const items = await validatedMirrors(source, "jobs", validateJobRecord, (item) => {
-      const newest = events
-        .filter(
-          (event) =>
-            String(event.emitter).toLowerCase() === String(item["jobEscrow"]).toLowerCase() &&
-            String(payload(event)["jobId"]) === String(item["jobId"]) &&
-            JOB_EVENT_STATE[String(event.name)] !== undefined,
-        )
-        .toSorted((a, b) => Number(b.block) - Number(a.block))[0];
-      return Boolean(newest && JOB_EVENT_STATE[String(newest.name)] !== item["state"]);
-    });
-    return pageResponse(context, config, "jobs-to-sync", items, validateJobRecord);
-  });
+  app.get("/jobs/to-sync", async (context) =>
+    idPage(
+      context,
+      config,
+      clock,
+      "jobs-to-sync",
+      (cursor, limit) => store.jobsToSync(cursor, limit),
+      (item) => assertValid(validateJobRecord, item["job"], "JobRecord"),
+    ),
+  );
 
-  app.get("/jobs/awaiting-evaluation", async (context) => {
-    const events = await source.rows("externalEvents");
-    const items = await validatedMirrors(
-      source,
-      "jobs",
-      validateJobRecord,
-      (item) =>
-        item["state"] === "Submitted" &&
-        !events.some(
-          (event) =>
-            String(event.emitter).toLowerCase() === String(item["jobEscrow"]).toLowerCase() &&
-            String(payload(event)["jobId"]) === String(item["jobId"]) &&
-            ["JobCompleted", "JobRejected", "JobExpired"].includes(String(event.name)),
-        ),
-    );
-    return pageResponse(context, config, "jobs-awaiting-evaluation", items, validateJobRecord);
-  });
+  app.get("/jobs/awaiting-evaluation", async (context) =>
+    idPage(
+      context,
+      config,
+      clock,
+      "jobs-awaiting-evaluation",
+      (cursor, limit) => store.jobsAwaitingEvaluation(cursor, limit),
+      (item) => assertValid(validateJobRecord, item, "JobRecord"),
+    ),
+  );
 
   app.get("/receipts", async (context) => {
     const vault = context.req.query("vault")?.toLowerCase();
-    if (!vault) return context.json({ error: "vault-required" }, 400);
-    return context.json({ items: [], nextCursor: null });
+    if (!vault || !ADDRESS.test(vault)) return problem(context, 400, "validation");
+    const limit = pageLimit(context, config);
+    if (limit === null) return problem(context, 400, "validation");
+    const scope = cursorScope(context, "receipts");
+    const decoded = decodeCursor(context.req.query("cursor"), scope, clock);
+    if (decoded === undefined) return problem(context, 400, "validation");
+    const position = decoded as ReceiptCursor | null;
+    if (position && (typeof position.createdAt !== "string" || typeof position.id !== "string")) {
+      return problem(context, 400, "validation");
+    }
+    const rows = await store.receiptsForLedger(vault, position, limit + 1);
+    const items = rows.slice(0, limit);
+    const last = items.at(-1);
+    const nextCursor =
+      rows.length > limit && last
+        ? encodeCursor({ createdAt: last.createdAt, id: last.id }, scope, config, clock)
+        : null;
+    return context.json({ items, nextCursor });
   });
 
   app.get("/anchors/latest", async (context) => {
     const publisher = context.req.query("publisher")?.toLowerCase();
-    const kind = integerQuery(context.req.query("kind"));
-    if (!publisher || kind === null) return context.json({ error: "invalid-anchor-query" }, 400);
-    const anchor = (await source.rows("anchors"))
-      .filter(
-        (row) => String(row.publisher).toLowerCase() === publisher && Number(row.kind) === kind,
-      )
-      .toSorted((left, right) => compareIntegers(String(right.seq), String(left.seq)))[0];
-    return context.json(
-      anchor
-        ? {
-            root: anchor.root,
-            seq: String(anchor.seq),
-            block: String(anchor.block),
-            transaction: anchor.transaction,
-          }
-        : null,
-    );
+    const kind = uintQuery(context.req.query("kind"));
+    if (!publisher || !ADDRESS.test(publisher) || kind === null || kind > 255n) {
+      return problem(context, 400, "validation");
+    }
+    return context.json(await store.latestAnchor(publisher, Number(kind)));
   });
 
-  app.get("/anchors/:root", async (context) => {
+  app.get("/anchors/by-batch/:root", async (context) => {
     const root = context.req.param("root").toLowerCase();
-    const anchor = (await source.rows("anchors")).find(
-      (row) =>
-        String(row.root).toLowerCase() === root || String(row["batchRoot"]).toLowerCase() === root,
-    );
-    return context.json(anchor ? jsonSafe(anchor) : null);
+    if (!HASH32.test(root)) return problem(context, 400, "validation");
+    return context.json(await store.anchorByBatch(root));
   });
+
   return app;
 }
 
-async function validatedMirrors(
-  source: QueryDataSource,
-  table: "envelopes" | "reservations" | "pockets" | "jobs",
-  validate: (value: unknown) => boolean,
-  filter: (item: Record<string, unknown>) => boolean,
-): Promise<MirrorRecord[]> {
-  return (await source.rows(table))
-    .map(mirror)
-    .filter(filter)
-    .map((item) => {
-      assertMirror(validate, item, table);
-      return item;
-    });
-}
-
-async function pullbacks(
-  source: QueryDataSource,
-  filter: (item: Record<string, unknown>, pocket: Record<string, unknown>) => boolean,
-): Promise<Record<string, unknown>[]> {
-  const items: Record<string, unknown>[] = [];
-  for (const row of await source.rows("pockets")) {
-    const pocket = mirror(row);
-    assertMirror(validatePocketRecord, pocket, "PocketRecord");
-    for (const item of pocket["pullbacks"] as Record<string, unknown>[]) {
-      if (filter(item, pocket)) items.push({ pocketRecord: pocket, pullback: item });
-    }
-  }
-  return items;
-}
-
-function pageResponse(
+async function idPage(
   context: Context,
   config: Config,
+  clock: { now(): number },
   route: string,
-  input: Record<string, unknown>[],
-  validate: (value: unknown) => boolean,
-) {
+  read: (cursor: IdCursor | null, limit: number) => Promise<Keyed[]>,
+  check: (item: Record<string, unknown>) => void = () => undefined,
+): Promise<Response> {
   const limit = pageLimit(context, config);
-  if (limit === null) return context.json({ error: "invalid-limit" }, 400);
+  if (limit === null) return problem(context, 400, "validation");
   const scope = cursorScope(context, route);
-  const offset = decodeCursor(context.req.query("cursor"), scope, config);
-  if (offset === null) return context.json({ error: "invalid-cursor" }, 400);
-  const items = input
-    .toSorted((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))
-    .slice(offset, offset + limit);
-  items.forEach((item) => assertMirror(validate, item, route));
-  const next =
-    offset + items.length < input.length
-      ? encodeCursor(offset + items.length, scope, config)
-      : null;
-  return context.json({ items, nextCursor: next });
+  const decoded = decodeCursor(context.req.query("cursor"), scope, clock);
+  if (decoded === undefined) return problem(context, 400, "validation");
+  const position = decoded as IdCursor | null;
+  if (position && typeof position.after !== "string") return problem(context, 400, "validation");
+  const rows = await read(position, limit + 1);
+  const page = rows.slice(0, limit);
+  page.forEach((row) => check(row.item));
+  const last = page.at(-1);
+  const nextCursor =
+    rows.length > limit && last ? encodeCursor({ after: last.key }, scope, config, clock) : null;
+  return context.json({ items: page.map((row) => row.item), nextCursor });
 }
 
 function pageLimit(context: Context, config: Config): number | null {
   const raw = context.req.query("limit");
   const limit = raw === undefined ? Number(config.get("api.pageDefaultLimit")) : Number(raw);
-  return Number.isInteger(limit) &&
-    limit >= Number(config.get("api.pageMinLimit")) &&
-    limit <= Number(config.get("api.pageMaxLimit"))
-    ? limit
-    : null;
+  if (raw !== undefined && !UINT.test(raw)) return null;
+  if (
+    !Number.isSafeInteger(limit) ||
+    limit < Number(config.get("api.pageMinLimit")) ||
+    limit > Number(config.get("api.pageMaxLimit"))
+  ) {
+    return null;
+  }
+  return limit;
 }
 
+/** The query string minus `cursor` and `limit`: a cursor only continues the query that issued it. */
 function cursorScope(context: Context, route: string): string {
   const params = new URL(context.req.url).searchParams;
   params.delete("cursor");
+  params.delete("limit");
   const query = [...params.entries()]
-    .toSorted(([left], [right]) => left.localeCompare(right))
+    .toSorted(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
     .map(([key, value]) => `${key}=${value}`)
     .join("&");
   return `${route}?${query}`;
 }
 
-function encodeCursor(offset: number, route: string, config: Config): string {
-  const expiresAt = Date.now() + Number(config.get("api.cursorTtlMinutes")) * 60_000;
-  return Buffer.from(JSON.stringify({ route, offset, expiresAt })).toString("base64url");
-}
-
-function encodeKeysetCursor(cursor: KeysetCursor, route: string, config: Config): string {
-  const expiresAt = Date.now() + Number(config.get("api.cursorTtlMinutes")) * 60_000;
-  return Buffer.from(JSON.stringify({ route, cursor, expiresAt })).toString("base64url");
-}
-
-function decodeKeysetCursor(
-  cursor: string | undefined,
-  route: string,
+function encodeCursor(
+  position: IdCursor | ReceiptCursor,
+  scope: string,
   config: Config,
-): KeysetCursor | null | undefined {
-  if (!cursor) return undefined;
+  clock: { now(): number },
+): string {
+  const expiresAt = clock.now() + Number(config.get("api.cursorTtlMinutes")) * 60_000;
+  return Buffer.from(JSON.stringify({ scope, position, expiresAt })).toString("base64url");
+}
+
+/** `null` for no cursor, `undefined` for an invalid, foreign or expired cursor. */
+function decodeCursor(
+  cursor: string | undefined,
+  scope: string,
+  clock: { now(): number },
+): IdCursor | ReceiptCursor | null | undefined {
+  if (cursor === undefined) return null;
+  if (cursor.length === 0 || cursor.length > 512) return undefined;
   try {
-    const value = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as Record<
-      string,
-      unknown
-    >;
-    const key = value["cursor"] as Record<string, unknown> | undefined;
-    if (
-      value["route"] !== route ||
-      !key ||
-      !Number.isSafeInteger(key["validBefore"]) ||
-      typeof key["id"] !== "string" ||
-      Number(value["expiresAt"]) <= Date.now() ||
-      Number(value["expiresAt"]) > Date.now() + Number(config.get("api.cursorTtlMinutes")) * 60_000
-    )
-      return null;
-    return { validBefore: Number(key["validBefore"]), id: key["id"] };
+    const value = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as {
+      scope?: unknown;
+      position?: unknown;
+      expiresAt?: unknown;
+    };
+    if (value.scope !== scope) return undefined;
+    if (typeof value.expiresAt !== "number" || value.expiresAt <= clock.now()) return undefined;
+    if (typeof value.position !== "object" || value.position === null) return undefined;
+    return value.position as IdCursor | ReceiptCursor;
   } catch {
-    return null;
+    return undefined;
   }
 }
 
-function decodeCursor(cursor: string | undefined, route: string, config: Config): number | null {
-  if (!cursor) return 0;
-  try {
-    const value = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as Record<
-      string,
-      unknown
-    >;
-    if (
-      value["route"] !== route ||
-      !Number.isInteger(value["offset"]) ||
-      Number(value["offset"]) < 0 ||
-      Number(value["expiresAt"]) <= Date.now() ||
-      Number(value["expiresAt"]) > Date.now() + Number(config.get("api.cursorTtlMinutes")) * 60_000
-    )
-      return null;
-    return Number(value["offset"]);
-  } catch {
-    return null;
-  }
+function uintQuery(value: string | undefined): bigint | null {
+  return value !== undefined && UINT.test(value) && value.length <= 20 ? BigInt(value) : null;
 }
 
-function mirror(row: QueryRow): MirrorRecord {
-  return row.mirror as MirrorRecord;
+function problem(context: Context, status: 400 | 404, czarCode: string): Response {
+  return context.json({ czarCode }, status);
 }
 
-function payload(row: QueryRow): QueryRow {
-  return row.payload as QueryRow;
-}
-
-function integerQuery(value: string | undefined): number | null {
-  if (value === undefined || !/^\d+$/.test(value)) return null;
-  const result = Number(value);
-  return Number.isSafeInteger(result) ? result : null;
-}
-
-function compareIntegers(left: string, right: string): number {
-  const leftValue = BigInt(left);
-  const rightValue = BigInt(right);
-  return leftValue < rightValue ? -1 : leftValue > rightValue ? 1 : 0;
-}
-
-function jsonSafe(value: Record<string, unknown>): Record<string, unknown> {
-  return Object.fromEntries(
-    Object.entries(value).map(([key, item]) => [
-      key,
-      typeof item === "bigint" ? item.toString() : item,
-    ]),
-  );
-}
-
-function assertMirror(validate: (value: unknown) => boolean, value: unknown, label: string): void {
+function assertValid(validate: Validate, value: unknown, label: string): void {
   if (!validate(value)) throw new Error(`Indexed ${label} failed @czar/schemas validation`);
 }
 
-function validatePullbackSelection(value: unknown): value is Record<string, unknown> {
-  if (!value || typeof value !== "object") return false;
-  const selection = value as Record<string, unknown>;
-  const pocket = selection["pocketRecord"];
-  const pullback = selection["pullback"];
-  if (!validatePocketRecord(pocket) || !pullback || typeof pullback !== "object") return false;
-  return (pocket.pullbacks as unknown[]).includes(pullback);
+/** The indexer never holds `keyRef` (SO provenance, SCR-114); every other PocketRecord rule applies. */
+function assertPocketProjection(value: unknown): void {
+  if (validatePocketRecord(value)) return;
+  const errors = validationErrors("pocket-record");
+  const onlyKeyRef = errors.every(
+    (error) => error.keyword === "required" && error.params["missingProperty"] === "keyRef",
+  );
+  if (!onlyKeyRef) throw new Error("Indexed PocketRecord failed @czar/schemas validation");
 }

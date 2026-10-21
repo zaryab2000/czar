@@ -1,5 +1,7 @@
 import { Hono } from "hono";
 import { db } from "ponder:api";
+import { createIndexerApi } from "#src/api/router";
+import { createQueryStore } from "#src/api/store";
 import {
   envelopes,
   externalEvents,
@@ -36,5 +38,8 @@ app.get("/external-events", async (c) =>
     })),
   ),
 );
+
+// T-034: the production query routes, served by this Ponder process for the end-to-end test.
+app.route("/q", createIndexerApi(createQueryStore(db)));
 
 export default app;

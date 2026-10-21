@@ -1,351 +1,498 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
-import { createIndexerApi } from "#src/api/router";
 import { loadConfig } from "@czar/config";
 import { derivedNonce } from "@czar/hashing";
-import type { QueryRows, QueryTable } from "#src/api/types";
+import {
+  anchors,
+  authorizations,
+  envelopes,
+  escrowJobs,
+  gatewayTransfers,
+  jobs,
+  pockets,
+  pullbacks,
+  reservations,
+} from "@czar/indexer/schema";
+import { envelopeMirror, jobMirror, pocketMirror, reservationMirror } from "@czar/indexer/mirrors";
+import type { Address, Hex } from "viem";
+import { beforeEach, describe, expect, it } from "vitest";
+import { createIndexerApi } from "#src/api/router";
+import { createQueryStore, PULLBACK_CANCEL_DELAY_BLOCKS } from "#src/api/store";
+import { createQueryDatabase } from "#test/query-db";
 
-const envelope = {
-  schemaVersion: "1.1",
-  envelopeRef: "eip155:5042002:0x0000000000000000000000000000000000000001:1",
-  vault: "0x0000000000000000000000000000000000000001",
-  envelopeId: 1,
-  objectiveHash: `0x${"1".repeat(64)}`,
-  planHash: `0x${"2".repeat(64)}`,
-  payeeRoot: `0x${"3".repeat(64)}`,
-  categoryId: `0x${"4".repeat(64)}`,
-  cap: "1000000",
-  maxStepAmount: "100000",
-  pocketCapBps: 5000,
-  expiresAt: 1_900_000_000,
-  approver: "owner",
-  approvalTx: `0x${"5".repeat(64)}`,
-  spent: "0",
-  reserved: "0",
-  pocketOutstanding: "0",
-  jobEscrowed: "0",
-  shortfall: "0",
-  state: "Open",
-  lastEventBlock: 1,
-};
+const VAULT: Address = "0x00000000000000000000000000000000000c2a21";
+const OTHER_VAULT: Address = "0x00000000000000000000000000000000000c2a99";
+const PAYEE: Address = "0x00000000000000000000000000000000000c2a22";
+const POCKET: Address = "0x00000000000000000000000000000000000c2a23";
+const ESCROW: Address = "0x0747eef0706327138c69792bf28cd525089e4583";
+const PUBLISHER: Address = "0x00000000000000000000000000000000000c2a24";
+const HASH = `0x${"a".repeat(64)}` as Hex;
+const ZERO = `0x${"0".repeat(64)}` as Hex;
+const hash = (c: string) => `0x${c.repeat(64)}` as Hex;
+const lower = (a: string) => a.toLowerCase();
 
-const reservation = {
-  schemaVersion: "1.0",
-  vault: envelope.vault,
-  reservationId: 7,
-  envelopeId: 1,
-  stepIndex: 0,
-  payee: "0x0000000000000000000000000000000000000002",
-  unitAmount: "50000",
-  count: 2,
-  validBefore: 1_800_000_000,
-  mode: "envelope",
-  settledMask: `0x${"0".repeat(64)}`,
-  settledCount: 0,
-  releasedCount: 0,
-  state: "Active",
-};
+type Db = Awaited<ReturnType<typeof createQueryDatabase>>["db"];
+let db: Db;
 
-const pullback = {
-  pullbackId: 3,
-  value: "25000",
-  salt: `0x${"6".repeat(64)}`,
-  maxFee: "1000",
-  maxBlockHeight: 100,
-  transferSpecHash: `0x${"7".repeat(64)}`,
-  requestedAtBlock: 100,
-  state: "Pending",
-  recovery: false,
-};
-
-const pocket = {
-  schemaVersion: "1.1",
-  vault: envelope.vault,
-  envelopeId: 1,
-  pocket: "0x0000000000000000000000000000000000000003",
-  keyRef: "pocket-test-key",
-  state: "Draining",
-  funded: "50000",
-  gasGranted: "0",
-  outstanding: "25000",
-  pendingPullback: "25000",
-  pullbacks: [pullback],
-};
-
-const job = {
-  schemaVersion: "1.1",
-  vault: envelope.vault,
-  envelopeId: 1,
-  stepIndex: 0,
-  jobEscrow: "0x0000000000000000000000000000000000000004",
-  jobId: "9",
-  jobKey: `0x${"8".repeat(64)}`,
-  provider: "0x0000000000000000000000000000000000000005",
-  evaluator: "0x0000000000000000000000000000000000000006",
-  reservedCap: "50000",
-  budget: "50000",
-  descriptionHash: `0x${"9".repeat(64)}`,
-  state: "Submitted",
-  expiredAt: 1_900_000_000,
-};
-
-const seed = (): QueryRows => ({
-  envelopes: [
-    { id: `${envelope.vault}:1`, vault: envelope.vault, envelopeId: 1n, mirror: envelope },
-  ],
-  reservations: [
-    { id: `${envelope.vault}:7`, vault: envelope.vault, reservationId: 7n, mirror: reservation },
-  ],
-  pockets: [
-    { id: `${envelope.vault}:0x03`, vault: envelope.vault, envelopeId: 1n, mirror: pocket },
-  ],
-  jobs: [{ id: "job:9", vault: envelope.vault, envelopeId: 1n, mirror: job }],
-  externalEvents: [],
-  anchors: [],
-  gatewayTransfers: [],
+const envelopeView = (envelopeId: bigint) => ({
+  cap: 1_000_000n,
+  maxStepAmount: 100_000n,
+  spent: 0n,
+  reserved: 0n,
+  pocketOutstanding: 0n,
+  jobEscrowed: 0n,
+  shortfall: 0n,
+  categoryId: HASH,
+  objectiveHash: HASH,
+  planHash: HASH,
+  payeeRoot: HASH,
+  pocket: POCKET,
+  expiresAt: 10_000n + envelopeId,
+  pocketCapBps: 2500,
+  state: 1,
+  approverIsOwner: true,
 });
 
-function seededDb(rows = seed()) {
-  const readCounts: Partial<Record<QueryTable, number>> = {};
-  return {
-    readCounts,
-    async rows(table: QueryTable) {
-      readCounts[table] = (readCounts[table] ?? 0) + rows[table].length;
-      return rows[table];
-    },
-    async pageReservationsNeedingFinalize({
-      now,
-      cursor,
-      limit,
-    }: {
-      now: number;
-      cursor: { validBefore: number; id: string } | null;
-      limit: number;
-    }) {
-      const matches = rows.reservations
-        .filter(
-          (row) =>
-            Number(row.validBefore ?? (row.mirror as Record<string, unknown>)["validBefore"]) < now,
-        )
-        .filter(
-          (row) =>
-            String(row.state ?? (row.mirror as Record<string, unknown>)["state"]) !== "Final",
-        )
-        .filter(
-          (row) =>
-            !cursor ||
-            Number(row.validBefore ?? (row.mirror as Record<string, unknown>)["validBefore"]) >
-              cursor.validBefore ||
-            (Number(row.validBefore ?? (row.mirror as Record<string, unknown>)["validBefore"]) ===
-              cursor.validBefore &&
-              String(row.id) > cursor.id),
-        )
-        .toSorted(
-          (left, right) =>
-            Number(left.validBefore ?? (left.mirror as Record<string, unknown>)["validBefore"]) -
-              Number(
-                right.validBefore ?? (right.mirror as Record<string, unknown>)["validBefore"],
-              ) || String(left.id).localeCompare(String(right.id)),
-        )
-        .slice(0, limit);
-      readCounts.reservations = (readCounts.reservations ?? 0) + matches.length;
-      return matches;
-    },
-  };
+async function seedEnvelope(vault: Address, envelopeId: bigint): Promise<string> {
+  const mirror = envelopeMirror({
+    vault,
+    envelopeId,
+    view: envelopeView(envelopeId),
+    approvalTx: HASH,
+    block: 1n,
+    timestamp: 1n,
+    closeStarted: false,
+  });
+  await db.insert(envelopes).values({
+    id: `${lower(vault)}:${envelopeId}`,
+    vault: lower(vault),
+    envelopeId,
+    envelopeRef: mirror.envelopeRef,
+    mirror,
+  });
+  return mirror.envelopeRef;
 }
 
-describe("indexer query API", () => {
-  afterEach(() => vi.useRealTimers());
-
-  it("returns the envelope and validates all included mirror records", async () => {
-    const app = createIndexerApi(seededDb(), loadConfig());
-    const response = await app.request(`/envelopes/${encodeURIComponent(envelope.envelopeRef)}`);
-    expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ envelope, reservations: [reservation] });
+async function seedReservation(
+  vault: Address,
+  reservationId: bigint,
+  input: { state: number; validBefore: bigint; count?: number; settledMask?: bigint },
+): Promise<void> {
+  const count = input.count ?? 1;
+  const view = {
+    envelopeId: 1n,
+    stepIndex: 0,
+    payee: PAYEE,
+    unitAmount: 100n,
+    count,
+    validBefore: input.validBefore,
+    mode: 1,
+    state: input.state,
+    settledCount: 0,
+    releasedCount: 0,
+    settledMask: input.settledMask ?? 0n,
+  };
+  const mirror = reservationMirror(vault, reservationId, view);
+  await db.insert(reservations).values({
+    id: `${lower(vault)}:${String(reservationId).padStart(4, "0")}`,
+    vault: lower(vault),
+    reservationId,
+    envelopeId: 1n,
+    stepIndex: 0,
+    state: mirror.state,
+    validBefore: input.validBefore,
+    mirror,
   });
+}
 
-  it("returns reservations whose authorization nonce is not settled", async () => {
-    const rows = seed();
-    rows.externalEvents.push({
-      id: "tx:1",
-      emitter: envelope.vault,
-      name: "AuthorizationUsed",
-      block: 2n,
-      payload: { nonce: derivedNonce(envelope.vault as `0x${string}`, 7n, 0) },
+async function seedAuthorization(
+  vault: Address,
+  reservationId: bigint,
+  index: number,
+  input: { used?: boolean; settled?: boolean; released?: boolean; createdAt: string },
+): Promise<void> {
+  await db.insert(authorizations).values({
+    id: `${lower(vault)}:${reservationId}:${index}`,
+    vault: lower(vault),
+    reservationId,
+    index,
+    nonce: derivedNonce(vault, reservationId, index),
+    amount: "100",
+    used: input.used ?? false,
+    settled: input.settled ?? false,
+    released: input.released ?? false,
+    settlementTx: input.settled ? hash("b") : null,
+    createdAt: input.createdAt,
+  });
+}
+
+async function seedJob(
+  jobId: bigint,
+  vaultState: number,
+  escrowStatus: string | null,
+  createdAt = "2026-10-21T00:00:10.000Z",
+): Promise<void> {
+  const jobKey = hash(String(jobId));
+  const mirror = jobMirror({
+    vault: VAULT,
+    jobKey,
+    jobEscrow: ESCROW,
+    evaluator: PAYEE,
+    descriptionHash: ZERO,
+    view: {
+      provider: PAYEE,
+      envelopeId: 1n,
+      stepIndex: 1,
+      state: vaultState,
+      expiredAt: 1000n,
+      jobId,
+      reservedCap: 500n,
+      budget: 400n,
+    },
+  });
+  await db.insert(jobs).values({
+    id: `${lower(VAULT)}:job${jobId}`,
+    vault: lower(VAULT),
+    envelopeId: 1n,
+    jobEscrow: lower(ESCROW),
+    jobId: String(jobId),
+    stepIndex: 1,
+    state: mirror.state,
+    createdAt,
+    mirror,
+  });
+  if (escrowStatus) {
+    await db.insert(escrowJobs).values({
+      id: `${lower(ESCROW)}:${jobId}`,
+      jobEscrow: lower(ESCROW),
+      jobId: String(jobId),
+      status: escrowStatus,
+      block: 5n,
     });
-    const app = createIndexerApi(seededDb(rows), loadConfig());
-    const response = await app.request(`/reservations/needing-settle?vault=${envelope.vault}`);
-    expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ items: [reservation], nextCursor: null });
+  }
+}
+
+beforeEach(async () => {
+  ({ db } = await createQueryDatabase());
+});
+
+describe("T-034 query store (SQL)", () => {
+  it("pages reservationsNeedingFinalize in SQL across pages with no gaps or repeats", async () => {
+    for (let id = 1n; id <= 7n; id += 1n) {
+      await seedReservation(VAULT, id, { state: 1, validBefore: 100n + id });
+    }
+    await seedReservation(VAULT, 8n, { state: 3, validBefore: 101n }); // Final: excluded
+    await seedReservation(VAULT, 9n, { state: 1, validBefore: 999n }); // not yet expired
+    const store = createQueryStore(db);
+    const first = await store.reservationsNeedingFinalize(200n, null, 3);
+    expect(first).toHaveLength(3);
+    const second = await store.reservationsNeedingFinalize(200n, { after: first[2]!.key }, 3);
+    const third = await store.reservationsNeedingFinalize(200n, { after: second[2]!.key }, 3);
+    const ids = [...first, ...second, ...third].map((row) => row.item["reservationId"]);
+    expect(ids).toEqual([1, 2, 3, 4, 5, 6, 7]);
   });
 
-  it("returns reservations needing finalization", async () => {
-    const app = createIndexerApi(seededDb(), loadConfig());
-    const response = await app.request("/reservations/needing-finalize?now=1800000001");
-    expect(((await response.json()) as { items: unknown[] }).items).toEqual([reservation]);
-  });
-
-  it("returns pending pullbacks with matching attestations and enforces the cancel delay", async () => {
-    const rows = seed();
-    rows.externalEvents.push({
-      id: "attest:1",
-      emitter: "minter",
-      name: "AttestationUsed",
-      block: 120n,
-      payload: { transferSpecHash: pullback.transferSpecHash },
+  it("finds reservations with a used but unsettled authorization, per vault", async () => {
+    await seedReservation(VAULT, 1n, { state: 1, validBefore: 999n, count: 2 });
+    await seedAuthorization(VAULT, 1n, 0, {
+      used: true,
+      settled: true,
+      createdAt: "2026-10-21T00:00:01.000Z",
     });
-    const app = createIndexerApi(seededDb(rows), loadConfig());
-    const confirm = await app.request("/pullbacks/to-confirm");
-    expect(((await confirm.json()) as { items: unknown[] }).items).toMatchObject([{ pullback }]);
-    const cancelEarly = await app.request("/pullbacks/to-cancel?block=3099");
-    expect(((await cancelEarly.json()) as { items: unknown[] }).items).toEqual([]);
-    const cancelOld = await app.request("/pullbacks/to-cancel?block=3101");
-    expect(((await cancelOld.json()) as { items: unknown[] }).items).toEqual([]);
+    await seedAuthorization(VAULT, 1n, 1, { used: true, createdAt: "2026-10-21T00:00:01.000Z" });
+    await seedReservation(VAULT, 2n, { state: 1, validBefore: 999n });
+    await seedAuthorization(VAULT, 2n, 0, { used: false, createdAt: "2026-10-21T00:00:02.000Z" });
+    await seedReservation(VAULT, 3n, { state: 3, validBefore: 1n });
+    await seedAuthorization(VAULT, 3n, 0, { used: true, createdAt: "2026-10-21T00:00:03.000Z" });
+    await seedReservation(OTHER_VAULT, 1n, { state: 1, validBefore: 999n });
+    await seedAuthorization(OTHER_VAULT, 1n, 0, {
+      used: true,
+      createdAt: "2026-10-21T00:00:04.000Z",
+    });
+    const rows = await createQueryStore(db).reservationsNeedingSettle(lower(VAULT), null, 10);
+    expect(rows.map((row) => row.item["reservationId"])).toEqual([1]);
   });
 
-  it("returns stale pending pullbacks for cancellation after the configured delay", async () => {
-    const rows = seed();
-    const app = createIndexerApi(seededDb(rows), loadConfig());
-    const response = await app.request("/pullbacks/to-cancel?block=3100");
-    expect(((await response.json()) as { items: unknown[] }).items).toMatchObject([{ pullback }]);
+  it("confirms attested pullbacks and cancels unattested ones only after maxBlockHeight + delay", async () => {
+    const seed = (id: number, attested: boolean, maxBlockHeight: bigint, state = "Pending") =>
+      db.insert(pullbacks).values({
+        id: `${lower(VAULT)}:${id}`,
+        vault: lower(VAULT),
+        pullbackId: BigInt(id),
+        pocket: lower(POCKET),
+        state,
+        transferSpecHash: hash(String(id)),
+        maxBlockHeight,
+        attested,
+      });
+    await seed(1, true, 100n);
+    await seed(2, false, 100n);
+    await seed(3, false, 5000n);
+    await seed(4, false, 100n, "Confirmed");
+    const store = createQueryStore(db);
+    const confirm = await store.pullbacksToConfirm(null, 10);
+    expect(confirm.map((row) => row.item["pullbackId"])).toEqual(["1"]);
+    const atBoundary = 100n + PULLBACK_CANCEL_DELAY_BLOCKS;
+    expect(await store.pullbacksToCancel(atBoundary - 1n, null, 10)).toEqual([]);
+    const cancel = await store.pullbacksToCancel(atBoundary, null, 10);
+    expect(cancel.map((row) => row.item["pullbackId"])).toEqual(["2"]);
   });
 
-  it("keeps the named pullback delay equal to the Solidity contract constant", () => {
-    const solidity = readFileSync(
+  it("selects jobs syncJob would move, and jobs awaiting evaluation", async () => {
+    await seedJob(1n, 1, "Funded"); // Opened, escrow funded -> sync
+    await seedJob(2n, 1, "Open"); // nothing to do
+    await seedJob(3n, 2, "Funded"); // Funded, escrow Funded -> nothing
+    await seedJob(4n, 2, "Submitted"); // -> sync, and awaiting evaluation
+    await seedJob(5n, 3, "Submitted"); // Submitted both -> nothing, awaiting evaluation
+    await seedJob(6n, 3, "Rejected"); // -> sync (refund)
+    await seedJob(7n, 4, "Completed"); // vault already Completed -> nothing
+    await seedJob(8n, 1, null); // no escrow event yet -> nothing
+    const store = createQueryStore(db);
+    const sync = await store.jobsToSync(null, 10);
+    expect(sync.map((row) => (row.item["job"] as { jobId: string }).jobId)).toEqual([
+      "1",
+      "4",
+      "6",
+    ]);
+    const awaiting = await store.jobsAwaitingEvaluation(null, 10);
+    expect(awaiting.map((row) => row.item["jobId"])).toEqual(["4", "5"]);
+  });
+
+  it("returns receipt facts for all three rails with the SCR-119 status mapping, paged in order", async () => {
+    const ref = await seedEnvelope(VAULT, 1n);
+    await seedReservation(VAULT, 1n, { state: 1, validBefore: 999n, count: 3 });
+    await seedAuthorization(VAULT, 1n, 0, {
+      used: true,
+      settled: true,
+      createdAt: "2026-10-21T00:00:01.000Z",
+    });
+    await seedAuthorization(VAULT, 1n, 1, { used: true, createdAt: "2026-10-21T00:00:02.000Z" });
+    await seedAuthorization(VAULT, 1n, 2, {
+      released: true,
+      createdAt: "2026-10-21T00:00:03.000Z",
+    });
+    await db.insert(pockets).values({
+      id: `${lower(VAULT)}:${lower(POCKET)}`,
+      vault: lower(VAULT),
+      envelopeId: 1n,
+      pocket: lower(POCKET),
+      mirror: pocketMirror({
+        vault: VAULT,
+        pocket: POCKET,
+        delegateReady: false,
+        pullbacks: [],
+        view: {
+          envelopeId: 1n,
+          state: 2,
+          funded: 1000n,
+          gasGranted: 0n,
+          outstanding: 1000n,
+          pendingPullback: 0n,
+        },
+      }),
+    });
+    const transfer = (id: string, status: string, createdAt: string) =>
+      db.insert(gatewayTransfers).values({
+        transferId: id,
+        status,
+        fromAddress: lower(POCKET),
+        toAddress: lower(PAYEE),
+        amount: "50",
+        nonce: id,
+        txHash: status === "completed" ? hash("c") : null,
+        createdAt,
+        updatedAt: createdAt,
+        pocketAddress: lower(POCKET),
+      });
+    await transfer("t1", "batched", "2026-10-21T00:00:04Z");
+    await transfer("t2", "completed", "2026-10-21T00:00:05.500+00:00");
+    await transfer("t3", "failed", "2026-10-21T00:00:06Z");
+    await seedJob(1n, 2, "Funded", "2026-10-21T00:00:07.000Z");
+    await seedJob(2n, 5, "Rejected", "2026-10-21T00:00:08.000Z");
+    await seedJob(3n, 4, "Completed", "2026-10-21T00:00:09.000Z");
+    await seedJob(9n, 6, "Rejected", "2026-10-21T00:00:09.500Z"); // cancelled before funding
+    // Another vault's settlement never appears.
+    await seedReservation(OTHER_VAULT, 1n, { state: 1, validBefore: 999n });
+    await seedAuthorization(OTHER_VAULT, 1n, 0, {
+      settled: true,
+      createdAt: "2026-10-21T00:00:00.500Z",
+    });
+
+    const store = createQueryStore(db);
+    const all: Awaited<ReturnType<typeof store.receiptsForLedger>> = [];
+    let cursor: { createdAt: string; id: string } | null = null;
+    for (;;) {
+      const page = await store.receiptsForLedger(lower(VAULT), cursor, 4);
+      const kept = page.slice(0, 3);
+      all.push(...kept);
+      if (page.length <= 3) break;
+      const last = kept.at(-1)!;
+      cursor = { createdAt: last.createdAt, id: last.id };
+    }
+    expect(all.map((fact) => [fact.rail, fact.status])).toEqual([
+      ["x402-exact", "settled"],
+      ["x402-exact", "reserved"],
+      ["x402-exact", "released"],
+      ["gateway-batched", "pending"],
+      ["gateway-batched", "completed"],
+      ["gateway-batched", "failed"],
+      ["erc8183-job", "reserved"],
+      ["erc8183-job", "refunded"],
+      ["erc8183-job", "settled"],
+      ["erc8183-job", "released"],
+    ]);
+    expect(new Set(all.map((fact) => fact.envelopeRef))).toEqual(new Set([ref]));
+    expect(all[0]).toMatchObject({
+      amount: "100",
+      reservationId: "1",
+      index: 0,
+      stepIndex: 0,
+      settlementTx: hash("b"),
+    });
+    expect(all[4]).toMatchObject({
+      transferId: "t2",
+      amount: "50",
+      settlementTx: hash("c"),
+      createdAt: "2026-10-21T00:00:05.500Z",
+    });
+    expect(all[6]).toMatchObject({ amount: "400", stepIndex: 1, jobKey: hash("1") });
+  });
+
+  it("pages receipts correctly when several rails share one timestamp", async () => {
+    await seedEnvelope(VAULT, 1n);
+    await seedReservation(VAULT, 1n, { state: 1, validBefore: 999n, count: 2 });
+    const same = "2026-10-21T00:00:01.000Z";
+    await seedAuthorization(VAULT, 1n, 0, { createdAt: same });
+    await seedAuthorization(VAULT, 1n, 1, { createdAt: same });
+    await seedJob(1n, 2, "Funded", same);
+    await seedJob(2n, 2, "Funded", same);
+    const store = createQueryStore(db);
+    const seen: string[] = [];
+    let cursor: { createdAt: string; id: string } | null = null;
+    for (let guard = 0; guard < 10; guard += 1) {
+      const page = await store.receiptsForLedger(lower(VAULT), cursor, 2);
+      const kept = page.slice(0, 1);
+      seen.push(...kept.map((fact) => fact.id));
+      if (page.length <= 1) break;
+      cursor = { createdAt: kept[0]!.createdAt, id: kept[0]!.id };
+    }
+    expect(seen).toHaveLength(4);
+    expect(new Set(seen).size).toBe(4);
+    expect(seen).toEqual(seen.toSorted());
+  });
+
+  it("returns the latest anchor by numeric seq and finds an anchor by root or batch root", async () => {
+    const anchor = (seq: string, root: Hex, batchRoot: Hex | null) =>
+      db.insert(anchors).values({
+        id: `a${seq}`,
+        publisher: lower(PUBLISHER),
+        kind: 1,
+        seq,
+        root,
+        prev: ZERO,
+        uriHash: ZERO,
+        uri: "ar://x",
+        batchRoot,
+        block: BigInt(seq),
+        transaction: hash("d"),
+      });
+    await anchor("9", hash("1"), null);
+    await anchor("10", hash("2"), hash("3"));
+    const store = createQueryStore(db);
+    expect(await store.latestAnchor(lower(PUBLISHER), 1)).toEqual({
+      root: hash("2"),
+      seq: "10",
+      block: "10",
+      transaction: hash("d"),
+    });
+    expect(await store.latestAnchor(lower(PUBLISHER), 0)).toBeNull();
+    expect((await store.anchorByBatch(hash("3")))?.["seq"]).toBe("10");
+    expect((await store.anchorByBatch(hash("1")))?.["seq"]).toBe("9");
+    expect(await store.anchorByBatch(hash("e"))).toBeNull();
+  });
+
+  it("matches the contract's PULLBACK_CANCEL_DELAY_BLOCKS", () => {
+    const source = readFileSync(
       new URL("../../../contracts/src/libraries/CzarConstants.sol", import.meta.url),
       "utf8",
     );
-    expect(solidity).toMatch(/PULLBACK_CANCEL_DELAY_BLOCKS\s*=\s*3_000\s*;/);
+    const match = /uint256 constant PULLBACK_CANCEL_DELAY_BLOCKS = ([0-9_]+);/.exec(source);
+    expect(match).not.toBeNull();
+    expect(BigInt(match![1]!.replaceAll("_", ""))).toBe(PULLBACK_CANCEL_DELAY_BLOCKS);
+  });
+});
+
+describe("T-034 HTTP routes", () => {
+  const config = loadConfig({ envFile: { "api.pageDefaultLimit": 2 } });
+
+  it("serves envelopeByRef with schema-valid mirrors and 404 for an unknown ref", async () => {
+    const ref = await seedEnvelope(VAULT, 1n);
+    await seedReservation(VAULT, 1n, { state: 1, validBefore: 999n });
+    await seedJob(1n, 2, "Funded");
+    const app = createIndexerApi(createQueryStore(db), config);
+    const found = await app.request(`/envelopes/${encodeURIComponent(ref)}`);
+    expect(found.status).toBe(200);
+    const body = (await found.json()) as { reservations: unknown[]; jobs: unknown[] };
+    expect(body.reservations).toHaveLength(1);
+    expect(body.jobs).toHaveLength(1);
+    expect((await app.request("/envelopes/eip155%3A5042002%3A0x00%3A1")).status).toBe(404);
   });
 
-  it("selects jobs whose indexed escrow status differs from the vault mirror", async () => {
-    const rows = seed();
-    rows.externalEvents.push({
-      id: "job-complete:1",
-      emitter: job.jobEscrow,
-      name: "JobCompleted",
-      block: 20n,
-      payload: { jobId: job.jobId },
-    });
-    const app = createIndexerApi(seededDb(rows), loadConfig());
-    const response = await app.request("/jobs/to-sync");
-    expect(((await response.json()) as { items: unknown[] }).items).toEqual([job]);
-    const awaiting = await app.request("/jobs/awaiting-evaluation");
-    expect(((await awaiting.json()) as { items: unknown[] }).items).toEqual([]);
-  });
-
-  it("returns submitted jobs awaiting evaluation", async () => {
-    const app = createIndexerApi(seededDb(), loadConfig());
-    const response = await app.request("/jobs/awaiting-evaluation");
-    expect(((await response.json()) as { items: unknown[] }).items).toEqual([job]);
-  });
-
-  it("returns the highest matching anchor and the anchor for a batch root", async () => {
-    const rows = seed();
-    rows.anchors.push(
-      {
-        id: "a1",
-        publisher: "publisher",
-        kind: 1,
-        seq: "2",
-        root: "root-2",
-        prev: "root-1",
-        uriHash: "hash",
-        uri: "uri",
-        batchRoot: "batch",
-        block: 20n,
-        transaction: "tx-2",
-      },
-      {
-        id: "a2",
-        publisher: "publisher",
-        kind: 1,
-        seq: "3",
-        root: "root-3",
-        prev: "root-2",
-        uriHash: "hash",
-        uri: "uri",
-        batchRoot: "batch",
-        block: 30n,
-        transaction: "tx-3",
-      },
-    );
-    const app = createIndexerApi(seededDb(rows), loadConfig());
-    expect(await (await app.request("/anchors/latest?publisher=publisher&kind=1")).json()).toEqual({
-      root: "root-3",
-      seq: "3",
-      block: "30",
-      transaction: "tx-3",
-    });
-    expect(await (await app.request("/anchors/batch")).json()).toMatchObject({ root: "root-2" });
-    expect((await app.request("/dependency-state")).status).toBe(404);
-  });
-
-  it("returns one SQL-selected page rather than loading every reservation", async () => {
-    const rows = seed();
-    for (let id = 8; id < 20; id += 1) {
-      rows.reservations.push({
-        id: `${envelope.vault}:${id}`,
-        vault: envelope.vault,
-        reservationId: BigInt(id),
-        validBefore: 1_800_000_000n,
-        state: "Active",
-        mirror: { ...reservation, reservationId: id },
-      });
+  it("pages over HTTP with opaque cursors bound to the query, and rejects bad input", async () => {
+    for (let id = 1n; id <= 5n; id += 1n) {
+      await seedReservation(VAULT, id, { state: 1, validBefore: 100n });
     }
-    const source = seededDb(rows);
-    const app = createIndexerApi(source, loadConfig({ envFile: { "api.pageDefaultLimit": 2 } }));
-    const response = await app.request("/reservations/needing-finalize?now=1900000000&limit=2");
-    const firstPage = (await response.json()) as {
-      items: Record<string, unknown>[];
+    const app = createIndexerApi(createQueryStore(db), config);
+    const ids: number[] = [];
+    let url = "/reservations/needing-finalize?now=200";
+    for (let guard = 0; guard < 5; guard += 1) {
+      const response = await app.request(url);
+      expect(response.status).toBe(200);
+      const page = (await response.json()) as {
+        items: { reservationId: number }[];
+        nextCursor: string | null;
+      };
+      expect(page.items.length).toBeLessThanOrEqual(2);
+      ids.push(...page.items.map((item) => item.reservationId));
+      if (!page.nextCursor) break;
+      url = `/reservations/needing-finalize?now=200&cursor=${page.nextCursor}`;
+    }
+    expect(ids).toEqual([1, 2, 3, 4, 5]);
+
+    const first = (await (await app.request("/reservations/needing-finalize?now=200")).json()) as {
       nextCursor: string;
     };
-    expect(firstPage.items).toHaveLength(2);
-    expect(source.readCounts?.reservations).toBe(3);
-    const secondResponse = await app.request(
-      `/reservations/needing-finalize?now=1900000000&limit=2&cursor=${firstPage.nextCursor}`,
+    const foreign = await app.request(
+      `/reservations/needing-finalize?now=300&cursor=${first.nextCursor}`,
     );
-    const secondPage = (await secondResponse.json()) as {
-      items: Record<string, unknown>[];
-      nextCursor: string | null;
-    };
-    expect(secondPage.items).toHaveLength(2);
-    expect(secondPage.items[0]?.["reservationId"]).not.toBe(firstPage.items[1]?.["reservationId"]);
-    expect(source.readCounts?.reservations).toBe(6);
-  });
-
-  it("returns ledger facts with the fixed chain and Gateway status mapping", async () => {
-    const app = createIndexerApi(seededDb(), loadConfig());
-    expect((await app.request(`/receipts?vault=${envelope.vault}`)).status).toBe(200);
-  });
-
-  it("paginates reservations with opaque cursors that expire", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-10-21T00:00:00.000Z"));
-    const rows = seed();
-    rows.reservations.push({
-      id: `${envelope.vault}:8`,
-      vault: envelope.vault,
-      reservationId: 8n,
-      mirror: { ...reservation, reservationId: 8, validBefore: 1_800_000_001 },
-    });
-    const config = loadConfig({ envFile: { "api.pageDefaultLimit": 1 } });
-    const app = createIndexerApi(seededDb(rows), config);
-    const first = await app.request("/reservations/needing-finalize?now=1900000000&limit=1");
-    expect(first.status).toBe(200);
-    const page = (await first.json()) as { items: unknown[]; nextCursor: string | null };
-    expect(page.items).toHaveLength(1);
-    expect(page.nextCursor).toMatch(/^[A-Za-z0-9_-]+$/);
-    vi.advanceTimersByTime(61 * 60_000);
-    const expired = await app.request(
-      `/reservations/needing-finalize?now=1900000000&limit=1&cursor=${page.nextCursor}`,
-    );
-    expect(expired.status).toBe(400);
-  });
-
-  it("rejects limits outside 1 through 200", async () => {
-    const app = createIndexerApi(seededDb(), loadConfig());
-    expect((await app.request("/reservations/needing-finalize?now=1&limit=0")).status).toBe(400);
+    expect(foreign.status).toBe(400);
+    expect((await app.request("/reservations/needing-finalize?now=-1")).status).toBe(400);
     expect((await app.request("/reservations/needing-finalize?now=1&limit=201")).status).toBe(400);
+    expect((await app.request("/reservations/needing-finalize?now=1&limit=0")).status).toBe(400);
+    expect((await app.request("/reservations/needing-settle?vault=0xnope")).status).toBe(400);
+    expect((await app.request("/receipts")).status).toBe(400);
+    expect((await app.request("/anchors/latest?publisher=0x1&kind=1")).status).toBe(400);
+    expect((await app.request("/anchors/by-batch/0x12")).status).toBe(400);
+  });
+
+  it("serves every remaining T-034 query route", async () => {
+    await seedEnvelope(VAULT, 1n);
+    const app = createIndexerApi(createQueryStore(db), config);
+    for (const path of [
+      `/reservations/needing-settle?vault=${lower(VAULT)}`,
+      "/pullbacks/to-confirm",
+      "/pullbacks/to-cancel?block=1",
+      "/jobs/to-sync",
+      "/jobs/awaiting-evaluation",
+      `/receipts?vault=${lower(VAULT)}`,
+    ]) {
+      const response = await app.request(path);
+      expect(response.status, path).toBe(200);
+      expect(await response.json()).toEqual({ items: [], nextCursor: null });
+    }
+    expect(
+      await (await app.request(`/anchors/latest?publisher=${lower(PUBLISHER)}&kind=1`)).json(),
+    ).toBeNull();
+    expect(await (await app.request(`/anchors/by-batch/${hash("1")}`)).json()).toBeNull();
+    expect((await app.request("/dependency-state")).status).toBe(404);
   });
 });

@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "imports": {
-    "#src/*": "./src/*.ts"
+    "#src/*": "./src/*.ts",
+    "#test/*": "./test/*.ts"
   },
   "exports": {
     "./rpc": "./src/rpc/arc-transport.ts",
@@ -19,6 +20,7 @@
   },
   "dependencies": {
     "@czar/config": "workspace:*",
+    "@czar/hashing": "workspace:*",
     "@czar/logging": "workspace:*",
     "@czar/schemas": "workspace:*",
     "@czar/vault-client": "workspace:*",
@@ -27,7 +29,7 @@
     "viem": "2.57.7"
   },
   "devDependencies": {
-    "@czar/hashing": "workspace:*",
+    "@electric-sql/pglite": "0.2.13",
     "ajv": "8.20.0",
     "hono": "4.13.13"
   }

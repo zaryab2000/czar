@@ -30,6 +30,7 @@ export const reservations = onchainTable(
     vault: t.text().notNull(),
     reservationId: t.bigint().notNull(),
     envelopeId: t.bigint().notNull(),
+    stepIndex: t.integer().notNull(),
     state: t.text().notNull(),
     validBefore: t.bigint().notNull(),
     mirror: t.jsonb().notNull(),
@@ -79,6 +80,7 @@ export const pullbacks = onchainTable(
   (t) => ({
     id: t.text().primaryKey(),
     vault: t.text().notNull(),
+    pullbackId: t.bigint().notNull(),
     pocket: t.text().notNull(),
     state: t.text().notNull(),
     transferSpecHash: t.text().notNull(),
@@ -96,12 +98,20 @@ export const pullbacks = onchainTable(
   }),
 );
 
-export const pockets = onchainTable("pockets", (t) => ({
-  id: t.text().primaryKey(),
-  vault: t.text().notNull(),
-  envelopeId: t.bigint().notNull(),
-  mirror: t.jsonb().notNull(),
-}));
+export const pockets = onchainTable(
+  "pockets",
+  (t) => ({
+    id: t.text().primaryKey(),
+    vault: t.text().notNull(),
+    envelopeId: t.bigint().notNull(),
+    pocket: t.text().notNull(),
+    mirror: t.jsonb().notNull(),
+  }),
+  (t) => ({
+    vaultEnvelopeIdx: index("pockets_vault_envelope_idx").on(t.vault, t.envelopeId),
+    pocketIdx: index("pockets_pocket_idx").on(t.pocket),
+  }),
+);
 
 export const jobs = onchainTable(
   "jobs",
@@ -111,14 +121,33 @@ export const jobs = onchainTable(
     envelopeId: t.bigint().notNull(),
     jobEscrow: t.text().notNull(),
     jobId: t.text().notNull(),
+    stepIndex: t.integer().notNull(),
     state: t.text().notNull(),
-    escrowState: t.text(),
+    createdAt: t.text().notNull(),
     mirror: t.jsonb().notNull(),
   }),
   (t) => ({
     vaultStateIdx: index("jobs_vault_state_idx").on(t.vault, t.state),
-    vaultEscrowStateIdx: index("jobs_vault_escrow_state_idx").on(t.vault, t.escrowState),
+    vaultEnvelopeIdx: index("jobs_vault_envelope_idx").on(t.vault, t.envelopeId),
     jobEscrowJobIdIdx: index("jobs_escrow_job_id_idx").on(t.jobEscrow, t.jobId),
+  }),
+);
+
+// Latest ERC-8183 escrow status per job, kept apart from `jobs` because the escrow emits
+// JobCreated/JobFunded in the same transaction before the vault's JobOpened, when no vault
+// job row exists yet. Status uses the adapter's vocabulary (IJobEscrowAdapter.EscrowStatus).
+export const escrowJobs = onchainTable(
+  "escrow_jobs",
+  (t) => ({
+    id: t.text().primaryKey(),
+    jobEscrow: t.text().notNull(),
+    jobId: t.text().notNull(),
+    status: t.text().notNull(),
+    block: t.bigint().notNull(),
+  }),
+  (t) => ({
+    escrowJobIdx: index("escrow_jobs_escrow_job_idx").on(t.jobEscrow, t.jobId),
+    statusIdx: index("escrow_jobs_status_idx").on(t.status),
   }),
 );
 
@@ -146,29 +175,40 @@ export const externalEvents = onchainTable("external_events", (t) => ({
   payload: t.jsonb().notNull(),
 }));
 
-export const anchors = onchainTable("anchors", (t) => ({
-  id: t.text().primaryKey(),
-  publisher: t.text().notNull(),
-  kind: t.integer().notNull(),
-  seq: t.text().notNull(),
-  root: t.text().notNull(),
-  prev: t.text().notNull(),
-  uriHash: t.text().notNull(),
-  uri: t.text().notNull(),
-  batchRoot: t.text(),
-  block: t.bigint().notNull(),
-  transaction: t.text().notNull(),
-}));
+export const anchors = onchainTable(
+  "anchors",
+  (t) => ({
+    id: t.text().primaryKey(),
+    publisher: t.text().notNull(),
+    kind: t.integer().notNull(),
+    seq: t.text().notNull(),
+    root: t.text().notNull(),
+    prev: t.text().notNull(),
+    uriHash: t.text().notNull(),
+    uri: t.text().notNull(),
+    batchRoot: t.text(),
+    block: t.bigint().notNull(),
+    transaction: t.text().notNull(),
+  }),
+  (t) => ({
+    publisherKindIdx: index("anchors_publisher_kind_idx").on(t.publisher, t.kind),
+    rootIdx: index("anchors_root_idx").on(t.root),
+  }),
+);
 
-export const gatewayTransfers = onchainTable("gateway_transfers", (t) => ({
-  transferId: t.text().primaryKey(),
-  status: t.text().notNull(),
-  fromAddress: t.text().notNull(),
-  toAddress: t.text().notNull(),
-  amount: t.text().notNull(),
-  nonce: t.text().notNull(),
-  txHash: t.text(),
-  createdAt: t.text().notNull(),
-  updatedAt: t.text().notNull(),
-  pocketAddress: t.text(),
-}));
+export const gatewayTransfers = onchainTable(
+  "gateway_transfers",
+  (t) => ({
+    transferId: t.text().primaryKey(),
+    status: t.text().notNull(),
+    fromAddress: t.text().notNull(),
+    toAddress: t.text().notNull(),
+    amount: t.text().notNull(),
+    nonce: t.text().notNull(),
+    txHash: t.text(),
+    createdAt: t.text().notNull(),
+    updatedAt: t.text().notNull(),
+    pocketAddress: t.text(),
+  }),
+  (t) => ({ pocketIdx: index("gateway_transfers_pocket_idx").on(t.pocketAddress) }),
+);
