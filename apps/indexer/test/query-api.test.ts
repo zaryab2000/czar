@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
 import { createIndexerApi } from "#src/api/router";
 import { loadConfig } from "@czar/config";
 import { derivedNonce } from "@czar/hashing";
@@ -50,7 +51,7 @@ const pullback = {
   value: "25000",
   salt: `0x${"6".repeat(64)}`,
   maxFee: "1000",
-  maxBlockHeight: 9000,
+  maxBlockHeight: 100,
   transferSpecHash: `0x${"7".repeat(64)}`,
   requestedAtBlock: 100,
   state: "Pending",
@@ -105,8 +106,11 @@ const seed = (): QueryRows => ({
 });
 
 function seededDb(rows = seed()) {
+  const readCounts: Partial<Record<QueryTable, number>> = {};
   return {
+    readCounts,
     async rows(table: QueryTable) {
+      readCounts[table] = (readCounts[table] ?? 0) + rows[table].length;
       return rows[table];
     },
   };
@@ -155,7 +159,7 @@ describe("indexer query API", () => {
     const app = createIndexerApi(seededDb(rows), loadConfig());
     const confirm = await app.request("/pullbacks/to-confirm");
     expect(((await confirm.json()) as { items: unknown[] }).items).toMatchObject([{ pullback }]);
-    const cancelEarly = await app.request("/pullbacks/to-cancel?block=3100");
+    const cancelEarly = await app.request("/pullbacks/to-cancel?block=3099");
     expect(((await cancelEarly.json()) as { items: unknown[] }).items).toEqual([]);
     const cancelOld = await app.request("/pullbacks/to-cancel?block=3101");
     expect(((await cancelOld.json()) as { items: unknown[] }).items).toEqual([]);
@@ -166,6 +170,14 @@ describe("indexer query API", () => {
     const app = createIndexerApi(seededDb(rows), loadConfig());
     const response = await app.request("/pullbacks/to-cancel?block=3100");
     expect(((await response.json()) as { items: unknown[] }).items).toMatchObject([{ pullback }]);
+  });
+
+  it("keeps the named pullback delay equal to the Solidity contract constant", () => {
+    const solidity = readFileSync(
+      new URL("../../../contracts/src/libraries/CzarConstants.sol", import.meta.url),
+      "utf8",
+    );
+    expect(solidity).toMatch(/PULLBACK_CANCEL_DELAY_BLOCKS\s*=\s*3_000\s*;/);
   });
 
   it("selects jobs whose indexed escrow status differs from the vault mirror", async () => {
@@ -193,20 +205,53 @@ describe("indexer query API", () => {
   it("returns the highest matching anchor and the anchor for a batch root", async () => {
     const rows = seed();
     rows.anchors.push(
-      { id: "a1", publisher: "publisher", kind: 1, seq: "2", root: "root-2", prev: "root-1", uriHash: "hash", uri: "uri", batchRoot: "batch", block: 20n, transaction: "tx-2" },
-      { id: "a2", publisher: "publisher", kind: 1, seq: "3", root: "root-3", prev: "root-2", uriHash: "hash", uri: "uri", batchRoot: "batch", block: 30n, transaction: "tx-3" },
+      {
+        id: "a1",
+        publisher: "publisher",
+        kind: 1,
+        seq: "2",
+        root: "root-2",
+        prev: "root-1",
+        uriHash: "hash",
+        uri: "uri",
+        batchRoot: "batch",
+        block: 20n,
+        transaction: "tx-2",
+      },
+      {
+        id: "a2",
+        publisher: "publisher",
+        kind: 1,
+        seq: "3",
+        root: "root-3",
+        prev: "root-2",
+        uriHash: "hash",
+        uri: "uri",
+        batchRoot: "batch",
+        block: 30n,
+        transaction: "tx-3",
+      },
     );
     const app = createIndexerApi(seededDb(rows), loadConfig());
-    expect(await (await app.request("/anchors/latest?publisher=publisher&kind=1")).json()).toEqual({ root: "root-3", seq: "3", block: "30", transaction: "tx-3" });
-    expect(await (await app.request("/anchors/batch")).json()).toEqual({ error: "root-required" });
-    expect(await (await app.request("/anchors/batch?root=batch")).json()).toMatchObject({ root: "root-2" });
+    expect(await (await app.request("/anchors/latest?publisher=publisher&kind=1")).json()).toEqual({
+      root: "root-3",
+      seq: "3",
+      block: "30",
+      transaction: "tx-3",
+    });
+    expect(await (await app.request("/anchors/batch")).json()).toMatchObject({ root: "root-2" });
     expect((await app.request("/dependency-state")).status).toBe(404);
   });
 
   it("returns one SQL-selected page rather than loading every reservation", async () => {
     const rows = seed();
     for (let id = 8; id < 20; id += 1) {
-      rows.reservations.push({ id: `${envelope.vault}:${id}`, vault: envelope.vault, reservationId: BigInt(id), mirror: { ...reservation, reservationId: id } });
+      rows.reservations.push({
+        id: `${envelope.vault}:${id}`,
+        vault: envelope.vault,
+        reservationId: BigInt(id),
+        mirror: { ...reservation, reservationId: id },
+      });
     }
     const source = seededDb(rows);
     const app = createIndexerApi(source, loadConfig({ envFile: { "api.pageDefaultLimit": 2 } }));

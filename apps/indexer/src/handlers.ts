@@ -1,14 +1,18 @@
 import { ponder } from "ponder:registry";
+import { and, eq } from "drizzle-orm";
 import {
   envelopes,
+  authorizations,
   indexedEvents,
   jobs,
   pockets,
+  pullbacks as pullbackRows,
   reservations,
   stepUsage,
   vaults,
 } from "ponder:schema";
 import { czarVaultAbi } from "@czar/vault-client";
+import { derivedNonce } from "@czar/hashing";
 import type { Address, Hex } from "viem";
 import "#src/register-external-events";
 import {
@@ -91,9 +95,10 @@ async function refreshEnvelope(
       id,
       vault: event.vault.toLowerCase(),
       envelopeId,
+      envelopeRef: mirror.envelopeRef,
       mirror,
     })
-    .onConflictDoUpdate({ mirror });
+    .onConflictDoUpdate({ envelopeRef: mirror.envelopeRef, mirror });
 }
 
 async function refreshReservation(
@@ -116,9 +121,17 @@ async function refreshReservation(
       id,
       vault: event.vault.toLowerCase(),
       reservationId,
+      envelopeId: BigInt(mirror.envelopeId),
+      state: mirror.state,
+      validBefore: BigInt(mirror.validBefore),
       mirror,
     })
-    .onConflictDoUpdate({ mirror });
+    .onConflictDoUpdate({
+      envelopeId: BigInt(mirror.envelopeId),
+      state: mirror.state,
+      validBefore: BigInt(mirror.validBefore),
+      mirror,
+    });
   await refreshEnvelope(context, event, view.envelopeId);
 }
 
@@ -212,6 +225,24 @@ async function refreshPullback(
     delegateReady: old.state === "DelegateReady",
   });
   await context.db.update(pockets, { id }).set({ mirror });
+  const projectionId = `${event.vault.toLowerCase()}:${pullbackId}`;
+  const oldProjection = await context.db.find(pullbackRows, { id: projectionId });
+  await context.db
+    .insert(pullbackRows)
+    .values({
+      id: projectionId,
+      vault: event.vault.toLowerCase(),
+      pocket: view.pocket.toLowerCase(),
+      state,
+      transferSpecHash: view.transferSpecHash.toLowerCase(),
+      maxBlockHeight: view.maxBlockHeight,
+      attested: oldProjection?.["attested"] ?? false,
+    })
+    .onConflictDoUpdate({
+      state,
+      transferSpecHash: view.transferSpecHash.toLowerCase(),
+      maxBlockHeight: view.maxBlockHeight,
+    });
   await refreshEnvelope(context, event, pocketView.envelopeId, undefined, requested);
 }
 
@@ -249,9 +280,18 @@ async function refreshJob(
       id,
       vault: event.vault.toLowerCase(),
       envelopeId: view.envelopeId,
+      jobEscrow: fromView.jobEscrow.toLowerCase(),
+      jobId: fromView.jobId,
+      state: String(mirror.state),
+      escrowState: previous?.escrowState ?? null,
       mirror,
     })
-    .onConflictDoUpdate({ mirror });
+    .onConflictDoUpdate({
+      jobEscrow: fromView.jobEscrow.toLowerCase(),
+      jobId: fromView.jobId,
+      state: String(mirror.state),
+      mirror,
+    });
   await refreshEnvelope(context, event, view.envelopeId);
 }
 
@@ -293,17 +333,59 @@ ponder.on("CzarVault:Reserved", async ({ event, context }) => {
   const info = meta(event);
   await record(context, info, "Reserved");
   await refreshReservation(context, info, event.args.reservationId);
+  const reservation = await context.client.readContract({
+    address: info.vault,
+    abi: czarVaultAbi,
+    functionName: "getReservation",
+    args: [event.args.reservationId],
+    blockNumber: info.block,
+  });
+  const createdAt = new Date(Number(info.timestamp) * 1000).toISOString();
+  const rows = Array.from({ length: reservation.count }, (_, index) => ({
+    id: `${info.vault.toLowerCase()}:${event.args.reservationId}:${index}`,
+    vault: info.vault.toLowerCase(),
+    reservationId: event.args.reservationId,
+    index,
+    nonce: derivedNonce(info.vault, event.args.reservationId, index),
+    amount: reservation.unitAmount.toString(),
+    used: false,
+    settled: false,
+    released: false,
+    settlementTx: null,
+    createdAt,
+  }));
+  if (rows.length > 0) await context.db.insert(authorizations).values(rows).onConflictDoNothing();
 });
 
 ponder.on("CzarVault:Settled", async ({ event, context }) => {
   const info = meta(event);
   await record(context, info, "Settled");
+  await context.db.sql
+    .update(authorizations)
+    .set({ settled: true, released: false, settlementTx: info.tx.toLowerCase() })
+    .where(
+      and(
+        eq(authorizations.vault, info.vault.toLowerCase()),
+        eq(authorizations.reservationId, event.args.reservationId),
+        eq(authorizations.index, event.args.index),
+      ),
+    );
   await refreshReservation(context, info, event.args.reservationId);
 });
 
 ponder.on("CzarVault:Released", async ({ event, context }) => {
   const info = meta(event);
   await record(context, info, "Released");
+  await context.db.sql
+    .update(authorizations)
+    .set({ released: true, settled: false })
+    .where(
+      and(
+        eq(authorizations.vault, info.vault.toLowerCase()),
+        eq(authorizations.reservationId, event.args.reservationId),
+        eq(authorizations.index, event.args.index),
+      ),
+    );
   await refreshReservation(context, info, event.args.reservationId);
 });
 

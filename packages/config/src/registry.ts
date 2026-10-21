@@ -777,14 +777,6 @@ export const PARAMETERS = [
     source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:62",
   },
   {
-    key: "indexer.pullbackCancelDelayBlocks",
-    type: "integer",
-    default: 3000,
-    unit: "blocks",
-    reason: "minimum age before a pending pullback can be cancelled",
-    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:109",
-  },
-  {
     key: "indexer.crossCheckEveryBlocks",
     type: "integer",
     default: 600,

@@ -1,6 +1,15 @@
 import { ponder } from "ponder:registry";
 import { and, eq } from "drizzle-orm";
-import { anchors, externalEvents, gatewayTransfers, pockets, vaults } from "ponder:schema";
+import {
+  anchors,
+  authorizations,
+  externalEvents,
+  gatewayTransfers,
+  jobs,
+  pockets,
+  pullbacks,
+  vaults,
+} from "ponder:schema";
 import type { Amount6, PocketRecord } from "@czar/schemas";
 import type { Address } from "viem";
 import { mirrorKey } from "@czar/indexer/mirrors";
@@ -55,7 +64,7 @@ function jsonValue(value: unknown): unknown {
 }
 
 async function save(context: Context, event: Event, name: string, payload: unknown): Promise<void> {
-  await context.db
+  await context.db.sql
     .insert(externalEvents)
     .values({
       id: externalEventId(event),
@@ -108,6 +117,10 @@ ponder.on("USDC:AuthorizationUsed", async ({ event, context }) => {
     authorizer: args.authorizer.toLowerCase(),
     nonce: args.nonce.toLowerCase(),
   });
+  await context.db.sql
+    .update(authorizations)
+    .set({ used: true })
+    .where(eq(authorizations.nonce, args.nonce.toLowerCase()));
 });
 
 const genericEvents = [
@@ -125,6 +138,18 @@ const genericEvents = [
   ["ERC8183", "Refunded"],
   ["ERC8183", "EvaluatorFeePaid"],
 ] as const;
+
+const ESCROW_STATUS: Readonly<Record<string, string>> = {
+  JobCreated: "Opened",
+  BudgetSet: "Opened",
+  JobFunded: "Funded",
+  JobSubmitted: "Submitted",
+  JobCompleted: "Completed",
+  JobRejected: "Rejected",
+  JobExpired: "Expired",
+  PaymentReleased: "Released",
+  Refunded: "Refunded",
+};
 
 ponder.on("OpenEvidenceLog:Committed", async ({ event, context }) => {
   const args = event.args;
@@ -207,6 +232,28 @@ for (const [contract, name] of genericEvents) {
       ]),
     );
     await save(context, event, name, normalized);
+    if (name === "AttestationUsed") {
+      const transferSpecHash = String(normalized["transferSpecHash"]).toLowerCase();
+      await context.db.sql
+        .update(pullbacks)
+        .set({ attested: true })
+        .where(eq(pullbacks.transferSpecHash, transferSpecHash));
+    }
+    const escrowState = ESCROW_STATUS[name];
+    if (escrowState && typeof normalized["jobId"] === "bigint") {
+      const jobRows = await context.db.sql
+        .select()
+        .from(jobs)
+        .where(
+          and(
+            eq(jobs.jobEscrow, event.log.address.toLowerCase()),
+            eq(jobs.jobId, String(normalized["jobId"])),
+          ),
+        );
+      for (const row of jobRows) {
+        await context.db.update(jobs, { id: row.id }).set({ escrowState });
+      }
+    }
   });
 }
 

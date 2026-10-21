@@ -22,6 +22,7 @@ const JOB_EVENT_STATE: Readonly<Record<string, string>> = {
   Refunded: "Refunded",
   PaymentReleased: "Released",
 };
+const PULLBACK_CANCEL_DELAY_BLOCKS = 3_000;
 export function createIndexerApi(source: QueryDataSource, config: Config = loadConfig()): Hono {
   const app = new Hono();
   app.get("/envelopes/:envelopeRef", async (context) => {
@@ -133,7 +134,6 @@ export function createIndexerApi(source: QueryDataSource, config: Config = loadC
   app.get("/pullbacks/to-cancel", async (context) => {
     const block = integerQuery(context.req.query("block"));
     if (block === null) return context.json({ error: "invalid-block" }, 400);
-    const delay = Number(config.get("indexer.pullbackCancelDelayBlocks"));
     const attested = new Set(
       (await source.rows("externalEvents"))
         .filter((row) => row.name === "AttestationUsed")
@@ -143,7 +143,7 @@ export function createIndexerApi(source: QueryDataSource, config: Config = loadC
       source,
       (item, pocket) =>
         item["state"] === "Pending" &&
-        Number(item["requestedAtBlock"]) + delay <= block &&
+        Number(item["maxBlockHeight"]) + PULLBACK_CANCEL_DELAY_BLOCKS <= block &&
         !attested.has(String(item["transferSpecHash"]).toLowerCase()) &&
         Boolean(pocket),
     );
@@ -195,22 +195,29 @@ export function createIndexerApi(source: QueryDataSource, config: Config = loadC
     const kind = integerQuery(context.req.query("kind"));
     if (!publisher || kind === null) return context.json({ error: "invalid-anchor-query" }, 400);
     const anchor = (await source.rows("anchors"))
-      .filter((row) => String(row.publisher).toLowerCase() === publisher && Number(row.kind) === kind)
+      .filter(
+        (row) => String(row.publisher).toLowerCase() === publisher && Number(row.kind) === kind,
+      )
       .toSorted((left, right) => compareIntegers(String(right.seq), String(left.seq)))[0];
-    return context.json(anchor ? {
-      root: anchor.root,
-      seq: String(anchor.seq),
-      block: String(anchor.block),
-      transaction: anchor.transaction,
-    } : null);
+    return context.json(
+      anchor
+        ? {
+            root: anchor.root,
+            seq: String(anchor.seq),
+            block: String(anchor.block),
+            transaction: anchor.transaction,
+          }
+        : null,
+    );
   });
 
   app.get("/anchors/:root", async (context) => {
     const root = context.req.param("root").toLowerCase();
     const anchor = (await source.rows("anchors")).find(
-      (row) => String(row.root).toLowerCase() === root || String(row["batchRoot"]).toLowerCase() === root,
+      (row) =>
+        String(row.root).toLowerCase() === root || String(row["batchRoot"]).toLowerCase() === root,
     );
-    return context.json(anchor ?? null);
+    return context.json(anchor ? jsonSafe(anchor) : null);
   });
   return app;
 }
@@ -327,6 +334,15 @@ function compareIntegers(left: string, right: string): number {
   const leftValue = BigInt(left);
   const rightValue = BigInt(right);
   return leftValue < rightValue ? -1 : leftValue > rightValue ? 1 : 0;
+}
+
+function jsonSafe(value: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [
+      key,
+      typeof item === "bigint" ? item.toString() : item,
+    ]),
+  );
 }
 
 function assertMirror(validate: (value: unknown) => boolean, value: unknown, label: string): void {

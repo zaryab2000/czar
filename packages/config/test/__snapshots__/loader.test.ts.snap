@@ -698,12 +698,6 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 1000,
   },
   {
-    "key": "indexer.pullbackCancelDelayBlocks",
-    "source": "default",
-    "unit": "blocks",
-    "value": 3000,
-  },
-  {
     "key": "indexer.reserveRateAlertPerMin",
     "source": "default",
     "unit": "count",
