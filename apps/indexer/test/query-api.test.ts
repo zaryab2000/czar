@@ -378,6 +378,16 @@ describe("T-034 query store (SQL)", () => {
       createdAt: "2026-10-21T00:00:05.500Z",
     });
     expect(all[6]).toMatchObject({ amount: "400", stepIndex: 1, jobKey: hash("1") });
+    expect(all[0]).toMatchObject({
+      payer: lower(VAULT),
+      nonce: derivedNonce(VAULT, 1n, 0),
+      validBefore: 999,
+    });
+    expect(all[0]?.payee?.toLowerCase()).toBe(lower(PAYEE));
+    const response = await createIndexerApi(store).request(`/receipts?vault=${lower(VAULT)}`);
+    expect(response.status).toBe(200);
+    const page = (await response.json()) as { items: { validBefore: number | null }[] };
+    expect(page.items[0]?.validBefore).toBe(999);
   });
 
   it("pages receipts correctly when several rails share one timestamp", async () => {

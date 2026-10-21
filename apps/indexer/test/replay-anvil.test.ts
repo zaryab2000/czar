@@ -647,8 +647,9 @@ it(
     // T-034: every CZ-19 §5.4 query through the real Ponder/Postgres API process.
     const query = async (path: string) => {
       const response = await fetch(`${API}/q${path}`);
-      expect(response.status, path).toBe(200);
-      return (await response.json()) as Record<string, unknown>;
+      const body = await response.text();
+      expect(response.status, `${path}: ${body}\n${ponderLogs}`).toBe(200);
+      return JSON.parse(body) as Record<string, unknown>;
     };
     const envelopeRef = String(mirrors.envelopes[0]?.["envelopeRef"]);
     const byRef = await query(`/envelopes/${encodeURIComponent(envelopeRef)}`);

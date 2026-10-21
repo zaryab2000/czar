@@ -28,6 +28,7 @@ import {
   reservations,
   vaults,
 } from "@czar/indexer/schema";
+import { safeNumber } from "#src/mirrors";
 
 /**
  * `PULLBACK_CANCEL_DELAY_BLOCKS` in contracts/src/libraries/CzarConstants.sol. A contract constant,
@@ -70,6 +71,11 @@ export interface ReceiptFact {
   readonly index: number | null;
   readonly transferId: string | null;
   readonly jobKey: string | null;
+  readonly payer: string | null;
+  readonly payee: string | null;
+  readonly nonce: string | null;
+  readonly validBefore: number | null;
+  readonly transferTx: string | null;
   readonly amount: string;
   readonly rail: ReceiptRail;
   readonly status: ReceiptStatus;
@@ -431,14 +437,18 @@ async function x402Receipts(
   const rows = await db
     .select({
       id: authorizations.id,
+      vault: authorizations.vault,
       reservationId: authorizations.reservationId,
       index: authorizations.index,
+      nonce: authorizations.nonce,
       amount: authorizations.amount,
       settled: authorizations.settled,
       released: authorizations.released,
       settlementTx: authorizations.settlementTx,
       createdAt: authorizations.createdAt,
       stepIndex: reservations.stepIndex,
+      validBefore: reservations.validBefore,
+      reservation: reservations.mirror,
       reservationState: reservations.state,
       envelopeRef: envelopes.envelopeRef,
     })
@@ -468,14 +478,18 @@ async function x402Receipts(
   return rows.map(
     (row: {
       id: string;
+      vault: string;
       reservationId: bigint;
       index: number;
+      nonce: string;
       amount: string;
       settled: boolean;
       released: boolean;
       settlementTx: string | null;
       createdAt: string;
       stepIndex: number;
+      validBefore: bigint;
+      reservation: { payee: string };
       reservationState: string;
       envelopeRef: string;
     }): ReceiptFact => ({
@@ -486,6 +500,11 @@ async function x402Receipts(
       index: row.index,
       transferId: null,
       jobKey: null,
+      payer: row.vault,
+      payee: row.reservation.payee,
+      nonce: row.nonce,
+      validBefore: safeNumber(row.validBefore),
+      transferTx: null,
       amount: row.amount,
       rail: "x402-exact",
       status: row.settled
@@ -517,6 +536,9 @@ async function gatewayReceipts(
   const rows = await db
     .select({
       transferId: gatewayTransfers.transferId,
+      payer: gatewayTransfers.fromAddress,
+      payee: gatewayTransfers.toAddress,
+      nonce: gatewayTransfers.nonce,
       status: gatewayTransfers.status,
       amount: gatewayTransfers.amount,
       txHash: gatewayTransfers.txHash,
@@ -541,6 +563,9 @@ async function gatewayReceipts(
   return rows.map(
     (row: {
       transferId: string;
+      payer: string;
+      payee: string;
+      nonce: string;
       status: string;
       amount: string;
       txHash: string | null;
@@ -555,6 +580,11 @@ async function gatewayReceipts(
       index: null,
       transferId: row.transferId,
       jobKey: null,
+      payer: row.payer,
+      payee: row.payee,
+      nonce: row.nonce,
+      validBefore: null,
+      transferTx: row.txHash,
       amount: row.amount,
       rail: "gateway-batched",
       status: GATEWAY_RECEIPT_STATUS[row.status] ?? "failed",
@@ -612,6 +642,11 @@ async function jobReceipts(
         index: null,
         transferId: null,
         jobKey: job.jobKey,
+        payer: null,
+        payee: null,
+        nonce: null,
+        validBefore: null,
+        transferTx: null,
         amount: job.budget === "0" ? job.reservedCap : job.budget,
         rail: "erc8183-job",
         status: jobReceiptStatus(row.state, row.escrowStatus),
