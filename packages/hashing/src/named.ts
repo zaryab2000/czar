@@ -1,10 +1,37 @@
 // Named hashes (02 §5.2). Each builds the exact preimage object the spec lists and returns H(preimage).
 // Inputs are the 02 objects; optional fields left undefined are omitted from the preimage.
-import { H } from "./jcs.ts";
+import { H, jcs } from "./jcs.ts";
 import type { Hash32 } from "./eip712.ts";
 import type { TaskSpec } from "@czar/schemas";
+import { keccak256 } from "viem";
 
 export const HASH_RULE = "czar-hash-v1";
+
+/** Computes the content-addressed Selection Layer profile id (SCR-122). */
+export function profileId(profile: Readonly<Record<string, unknown>>): string {
+  const { profile_id: _profileId, ...profileCore } = profile;
+  return `prof_${H(profileCore).slice(2, 34)}`;
+}
+
+/** Builds the structural key-tree used by shapeHash (02 §5.2, SCR-122). */
+export function keyTree(value: unknown): unknown {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return value.length ? [keyTree(value[0])] : [];
+  if (typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, keyTree(item)]),
+    );
+  }
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean")
+    return typeof value;
+  throw new TypeError(`Unsupported value in shape key-tree: ${typeof value}`);
+}
+
+/** Hashes the canonical key-tree of a JSON response body. */
+export function shapeHash(bodyText: string): Hash32 {
+  const parsed: unknown = JSON.parse(bodyText);
+  return keccak256(jcs(keyTree(parsed)));
+}
 
 export function taskSpecHash(taskSpec: TaskSpec): Hash32 {
   return H({ hashRule: HASH_RULE, kind: "task-spec", taskSpec });

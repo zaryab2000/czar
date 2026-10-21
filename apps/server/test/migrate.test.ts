@@ -58,6 +58,7 @@ describe("CZ-12 migrations", () => {
       "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name",
     );
     expect(result.rows.map(({ table_name }) => table_name)).toEqual([
+      "acceptance_reports",
       "audit",
       "devices",
       "idempotency",
@@ -69,6 +70,7 @@ describe("CZ-12 migrations", () => {
       "pairing_codes",
       "pay_requests",
       "plans",
+      "profiles",
       "rate_limit_buckets",
       "results",
       "schema_migrations",

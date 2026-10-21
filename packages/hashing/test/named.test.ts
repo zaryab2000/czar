@@ -11,7 +11,9 @@ import {
   objectiveHash,
   paymentRefHash,
   planHash,
+  profileId,
   reportHash,
+  shapeHash,
   soulVersionCommit,
   soulVersionHash,
   taskSpecHash,
@@ -251,5 +253,34 @@ describe("named hashes (02 §5.2)", () => {
       keccak256(encodeAbiParameters([{ type: "bytes32" }, { type: "bytes32" }], [hash("9"), salt])),
     );
     expect(burnSalt(VAULT, 1n)).not.toBe(burnSalt(VAULT, 2n));
+  });
+
+  it("computes profile ids from canonical profile JSON without profile_id", () => {
+    const profile = {
+      task_class: "data-json",
+      version: 1,
+      input_generator: { kind: "parametric", spec: {} },
+      checks: [],
+      tolerances: {},
+      abstain_rules: {},
+      cost_estimate_usd: 0,
+      receipt_checks: [],
+      limits: ["no-correctness-check"],
+      code_hash: hash("4"),
+    };
+    const id = profileId(profile);
+    expect(id).toMatch(/^prof_[0-9a-f]{32}$/);
+    expect(profileId({ ...profile, profile_id: "prof_ignored" })).toBe(id);
+    expect(profileId({ ...profile, version: 2 })).not.toBe(id);
+  });
+
+  it("hashes only JSON key structure and reduces arrays to their first element", () => {
+    expect(shapeHash('{"name":"Ada","scores":[1,2],"empty":[]}')).toBe(
+      shapeHash('{"name":"Grace","scores":[9],"empty":[]}'),
+    );
+    expect(shapeHash('{"name":"Ada","scores":[1,2],"empty":[]}')).not.toBe(
+      shapeHash('{"name":"Ada","scores":["1"],"empty":[]}'),
+    );
+    expect(shapeHash("null")).toMatch(/^0x[0-9a-f]{64}$/);
   });
 });
