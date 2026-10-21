@@ -45,6 +45,14 @@ describe("createLogger", () => {
     });
   });
 
+  it("accepts HTTP methods and the four S1 operation ids", () => {
+    const { logger, last } = capture();
+    logger.info("http_request", { method: "POST", route: "pairDevice", httpStatus: 201 });
+    expect(last()["method"]).toBe("POST");
+    expect(last()["route"]).toBe("pairDevice");
+    expect(last()["droppedFields"]).toBeUndefined();
+  });
+
   it("keeps allowlisted shapes: ids, hashes, addresses, amounts, counts, durations, enums, codes", () => {
     const { logger, last } = capture();
     const fields = {

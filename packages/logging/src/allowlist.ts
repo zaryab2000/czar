@@ -108,6 +108,8 @@ export const FIELD_RULES: readonly FieldRule[] = [
     accept: nonNegativeInteger,
   },
   { name: /^([a-z][A-Za-z0-9]*Ms|durationMs)$/, accept: nonNegativeInteger },
+  { name: /^method$/, accept: matches(/^(GET|POST|PUT|PATCH|DELETE)$/) },
+  { name: /^route$/, accept: matches(/^[a-z][A-Za-z0-9]{0,63}$/) },
   {
     name: /^(state|status|outcome|kind|mode|host|layer|rule|entity|czarCode|errorCode|method|route|network|keyId)$/,
     accept: matches(ENUM_TOKEN),

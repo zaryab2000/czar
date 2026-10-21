@@ -2,8 +2,13 @@
 // Inputs are the 02 objects; optional fields left undefined are omitted from the preimage.
 import { H } from "./jcs.ts";
 import type { Hash32 } from "./eip712.ts";
+import type { TaskSpec } from "@czar/schemas";
 
 export const HASH_RULE = "czar-hash-v1";
+
+export function taskSpecHash(taskSpec: TaskSpec): Hash32 {
+  return H({ hashRule: HASH_RULE, kind: "task-spec", taskSpec });
+}
 
 const sortedAscending = (hashes: readonly string[]) =>
   [...hashes].map((h) => h.toLowerCase()).toSorted();
@@ -49,6 +54,7 @@ export interface ObjectiveInput {
   readonly deadline?: string;
   readonly minutesSaved: number;
   readonly hourlyBand: string;
+  readonly taskSpecHash: string;
 }
 
 /** `observationHashes` sorted ascending; `capabilities` as given; `goal` is the redacted text. */
@@ -65,6 +71,7 @@ export function objectiveHash(o: ObjectiveInput): Hash32 {
     deadline: o.deadline,
     minutesSaved: o.minutesSaved,
     hourlyBand: o.hourlyBand,
+    taskSpecHash: o.taskSpecHash,
   });
 }
 
