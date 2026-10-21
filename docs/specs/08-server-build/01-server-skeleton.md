@@ -111,7 +111,6 @@ Create only these S1-owned files (split a file if a function exceeds the reposit
 | `apps/server/src/devices/pair.ts` | Internal code issuance and consumption, and the pair handler. |
 | `apps/server/src/routes/daemon.ts` | The four S1 handlers only. Keep them thin. |
 | `apps/server/test/compose.yaml`, `test/db.ts`, `test/fixtures.ts`, `test/*.test.ts` | Local PostgreSQL 16 for tests; per-test-file database setup; fixtures; tests in §11. |
-| `.github/workflows/ci.yml` | Add the `postgres` service to the `node` job (§13). No other CI change. |
 
 `packages/api-contract` owns the OpenAPI validators; `packages/schemas` owns `ObjectiveSubmission`, generated types and the sender guard. The server may define private row types but never hand-copies a wire interface.
 
@@ -367,7 +366,7 @@ Terminal states have no outgoing transition in S1. The transition repository use
 
 ### 9.2 `POST /v1/objectives` (`submitObjective`)
 
-1. Require DeviceToken, UUID v4 idempotency key and JSON body. Validate against T-009's operation schema and T-006's `ObjectiveSubmission` validator and `assertNoLocalOnly`. Ensure `body.deviceId === authenticated.deviceId`; a mismatch is `400 validation` and does not reveal another device.
+1. Require DeviceToken, UUID v4 idempotency key and JSON body. Validate against T-009's operation schema, then call `assertNoLocalOnly(body, "objective-submission")` from `@czar/schemas` (merged in PR #25). It validates the schema and rejects any `local-only` field in one call; map its `SchemaValidationError` and `LocalOnlyFieldError` to `400 validation`. Types come from `@czar/schemas` (`ObjectiveSubmission`, `TaskSpec`). Ensure `body.deviceId === authenticated.deviceId`; a mismatch is `400 validation` and does not reveal another device.
 2. Use the corrected `@czar/hashing` functions to recompute `taskSpecHash` and `objectiveHash` exactly as spec 02 §5.2: observation hashes sorted ascending, capabilities in supplied order, absent `deadline` omitted, `goal` as redacted text, and `taskSpecHash` included. A mismatch is `422 hash-mismatch`; no row or event is inserted. Do not trust a submitted hash for storage without recomputation.
 3. Inside the idempotency transaction, check global uniqueness of `objectiveId`. The same ID from a different device is rejected without disclosing the other record. Never overwrite an objective on conflict. Insert `objectives` with `state='received'`, full validated submission JSONB, authenticated user/device IDs and recomputed hash. Insert `objective.received` in `outbox_events` with `objectiveId` and hash only.
 4. Return `202 ObjectiveStatus` with `status='received'` and UTC `updatedAt`. A byte-identical retry returns the same body and original `updatedAt`, with no second outbox row.
@@ -467,32 +466,17 @@ Do the steps in order. Each step writes its failing tests first.
 2. **HTTP boundary.** Write contract tests for the four `operationId`s through T-009's helper. Implement `createApp`, the middleware pipeline (§6), RFC 9457 mapping, rate headers and allowlisted logging. Register only the four routes.
 3. **Authentication and pairing.** Write the single-use, expiry, replay and concurrency tests; implement token hashing, `issuePairingCode`, pair consumption, device auth and seeded app-session verification.
 4. **Objectives.** Write status, replay, hash, device-isolation, cursor and retention tests; implement the state guard, atomic submission plus outbox insert, keyset pagination, the get route and `purgeExpiredGoals`.
-5. **CI.** Add the Postgres service to `.github/workflows/ci.yml` (§13). Push and confirm the `node` job runs the server tests green.
+5. **Full local run.** Run every command in §13 on Zaryab's Mac (OrbStack provides Docker) and paste the output. GitHub CI is not used for this project; do not edit `.github/workflows/` or wait for CI.
 6. **Adversarial pass.** Run the malformed-body, foreign-device, same-key race, DB outage and privacy-corpus tests. Search the log sink and every table for a raw token, code or goal. Re-read each changed file for unused code and undocumented behaviour.
 7. **Task report** (format in `CLAUDE.md`): files, exact commands and pass/fail counts, dependency versions and audit output, the Postgres image digest used, SCRs filed, limitations. Do not mark T-041 done while any §13 box is unchecked.
 
 ## 13. Commands and definition of done
 
-**Test database.** `apps/server/test/compose.yaml` runs one service: image `postgres:16.15@sha256:<digest>`, port `127.0.0.1:15432:5432`, `POSTGRES_HOST_AUTH_METHOD: trust`, `tmpfs: /var/lib/postgresql/data`, healthcheck `pg_isready -U postgres`, no named volume. Resolve the digest once with `docker buildx imagetools inspect postgres:16.15` (multi-arch index digest) and use the same pinned reference in compose and CI. Trust auth is allowed **only** for this loopback, tmpfs, throwaway test server: it holds no credential and no product data. T-040's product database uses its own authentication.
+**Test database.** `apps/server/test/compose.yaml` runs one service: image `postgres:16.15@sha256:<digest>`, port `127.0.0.1:15432:5432`, `POSTGRES_HOST_AUTH_METHOD: trust`, `tmpfs: /var/lib/postgresql/data`, healthcheck `pg_isready -U postgres`, no named volume. Resolve the digest once with `docker buildx imagetools inspect postgres:16.15` (multi-arch index digest) and pin it in `compose.yaml`. Trust auth is allowed **only** for this loopback, tmpfs, throwaway test server: it holds no credential and no product data. T-040's product database uses its own authentication.
 
-**CI.** In `.github/workflows/ci.yml`, add to the `node` job, with the same pinned image reference:
+**CI.** Not used. All verification is the local command run below.
 
-```yaml
-    services:
-      postgres:
-        image: postgres:16.15@sha256:<digest>
-        env:
-          POSTGRES_HOST_AUTH_METHOD: trust
-        ports:
-          - 127.0.0.1:15432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 2s --health-timeout 5s --health-retries 30
-```
-
-Nothing else in CI changes. `actionlint` and `zizmor` must stay green.
-
-**Local machine.** Docker must be running on Zaryab's Mac (T-040 already requires it for product Postgres). If it is not installed, stop and ask; installing Docker is a step that needs Zaryab's approval.
+**Local machine.** Docker must be running on Zaryab's Mac; OrbStack is installed and provides `docker compose` and `docker buildx`. If `docker info` fails, stop and ask.
 
 Commands from the repo root:
 
@@ -520,7 +504,7 @@ No pass count is prewritten; the task report records the actual counts. T-041 is
 - [ ] `ObjectiveSubmission` rejects local-only extras; one outbox event accompanies one stored objective; `objectiveStatus_onlyCanonicalValuesStored` passes.
 - [ ] Device isolation, single-use pairing, token hashing, 24-hour idempotency, cursor expiry, retention and rate-limit boundaries pass, all read from `@czar/config`.
 - [ ] Database-outage and concurrent-retry tests prove no partial write or duplicate event; no bearer, code or user text appears in logs or problem bodies.
-- [ ] `pnpm lint`, `pnpm -r typecheck` and the CI `node` job pass with zero warnings. The task report contains the outputs.
+- [ ] `pnpm lint`, `pnpm -r typecheck` and the full §13 command list pass locally with zero warnings. The task report contains the outputs.
 
 ## 14. Handoff to later server PRDs
 
