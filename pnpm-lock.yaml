@@ -127,6 +127,9 @@ importers:
       '@czar/schemas':
         specifier: workspace:*
         version: link:../../packages/schemas
+      '@czar/signer':
+        specifier: workspace:*
+        version: link:../signer
       '@czar/vault-client':
         specifier: workspace:*
         version: link:../../packages/vault-client

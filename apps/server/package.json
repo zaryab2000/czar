@@ -12,7 +12,8 @@
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "eval": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/eval.mjs"
   },
   "dependencies": {
     "@czar/api-contract": "workspace:*",
@@ -20,6 +21,7 @@
     "@czar/hashing": "workspace:*",
     "@czar/logging": "workspace:*",
     "@czar/schemas": "workspace:*",
+    "@czar/signer": "workspace:*",
     "@czar/vault-client": "workspace:*",
     "@czar/x402": "workspace:*",
     "ajv": "8.20.0",

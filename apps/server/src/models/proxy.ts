@@ -1,11 +1,18 @@
 import { Ajv2020 } from "ajv/dist/2020.js";
+import { readFile } from "node:fs/promises";
 import type { Config, ParameterKey } from "@czar/config";
 import { validateRecordedExchange } from "@czar/api-contract";
 import type { Logger } from "@czar/logging";
 import type { Pool, PoolClient } from "pg";
+import { keccak256 } from "viem";
 import { findOrCreateIdempotency, fingerprintRequest } from "#src/http/idempotency";
 
-export type ModelPrompt = "P-01" | "P-04" | "P-05" | "P-06" | "P-07";
+export type ModelPrompt = "P-01" | "P-02" | "P-04" | "P-05" | "P-06" | "P-07";
+
+export async function computePromptHash(prompt: ModelPrompt): Promise<string> {
+  const bytes = await readFile(new URL(`../../../../models/${prompt}.md`, import.meta.url));
+  return keccak256(bytes);
+}
 
 export interface ModelCallRequest {
   readonly prompt: ModelPrompt;
@@ -44,6 +51,11 @@ const PROMPT_PARAMS: Readonly<
     monthly: "models.screenMonthlyTokens",
     perCall: "models.screen.maxTokensPerCall",
     timeout: "models.screen.timeoutMs",
+  },
+  "P-02": {
+    monthly: "models.readerMonthlyTokens",
+    perCall: "models.reader.maxTokensPerCall",
+    timeout: "models.reader.timeoutMs",
   },
   "P-04": {
     monthly: "models.soulMonthlyTokens",
@@ -95,6 +107,39 @@ export async function completeModelCall(
     readonly now: Date;
   },
 ): Promise<ModelProxyResult> {
+  return completeWithBudget(pool, config, logger, modelClient, input, false);
+}
+
+/** Runs the server-only P-01/P-02 boundary prompts through the same owner budget. */
+export async function completeBoundaryModelCall(
+  pool: Pool,
+  config: Config,
+  logger: Logger,
+  modelClient: ModelClient,
+  input: {
+    readonly body: ModelCallRequest;
+    readonly rawBody: Buffer;
+    readonly key: string;
+    readonly deviceId: string;
+    readonly userId: string;
+    readonly now: Date;
+  },
+): Promise<ModelProxyResult> {
+  if (input.body.prompt !== "P-01" && input.body.prompt !== "P-02")
+    return { status: 400, code: "validation", body: {} };
+  return completeWithBudget(pool, config, logger, modelClient, input, true);
+}
+
+async function completeWithBudget(
+  pool: Pool,
+  config: Config,
+  logger: Logger,
+  modelClient: ModelClient,
+  input: Parameters<typeof completeModelCall>[4],
+  boundaryOnly: boolean,
+): Promise<ModelProxyResult> {
+  if ((await computePromptHash(input.body.prompt)) !== input.body.promptHash.toLowerCase())
+    return { status: 503, code: "upstream-unavailable", body: {} };
   const validateOutput = compileOutputValidator(input.body.schema);
   if (!validateOutput) return { status: 400, code: "validation", body: {} };
   const scope = `completeModelCall:${input.deviceId}`;
@@ -124,7 +169,7 @@ export async function completeModelCall(
   }
 
   const result = await inTransaction(pool, (client) =>
-    settle(client, input, scope, monthStart, reservation, completion, validateOutput),
+    settle(client, input, scope, monthStart, reservation, completion, validateOutput, boundaryOnly),
   );
   if (result.usage) {
     logger.info(result.status === 200 ? "model_call_completed" : "model_call_rejected", {
@@ -206,6 +251,7 @@ async function settle(
   reservation: Extract<Reservation, { kind: "reserved" }>,
   completion: ModelCompletion | undefined,
   validateOutput: (value: unknown) => boolean,
+  boundaryOnly: boolean,
 ): Promise<ModelProxyResult> {
   await client.query("DELETE FROM model_reservations WHERE reservation_id=$1", [
     reservation.reservationId,
@@ -220,11 +266,12 @@ async function settle(
   const ok =
     used <= reservation.maxTotalTokens &&
     validateOutput(completion.output) &&
-    validateRecordedExchange("completeModelCall", {
-      requestBody: input.body,
-      responseStatus: 200,
-      responseBody: body,
-    }).valid;
+    (boundaryOnly ||
+      validateRecordedExchange("completeModelCall", {
+        requestBody: input.body,
+        responseStatus: 200,
+        responseBody: body,
+      }).valid);
   const status = ok ? 200 : 503;
   await recordIdempotencyUsage(client, scope, input.key, status, completion.usage);
   if (!ok) return { status: 503, code: "upstream-unavailable", body: {}, usage: completion.usage };
