@@ -75,6 +75,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 10,
   },
   {
+    "key": "acceptance.sandboxMemoryMb",
+    "source": "default",
+    "unit": "MB",
+    "value": 50,
+  },
+  {
     "key": "acceptance.sandboxTimeoutMs",
     "source": "default",
     "unit": "ms",

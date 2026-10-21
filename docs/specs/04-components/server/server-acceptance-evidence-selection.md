@@ -225,6 +225,7 @@ Ponder 0.18.x (A9-05), viem 2.57.x (A9-05), Postgres 16; hosted fallbacks Goldsk
 ### 3. Runtime
 
 - Server worker pool; each check runs in a sandbox (Node `vm` context with no `require`, no network, no timers beyond `acceptance.sandboxTimeoutMs`; SL-C7 reuse). Budget: ≤ 50 MB per check, `acceptance.sandboxTimeoutMs` 5,000 ms.
+- **Sandbox (SCR-122):** each check run is a `worker_threads` worker with `resourceLimits.maxOldGenerationSizeMb = acceptance.sandboxMemoryMb` 50, terminated at `acceptance.sandboxTimeoutMs` (→ `inconclusive`, `limits += ["sandbox-timeout"]`). Inside it the executor script runs in a `vm` context with `codeGeneration: {strings: false, wasm: false}` that receives only copied data, never host functions or objects. Ajv runs in the worker outside the context, with no `loadSchema`.
 - The evaluator loop wakes on `jobsAwaitingEvaluation()` from CZ-19 and on a timer `acceptance.evaluatorPollSeconds` 15.
 
 ### 4. Interfaces
@@ -281,6 +282,7 @@ stateDiagram-v2
 #### 5.4 Report and hash
 
 - `AcceptanceReport` = SL `ValidationReportCore` fields + Czar additions (02 §4.14): `obs_id` (the receipt's id), `profile_id` (`prof_` + hash of the profile JSON, SL §5.1), `method_version` = the executor code hash (SL-C7 `code_hash`), `validator = {id: "czar-evaluator", address: K7 address}`, `assignment = {kind: "buyer-local"}`, `checks[]`, `conflict_flags = ["self-reported-checks"]`, `cost_usd = 0`, `created_at`, `limits = ["no-correctness-check"]`, `envelopeRef`, `stepIndex`, `jobKey?`, `decision`, `reportHash = keccak256(jcs(report minus reportHash))` (02 §5.2).
+- **Ids (SCR-122):** the executor is the single plain-JS file `apps/server/src/acceptance/executor/checks.js`, run unchanged; `code_hash` = `keccak256(UTF-8 bytes of that file)`. `profile_id` = `"prof_" + hex(keccak256(jcs(profile without profile_id)))[0:32]` (`@czar/hashing` `profileId`). The Phase 1 `data-json` profile JSON is fixed in SCR-122 (check specs name parameter keys, not values). `shapeHash(body)` = `keccak256(jcs(keyTree(JSON.parse(body))))`, where `keyTree` keeps object keys, maps an array to `[keyTree(first)]` or `[]`, and a scalar to its type name (`string`, `number`, `boolean`, `null`); CZ-18 writes `shape_hash_advisory` with the same `@czar/hashing` `shapeHash`.
 - `reportHash` is the ERC-8183 `reason` (03 `job-escrow-adapter.md` §3) and the `outcomeHashes[]` entry in the `demand-proof` leaf (02 §4.17).
 
 #### 5.5 Evaluator for ERC-8183 jobs
@@ -323,6 +325,7 @@ Czar judges work it planned and paid for. Mitigations in Phase 1, all visible:
 | `acceptance.maxBodyBytes` | 5,242,880 | SL-C2 `Q03` |
 | `acceptance.schemaMaxBytes` | 8,192 | 02 §11.3 |
 | `acceptance.sandboxTimeoutMs` | 5,000 | deterministic checks are fast; a slow check is a bug |
+| `acceptance.sandboxMemoryMb` | 50 | §3 per-check memory budget (SCR-122) |
 | `acceptance.evaluatorPollSeconds` | 15 | jobs are minutes-scale; no need for sub-second |
 | `acceptance.deliverableMaxBytes` | 20,971,520 | job deliverables are larger than API bodies; bounded for the sandbox |
 | `acceptance.deliverableFetchTimeoutMs` | 30,000 | matches delivery |
@@ -876,3 +879,4 @@ Postgres 16 (pgvector only in Phase 2, C1-13), `@czar/x402` for probes, `@x402/e
 | 2026-10-20 | N1 (D87) | Job providers need only `delivery` in Phase 1; unverified-with-approval rule; seeded job runs; wording and tests. |
 | 2026-10-20 | H6, N2 | Evaluator step 3: artifact deliverables keep their flags and are decided by the profile. |
 | 2026-10-20 | D91 | CZ-18: capability cards (§5.3b), tags+BM25 retrieval and the match set (§5.3c), testnet test-buyer (§5.3d), `output-format` gate, storage, parameters, tests. Embeddings held in SCR-032. |
+| 2026-10-21 | SCR-122 | Sandbox as worker plus `vm` context; `acceptance.sandboxMemoryMb`; `code_hash`, `profile_id` and `shapeHash` defined; Phase 1 `data-json` profile JSON fixed. |
