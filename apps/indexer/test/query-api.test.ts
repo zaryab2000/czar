@@ -4,6 +4,7 @@ import { derivedNonce } from "@czar/hashing";
 import {
   anchors,
   authorizations,
+  haltFlags,
   envelopes,
   escrowJobs,
   gatewayTransfers,
@@ -493,6 +494,24 @@ describe("T-034 HTTP routes", () => {
       await (await app.request(`/anchors/latest?publisher=${lower(PUBLISHER)}&kind=1`)).json(),
     ).toBeNull();
     expect(await (await app.request(`/anchors/by-batch/${hash("1")}`)).json()).toBeNull();
-    expect((await app.request("/dependency-state")).status).toBe(404);
+  });
+
+  it("returns dependency state flags from PGlite through the query store and HTTP route", async () => {
+    await db.insert(haltFlags).values([
+      { path: "gateway-nano", halted: true, reason: "dependency-upgraded", sourceProxy: "0x01", block: 12n, transaction: hash("1") },
+      { path: "x402-exact", halted: true, reason: "dependency-upgraded", sourceProxy: "0x02", block: 10n, transaction: hash("2") },
+    ]);
+    const store = createQueryStore(db);
+    expect((await store.dependencyState()).map((flag) => flag.path)).toEqual([
+      "gateway-nano",
+      "x402-exact",
+    ]);
+    const app = createIndexerApi(store, config);
+    expect(await (await app.request("/dependency-state")).json()).toEqual({
+      items: [
+        { path: "gateway-nano", halted: true, reason: "dependency-upgraded", sourceProxy: "0x01", block: "12", transaction: hash("1") },
+        { path: "x402-exact", halted: true, reason: "dependency-upgraded", sourceProxy: "0x02", block: "10", transaction: hash("2") },
+      ],
+    });
   });
 });
