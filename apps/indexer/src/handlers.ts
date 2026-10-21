@@ -1,5 +1,5 @@
 import { ponder } from "ponder:registry";
-import { and, eq } from "drizzle-orm";
+import { and, eq, lt, sum } from "drizzle-orm";
 import {
   envelopes,
   authorizations,
@@ -8,11 +8,14 @@ import {
   pockets,
   pullbacks as pullbackRows,
   reservations,
+  reserveRateBuckets,
   stepUsage,
   vaults,
 } from "ponder:schema";
 import { czarVaultAbi } from "@czar/vault-client";
 import { derivedNonce } from "@czar/hashing";
+import { envVarName, loadConfig, PARAMETERS } from "@czar/config";
+import { createLogger } from "@czar/logging";
 import type { Address, Hex } from "viem";
 import "#src/register-external-events";
 import {
@@ -25,6 +28,8 @@ import {
   safeNumber,
   type PullbackMirror,
 } from "@czar/indexer/mirrors";
+import { createLagMonitor, isLiveBucket, lagAlert, reserveRateAlert } from "#src/alerts/rules";
+import { createAlertReporter } from "#src/alerts/reporter";
 
 type Context = Parameters<Parameters<typeof ponder.on>[1]>[0]["context"];
 type Meta = {
@@ -34,6 +39,69 @@ type Meta = {
   tx: Hex;
   logIndex: number;
 };
+
+const alertConfig = loadConfig({
+  env: Object.fromEntries(
+    PARAMETERS.flatMap((parameter) => {
+      const name = envVarName(parameter.key);
+      const value = process.env[name];
+      return value === undefined ? [] : [[name, value]];
+    }),
+  ),
+});
+const reportAlert = createAlertReporter(createLogger({ service: "indexer", component: "CZ-19" }));
+const minuteBuckets = 60n;
+const MS_PER_SECOND = 1000;
+const lagMonitor = createLagMonitor(alertConfig.get("indexer.pollingIntervalMs") as number);
+
+async function recordReserveRate(context: Context, event: Meta): Promise<void> {
+  const bucket = event.timestamp / minuteBuckets;
+  const vault = event.vault.toLowerCase();
+  const id = `${bucket}:${vault}`;
+  await context.db
+    .insert(reserveRateBuckets)
+    .values({ id, bucket, vault, count: 1 })
+    .onConflictDoUpdate((row) => ({ count: row.count + 1 }));
+  const [vaultBucket] = await context.db.sql
+    .select({ count: reserveRateBuckets.count })
+    .from(reserveRateBuckets)
+    .where(eq(reserveRateBuckets.id, id));
+  const limits = alertConfig.get("indexer.reserveRateAlertPerMin") as {
+    perVault: number;
+    global: number;
+  };
+  const live = isLiveBucket(
+    BigInt(Math.floor(Date.now() / MS_PER_SECOND)),
+    event.timestamp,
+    minuteBuckets,
+  );
+  const vaultCount = vaultBucket?.count ?? 0;
+  if (live && vaultCount === limits.perVault + 1 && reserveRateAlert(vaultCount, limits.perVault)) {
+    reportAlert("reserve-rate", {
+      rule: "reserve-rate",
+      count: vaultCount,
+      vault,
+      blockNumber: Number(event.block),
+      mode: "per-vault",
+    });
+  }
+  const [globalBucket] = await context.db.sql
+    .select({ count: sum(reserveRateBuckets.count) })
+    .from(reserveRateBuckets)
+    .where(eq(reserveRateBuckets.bucket, bucket));
+  const globalCount = Number(globalBucket?.count ?? 0);
+  if (live && globalCount === limits.global + 1 && reserveRateAlert(globalCount, limits.global)) {
+    reportAlert("reserve-rate", {
+      rule: "reserve-rate",
+      count: globalCount,
+      blockNumber: Number(event.block),
+      mode: "global",
+    });
+  }
+  await context.db.sql
+    .delete(reserveRateBuckets)
+    .where(lt(reserveRateBuckets.bucket, bucket - minuteBuckets));
+}
 
 function meta(event: {
   log: { address: Address; logIndex: number };
@@ -337,6 +405,7 @@ ponder.on("CzarVault:EnvelopeForceClosed", async ({ event, context }) => {
 ponder.on("CzarVault:Reserved", async ({ event, context }) => {
   const info = meta(event);
   await record(context, info, "Reserved");
+  await recordReserveRate(context, info);
   await refreshReservation(context, info, event.args.reservationId);
   const reservation = await context.client.readContract({
     address: info.vault,
@@ -360,6 +429,19 @@ ponder.on("CzarVault:Reserved", async ({ event, context }) => {
     createdAt,
   }));
   if (rows.length > 0) await context.db.insert(authorizations).values(rows).onConflictDoNothing();
+});
+
+ponder.on("IndexerLag:block", async ({ event, context }) => {
+  if (!lagMonitor.shouldCheck(Date.now())) return;
+  const head = BigInt(await context.client.request({ method: "eth_blockNumber" }));
+  const indexed = event.block.number;
+  const lag = lagAlert(head, indexed, alertConfig.get("indexer.maxLagBlocks") as number);
+  if (!lagMonitor.observe(lag) || lag === null) return;
+  reportAlert("indexer-lag", {
+    rule: "indexer-lag",
+    count: Number(lag),
+    blockNumber: Number(indexed),
+  });
 });
 
 ponder.on("CzarVault:Settled", async ({ event, context }) => {

@@ -5,6 +5,8 @@ export const usdcEvents = parseAbi([
   "event AuthorizationUsed(address indexed authorizer,bytes32 indexed nonce)",
 ]);
 
+export const proxyEvents = parseAbi(["event Upgraded(address indexed implementation)"]);
+
 export const eip7708Events = parseAbi([
   "event Transfer(address indexed from,address indexed to,uint256 value)",
 ]);
@@ -31,6 +33,11 @@ export const erc8183Events = parseAbi([
   "event PaymentReleased(uint256 indexed jobId,address indexed provider,uint256 amount)",
   "event Refunded(uint256 indexed jobId,address indexed client,uint256 amount)",
   "event EvaluatorFeePaid(uint256 indexed jobId,address indexed evaluator,uint256 amount)",
+  "event RoleGranted(bytes32 indexed role,address indexed account,address indexed sender)",
+  "event HookWhitelistUpdated(address indexed hook,bool status)",
+  "event PaymentTokenAllowlistUpdated(address indexed token,bool status)",
+  "event PlatformFeeUpdated(uint256 feeBP,address indexed treasury)",
+  "event EvaluatorFeeUpdated(uint256 feeBP)",
 ]);
 
 export const openEvidenceEvents = parseAbi([

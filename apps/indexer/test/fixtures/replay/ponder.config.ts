@@ -8,6 +8,7 @@ import {
   gatewayMinterEvents,
   gatewayWalletEvents,
   openEvidenceEvents,
+  proxyEvents,
   usdcEvents,
 } from "#src/external-abis";
 import { EXTERNAL_ADDRESSES } from "#src/external-events";
@@ -35,6 +36,7 @@ export default createConfig({
   },
   blocks: {
     GatewayPoll: { chain: "arcTestnet" },
+    IndexerLag: { chain: "arcTestnet" },
   },
   contracts: {
     CzarVaultFactory: {
@@ -55,7 +57,7 @@ export default createConfig({
     },
     USDC: {
       chain: "arcTestnet",
-      abi: usdcEvents,
+      abi: [...usdcEvents, ...proxyEvents],
       address: EXTERNAL_ADDRESSES.usdc as `0x${string}`,
       startBlock: 0,
     },
@@ -67,19 +69,19 @@ export default createConfig({
     },
     GatewayWallet: {
       chain: "arcTestnet",
-      abi: gatewayWalletEvents,
+      abi: [...gatewayWalletEvents, ...proxyEvents],
       address: EXTERNAL_ADDRESSES.gatewayWallet as `0x${string}`,
       startBlock: 0,
     },
     GatewayMinter: {
       chain: "arcTestnet",
-      abi: gatewayMinterEvents,
+      abi: [...gatewayMinterEvents, ...proxyEvents],
       address: EXTERNAL_ADDRESSES.gatewayMinter as `0x${string}`,
       startBlock: 0,
     },
     ERC8183: {
       chain: "arcTestnet",
-      abi: erc8183Events,
+      abi: [...erc8183Events, ...proxyEvents],
       address: EXTERNAL_ADDRESSES.erc8183 as `0x${string}`,
       startBlock: 0,
     },

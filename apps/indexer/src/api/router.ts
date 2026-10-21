@@ -132,6 +132,10 @@ export function createIndexerApi(store: QueryStore, config: Config = loadConfig(
     return context.json(await store.anchorByBatch(root));
   });
 
+  app.get("/dependency-state", async (context) =>
+    context.json({ items: await store.dependencyState() }),
+  );
+
   return app;
 }
 

@@ -3,9 +3,11 @@ import { and, eq } from "drizzle-orm";
 import {
   anchors,
   authorizations,
+  dependencyState,
   externalEvents,
   escrowJobs,
   gatewayTransfers,
+  haltFlags,
   pockets,
   pullbacks,
   vaults,
@@ -19,6 +21,8 @@ import { normalizeTransferAmount } from "#src/amounts";
 import { externalEventId, pocketDelegateState } from "#src/external-events";
 import { EXTERNAL_ADDRESSES } from "#src/external-events";
 import { pollGatewayTransfers } from "#src/gateway-poller";
+import { createAlertReporter } from "#src/alerts/reporter";
+import { haltPaths, type PinnedProxy } from "#src/alerts/rules";
 
 type Context = Parameters<Parameters<typeof ponder.on>[1]>[0]["context"];
 type Event = {
@@ -49,6 +53,7 @@ for (const address of payoutAddresses) {
 }
 const normalizedPayoutAddresses = payoutAddresses.map((address) => address.toLowerCase());
 const logger = createLogger({ service: "indexer", component: "CZ-19" });
+const reportAlert = createAlertReporter(logger);
 const MS_PER_SECOND = 1000;
 let lastGatewayPollMs = 0;
 let gatewayPollInFlight = false;
@@ -156,6 +161,109 @@ const ESCROW_STATUS: Readonly<Record<string, string>> = {
   JobRejected: "Rejected",
   JobExpired: "Expired",
 };
+
+const PINNED_PROXIES = [
+  ["USDC", "usdc", EXTERNAL_ADDRESSES.usdc],
+  ["GatewayWallet", "gatewayWallet", EXTERNAL_ADDRESSES.gatewayWallet],
+  ["GatewayMinter", "gatewayMinter", EXTERNAL_ADDRESSES.gatewayMinter],
+  ["ERC8183", "erc8183", EXTERNAL_ADDRESSES.erc8183],
+] as const satisfies readonly (readonly [string, PinnedProxy, string])[];
+
+async function dependencyAlert(
+  context: Context,
+  event: Event,
+  proxy: string,
+  implementation: string | null,
+  name: string,
+  paths: readonly string[],
+): Promise<void> {
+  const transaction = event.transaction.hash.toLowerCase();
+  const block = event.block.number;
+  if (implementation !== null) {
+    const id = proxy.toLowerCase();
+    await context.db
+      .insert(dependencyState)
+      .values({
+        id,
+        proxy: id,
+        implementation: implementation.toLowerCase(),
+        lastEvent: name,
+        block,
+        transaction,
+      })
+      .onConflictDoUpdate({
+        implementation: implementation.toLowerCase(),
+        lastEvent: name,
+        block,
+        transaction,
+      });
+  }
+  for (const path of paths) {
+    await context.db
+      .insert(haltFlags)
+      .values({
+        path,
+        halted: true,
+        reason: "dependency-upgraded",
+        sourceProxy: proxy.toLowerCase(),
+        block,
+        transaction,
+      })
+      .onConflictDoUpdate({
+        halted: true,
+        reason: "dependency-upgraded",
+        sourceProxy: proxy.toLowerCase(),
+        block,
+        transaction,
+      });
+  }
+  reportAlert("dependency-upgraded", {
+    rule: "dependency-upgraded",
+    flags: [...paths],
+    ...(implementation === null ? {} : { implementationAddress: implementation.toLowerCase() }),
+    blockNumber: Number(block),
+    hash: transaction,
+  });
+}
+
+for (const [contract, proxyKey, proxy] of PINNED_PROXIES) {
+  const eventName = `${contract}:Upgraded` as Parameters<typeof ponder.on>[0];
+  ponder.on(eventName, async (input) => {
+    const { event, context } = input as unknown as { event: Event; context: Context };
+    const args = event.args as { implementation: Address };
+    await save(context, event, "Upgraded", args);
+    await dependencyAlert(
+      context,
+      event,
+      proxy,
+      args.implementation,
+      "Upgraded",
+      haltPaths(proxyKey, "Upgraded"),
+    );
+  });
+}
+
+for (const name of [
+  "RoleGranted",
+  "HookWhitelistUpdated",
+  "PlatformFeeUpdated",
+  "EvaluatorFeeUpdated",
+] as const) {
+  const eventName = `ERC8183:${name}` as Parameters<typeof ponder.on>[0];
+  ponder.on(eventName, async (input) => {
+    const { event, context } = input as unknown as { event: Event; context: Context };
+    const args = event.args as Record<string, unknown>;
+    await save(context, event, name, args);
+    await dependencyAlert(
+      context,
+      event,
+      EXTERNAL_ADDRESSES.erc8183,
+      null,
+      name,
+      haltPaths("erc8183", name),
+    );
+  });
+}
 
 ponder.on("OpenEvidenceLog:Committed", async ({ event, context }) => {
   const args = event.args;

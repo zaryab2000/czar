@@ -212,3 +212,34 @@ export const gatewayTransfers = onchainTable(
   }),
   (t) => ({ pocketIdx: index("gateway_transfers_pocket_idx").on(t.pocketAddress) }),
 );
+
+export const dependencyState = onchainTable("dependency_state", (t) => ({
+  id: t.text().primaryKey(),
+  proxy: t.text().notNull(),
+  implementation: t.text().notNull(),
+  lastEvent: t.text().notNull(),
+  block: t.bigint().notNull(),
+  transaction: t.text().notNull(),
+}));
+
+export const haltFlags = onchainTable("halt_flags", (t) => ({
+  path: t.text().primaryKey(),
+  halted: t.boolean().notNull(),
+  reason: t.text().notNull(),
+  sourceProxy: t.text().notNull(),
+  block: t.bigint().notNull(),
+  transaction: t.text().notNull(),
+}));
+
+export const reserveRateBuckets = onchainTable(
+  "reserve_rate_buckets",
+  (t) => ({
+    id: t.text().primaryKey(),
+    bucket: t.bigint().notNull(),
+    vault: t.text().notNull(),
+    count: t.integer().notNull(),
+  }),
+  (t) => ({
+    bucketVaultIdx: index("reserve_rate_bucket_vault_idx").on(t.bucket, t.vault),
+  }),
+);
