@@ -10,6 +10,7 @@ import {
 } from "ponder:schema";
 import { czarVaultAbi } from "@czar/vault-client";
 import type { Address, Hex } from "viem";
+import "#src/register-external-events";
 import {
   envelopeMirror,
   jobMirror,

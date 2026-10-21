@@ -3,6 +3,9 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "imports": {
+    "#src/*": "./src/*.ts"
+  },
   "exports": {
     "./rpc": "./src/rpc/arc-transport.ts",
     "./handlers": "./src/handlers.ts",
@@ -17,7 +20,9 @@
   "dependencies": {
     "@czar/config": "workspace:*",
     "@czar/logging": "workspace:*",
+    "@czar/schemas": "workspace:*",
     "@czar/vault-client": "workspace:*",
+    "drizzle-orm": "0.41.0",
     "ponder": "0.18.2",
     "viem": "2.57.7"
   },
