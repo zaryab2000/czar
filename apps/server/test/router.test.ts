@@ -11,6 +11,7 @@ import {
   pocketThreshold,
   pocketWorthIt,
   route,
+  routingParamsFromConfig,
   type MerchantRate,
   type RouterInput,
   type RoutingParams,
@@ -46,11 +47,6 @@ const gateway: PaymentRequirements = {
   ...exact,
   extra: { name: GATEWAY_EXTRA_NAME },
 };
-const gatewayOnly: PaymentRequirements = {
-  ...gateway,
-  scheme: "exact",
-};
-
 function input(overrides: Partial<RouterInput> = {}): RouterInput {
   return {
     step: {} as Step,
@@ -106,11 +102,11 @@ describe("CZ-14 payment router cost model", () => {
       readFileSync(new URL("../../../packages/config/gas-table.json", import.meta.url), "utf8"),
     ) as Record<string, unknown>;
     const config = loadConfig({ envFile: measured });
-    const params = paramsFromConfig(config);
-    expect(pocketThreshold(1, FLOOR_GAS_PRICE, params)).toBeGreaterThan(0n);
-    expect(pocketThreshold(10, FLOOR_GAS_PRICE, params)).toBeGreaterThan(0n);
-    expect(pocketThreshold(100, FLOOR_GAS_PRICE, params)).toBeGreaterThan(0n);
-    expect(cPocket(FLOOR_GAS_PRICE, params)).toBeGreaterThan(15_660n);
+    const params = routingParamsFromConfig(config);
+    expect(pocketThreshold(1, FLOOR_GAS_PRICE, params)).toBe(84_980n);
+    expect(pocketThreshold(10, FLOOR_GAS_PRICE, params)).toBe(9_955n);
+    expect(pocketThreshold(100, FLOOR_GAS_PRICE, params)).toBe(3_056n);
+    expect(cPocket(FLOOR_GAS_PRICE, params)).toBe(22_433n);
   });
 });
 
@@ -172,13 +168,14 @@ describe("CZ-14 payment router decision order", () => {
 
   it("pauses Gateway above maxGasPrice and uses safe exact batch", () => {
     expect(
-      route(input({ unitAmount: 3_960n, eth_gasPrice: SEED.maxGasPriceWei + 1n })),
+      route(input({ unitAmount: 40_000n, eth_gasPrice: SEED.maxGasPriceWei + 1n })),
     ).toMatchObject({ kind: "x402-exact", routingReason: "vault-direct-batched" });
   });
 
   it.each([
     ["upto", { scheme: "upto", extra: {} }],
     ["batch-settlement", { scheme: "batch-settlement", extra: {} }],
+    ["SIWX scheme", { scheme: "siwx", extra: {} }],
     ["SIWX-only", { scheme: "exact", extra: { siwx: true } }],
   ] as const)("refuses %s-only offers", (_name, changes) => {
     const offer = { ...exact, ...changes } as PaymentRequirements;
@@ -197,8 +194,27 @@ describe("CZ-14 payment router decision order", () => {
     });
   });
 
+  it("returns fee-exceeds-payment for a gateway-only offer when volume is too small", () => {
+    expect(route(input({ offers: [gateway], unitAmount: 1n, V: 156_599n }))).toMatchObject({
+      skipped: true,
+      error: "unsupported-offer",
+      reason: "fee-exceeds-payment",
+    });
+  });
+
   it("returns no-usable-offer when no supported parsed offer matches", () => {
     expect(route(input({ offers: [], unitAmount: 100_000n }))).toMatchObject({
+      skipped: true,
+      error: "unsupported-offer",
+      reason: "no-usable-offer",
+    });
+  });
+
+  it.each([
+    ["wrong plan network", { network: "eip155:1" }],
+    ["wrong asset", { asset: "0x0000000000000000000000000000000000000002" }],
+  ] as const)("rejects an otherwise exact offer with %s", (_name, changes) => {
+    expect(route(input({ offers: [{ ...exact, ...changes }] }))).toMatchObject({
       skipped: true,
       error: "unsupported-offer",
       reason: "no-usable-offer",
@@ -229,29 +245,10 @@ describe("CZ-14 payment router decision order", () => {
       } else if ("kind" in result && result.kind === "gateway-nano") {
         expect(pocketWorthIt(volume, FLOOR_GAS_PRICE, SEED)).toBe(true);
       } else if (!("kind" in result)) {
-        expect(
-          cVd(calls, FLOOR_GAS_PRICE, SEED) <= amount ||
-            !pocketWorthIt(volume, FLOOR_GAS_PRICE, SEED),
-        ).toBe(true);
+        const hasGateway = i % 3 !== 0;
+        expect(cVd(calls, FLOOR_GAS_PRICE, SEED) > amount).toBe(true);
+        expect(hasGateway && pocketWorthIt(volume, FLOOR_GAS_PRICE, SEED)).toBe(false);
       }
     }
   });
 });
-
-function paramsFromConfig(config: ReturnType<typeof loadConfig>): RoutingParams {
-  return {
-    gas: {
-      reserve: BigInt(config.get("routing.gas.reserve")),
-      settleBase: BigInt(config.get("routing.gas.settleBase")),
-      settleIdx: BigInt(config.get("routing.gas.settleIdx")),
-      finalize: BigInt(config.get("routing.gas.finalize")),
-      pocketSetup: BigInt(config.get("routing.gas.pocketSetup")),
-      pocketDrain: BigInt(config.get("routing.gas.pocketDrain")),
-      pocketSweep: BigInt(config.get("routing.gas.pocketSweep")),
-    },
-    gatewayFeeAtomic: BigInt(config.get("routing.gatewayFeeAtomic")),
-    maxFeeRatioBps: BigInt(config.get("routing.maxFeeRatioBps")),
-    jobThresholdAtomic: BigInt(config.get("routing.jobThresholdAtomic")),
-    maxGasPriceWei: BigInt(config.get("routing.maxGasPriceWei")),
-  };
-}

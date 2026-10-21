@@ -20,6 +20,7 @@
     "@czar/hashing": "workspace:*",
     "@czar/logging": "workspace:*",
     "@czar/schemas": "workspace:*",
+    "@czar/vault-client": "workspace:*",
     "@czar/x402": "workspace:*",
     "ajv": "8.20.0",
     "hono": "4.13.13",
