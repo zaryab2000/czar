@@ -73,4 +73,4 @@ dependencies, and job startup together. Define the runtime owner and startup wir
 ## Commits
 
 - `db49b14` — `Add signer-scoped signature rate limits`
-- Signer implementation commit: recorded in branch history when committed.
+- `08eab95` — `Build signer policies, gas refill, and pocket keys`
