@@ -1,6 +1,14 @@
 import { Hono } from "hono";
 import { db } from "ponder:api";
-import { envelopes, jobs, pockets, reservations, stepUsage, vaults } from "ponder:schema";
+import {
+  envelopes,
+  externalEvents,
+  jobs,
+  pockets,
+  reservations,
+  stepUsage,
+  vaults,
+} from "ponder:schema";
 
 const app = new Hono();
 
@@ -17,6 +25,16 @@ app.get("/mirrors", async (c) =>
       used: row.used,
     })),
   }),
+);
+
+app.get("/external-events", async (c) =>
+  c.json(
+    (await db.select().from(externalEvents)).map((row) => ({
+      name: row.name,
+      emitter: row.emitter,
+      payload: row.payload,
+    })),
+  ),
 );
 
 export default app;

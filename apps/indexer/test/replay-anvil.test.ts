@@ -41,6 +41,7 @@ const CIRCLE: Address = "0x0747EEf0706327138c69792bF28Cd525089e4583";
 const GATEWAY_WALLET: Address = "0x0077777d7EBA4688BDeF3E311b846F25870A19B9";
 const GATEWAY_MINTER: Address = "0x0022222ABE238Cc2C7Bb1f21003F0a260052475B";
 const USDC: Address = "0x3600000000000000000000000000000000000000";
+const SYSTEM_EMITTER: Address = "0xfffffffffffffffffffffffffffffffffffffffe";
 const SENDER: Address = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
 const ACTORS = {
   owner: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
@@ -66,6 +67,10 @@ const HASH = `0x${"a".repeat(64)}` as Hex;
 const ZERO = `0x${"0".repeat(64)}` as Hex;
 const TEST_TIMEOUT = 180_000;
 const gatewayAbi = parseAbi(["function addDelegate(address token, address delegate)"]);
+const externalEmitterAbi = parseAbi([
+  "function emitTransfer(address from,address to,uint256 value)",
+  "function emitAuthorizationUsed(address authorizer,bytes32 nonce)",
+]);
 const ajv = new Ajv2020.default({ strict: false });
 const schemaUrl = (name: string) =>
   new URL(`../../../docs/specs/02-data-and-protocol/schemas/${name}.schema.json`, import.meta.url);
@@ -128,6 +133,7 @@ const send = (who: Address, abi: Abi, functionName: string, args: readonly unkno
 
 let factory: Address;
 let vault: Address;
+let openEvidenceAddress: Address;
 
 async function deploy(): Promise<void> {
   anvil = spawn(
@@ -155,12 +161,18 @@ async function deploy(): Promise<void> {
   execFileSync(
     "script/deploy.sh",
     [RPC, `../${KEYS_FILE}`, `../${OUT_FILE}`, "--broadcast", "--unlocked", "--sender", SENDER],
-    { cwd: CONTRACTS, stdio: "ignore", env: { ...process.env, ARC_FORGE: "arc-forge" } },
+    {
+      cwd: CONTRACTS,
+      stdio: "ignore",
+      env: { ...process.env, ARC_FORGE: "arc-forge" },
+    },
   );
   const output = JSON.parse(readFileSync(fileURLToPath(new URL(OUT_FILE, ROOT)), "utf8")) as {
     CzarVaultFactory: Address;
+    OpenEvidenceLog: Address;
   };
   factory = output.CzarVaultFactory;
+  openEvidenceAddress = output.OpenEvidenceLog;
   await send(ACTORS.owner, czarVaultFactoryAbi, "createVault", [ACTORS.owner]);
   vault = await pub.readContract({
     address: factory,
@@ -210,6 +222,45 @@ async function installGatewayMocks(): Promise<void> {
   await test.setBalance({ address: ACTORS.pocket, value: parseEther("1") });
 }
 
+async function emitExternalTransfers(): Promise<void> {
+  const bytecode = execFileSync(
+    "arc-forge",
+    ["inspect", "MockExternalEventEmitter", "deployedBytecode"],
+    {
+      cwd: CONTRACTS,
+      encoding: "utf8",
+    },
+  ).trim() as Hex;
+  await test.setCode({ address: USDC, bytecode });
+  await test.setCode({ address: SYSTEM_EMITTER, bytecode });
+  const nonce = `0x${"7".repeat(64)}` as Hex;
+  const authorizationReceipt = await sendTo(
+    SENDER,
+    USDC,
+    externalEmitterAbi,
+    "emitAuthorizationUsed",
+    [vault, nonce],
+  );
+  const usdcTransferReceipt = await sendTo(SENDER, USDC, externalEmitterAbi, "emitTransfer", [
+    vault,
+    ACTORS.payee,
+    1_234_567n,
+  ]);
+  const nativeTransferReceipt = await sendTo(
+    SENDER,
+    SYSTEM_EMITTER,
+    externalEmitterAbi,
+    "emitTransfer",
+    [vault, ACTORS.payee, 1_234_567_000_000_000_000n],
+  );
+  expect(authorizationReceipt.logs).toHaveLength(1);
+  expect(usdcTransferReceipt.logs).toHaveLength(1);
+  expect(nativeTransferReceipt.logs).toHaveLength(1);
+  expect(authorizationReceipt.logs[0]?.address.toLowerCase()).toBe(USDC.toLowerCase());
+  expect(usdcTransferReceipt.logs[0]?.address.toLowerCase()).toBe(USDC.toLowerCase());
+  expect(nativeTransferReceipt.logs[0]?.address.toLowerCase()).toBe(SYSTEM_EMITTER.toLowerCase());
+}
+
 async function replayPocket(envelopeId: bigint, proof: Hex[]): Promise<bigint> {
   await send(ACTORS.agent, czarVaultAbi, "registerPocket", [envelopeId, ACTORS.pocket, proof]);
   await send(ACTORS.agent, czarVaultAbi, "grantPocketGas", [ACTORS.pocket, 100n]);
@@ -257,7 +308,6 @@ async function replay(): Promise<{
   reservationId: bigint;
   pullbackId: bigint;
   jobKey: Hex;
-  endBlock: bigint;
   approvalTx: Hex;
 }> {
   const one = 1_000_000n;
@@ -323,19 +373,17 @@ async function replay(): Promise<{
   await test.setNextBlockTimestamp({ timestamp: now + 301n });
   await send(ACTORS.owner, czarVaultAbi, "finalize", [reservationId, 0, 2]);
   await send(ACTORS.owner, czarVaultAbi, "closeEnvelope", [envelopeId]);
-  const endBlock = await pub.getBlockNumber();
   await test.mine({ blocks: 1050 });
   return {
     envelopeId,
     reservationId,
     pullbackId,
     jobKey,
-    endBlock,
     approvalTx: openedEnvelope.transactionHash,
   };
 }
 
-async function indexedMirrors(endBlock: bigint): Promise<{
+async function indexedMirrors(): Promise<{
   vaults: string[];
   envelopes: Record<string, unknown>[];
   reservations: Record<string, unknown>[];
@@ -352,8 +400,9 @@ async function indexedMirrors(endBlock: bigint): Promise<{
         ...process.env,
         CZAR_TEST_RPC_URL: RPC,
         CZAR_TEST_FACTORY: factory,
+        CZAR_TEST_OPEN_EVIDENCE: openEvidenceAddress,
         CZAR_TEST_PGLITE_DIR: pgliteDir,
-        CZAR_TEST_END_BLOCK: String(endBlock),
+        CZAR_TEST_GATEWAY_POLL_DISABLED: "1",
       },
       stdio: "ignore",
     },
@@ -372,12 +421,44 @@ async function indexedMirrors(endBlock: bigint): Promise<{
       const response = await fetch(`${API}/mirrors`);
       if (!response.ok) return false;
       mirrors = (await response.json()) as Awaited<ReturnType<typeof indexedMirrors>>;
+      const eventResponse = await fetch(`${API}/external-events`);
+      if (!eventResponse.ok) return false;
+      const events = (await eventResponse.json()) as {
+        name: string;
+        emitter: string;
+        payload: Record<string, unknown>;
+      }[];
+      const relevant = (name: string, emitter: Address, payload: Record<string, unknown>) =>
+        events.some(
+          (event) =>
+            event.name === name &&
+            event.emitter === emitter.toLowerCase() &&
+            Object.entries(payload).every(([key, value]) => event.payload[key] === value),
+        );
+      if (
+        !relevant("AuthorizationUsed", USDC, {
+          authorizer: vault.toLowerCase(),
+          nonce: `0x${"7".repeat(64)}`,
+        }) ||
+        !relevant("Transfer", USDC, {
+          from: vault.toLowerCase(),
+          to: ACTORS.payee.toLowerCase(),
+          amount: "1234567",
+        }) ||
+        !relevant("Transfer", SYSTEM_EMITTER, {
+          from: vault.toLowerCase(),
+          to: ACTORS.payee.toLowerCase(),
+          amount: "1234567",
+        })
+      ) {
+        return false;
+      }
       return (
         mirrors.envelopes.length === 1 &&
         mirrors.reservations.length === 1 &&
         mirrors.pockets.length === 1 &&
         mirrors.jobs.length === 1 &&
-        mirrors.envelopes[0]?.["state"] === "Closing" &&
+        mirrors.envelopes[0]?.["state"] === "Closed" &&
         mirrors.reservations[0]?.["state"] === "Final" &&
         mirrors.jobs[0]?.["state"] === "Released" &&
         Array.isArray(mirrors.pockets[0]?.["pullbacks"])
@@ -396,8 +477,9 @@ it(
     await deploy();
     await installCircleMock();
     await installGatewayMocks();
-    const { envelopeId, reservationId, pullbackId, jobKey, endBlock, approvalTx } = await replay();
-    const mirrors = await indexedMirrors(endBlock);
+    const { envelopeId, reservationId, pullbackId, jobKey, approvalTx } = await replay();
+    await emitExternalTransfers();
+    const mirrors = await indexedMirrors();
     expect(mirrors.vaults).toEqual([vault.toLowerCase()]);
     const envelopeEventBlock = BigInt(String(mirrors.envelopes[0]?.["lastEventBlock"]));
     const envelope = await pub.readContract({
@@ -487,6 +569,40 @@ it(
     expect(ajv.getSchema("job-record")?.(mirrors.jobs[0])).toBe(true);
     expect(mirrors.pockets[0]).not.toHaveProperty("keyRef");
     expect(ajv.getSchema("pocket-projection")?.(mirrors.pockets[0])).toBe(true);
+    const externalResponse = await fetch(`${API}/external-events`);
+    expect(externalResponse.ok).toBe(true);
+    const externalEvents = (await externalResponse.json()) as {
+      name: string;
+      emitter: string;
+      payload: Record<string, unknown>;
+    }[];
+    const transfers = externalEvents.filter((event) => event.name === "Transfer");
+    expect(transfers).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          emitter: USDC.toLowerCase(),
+          payload: expect.objectContaining({
+            from: vault.toLowerCase(),
+            to: ACTORS.payee.toLowerCase(),
+            amount: "1234567",
+          }),
+        }),
+        expect.objectContaining({
+          emitter: SYSTEM_EMITTER.toLowerCase(),
+          payload: expect.objectContaining({
+            from: vault.toLowerCase(),
+            to: ACTORS.payee.toLowerCase(),
+            amount: "1234567",
+          }),
+        }),
+      ]),
+    );
+    expect(
+      externalEvents.find((event) => event.name === "AuthorizationUsed")?.payload,
+    ).toMatchObject({
+      authorizer: vault.toLowerCase(),
+      nonce: `0x${"7".repeat(64)}`,
+    });
   },
   TEST_TIMEOUT,
 );
