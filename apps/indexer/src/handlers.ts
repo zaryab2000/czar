@@ -28,7 +28,7 @@ import {
   safeNumber,
   type PullbackMirror,
 } from "@czar/indexer/mirrors";
-import { lagAlert, reserveRateAlert } from "#src/alerts/rules";
+import { createLagMonitor, isLiveBucket, lagAlert, reserveRateAlert } from "#src/alerts/rules";
 import { createAlertReporter } from "#src/alerts/reporter";
 
 type Context = Parameters<Parameters<typeof ponder.on>[1]>[0]["context"];
@@ -51,6 +51,8 @@ const alertConfig = loadConfig({
 });
 const reportAlert = createAlertReporter(createLogger({ service: "indexer", component: "CZ-19" }));
 const minuteBuckets = 60n;
+const MS_PER_SECOND = 1000;
+const lagMonitor = createLagMonitor(alertConfig.get("indexer.pollingIntervalMs") as number);
 
 async function recordReserveRate(context: Context, event: Meta): Promise<void> {
   const bucket = event.timestamp / minuteBuckets;
@@ -68,8 +70,13 @@ async function recordReserveRate(context: Context, event: Meta): Promise<void> {
     perVault: number;
     global: number;
   };
+  const live = isLiveBucket(
+    BigInt(Math.floor(Date.now() / MS_PER_SECOND)),
+    event.timestamp,
+    minuteBuckets,
+  );
   const vaultCount = vaultBucket?.count ?? 0;
-  if (vaultCount === limits.perVault + 1 && reserveRateAlert(vaultCount, limits.perVault)) {
+  if (live && vaultCount === limits.perVault + 1 && reserveRateAlert(vaultCount, limits.perVault)) {
     reportAlert("reserve-rate", {
       rule: "reserve-rate",
       count: vaultCount,
@@ -83,7 +90,7 @@ async function recordReserveRate(context: Context, event: Meta): Promise<void> {
     .from(reserveRateBuckets)
     .where(eq(reserveRateBuckets.bucket, bucket));
   const globalCount = Number(globalBucket?.count ?? 0);
-  if (globalCount === limits.global + 1 && reserveRateAlert(globalCount, limits.global)) {
+  if (live && globalCount === limits.global + 1 && reserveRateAlert(globalCount, limits.global)) {
     reportAlert("reserve-rate", {
       rule: "reserve-rate",
       count: globalCount,
@@ -425,10 +432,11 @@ ponder.on("CzarVault:Reserved", async ({ event, context }) => {
 });
 
 ponder.on("IndexerLag:block", async ({ event, context }) => {
+  if (!lagMonitor.shouldCheck(Date.now())) return;
   const head = BigInt(await context.client.request({ method: "eth_blockNumber" }));
   const indexed = event.block.number;
   const lag = lagAlert(head, indexed, alertConfig.get("indexer.maxLagBlocks") as number);
-  if (lag === null) return;
+  if (!lagMonitor.observe(lag) || lag === null) return;
   reportAlert("indexer-lag", {
     rule: "indexer-lag",
     count: Number(lag),

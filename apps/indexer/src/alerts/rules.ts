@@ -29,3 +29,36 @@ export function haltPaths(proxy: PinnedProxy, event: string): readonly HaltPath[
   }
   return [];
 }
+
+/**
+ * Lag monitor: checks at most once per `intervalMs` of wall time and pages once per episode
+ * (when the indexer first falls behind), so a backfill does not issue one RPC call and one page
+ * per historical block.
+ */
+export function createLagMonitor(intervalMs: number) {
+  let lastCheckMs = Number.NEGATIVE_INFINITY;
+  let lagging = false;
+  return {
+    shouldCheck(nowMs: number): boolean {
+      if (nowMs - lastCheckMs < intervalMs) return false;
+      lastCheckMs = nowMs;
+      return true;
+    },
+    /** Returns true when this observation should page. */
+    observe(lag: bigint | null): boolean {
+      if (lag === null) {
+        lagging = false;
+        return false;
+      }
+      if (lagging) return false;
+      lagging = true;
+      return true;
+    },
+  };
+}
+
+/** A rate bucket older than its own width in wall time is history (backfill, re-index), not a
+ * live anomaly; it is still counted but never pages. */
+export function isLiveBucket(nowSeconds: bigint, bucketTimestamp: bigint, widthSeconds: bigint) {
+  return nowSeconds - bucketTimestamp <= widthSeconds;
+}
