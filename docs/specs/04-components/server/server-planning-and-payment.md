@@ -72,7 +72,7 @@ Storage (Postgres):
 | `pay_requests` | `payRequestId` (client id, RV-050), `deviceId`, `planId`, `stepIndex`, fingerprint, `status`, `paymentIds[]` (per index, server-minted) |
 | `sessions`, `audit` | as named; `push_subscriptions` is stage 2 (D69) |
 
-Parameters: `api.approvalWaitMinutes` 15 (how long `opening` waits for `EnvelopeOpened` before falling back; UserOps on Arc mine in seconds, so this covers bundler retries), `api.planTtlHours` 24 (`Plan.expiresAt` for approval; after that a fresh plan is priced), `api.idempotencyTtlHours` 24, `api.rateLimitDaemonPerMin` 600, `api.rateLimitAppPerMin` 120 (02 §9.5).
+Parameters: `api.approvalWaitMinutes` 15 (how long `opening` waits for `EnvelopeOpened` before falling back; UserOps on Arc mine in seconds, so this covers bundler retries), `api.planTtlHours` 24 (`Plan.expiresAt` for approval; after that a fresh plan is priced), `api.idempotencyTtlHours` 24, `api.rateLimitDaemonPerMin` 600, `api.rateLimitAppPerMin` 120 (02 §9.5), `api.cursorTtlMinutes` 60 (opaque list cursors expire after 1 h, 02 §9.5; SCR-115), `api.goalRetentionDays` 365 (goal text deleted after 1 year, 01 §11.1, §8; SCR-115).
 
 ### 6. Behaviour
 - `submitObjective`: validate schema (including `taskSpec`, D84); recompute `objectiveHash` (02 §5.2, which includes `taskSpecHash`) → `422 hash-mismatch` on mismatch; reject any reused `objectiveId` from another device; store; emit `objective.received`.

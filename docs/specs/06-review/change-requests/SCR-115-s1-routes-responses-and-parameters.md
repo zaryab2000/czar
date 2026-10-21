@@ -5,7 +5,7 @@
 | ID | SCR-115 |
 | Filed by | Architect (Claude), 2026-10-21, from the S1 server-skeleton PRD review |
 | Spec and section | `docs/specs/02-data-and-protocol/api/openapi.yaml` `pairDevice`, `submitObjective`, `listObjectives`, `getObjective`; `docs/specs/04-components/server/server-planning-and-payment.md` CZ-12 §5 Parameters; `packages/config/src/registry.ts` |
-| Status | Open — awaiting Zaryab's acceptance. Blocks T-041 (and T-009's fixtures for these four operations). |
+| Status | Accepted (Zaryab, 2026-10-21); applied to `openapi.yaml`, CZ-12 §5 and `@czar/config` |
 
 ## Problem
 
@@ -44,4 +44,4 @@ No new route, field, status value or behaviour; this only declares what the spec
 
 ## Decision
 
-- Pending Zaryab.
+- 2026-10-21: **Accepted by Zaryab** as proposed. Applied: the listed responses on the four operations, `listObjectives` `status` typed as `ObjectiveStatusValue`, `api.cursorTtlMinutes` 60 and `api.goalRetentionDays` 365 in CZ-12 §5 and the config registry.

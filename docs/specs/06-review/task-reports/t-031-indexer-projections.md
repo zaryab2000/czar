@@ -3,7 +3,7 @@
 **Date:** 2026-10-21
 **Base:** `origin/build-v1` at `6572592`
 **Worktree:** `czar_v0.t031-indexer-projections`
-**Status:** Complete for T-031 acceptance. SCR-112 decisions have been applied.
+**Status:** Complete for T-031 acceptance. SCR-114 decisions have been applied.
 
 ## Implemented
 
@@ -33,5 +33,5 @@ The initial `pnpm install` attempt used Node 25 and failed the repository's Node
 
 ## Acceptance scope
 
-SCR-112's seven decisions are reflected in the implementation. T-006 schema-package adoption and
+SCR-114's seven decisions are reflected in the implementation. T-006 schema-package adoption and
 T-027 deployment-manifest integration are separate tasks and do not block T-031 acceptance.

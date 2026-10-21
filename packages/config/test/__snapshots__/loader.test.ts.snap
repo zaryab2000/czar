@@ -111,6 +111,18 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 300,
   },
   {
+    "key": "api.cursorTtlMinutes",
+    "source": "default",
+    "unit": "minutes",
+    "value": 60,
+  },
+  {
+    "key": "api.goalRetentionDays",
+    "source": "default",
+    "unit": "days",
+    "value": 365,
+  },
+  {
     "key": "api.idempotencyTtlHours",
     "source": "default",
     "unit": "hours",

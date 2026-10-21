@@ -1,8 +1,8 @@
-# SCR-112: Define sources for non-event indexer mirror fields
+# SCR-114: Define sources for non-event indexer mirror fields
 
 | Field | Value |
 |---|---|
-| ID | SCR-112 |
+| ID | SCR-114 |
 | Filed by | Codex, 2026-10-21 |
 | Spec and section | `docs/specs/05-build-plan/phase-1-tasks.md` T-031; `docs/specs/02-data-and-protocol/data-and-protocol.md` §4.8–§4.11 |
 | Status | Accepted (2026-10-21; implementation decisions recorded below) |
