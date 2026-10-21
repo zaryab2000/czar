@@ -498,8 +498,22 @@ describe("T-034 HTTP routes", () => {
 
   it("returns dependency state flags from PGlite through the query store and HTTP route", async () => {
     await db.insert(haltFlags).values([
-      { path: "gateway-nano", halted: true, reason: "dependency-upgraded", sourceProxy: "0x01", block: 12n, transaction: hash("1") },
-      { path: "x402-exact", halted: true, reason: "dependency-upgraded", sourceProxy: "0x02", block: 10n, transaction: hash("2") },
+      {
+        path: "gateway-nano",
+        halted: true,
+        reason: "dependency-upgraded",
+        sourceProxy: "0x01",
+        block: 12n,
+        transaction: hash("1"),
+      },
+      {
+        path: "x402-exact",
+        halted: true,
+        reason: "dependency-upgraded",
+        sourceProxy: "0x02",
+        block: 10n,
+        transaction: hash("2"),
+      },
     ]);
     const store = createQueryStore(db);
     expect((await store.dependencyState()).map((flag) => flag.path)).toEqual([
@@ -509,8 +523,22 @@ describe("T-034 HTTP routes", () => {
     const app = createIndexerApi(store, config);
     expect(await (await app.request("/dependency-state")).json()).toEqual({
       items: [
-        { path: "gateway-nano", halted: true, reason: "dependency-upgraded", sourceProxy: "0x01", block: "12", transaction: hash("1") },
-        { path: "x402-exact", halted: true, reason: "dependency-upgraded", sourceProxy: "0x02", block: "10", transaction: hash("2") },
+        {
+          path: "gateway-nano",
+          halted: true,
+          reason: "dependency-upgraded",
+          sourceProxy: "0x01",
+          block: "12",
+          transaction: hash("1"),
+        },
+        {
+          path: "x402-exact",
+          halted: true,
+          reason: "dependency-upgraded",
+          sourceProxy: "0x02",
+          block: "10",
+          transaction: hash("2"),
+        },
       ],
     });
   });

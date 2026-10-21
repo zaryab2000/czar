@@ -22,6 +22,7 @@ import {
   escrowJobs,
   gatewayTransfers,
   jobs,
+  haltFlags,
   pockets,
   pullbacks,
   reservations,
@@ -82,6 +83,15 @@ export interface AnchorHead {
   readonly transaction: string;
 }
 
+export interface HaltFlag {
+  readonly path: string;
+  readonly halted: boolean;
+  readonly reason: string;
+  readonly sourceProxy: string;
+  readonly block: string;
+  readonly transaction: string;
+}
+
 type Row = Record<string, unknown>;
 
 /** A row and the internal key the next keyset page starts after. */
@@ -122,6 +132,7 @@ export interface QueryStore {
   ): Promise<ReceiptFact[]>;
   latestAnchor(publisher: string, kind: number): Promise<AnchorHead | null>;
   anchorByBatch(root: string): Promise<Row | null>;
+  dependencyState(): Promise<HaltFlag[]>;
 }
 
 const afterId = (column: Parameters<typeof gt>[0], cursor: IdCursor | null): SQL | undefined =>
@@ -327,6 +338,20 @@ export function createQueryStore(db: QueryDb): QueryStore {
         .orderBy(asc(anchors.id))
         .limit(1);
       return row ? { ...row, block: String(row.block) } : null;
+    },
+
+    async dependencyState() {
+      const rows = await db.select().from(haltFlags).orderBy(asc(haltFlags.path));
+      return rows.map(
+        (row: {
+          path: string;
+          halted: boolean;
+          reason: string;
+          sourceProxy: string;
+          block: bigint;
+          transaction: string;
+        }) => ({ ...row, block: row.block.toString() }),
+      );
     },
   };
 }

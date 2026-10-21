@@ -71,6 +71,7 @@ const gatewayAbi = parseAbi(["function addDelegate(address token, address delega
 const externalEmitterAbi = parseAbi([
   "function emitTransfer(address from,address to,uint256 value)",
   "function emitAuthorizationUsed(address authorizer,bytes32 nonce)",
+  "function emitUpgraded(address implementation)",
 ]);
 const ajv = new Ajv2020.default({ strict: false });
 const schemaUrl = (name: string) =>
@@ -91,6 +92,7 @@ ajv.addSchema(pocketProjectionSchema, "pocket-projection");
 let anvil: ChildProcess | undefined;
 let ponder: ChildProcess | undefined;
 let pgliteDir: string | undefined;
+let ponderLogs = "";
 
 afterAll(() => {
   ponder?.kill();
@@ -234,6 +236,7 @@ async function emitExternalTransfers(reservationId: bigint): Promise<void> {
   ).trim() as Hex;
   await test.setCode({ address: USDC, bytecode });
   await test.setCode({ address: SYSTEM_EMITTER, bytecode });
+  await test.setCode({ address: CIRCLE, bytecode });
   // The derived nonce of authorization index 0, so the authorizations projection marks it used.
   const nonce = derivedNonce(vault, reservationId, 0);
   const authorizationReceipt = await sendTo(
@@ -261,6 +264,8 @@ async function emitExternalTransfers(reservationId: bigint): Promise<void> {
   expect(authorizationReceipt.logs[0]?.address.toLowerCase()).toBe(USDC.toLowerCase());
   expect(usdcTransferReceipt.logs[0]?.address.toLowerCase()).toBe(USDC.toLowerCase());
   expect(nativeTransferReceipt.logs[0]?.address.toLowerCase()).toBe(SYSTEM_EMITTER.toLowerCase());
+  await sendTo(SENDER, USDC, externalEmitterAbi, "emitUpgraded", [ACTORS.admin]);
+  await sendTo(SENDER, CIRCLE, externalEmitterAbi, "emitUpgraded", [ACTORS.admin]);
 }
 
 async function replayPocket(envelopeId: bigint, proof: Hex[]): Promise<bigint> {
@@ -406,9 +411,12 @@ async function indexedMirrors(): Promise<{
         CZAR_TEST_PGLITE_DIR: pgliteDir,
         CZAR_TEST_GATEWAY_POLL_DISABLED: "1",
       },
-      stdio: "ignore",
+      stdio: ["ignore", "pipe", "pipe"],
     },
   );
+  ponder.stdout?.on("data", (chunk: Buffer) => {
+    ponderLogs += chunk.toString();
+  });
   await waitFor(async () => {
     try {
       return (await fetch(`${API}/health`)).ok;
@@ -469,6 +477,15 @@ async function indexedMirrors(): Promise<{
       return false;
     }
   }, "four indexed mirrors");
+  await waitFor(async () => {
+    const response = await fetch(`${API}/q/dependency-state`);
+    if (!response.ok) return false;
+    const body = (await response.json()) as { items: { path: string; halted: boolean }[] };
+    return ["x402-exact", "gateway-nano", "erc8183-job"].every((path) =>
+      body.items.some((flag) => flag.path === path && flag.halted),
+    );
+  }, "dependency halt flags from the USDC and ERC-8183 Upgraded logs");
+  expect(ponderLogs).toContain('"rule":"dependency-upgraded"');
   if (!mirrors) throw new Error("Ponder returned no mirror data");
   return mirrors;
 }
