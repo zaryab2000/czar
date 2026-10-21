@@ -113,6 +113,44 @@ function seededDb(rows = seed()) {
       readCounts[table] = (readCounts[table] ?? 0) + rows[table].length;
       return rows[table];
     },
+    async pageReservationsNeedingFinalize({
+      now,
+      cursor,
+      limit,
+    }: {
+      now: number;
+      cursor: { validBefore: number; id: string } | null;
+      limit: number;
+    }) {
+      const matches = rows.reservations
+        .filter(
+          (row) =>
+            Number(row.validBefore ?? (row.mirror as Record<string, unknown>)["validBefore"]) < now,
+        )
+        .filter(
+          (row) =>
+            String(row.state ?? (row.mirror as Record<string, unknown>)["state"]) !== "Final",
+        )
+        .filter(
+          (row) =>
+            !cursor ||
+            Number(row.validBefore ?? (row.mirror as Record<string, unknown>)["validBefore"]) >
+              cursor.validBefore ||
+            (Number(row.validBefore ?? (row.mirror as Record<string, unknown>)["validBefore"]) ===
+              cursor.validBefore &&
+              String(row.id) > cursor.id),
+        )
+        .toSorted(
+          (left, right) =>
+            Number(left.validBefore ?? (left.mirror as Record<string, unknown>)["validBefore"]) -
+              Number(
+                right.validBefore ?? (right.mirror as Record<string, unknown>)["validBefore"],
+              ) || String(left.id).localeCompare(String(right.id)),
+        )
+        .slice(0, limit);
+      readCounts.reservations = (readCounts.reservations ?? 0) + matches.length;
+      return matches;
+    },
   };
 }
 
@@ -250,14 +288,30 @@ describe("indexer query API", () => {
         id: `${envelope.vault}:${id}`,
         vault: envelope.vault,
         reservationId: BigInt(id),
+        validBefore: 1_800_000_000n,
+        state: "Active",
         mirror: { ...reservation, reservationId: id },
       });
     }
     const source = seededDb(rows);
     const app = createIndexerApi(source, loadConfig({ envFile: { "api.pageDefaultLimit": 2 } }));
     const response = await app.request("/reservations/needing-finalize?now=1900000000&limit=2");
-    expect(((await response.json()) as { items: unknown[] }).items).toHaveLength(2);
-    expect(source.readCounts?.reservations).toBe(2);
+    const firstPage = (await response.json()) as {
+      items: Record<string, unknown>[];
+      nextCursor: string;
+    };
+    expect(firstPage.items).toHaveLength(2);
+    expect(source.readCounts?.reservations).toBe(3);
+    const secondResponse = await app.request(
+      `/reservations/needing-finalize?now=1900000000&limit=2&cursor=${firstPage.nextCursor}`,
+    );
+    const secondPage = (await secondResponse.json()) as {
+      items: Record<string, unknown>[];
+      nextCursor: string | null;
+    };
+    expect(secondPage.items).toHaveLength(2);
+    expect(secondPage.items[0]?.["reservationId"]).not.toBe(firstPage.items[1]?.["reservationId"]);
+    expect(source.readCounts?.reservations).toBe(6);
   });
 
   it("returns ledger facts with the fixed chain and Gateway status mapping", async () => {

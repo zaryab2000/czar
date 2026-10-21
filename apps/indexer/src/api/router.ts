@@ -9,7 +9,7 @@ import {
 import { derivedNonce } from "@czar/hashing";
 import { Hono } from "hono";
 import type { Context } from "hono";
-import type { MirrorRecord, QueryDataSource, QueryRow } from "#src/api/types";
+import type { KeysetCursor, MirrorRecord, QueryDataSource, QueryRow } from "#src/api/types";
 
 const JOB_EVENT_STATE: Readonly<Record<string, string>> = {
   JobCreated: "Opened",
@@ -102,19 +102,27 @@ export function createIndexerApi(source: QueryDataSource, config: Config = loadC
   app.get("/reservations/needing-finalize", async (context) => {
     const now = integerQuery(context.req.query("now"));
     if (now === null) return context.json({ error: "invalid-now" }, 400);
-    const items = await validatedMirrors(
-      source,
-      "reservations",
-      validateReservation,
-      (item) => Number(item["validBefore"]) < now && item["state"] !== "Final",
-    );
-    return pageResponse(
-      context,
-      config,
-      "reservations-needing-finalize",
-      items,
-      validateReservation,
-    );
+    const limit = pageLimit(context, config);
+    if (limit === null) return context.json({ error: "invalid-limit" }, 400);
+    const route = cursorScope(context, "reservations-needing-finalize");
+    const cursor = decodeKeysetCursor(context.req.query("cursor"), route, config);
+    if (cursor === null) return context.json({ error: "invalid-cursor" }, 400);
+    const rows = await source.pageReservationsNeedingFinalize({
+      now,
+      cursor: cursor ?? null,
+      limit: limit + 1,
+    });
+    const page = rows.slice(0, limit).map(mirror);
+    page.forEach((item) => assertMirror(validateReservation, item, "Reservation"));
+    const last = rows.length > limit ? rows[limit - 1] : undefined;
+    const nextCursor = last
+      ? encodeKeysetCursor(
+          { validBefore: Number(last["validBefore"]), id: String(last.id) },
+          route,
+          config,
+        )
+      : null;
+    return context.json({ items: page, nextCursor });
   });
 
   app.get("/pullbacks/to-confirm", async (context) => {
@@ -259,13 +267,8 @@ function pageResponse(
   input: Record<string, unknown>[],
   validate: (value: unknown) => boolean,
 ) {
-  const max = Number(config.get("api.pageMaxLimit"));
-  const min = Number(config.get("api.pageMinLimit"));
-  const fallback = Number(config.get("api.pageDefaultLimit"));
-  const raw = context.req.query("limit");
-  const limit = raw === undefined ? fallback : Number(raw);
-  if (!Number.isInteger(limit) || limit < min || limit > max)
-    return context.json({ error: "invalid-limit" }, 400);
+  const limit = pageLimit(context, config);
+  if (limit === null) return context.json({ error: "invalid-limit" }, 400);
   const scope = cursorScope(context, route);
   const offset = decodeCursor(context.req.query("cursor"), scope, config);
   if (offset === null) return context.json({ error: "invalid-cursor" }, 400);
@@ -278,6 +281,16 @@ function pageResponse(
       ? encodeCursor(offset + items.length, scope, config)
       : null;
   return context.json({ items, nextCursor: next });
+}
+
+function pageLimit(context: Context, config: Config): number | null {
+  const raw = context.req.query("limit");
+  const limit = raw === undefined ? Number(config.get("api.pageDefaultLimit")) : Number(raw);
+  return Number.isInteger(limit) &&
+    limit >= Number(config.get("api.pageMinLimit")) &&
+    limit <= Number(config.get("api.pageMaxLimit"))
+    ? limit
+    : null;
 }
 
 function cursorScope(context: Context, route: string): string {
@@ -293,6 +306,38 @@ function cursorScope(context: Context, route: string): string {
 function encodeCursor(offset: number, route: string, config: Config): string {
   const expiresAt = Date.now() + Number(config.get("api.cursorTtlMinutes")) * 60_000;
   return Buffer.from(JSON.stringify({ route, offset, expiresAt })).toString("base64url");
+}
+
+function encodeKeysetCursor(cursor: KeysetCursor, route: string, config: Config): string {
+  const expiresAt = Date.now() + Number(config.get("api.cursorTtlMinutes")) * 60_000;
+  return Buffer.from(JSON.stringify({ route, cursor, expiresAt })).toString("base64url");
+}
+
+function decodeKeysetCursor(
+  cursor: string | undefined,
+  route: string,
+  config: Config,
+): KeysetCursor | null | undefined {
+  if (!cursor) return undefined;
+  try {
+    const value = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as Record<
+      string,
+      unknown
+    >;
+    const key = value["cursor"] as Record<string, unknown> | undefined;
+    if (
+      value["route"] !== route ||
+      !key ||
+      !Number.isSafeInteger(key["validBefore"]) ||
+      typeof key["id"] !== "string" ||
+      Number(value["expiresAt"]) <= Date.now() ||
+      Number(value["expiresAt"]) > Date.now() + Number(config.get("api.cursorTtlMinutes")) * 60_000
+    )
+      return null;
+    return { validBefore: Number(key["validBefore"]), id: key["id"] };
+  } catch {
+    return null;
+  }
 }
 
 function decodeCursor(cursor: string | undefined, route: string, config: Config): number | null {

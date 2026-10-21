@@ -15,6 +15,8 @@ export interface QueryRow extends Record<string, unknown> {
   vault?: string;
   envelopeId?: bigint | number;
   reservationId?: bigint | number;
+  state?: string;
+  validBefore?: bigint | number;
   emitter?: string;
   name?: string;
   block?: bigint | number;
@@ -46,6 +48,16 @@ export interface MirrorRecord extends Record<string, unknown> {
 }
 export type QueryRows = Record<QueryTable, QueryRow[]>;
 
+export interface KeysetCursor {
+  validBefore: number;
+  id: string;
+}
+
 export interface QueryDataSource {
   rows(table: QueryTable): Promise<readonly QueryRow[]>;
+  pageReservationsNeedingFinalize(input: {
+    now: number;
+    cursor: KeysetCursor | null;
+    limit: number;
+  }): Promise<readonly QueryRow[]>;
 }
