@@ -10,3 +10,5 @@ export type { Decision, PolicyContext, PurposeIds, SignerNetwork } from "./polic
 export type * from "./projection.ts";
 export { coerceArgs, parseRequest, SHAPES, ShapeError } from "./requests.ts";
 export * from "./service.ts";
+export * from "./socket.ts";
+export * from "./main.ts";
