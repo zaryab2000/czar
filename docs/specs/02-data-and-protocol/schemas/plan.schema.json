@@ -139,9 +139,10 @@
           "reason": {
             "type": "string",
             "enum": [
-              "no-agent"
+              "no-agent",
+              "no-template"
             ],
-            "description": "Why it was dropped.",
+            "description": "Why it was dropped. no-template: the rule-based fallback has no default input template for this capability (SCR-120).",
             "x-privacyClass": "server-only"
           }
         }

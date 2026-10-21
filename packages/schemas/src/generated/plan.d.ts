@@ -122,9 +122,9 @@ export interface Plan {
      */
     capability: string;
     /**
-     * Why it was dropped.
+     * Why it was dropped. no-template: the rule-based fallback has no default input template for this capability (SCR-120).
      */
-    reason: "no-agent";
+    reason: "no-agent" | "no-template";
   }[];
   /**
    * Shadow plans only (D83 point 7): real-market prices per capability from the MarketView; never used for payment.

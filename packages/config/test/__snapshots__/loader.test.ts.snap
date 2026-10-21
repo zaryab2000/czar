@@ -1425,6 +1425,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 1000000,
   },
   {
+    "key": "planner.envelopeTtlHours",
+    "source": "default",
+    "unit": "hours",
+    "value": 48,
+  },
+  {
     "key": "planner.jobSlackBps",
     "source": "default",
     "unit": "bps",
