@@ -163,7 +163,7 @@ function parseTransfer(value: unknown): GatewayTransferInsert | null {
     !isAddress(fromAddress) ||
     !isAddress(toAddress) ||
     typeof amount !== "string" ||
-    !/^\d+$/.test(amount) ||
+    !/^(0|[1-9]\d*)$/.test(amount) ||
     typeof nonce !== "string" ||
     nonce.length === 0 ||
     !(txHash === null || (typeof txHash === "string" && /^0x[\da-fA-F]{64}$/.test(txHash))) ||

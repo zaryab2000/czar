@@ -10,9 +10,8 @@ describe("Transfer amount normalization", () => {
     expect(normalizeTransferAmount("eip7708", 1_234_567_000_000_000_000n)).toBe("1234567");
   });
 
-  it("rejects native amounts that cannot be represented as Amount6", () => {
-    expect(() => normalizeTransferAmount("eip7708", 1_000_000_000_001n)).toThrow(
-      "Native USDC transfer has sub-Amount6 precision.",
-    );
+  it("floors native dust below Amount6 precision instead of halting indexing", () => {
+    expect(normalizeTransferAmount("eip7708", 1_000_000_000_001n)).toBe("1");
+    expect(normalizeTransferAmount("eip7708", 1n)).toBe("0");
   });
 });
