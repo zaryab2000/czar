@@ -727,6 +727,7 @@
   - The regex pre-screen alone (model disabled) flags eval cases 2–6 and 9 of P-01.
 - **Review fixes (2026-10-19):** P-01 chunked over everything P-02 reads, regex over the whole body (RV-041); screen unavailable → quarantine (D76); one flag rule, quarantine recorded `inconclusive` (RV-042); before the first hosted call, G0-16's record and Zaryab's account approval exist (RV-062).
 - **H6, N2 (2026-10-20):** artifact deliverables kept whole; P-01 flags recorded; P-02 reads only `expectedKeys`.
+- **SCR-123 (2026-10-21):** "wire the eval suites into CI" means the local command (no hosted CI) with modes `offline` and `live`; "wrap them for the planner" means the re-plan input `{stepIndex, errorCode, flags}` (D74). Code is done when the `offline` run passes every case and the regex-only run flags P-01 cases 2–6 and 9; the `live` run needs G0-16 and passes before T-050. P-02 `expectedFields`, the code-only extractor and the per-user budget path are fixed in SCR-123.
 
 ### T-047 Acceptance checker minimal: delivery and structural in a sandbox, AcceptanceReport, reportHash
 - **Milestone / group / who:** M3 / M3-b / agent. **Size:** M. **Deps:** T-006, T-007.
@@ -742,6 +743,7 @@
   - A check script that tries `fetch` inside the sandbox fails.
   - `reportHash` recomputes from the stored report.
 - **Review fixes (2026-10-19):** Decision rule per CZ-16 §5.3 as amended: quarantine → `inconclusive`; labels `none`/`injection-suspect`/`pii-suspect` (RV-042, D76).
+- **SCR-122 (2026-10-21):** sandbox = worker with `acceptance.sandboxMemoryMb` plus a `vm` context; executor file `apps/server/src/acceptance/executor/checks.js`, `code_hash`, `profile_id` and `shapeHash` (in `@czar/hashing`); seed the `data-json` profile row; tables `acceptance_reports` and `profiles`. Extra tests: `profile_id` and `code_hash` recompute from the stored profile and the file; a check that loops forever ends `inconclusive` with `sandbox-timeout`; a check that allocates past the memory cap ends `inconclusive`.
 
 ### T-048 Paying agent vault-direct loop with step_executions and crash recovery
 - **Milestone / group / who:** M3 / M3-c / agent. **Size:** L. **Deps:** T-045, T-046, T-047, T-034, T-036.
@@ -1707,3 +1709,4 @@
 | 2026-10-20 | D91 | New T-115 to T-119; T-090 hands index loading and the live lead fetch to T-115; T-092 note; coverage and notes. |
 | 2026-10-21 | D92 (Zaryab) | Arc testnet moves to the end of Phase 1: T-027 to M8 (deps add T-101); T-036 and T-040 run on a local `arc-anvil` deployment (`deployments/arc-local.json`, `env/local.toml`); new T-121 does the testnet deploy, signer evidence and `env/testnet.toml`; T-102 depends on T-121; every earlier "on testnet" step runs on the local chain with Circle mocks and fixtures. |
 | 2026-10-21 | SCR-119 | CZ-19 §5.4 response contracts for `receiptsForLedger` (settlement facts; server joins the rest of `LedgerReceipt`), `latestAnchor`, `anchorByBatch`; `dependencyState` moves to T-033; queries page in SQL. |
+| 2026-10-21 | SCR-122, SCR-123 | T-047 sandbox, ids and profile seed; T-046 eval modes, `expectedFields`, code-only extractor, re-plan input, budget path. |

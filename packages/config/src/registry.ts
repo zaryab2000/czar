@@ -90,6 +90,14 @@ export const PARAMETERS = [
     notes: "also prose line 216 (5,000 ms)",
   },
   {
+    key: "acceptance.sandboxMemoryMb",
+    type: "integer",
+    default: 50,
+    unit: "MB",
+    reason: "per-check memory budget for the sandbox worker (CZ-16 §3, SCR-122)",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:328",
+  },
+  {
     key: "acceptance.schemaMaxBytes",
     type: "integer",
     default: 8192,
