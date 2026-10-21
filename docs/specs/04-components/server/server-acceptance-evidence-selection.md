@@ -114,6 +114,14 @@ stateDiagram-v2
 | `anchorByBatch(root)` | CZ-17, verification page | `Committed` row |
 | `dependencyState()` | CZ-15 routing flags | halted paths |
 
+Response contracts (SCR-119, 2026-10-21). These are internal indexer → server responses, not public API shapes; no `@czar/schemas` type is added for them:
+
+- `receiptsForLedger(vault, cursor)`: the indexer returns **settlement facts**, one row per paid authorization index: `envelopeRef`, `stepIndex`, `reservationId`, `index`, `amount` (`Amount6`), `rail` (`x402-exact` | `gateway-batched` | `erc8183-job`), `status`, `settlementTx?`, `createdAt` (block time, RFC 3339). `status` comes from chain and Gateway state only: `reserved` (reserved, nonce unused), `settled` (`Settled`), `pending` / `completed` (pocket path, from `gateway_transfers`), `released` (`Released` or unused at `Final`), `refunded` (`JobRefunded`), `failed` (Gateway `failed`). CZ-12 `listReceipts` and CZ-25 join their own fields (`objectiveId`, `paymentRefHash`, `minutesSaved`, `minutesSource`, `accepted`, `merchantLabel`, `merchantIsCzar`, `amountDisplay`, and `quarantined`) to build `LedgerReceipt`. The query takes a vault address (the server maps user → vault). Paging per 02 §9.5.
+- `latestAnchor(publisher, kind)`: `{root, seq, block, transaction}` of the highest `seq` for that publisher and kind, or `null` when none; CZ-17 uses `root` as the next `prev`.
+- `anchorByBatch(root)`: the full `anchors` row for that `root`, or `null`.
+- `dependencyState()`: belongs to T-033, which owns `halt_flags`; it returns the current `halt_flags` rows. T-034 does not serve it.
+- Every query filters and pages in SQL; none loads a whole projection table into memory.
+
 #### 5.5 Alerts (named parameters)
 
 | Alert | Rule | Parameter (default, reason) | Action |

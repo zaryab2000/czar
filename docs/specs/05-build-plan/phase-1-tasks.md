@@ -544,6 +544,7 @@
 - **Milestone / group / who:** M2 / M2-c / agent. **Size:** M. **Deps:** T-031, T-032.
 - **Spec refs:** CZ-19 §5.5; `S01/system-architecture.md` §16.2; FD-18; A1-02, A2-23, A4-08, A5-12.
 - **Outputs:** alert rules, `halt_flags` table read by the paying agent.
+- **SCR-119 (2026-10-21):** T-033 also serves the `dependencyState()` query (CZ-19 §5.4), returning the current `halt_flags` rows.
 - **Inputs:** projections from T-031 and T-032.
 - **Steps:**
   - Watch `Upgraded(address)` on every pinned proxy and ERC-8183 admin events.
@@ -1705,3 +1706,4 @@
 | 2026-10-20 | D90 | New M5 tasks T-109 to T-114 (T-114 blocked on SCR-030); notes on T-065 (P-07 allowlist) and T-067; coverage rows. |
 | 2026-10-20 | D91 | New T-115 to T-119; T-090 hands index loading and the live lead fetch to T-115; T-092 note; coverage and notes. |
 | 2026-10-21 | D92 (Zaryab) | Arc testnet moves to the end of Phase 1: T-027 to M8 (deps add T-101); T-036 and T-040 run on a local `arc-anvil` deployment (`deployments/arc-local.json`, `env/local.toml`); new T-121 does the testnet deploy, signer evidence and `env/testnet.toml`; T-102 depends on T-121; every earlier "on testnet" step runs on the local chain with Circle mocks and fixtures. |
+| 2026-10-21 | SCR-119 | CZ-19 §5.4 response contracts for `receiptsForLedger` (settlement facts; server joins the rest of `LedgerReceipt`), `latestAnchor`, `anchorByBatch`; `dependencyState` moves to T-033; queries page in SQL. |
