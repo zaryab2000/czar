@@ -2,6 +2,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { chmod, lstat, mkdir, unlink } from "node:fs/promises";
 import { connect, createServer, type Server, type Socket } from "node:net";
 import { dirname, resolve } from "node:path";
+import { loadConfig } from "@czar/config";
 import type { Address } from "@czar/hashing";
 import type { AuditSink, SignRequest, SignResult, Signer } from "./service.ts";
 import { Denied } from "./policy.ts";
@@ -97,7 +98,7 @@ export async function createSignerClient(options: SignerClientOptions): Promise<
   const identity =
     options.identity ??
     keychainSignerIdentity(
-      options.keychainService ?? "dev.czar.signer.keystore",
+      options.keychainService ?? String(loadConfig().get("signer.keychainService")),
       options.keychainOpen,
     );
   const token = await identity.tokenFor(options.service);
