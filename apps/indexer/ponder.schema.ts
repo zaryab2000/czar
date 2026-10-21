@@ -75,3 +75,16 @@ export const anchors = onchainTable("anchors", (t) => ({
   block: t.bigint().notNull(),
   transaction: t.text().notNull(),
 }));
+
+export const gatewayTransfers = onchainTable("gateway_transfers", (t) => ({
+  transferId: t.text().primaryKey(),
+  status: t.text().notNull(),
+  fromAddress: t.text().notNull(),
+  toAddress: t.text().notNull(),
+  amount: t.text().notNull(),
+  nonce: t.text().notNull(),
+  txHash: t.text(),
+  createdAt: t.text().notNull(),
+  updatedAt: t.text().notNull(),
+  pocketAddress: t.text(),
+}));

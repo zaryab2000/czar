@@ -1,17 +1,49 @@
 import { ponder } from "ponder:registry";
 import { and, eq } from "drizzle-orm";
-import { anchors, externalEvents, pockets, vaults } from "ponder:schema";
+import { anchors, externalEvents, gatewayTransfers, pockets, vaults } from "ponder:schema";
 import type { Amount6, PocketRecord } from "@czar/schemas";
 import type { Address } from "viem";
 import { mirrorKey } from "@czar/indexer/mirrors";
+import { envVarName, loadConfig, PARAMETERS } from "@czar/config";
+import { createLogger } from "@czar/logging";
 import { normalizeTransferAmount } from "#src/amounts";
 import { externalEventId, isKnownTransfer, pocketDelegateState } from "#src/external-events";
 import { EXTERNAL_ADDRESSES } from "#src/external-events";
+import { pollGatewayTransfers } from "#src/gateway-poller";
 
 type Context = Parameters<Parameters<typeof ponder.on>[1]>[0]["context"];
-type Event = Parameters<Parameters<typeof ponder.on>[1]>[0]["event"];
+type Event = {
+  args: unknown;
+  log: { address: Address; logIndex: number };
+  block: { number: bigint };
+  transaction: { hash: `0x${string}` };
+};
 type TransferArgs = { from: Address; to: Address; value: bigint };
 type AuthArgs = { authorizer: Address; nonce: `0x${string}` };
+
+function configuredEnvironment(): Record<string, string> {
+  const environment: Record<string, string> = {};
+  for (const parameter of PARAMETERS) {
+    const name = envVarName(parameter.key);
+    const value = process.env[name];
+    if (value !== undefined) environment[name] = value;
+  }
+  return environment;
+}
+
+const config = loadConfig({ env: configuredEnvironment() });
+const payoutAddresses = config.get("indexer.merchantPayoutAddresses") as string[];
+for (const address of payoutAddresses) {
+  if (!/^0x[\da-f]{40}$/.test(address)) {
+    throw new Error("indexer.merchantPayoutAddresses must contain lowercase EVM addresses");
+  }
+}
+const normalizedPayoutAddresses = payoutAddresses.map((address) => address.toLowerCase());
+const logger = createLogger({ service: "indexer", component: "CZ-19" });
+const MS_PER_SECOND = 1000;
+let lastGatewayPollMs = 0;
+let gatewayPollInFlight = false;
+let consecutiveGatewayErrors = 0;
 
 function jsonValue(value: unknown): unknown {
   if (typeof value === "bigint") return value.toString();
@@ -44,6 +76,7 @@ async function knownAddresses(context: Context): Promise<Set<string>> {
     [
       ...knownVaults.map((row) => row.id),
       ...knownPockets.map((row) => (row.mirror as { pocket: string }).pocket),
+      ...normalizedPayoutAddresses,
     ].map((address) => address.toLowerCase()),
   );
 }
@@ -139,7 +172,8 @@ ponder.on("OpenEvidenceLog:Revealed", async ({ event, context }) => {
 
 for (const name of ["DelegateAdded", "DelegateRemoved"] as const) {
   const eventName = `GatewayWallet:${name}` as Parameters<typeof ponder.on>[0];
-  ponder.on(eventName, async ({ event, context }) => {
+  ponder.on(eventName, async (input) => {
+    const { event, context } = input as unknown as { event: Event; context: Context };
     const args = event.args as unknown as { token: Address; depositor: Address; delegate: Address };
     await save(context, event, name, args);
     if (args.token.toLowerCase() !== EXTERNAL_ADDRESSES.usdc.toLowerCase()) return;
@@ -156,7 +190,8 @@ for (const name of ["DelegateAdded", "DelegateRemoved"] as const) {
 
 for (const [contract, name] of genericEvents) {
   const eventName = `${contract}:${name}` as Parameters<typeof ponder.on>[0];
-  ponder.on(eventName, async ({ event, context }) => {
+  ponder.on(eventName, async (input) => {
+    const { event, context } = input as unknown as { event: Event; context: Context };
     const args = event.args as unknown as Record<string, unknown>;
     const known = await knownAddresses(context);
     const addresses = Object.values(args).filter(
@@ -174,3 +209,63 @@ for (const [contract, name] of genericEvents) {
     await save(context, event, name, normalized);
   });
 }
+
+ponder.on("GatewayPoll:block", async ({ context }) => {
+  if (process.env["CZAR_TEST_GATEWAY_POLL_DISABLED"] === "1") return;
+  const now = Date.now();
+  const intervalMs = (config.get("indexer.gatewayPollSeconds") as number) * MS_PER_SECOND;
+  if (gatewayPollInFlight || now - lastGatewayPollMs < intervalMs) return;
+  gatewayPollInFlight = true;
+  lastGatewayPollMs = now;
+  try {
+    const pocketRows = await context.db.sql.select().from(pockets);
+    const pocketAddresses = new Set(
+      pocketRows.map((row) => (row.mirror as PocketRecord).pocket.toLowerCase()),
+    );
+    const targets = [
+      ...pocketRows
+        .filter((row) => {
+          const state = (row.mirror as PocketRecord).state;
+          return state === "Funded" || state === "Draining";
+        })
+        .map((row) => ({
+          kind: "pocket" as const,
+          address: (row.mirror as PocketRecord).pocket,
+        })),
+      ...normalizedPayoutAddresses.map((address) => ({ kind: "merchant" as const, address })),
+    ];
+    for (const target of targets) {
+      const outcome = await pollGatewayTransfers(
+        target,
+        {
+          pageSize: config.get("indexer.gatewayPageSize") as number,
+          timeoutMs: config.get("fetch.timeoutMs") as number,
+          pocketAddresses,
+        },
+        {
+          find: (transferId) => context.db.find(gatewayTransfers, { transferId }),
+          async save(record) {
+            await context.db
+              .insert(gatewayTransfers)
+              .values(record)
+              .onConflictDoUpdate({ ...record });
+          },
+        },
+        {
+          fetch,
+          log: (event) => logger.warn(event),
+        },
+      );
+      if (outcome.error) {
+        consecutiveGatewayErrors += 1;
+        if (consecutiveGatewayErrors > (config.get("indexer.gatewayPollFailMax") as number)) {
+          logger.error("gateway_poll_failing");
+        }
+      } else {
+        consecutiveGatewayErrors = 0;
+      }
+    }
+  } finally {
+    gatewayPollInFlight = false;
+  }
+});

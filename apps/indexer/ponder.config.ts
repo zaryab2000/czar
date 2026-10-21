@@ -55,6 +55,9 @@ export default createConfig({
       ethGetLogsBlockRange: config.get("indexer.getLogsBlockRange") as number,
     },
   },
+  blocks: {
+    GatewayPoll: { chain: "arcTestnet" },
+  },
   contracts: {
     CzarVaultFactory: {
       chain: "arcTestnet",
