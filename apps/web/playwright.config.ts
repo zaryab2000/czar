@@ -22,10 +22,18 @@ export default defineConfig({
     },
     { name: "webkit-desktop", use: { ...devices["Desktop Safari"], viewport: DESKTOP_VIEWPORT } },
   ],
-  webServer: {
-    command: `pnpm exec next start --hostname localhost --port ${PORT}`,
-    url: `http://localhost:${PORT}`,
-    reuseExistingServer: false,
-    env: { NEXT_TELEMETRY_DISABLED: "1" },
-  },
+  webServer: [
+    {
+      command: "node e2e/mock-bundler.mjs",
+      url: "http://127.0.0.1:4337/health",
+      reuseExistingServer: false,
+      env: { CZAR_ARC_RPC_URL: "http://127.0.0.1:8549" },
+    },
+    {
+      command: `pnpm exec next start --hostname localhost --port ${PORT}`,
+      url: `http://localhost:${PORT}`,
+      reuseExistingServer: false,
+      env: { NEXT_TELEMETRY_DISABLED: "1" },
+    },
+  ],
 });

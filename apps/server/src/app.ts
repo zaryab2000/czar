@@ -6,8 +6,9 @@ import type { Config } from "@czar/config";
 import type { Logger } from "@czar/logging";
 import { assertNoLocalOnly, LocalOnlyFieldError, SchemaValidationError } from "@czar/schemas";
 import type { ObjectiveSubmission } from "@czar/schemas";
+import type { Plan, SubjectsRevision } from "@czar/schemas";
 import type { Pool } from "pg";
-import { authenticateDevice, digest, type Principal } from "#src/http/auth";
+import { appSessionVerifier, authenticateDevice, digest, type Principal } from "#src/http/auth";
 import {
   parseIdempotencyKey,
   parseObjectiveId,
@@ -19,10 +20,32 @@ import { findOrCreateIdempotency, fingerprintRequest } from "#src/http/idempoten
 import { PairingRejected, consumePairingCode, type PairDependencies } from "#src/devices/pair";
 import { submitObjective } from "#src/objectives/service";
 import { completeModelCall, type ModelClient, type ModelCallRequest } from "#src/models/proxy";
+import {
+  createApprovalIntentRoute,
+  getApprovalRoute,
+  listApprovalsRoute,
+  notifySubmittedRoute,
+  revisePlanSubjectsRoute,
+} from "#src/app/approvals";
+import { createFreezeIntentRoute } from "#src/app/freeze";
+import { createAuthChallengeRoute, createSessionRoute, registerPasskeyRoute } from "#src/app/auth";
+import {
+  getEnvelopeRoute,
+  getMeRoute,
+  listEnvelopesRoute,
+  listReceiptsRoute,
+  type AppReadOptions,
+} from "#src/app/reads";
 
 export interface AppDependencies extends PairDependencies {
   logger: Logger;
   modelClient?: ModelClient;
+  appReadOptions?: AppReadOptions;
+  revisePlanSubjects?: (
+    userId: string,
+    planId: string,
+    revision: SubjectsRevision,
+  ) => Promise<Plan | null>;
 }
 
 interface RequestState {
@@ -97,11 +120,144 @@ export function createApp(dependencies: AppDependencies): Hono {
     return context.json({ status: "ok" });
   });
   app.post("/v1/devices/pair", (context) => pairRoute(context, dependencies));
+  app.post("/v1/auth/challenge", (context) =>
+    publicAuthRoute(context, appAuthDependencies(dependencies), createAuthChallengeRoute),
+  );
+  app.post("/v1/auth/passkey", (context) =>
+    publicAuthRoute(context, appAuthDependencies(dependencies), registerPasskeyRoute),
+  );
+  app.post("/v1/auth/session", (context) =>
+    publicAuthRoute(context, appAuthDependencies(dependencies), createSessionRoute),
+  );
   app.post("/v1/objectives", (context) => submitRoute(context, dependencies));
   app.post("/v1/models/complete", (context) => modelRoute(context, dependencies));
   app.get("/v1/objectives", (context) => listRoute(context, dependencies));
   app.get("/v1/objectives/:objectiveId", (context) => getRoute(context, dependencies));
+  app.get(
+    "/v1/me",
+    appSessionVerifier(dependencies.pool, dependencies.config),
+    (context, next) => appRateLimit(context, next, dependencies),
+    (context) => getMeRoute(context, appReadDependencies(dependencies)),
+  );
+  app.get(
+    "/v1/envelopes",
+    appSessionVerifier(dependencies.pool, dependencies.config),
+    (context, next) => appRateLimit(context, next, dependencies),
+    (context) => listEnvelopesRoute(context, appReadDependencies(dependencies)),
+  );
+  app.get(
+    "/v1/envelopes/:envelopeRef",
+    appSessionVerifier(dependencies.pool, dependencies.config),
+    (context, next) => appRateLimit(context, next, dependencies),
+    (context) => getEnvelopeRoute(context, appReadDependencies(dependencies)),
+  );
+  app.get(
+    "/v1/ledger/receipts",
+    appSessionVerifier(dependencies.pool, dependencies.config),
+    (context, next) => appRateLimit(context, next, dependencies),
+    (context) => listReceiptsRoute(context, appReadDependencies(dependencies)),
+  );
+  app.get(
+    "/v1/approvals",
+    appSessionVerifier(dependencies.pool, dependencies.config),
+    (context, next) => appRateLimit(context, next, dependencies),
+    (context) => listApprovalsRoute(context, dependencies),
+  );
+  app.get(
+    "/v1/approvals/:planId",
+    appSessionVerifier(dependencies.pool, dependencies.config),
+    (context, next) => appRateLimit(context, next, dependencies),
+    (context) => getApprovalRoute(context, dependencies),
+  );
+  app.post(
+    "/v1/approvals/:planId/subjects",
+    appSessionVerifier(dependencies.pool, dependencies.config),
+    (context, next) => appRateLimit(context, next, dependencies),
+    (context) => revisePlanSubjectsRoute(context, dependencies),
+  );
+  app.post(
+    "/v1/approvals/:planId/intent",
+    appSessionVerifier(dependencies.pool, dependencies.config),
+    (context, next) => appRateLimit(context, next, dependencies),
+    (context) => createApprovalIntentRoute(context, dependencies),
+  );
+  app.post(
+    "/v1/approvals/:planId/submitted",
+    appSessionVerifier(dependencies.pool, dependencies.config),
+    (context, next) => appRateLimit(context, next, dependencies),
+    (context) => notifySubmittedRoute(context, dependencies),
+  );
+  app.post(
+    "/v1/freeze/intent",
+    appSessionVerifier(dependencies.pool, dependencies.config),
+    (context, next) => appRateLimit(context, next, dependencies),
+    (context) => createFreezeIntentRoute(context, dependencies.pool),
+  );
+  app.get(
+    "/v1/soul/pointer",
+    appSessionVerifier(dependencies.pool, dependencies.config),
+    (context, next) => appRateLimit(context, next, dependencies),
+    (context) => soulPointerRoute(context),
+  );
   return app;
+}
+
+function soulPointerRoute(context: ServerContext): Response {
+  const body = {
+    available: false as const,
+    message:
+      "Open the Czar viewer on your computer to tell Czar about your work (about five minutes, optional).",
+    desktopUrl: "http://127.0.0.1/soul" as const,
+  };
+  assertExchange("getSoulPointer", undefined, 200, body);
+  return jsonResponse(context, 200, body);
+}
+
+function appReadDependencies(dependencies: AppDependencies) {
+  return {
+    pool: dependencies.pool,
+    config: dependencies.config,
+    ...(dependencies.appReadOptions ? { options: dependencies.appReadOptions } : {}),
+  };
+}
+
+function appAuthDependencies(dependencies: AppDependencies) {
+  return {
+    ...dependencies,
+    rpcUrl: dependencies.appReadOptions?.rpcUrl ?? process.env["CZAR_ARC_RPC_URL"],
+  };
+}
+
+async function appRateLimit(
+  context: ServerContext,
+  next: () => Promise<void>,
+  deps: AppDependencies,
+): Promise<Response | void> {
+  const userId = context.get("appUserId") as string | undefined;
+  if (!userId) return problemResponse(context, 401, "session-expired");
+  const rate = await applyRateLimit(deps.pool, deps.config, deps.clock.now(), "app", userId);
+  setRateHeaders(context, rate);
+  if (!rate.allowed) return problemResponse(context, 429, "rate-limited", true);
+  await next();
+}
+
+async function publicAuthRoute(
+  context: ServerContext,
+  dependencies: AppDependencies,
+  route: (context: ServerContext, dependencies: AppDependencies) => Promise<Response>,
+): Promise<Response> {
+  const ip =
+    context.req.header("CF-Connecting-IP") ?? context.req.header("X-Forwarded-For") ?? "unknown";
+  const rate = await applyRateLimit(
+    dependencies.pool,
+    dependencies.config,
+    dependencies.clock.now(),
+    "app-auth",
+    digest(ip),
+  );
+  setRateHeaders(context, rate);
+  if (!rate.allowed) return problemResponse(context, 429, "rate-limited", true);
+  return route(context, dependencies);
 }
 
 async function pairRoute(context: ServerContext, deps: AppDependencies): Promise<Response> {
@@ -448,10 +604,27 @@ async function safeCzarCode(response: Response): Promise<CzarCode | undefined> {
 }
 
 function operationFor(path: string, method: string): string {
+  if (method === "GET" && path === "/v1/me") return "getMe";
+  if (method === "GET" && path === "/v1/envelopes") return "listEnvelopes";
+  if (method === "GET" && /^\/v1\/envelopes\/[^/]+$/.test(path)) return "getEnvelope";
+  if (method === "GET" && path === "/v1/ledger/receipts") return "listReceipts";
+  if (method === "POST" && path === "/v1/auth/challenge") return "createAuthChallenge";
+  if (method === "POST" && path === "/v1/auth/passkey") return "registerPasskey";
+  if (method === "POST" && path === "/v1/auth/session") return "createSession";
   if (method === "POST" && path === "/v1/devices/pair") return "pairDevice";
   if (method === "POST" && path === "/v1/objectives") return "submitObjective";
   if (method === "POST" && path === "/v1/models/complete") return "completeModelCall";
   if (method === "GET" && path === "/v1/objectives") return "listObjectives";
   if (method === "GET" && path.startsWith("/v1/objectives/")) return "getObjective";
+  if (method === "GET" && path === "/v1/soul/pointer") return "getSoulPointer";
+  if (method === "GET" && path === "/v1/approvals") return "listApprovals";
+  if (method === "GET" && /^\/v1\/approvals\/[^/]+$/.test(path)) return "getApproval";
+  if (method === "POST" && /^\/v1\/approvals\/[^/]+\/intent$/.test(path)) {
+    return "createApprovalIntent";
+  }
+  if (method === "POST" && /^\/v1\/approvals\/[^/]+\/submitted$/.test(path)) {
+    return "notifySubmitted";
+  }
+  if (method === "POST" && path === "/v1/freeze/intent") return "createFreezeIntent";
   return "unknown";
 }

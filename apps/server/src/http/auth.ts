@@ -55,7 +55,7 @@ export function appSessionVerifier(pool: Pool, config: Config): MiddlewareHandle
       [tokenHash, config.get("app.sessionHours")],
     );
     if (!result.rowCount)
-      return context.json(problem(401, "validation"), 401, {
+      return context.json(problem(401, "session-expired"), 401, {
         "Content-Type": "application/problem+json",
       });
     context.set("appUserId", result.rows[0]?.user_id);

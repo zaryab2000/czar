@@ -2,6 +2,7 @@
 // http://localhost (D69, D78): no web manifest, no service worker, no Home Screen install.
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import { AppShell } from "#src/app-shell";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -13,10 +14,7 @@ export default function RootLayout({ children }: { readonly children: ReactNode 
   return (
     <html lang="en">
       <body>
-        <header className="czar-header">
-          <span className="czar-wordmark">Czar</span>
-        </header>
-        <main className="czar-main">{children}</main>
+        <AppShell>{children}</AppShell>
       </body>
     </html>
   );

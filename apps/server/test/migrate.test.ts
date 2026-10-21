@@ -60,6 +60,7 @@ describe("CZ-12 migrations", () => {
     expect(result.rows.map(({ table_name }) => table_name)).toEqual([
       "acceptance_reports",
       "audit",
+      "auth_challenges",
       "devices",
       "evidence_receipts",
       "executor_leases",
@@ -70,6 +71,7 @@ describe("CZ-12 migrations", () => {
       "objectives",
       "outbox_events",
       "pairing_codes",
+      "passkey_credentials",
       "pay_requests",
       "plans",
       "profiles",

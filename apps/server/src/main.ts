@@ -11,6 +11,8 @@ import { createAcceptanceChecker } from "#src/acceptance/index";
 import type { AcceptancePorts } from "#src/acceptance/types";
 import { runBoundary } from "#src/boundary/index";
 import { createApp } from "#src/app";
+import type { AppReadOptions } from "#src/app/reads";
+import type { Plan, SubjectsRevision } from "@czar/schemas";
 import type { PairDependencies } from "#src/devices/pair";
 import { migrate } from "#src/db/migrate";
 import {
@@ -46,6 +48,12 @@ export interface ServerMainOptions extends PairDependencies {
     stepResult: unknown,
     reportHashes: readonly string[],
   ) => PaymentReceiptInput;
+  readonly appReadOptions: AppReadOptions;
+  readonly revisePlanSubjects: (
+    userId: string,
+    planId: string,
+    revision: SubjectsRevision,
+  ) => Promise<Plan | null>;
 }
 
 export interface ServerMain {
@@ -87,6 +95,8 @@ export async function createServerMain(options: ServerMainOptions): Promise<Serv
     clock: options.clock,
     random: options.random,
     modelClient: options.modelClient,
+    ...(options.appReadOptions ? { appReadOptions: options.appReadOptions } : {}),
+    ...(options.revisePlanSubjects ? { revisePlanSubjects: options.revisePlanSubjects } : {}),
   });
   return {
     app,
