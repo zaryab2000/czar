@@ -19,8 +19,6 @@ import { USDC_ADDRESS } from "@czar/x402";
 import { problem } from "#src/http/problem";
 import { RequestValidationError } from "#src/http/validate";
 
-const PERIOD_LENGTH_SECONDS = 604_800;
-
 export interface AppReadOptions {
   readonly rpcUrl: string;
   readonly factoryAddress: Address;
@@ -95,7 +93,10 @@ export async function getMeRoute(
         blockNumber,
       })
     : undefined;
-  const periodId = Number(block.timestamp / BigInt(PERIOD_LENGTH_SECONDS));
+  const periodLengthSeconds = dependencies.config.get(
+    "signer.projection.periodLengthSeconds",
+  ) as number;
+  const periodId = Number(block.timestamp / BigInt(periodLengthSeconds));
   const pockets = vaultCreated ? await sumOpenEnvelopePockets(options.indexerUrl, vault) : 0n;
   const response: Me = {
     userId,
@@ -121,7 +122,7 @@ export async function getMeRoute(
           autoLimit: limit.autoLimit.toString(),
           usedThisPeriod: limit.periodId === BigInt(periodId) ? limit.usedInPeriod.toString() : "0",
           periodId,
-          periodEndsAt: new Date((periodId + 1) * PERIOD_LENGTH_SECONDS * 1000).toISOString(),
+          periodEndsAt: new Date((periodId + 1) * periodLengthSeconds * 1000).toISOString(),
         },
       ];
     }),
