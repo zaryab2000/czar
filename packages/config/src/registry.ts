@@ -1690,9 +1690,9 @@ export const PARAMETERS = [
   {
     key: "payer.jobBudgetWaitHours",
     type: "integer",
-    default: 12,
+    default: 2,
     unit: "hours",
-    reason: "wait for provider's setBudget",
+    reason: "wait for provider's setBudget before cancelling and opening an alternate (H2)",
     source: "docs/specs/04-components/server/server-planning-and-payment.md:377",
     notes: "prose only",
   },

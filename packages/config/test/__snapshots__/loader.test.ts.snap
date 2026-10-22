@@ -1280,7 +1280,7 @@ exports[`registry > matches the dump snapshot 1`] = `
     "key": "payer.jobBudgetWaitHours",
     "source": "default",
     "unit": "hours",
-    "value": 12,
+    "value": 2,
   },
   {
     "key": "payer.jobDurationHours",
