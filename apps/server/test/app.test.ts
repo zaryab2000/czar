@@ -23,6 +23,12 @@ describe("CZ-12 daemon routes", () => {
     await seedPairingCode(pool, "00000042");
   });
 
+  it("healthCheck_reportsDatabaseReadiness", async () => {
+    const response = await context.app.request("/health");
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ status: "ok" });
+  });
+
   it("malformedJson_problemUsesRfc9457AndNoSensitiveDetail", async () => {
     const response = await context.app.request("/v1/devices/pair", {
       method: "POST",

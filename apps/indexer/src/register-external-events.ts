@@ -378,7 +378,7 @@ for (const [contract, name] of genericEvents) {
 }
 
 ponder.on("GatewayPoll:block", async ({ context }) => {
-  if (process.env["CZAR_TEST_GATEWAY_POLL_DISABLED"] === "1") return;
+  if (process.env["CZAR_INDEXER_DISABLE_EXTERNAL_POLL"] === "1") return;
   const now = Date.now();
   const intervalMs = (config.get("indexer.gatewayPollSeconds") as number) * MS_PER_SECOND;
   if (gatewayPollInFlight || now - lastGatewayPollMs < intervalMs) return;

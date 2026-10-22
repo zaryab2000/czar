@@ -1,0 +1,2 @@
+# Local process parameters only. Runtime ports and RPC URLs are set by ops/local.
+"fetch.localMerchantOrigins" = ["http://127.0.0.1:8787"]

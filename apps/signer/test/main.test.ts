@@ -38,7 +38,6 @@ describe("signer process bootstrap", () => {
       env: {},
       argv: ["node", "main.ts"],
       refill: {
-        keyAddress: () => "0x0000000000000000000000000000000000000001",
         getNativeBalance: async () => 10_000_000n,
         submitTransaction: async () => undefined,
         alert: async () => undefined,

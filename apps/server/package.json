@@ -13,7 +13,8 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
-    "eval": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/eval.mjs"
+    "eval": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/eval.mjs",
+    "start:local": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/local-main.ts"
   },
   "dependencies": {
     "@czar/api-contract": "workspace:*",

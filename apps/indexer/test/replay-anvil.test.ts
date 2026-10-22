@@ -409,7 +409,7 @@ async function indexedMirrors(): Promise<{
         CZAR_TEST_FACTORY: factory,
         CZAR_TEST_OPEN_EVIDENCE: openEvidenceAddress,
         CZAR_TEST_PGLITE_DIR: pgliteDir,
-        CZAR_TEST_GATEWAY_POLL_DISABLED: "1",
+        CZAR_INDEXER_DISABLE_EXTERNAL_POLL: "1",
       },
       stdio: ["ignore", "pipe", "pipe"],
     },

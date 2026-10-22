@@ -1,0 +1,114 @@
+version: "0.5"
+is_user: true
+vars:
+  - name: CZAR_ROOT
+    value: .
+processes:
+  arc-anvil:
+    command: arc-anvil --network arc --chain-id 5042002 --mnemonic-random --quiet --port 8545
+    working_dir: ${CZAR_ROOT}
+    readiness_probe:
+      exec:
+        command: >-
+          curl --fail --silent --max-time 2 -X POST -H 'content-type: application/json'
+          --data '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}'
+          http://127.0.0.1:8545
+      initial_delay_seconds: 2
+      period_seconds: 2
+      timeout_seconds: 2
+  postgres:
+    command: docker compose -f ops/local/compose.yaml up postgres
+    working_dir: ${CZAR_ROOT}
+    readiness_probe:
+      exec:
+        command: docker compose -f ops/local/compose.yaml exec -T postgres pg_isready -U postgres
+      initial_delay_seconds: 2
+      period_seconds: 2
+      timeout_seconds: 2
+  deploy:
+    command: bash ops/local/deploy.sh
+    working_dir: ${CZAR_ROOT}
+    depends_on:
+      arc-anvil:
+        condition: process_healthy
+  indexer:
+    command: pnpm --filter @czar/indexer start:local
+    working_dir: ${CZAR_ROOT}
+    environment:
+      CZAR_LOCAL_CONFIG: ../../env/local.toml
+      CZAR_INDEXER_DEPLOYMENT_PATH: ../../deployments/arc-local.json
+      CZAR_INDEXER_RPC_URL: http://127.0.0.1:8545
+      CZAR_INDEXER_DISABLE_EXTERNAL_POLL: "1"
+      DATABASE_URL: postgres://postgres@127.0.0.1:15433/postgres
+    depends_on:
+      arc-anvil:
+        condition: process_healthy
+      deploy:
+        condition: process_completed
+      postgres:
+        condition: process_healthy
+    readiness_probe:
+      http_get:
+        host: 127.0.0.1
+        port: 42069
+        path: /health
+      initial_delay_seconds: 10
+      period_seconds: 3
+      timeout_seconds: 2
+  server:
+    command: pnpm --filter @czar/server start:local
+    working_dir: ${CZAR_ROOT}
+    environment:
+      CZAR_LOCAL_CONFIG: ../../env/local.toml
+      CZAR_DATABASE_URL: postgres://postgres@127.0.0.1:15433/postgres
+      CZAR_SERVER_PORT: "3000"
+    depends_on:
+      postgres:
+        condition: process_healthy
+    readiness_probe:
+      http_get:
+        host: localhost
+        port: 3000
+        path: /health
+      initial_delay_seconds: 3
+      period_seconds: 3
+      timeout_seconds: 2
+  signer:
+    command: pnpm --filter @czar/signer start:local
+    working_dir: ${CZAR_ROOT}
+    environment:
+      CZAR_LOCAL_CONFIG: ../../env/local.toml
+      CZAR_SIGNER_RPC_URL: http://127.0.0.1:8545
+      CZAR_SIGNER_DEPLOYMENT_PATH: ../../deployments/arc-local.json
+      CZAR_DATABASE_URL: postgres://postgres@127.0.0.1:15433/postgres
+    depends_on:
+      arc-anvil:
+        condition: process_healthy
+      deploy:
+        condition: process_completed
+      postgres:
+        condition: process_healthy
+      server:
+        condition: process_healthy
+      indexer:
+        condition: process_healthy
+    readiness_probe:
+      exec:
+        command: >-
+          test -S "$HOME/Library/Application Support/Czar/signer/signer.sock"
+      initial_delay_seconds: 5
+      period_seconds: 3
+      timeout_seconds: 2
+  merchants:
+    command: pnpm --filter @czar/merchants start:local
+    working_dir: ${CZAR_ROOT}
+    environment:
+      CZAR_MERCHANT_PORT: "8787"
+    readiness_probe:
+      http_get:
+        host: 127.0.0.1
+        port: 8787
+        path: /health
+      initial_delay_seconds: 2
+      period_seconds: 3
+      timeout_seconds: 2
