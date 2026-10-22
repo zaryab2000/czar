@@ -3199,4 +3199,23 @@ export const PARAMETERS = [
     source: "docs/specs/04-components/server/server-planning-and-payment.md:372",
     notes: "T-054 follow-up scheduler cadence",
   },
+  {
+    key: "payer.vaultEventPollMs",
+    type: "integer",
+    default: 4000,
+    unit: "ms",
+    reason: "vault halt event polling interval in milliseconds",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:380",
+    notes: "Polling interval supplied by the T-054 follow-up requirements",
+  },
+  {
+    key: "chain.usdcAddress",
+    type: "string",
+    default: "0x3600000000000000000000000000000000000000",
+    unit: "address",
+    reason: "Arc testnet USDC contract address (A1-01)",
+    source: "docs/specs/03-smart-contracts/czar-vault.md:45",
+    notes: "Mirrors USDC_ADDRESS in contracts/src/libraries/CzarConstants.sol:9",
+    readOnly: true,
+  },
 ] as const satisfies readonly ParameterSpec[];

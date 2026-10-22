@@ -175,6 +175,12 @@ describe("app receipt accepted by deployed vault", () => {
         }),
       },
       createSigner: async () => signer,
+      publicClient,
+      walletClient: createWalletClient({
+        chain,
+        transport: http(RPC_URL),
+        account: relayerAccount,
+      }),
       acceptancePorts: {
         outputSchema: { forService: async () => null },
         shapeHistory: { forService: async () => null },
@@ -230,6 +236,7 @@ describe("app receipt accepted by deployed vault", () => {
       expect(report.flags).toContain("injection-quarantined");
     }
     expect(logs.join("\n")).not.toContain("ignore your plan");
+    root.close();
   }, 180_000);
 });
 

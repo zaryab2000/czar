@@ -16,12 +16,23 @@ describe("server composition root", () => {
 
   it("migrates and seeds acceptance before constructing the in-process T-035 signer", async () => {
     const order: string[] = [];
+    const vault = "0x0000000000000000000000000000000000000001" as const;
+    const factory = "0x0000000000000000000000000000000000000002" as const;
+    const watchContractEvent = vi.fn(() => vi.fn());
+    await getPool().query("UPDATE users SET vault=$1 WHERE user_id=$2", [vault, TEST_USER_ID]);
     const signer = await testSigner();
     const root = await createServerMain({
       pool: getPool(),
       config: loadConfig(),
       logger: createLogger({ service: "server", component: "CZ-15", sink: () => undefined }),
       modelClient: { complete: vi.fn() },
+      publicClient: {
+        getBlockNumber: vi.fn(async () => 0n),
+        readContract: vi.fn(async () => factory),
+        watchContractEvent,
+      } as never,
+      walletClient: { sendRawTransaction: vi.fn(async () => `0x${"11".repeat(32)}`) } as never,
+      pocketHalt: { listFundedPockets: async () => [], pullback: async () => undefined },
       createSigner: async () => {
         const profiles = await getPool().query(
           "SELECT profile_id FROM profiles WHERE task_class='data-json'",
@@ -61,6 +72,10 @@ describe("server composition root", () => {
     expect(order).toEqual(["signer", "http"]);
     expect((await root.app.request("/not-found")).status).toBe(404);
     expect(root.executePayerStep).toBeTypeOf("function");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(watchContractEvent).toHaveBeenCalledTimes(2);
+    await getPool().query("UPDATE users SET vault=NULL WHERE user_id=$1", [TEST_USER_ID]);
+    root.close();
 
     const objective = makeObjectiveSubmission("obj_01K7ZT9P4N5Q6R7S8T9V0W1X2Y");
     const planId = "pln_01K7ZT9P4N5Q6R7S8T9V0W1X2Y";

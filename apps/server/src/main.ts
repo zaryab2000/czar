@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { keccak256 } from "viem";
+import { isAddress, keccak256, type Address, type PublicClient, type WalletClient } from "viem";
 import type { Config } from "@czar/config";
 import { paymentRefHash } from "@czar/hashing";
 import type { Logger } from "@czar/logging";
@@ -29,6 +29,8 @@ import {
 } from "#src/payer/vault-direct";
 import { startPayerRuntime, type VaultHaltEventSource } from "#src/payer/runtime";
 import type { PocketHaltDependencies } from "#src/payer/pocket";
+import { createVaultEventSource } from "#src/payer/vault-event-source";
+import { createPullbackChainAdapter } from "#src/payer/pullback-chain-adapter";
 import {
   runPendingPullbackFallbacks,
   type PullbackFallbackSchedulerDependencies,
@@ -45,6 +47,9 @@ export interface ServerMainOptions extends PairDependencies {
   readonly vaultEvents?: VaultHaltEventSource;
   readonly pocketHalt?: PocketHaltDependencies;
   readonly pullbackFallbackChain?: PullbackFallbackSchedulerDependencies["chain"];
+  readonly publicClient: PublicClient;
+  readonly walletClient: WalletClient;
+  readonly withdrawalBlockReader?: (pocket: Address) => Promise<bigint>;
   readonly chain: VaultDirectChain;
   readonly safeFetch: SafeFetch;
   readonly settlement: PaymentReceiptDependencies["settlement"];
@@ -79,23 +84,26 @@ export async function createServerMain(options: ServerMainOptions): Promise<Serv
   } as const;
   const boundary = createPayerBoundary(options, acceptance, promptHashes, objects);
   const signer = await options.createSigner();
+  const vaultEvents = options.vaultEvents ?? (await createDatabaseVaultEventSource(options));
+  const pullbackFallbackChain =
+    options.pullbackFallbackChain ??
+    createPullbackChainAdapter(options.publicClient, options.walletClient, {
+      config: options.config,
+      logger: options.logger,
+      ...(options.withdrawalBlockReader ? { withdrawalBlock: options.withdrawalBlockReader } : {}),
+    });
   const payerRuntime = startPayerRuntime({
-    ...(options.vaultEvents ? { events: options.vaultEvents } : {}),
+    ...(vaultEvents ? { events: vaultEvents } : {}),
     ...(options.pocketHalt ? { pocketHalt: options.pocketHalt } : {}),
     fallbackPollSeconds: Number(options.config.get("payer.pullbackFallbackPollSeconds")),
-    ...(options.pullbackFallbackChain
-      ? {
-          runFallbacks: () =>
-            runPendingPullbackFallbacks({
-              pool: options.pool,
-              config: options.config,
-              signer,
-              chain:
-                options.pullbackFallbackChain as PullbackFallbackSchedulerDependencies["chain"],
-              now: options.clock.now,
-            }),
-        }
-      : {}),
+    runFallbacks: () =>
+      runPendingPullbackFallbacks({
+        pool: options.pool,
+        config: options.config,
+        signer,
+        chain: pullbackFallbackChain,
+        now: options.clock.now,
+      }),
     onError: (operation) =>
       options.logger.error("payer_runtime_failure", { rule: operation, state: "error" }),
   });
@@ -130,6 +138,30 @@ export async function createServerMain(options: ServerMainOptions): Promise<Serv
     acceptance,
     executePayerStep: (input) => executeVaultDirectStep(input, payerDependencies),
     close: () => payerRuntime.stop(),
+  };
+}
+
+async function createDatabaseVaultEventSource(
+  options: ServerMainOptions,
+): Promise<VaultHaltEventSource | undefined> {
+  const rows = await options.pool.query<{ vault: string }>(
+    "SELECT DISTINCT vault FROM users WHERE vault IS NOT NULL ORDER BY vault",
+  );
+  const vaults = rows.rows.map((row) => row.vault).filter((vault) => isAddress(vault));
+  if (vaults.length !== rows.rows.length)
+    options.logger.error("vault_event_invalid_address", {
+      rule: "vault_event_source",
+      state: "invalid",
+    });
+  const sources = vaults.map((vault) =>
+    createVaultEventSource(options.publicClient, vault, options.config, options.logger),
+  );
+  if (sources.length === 0) return undefined;
+  return {
+    subscribe(listener) {
+      const unsubscribe = sources.map((source) => source.subscribe(listener));
+      return () => unsubscribe.forEach((stop) => stop());
+    },
   };
 }
 

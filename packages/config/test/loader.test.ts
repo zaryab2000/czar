@@ -21,6 +21,8 @@ describe("loadConfig", () => {
     expect(config.get("payer.job.minExpiryLeadSeconds")).toBe(360);
     expect(config.get("payer.pullbackFallbackPollSeconds")).toBe(60);
     expect(config.get("payer.job.deliverableStorePath")).toBe("./var/job-deliverables");
+    expect(config.get("payer.vaultEventPollMs")).toBe(4000);
+    expect(config.get("chain.usdcAddress")).toBe("0x3600000000000000000000000000000000000000");
   });
 
   it("env overlay overrides a default", () => {
