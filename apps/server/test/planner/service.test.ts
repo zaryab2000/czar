@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Plan } from "@czar/schemas";
+import type { ObjectiveSubmission, Plan } from "@czar/schemas";
 import { recomputePlanHash, type PlannerRequest } from "#src/planner/index";
 import { makeObjectiveSubmission, seedDevice, TEST_USER_ID } from "#test/fixtures";
 import { setupDatabase } from "#test/db";
@@ -111,6 +111,53 @@ describe("planner persistence", () => {
     expect(row.rows[0]).toMatchObject({ state: "received", plan_id: null });
     expect((await pool().query("SELECT * FROM plans")).rows).toHaveLength(0);
     expect(build).toHaveBeenCalledWith(expect.objectContaining({ shadow: true }));
+  });
+
+  it("rebuilds a revised subject list and supersedes the old plan", async () => {
+    await seedObjective();
+    const oldPlan = testPlan();
+    await pool().query(
+      `INSERT INTO plans (plan_id,objective_id,plan,plan_hash,payee_root,state,created_at,updated_at)
+       VALUES ($1,$2,$3::jsonb,$4,$5,'offered',now(),now())`,
+      [PLAN_ID, OBJECTIVE, JSON.stringify(oldPlan), oldPlan.planHash, oldPlan.payeeRoot],
+    );
+    await pool().query(
+      "UPDATE objectives SET state='awaiting-approval',plan_id=$2 WHERE objective_id=$1",
+      [OBJECTIVE, PLAN_ID],
+    );
+    const replacementId = "pln_01K7ZT9P4N5Q6R7S8T9V0W1X2Z";
+    const op = operations(async (input) => {
+      const replacement = {
+        ...testPlan(),
+        planId: replacementId,
+        taskSpec: input.taskSpec,
+      };
+      return {
+        plan: { ...replacement, planHash: recomputePlanHash(replacement) },
+        approvalNeeded: true,
+      };
+    });
+    const revised = await op.reviseSubjects(TEST_USER_ID, PLAN_ID, {
+      subjects: [{ label: "Vendor Beta", addedByUser: true }],
+    });
+    expect(revised?.taskSpec?.subjects).toEqual([{ label: "Vendor Beta", addedByUser: true }]);
+    expect(revised?.planHash).not.toBe(oldPlan.planHash);
+    const old = await pool().query<{ state: string }>("SELECT state FROM plans WHERE plan_id=$1", [
+      PLAN_ID,
+    ]);
+    const replacement = await pool().query<{ state: string; plan: Plan }>(
+      "SELECT state,plan FROM plans WHERE plan_id=$1",
+      [replacementId],
+    );
+    const objective = await pool().query<{
+      state: string;
+      plan_id: string;
+      submission: ObjectiveSubmission;
+    }>("SELECT state,plan_id,submission FROM objectives WHERE objective_id=$1", [OBJECTIVE]);
+    expect(old.rows[0]?.state).toBe("superseded");
+    expect(replacement.rows[0]?.state).toBe("offered");
+    expect(objective.rows[0]).toMatchObject({ state: "awaiting-approval", plan_id: replacementId });
+    expect(objective.rows[0]?.submission.taskSpec.subjects[0]?.label).toBe("Vendor Beta");
   });
 
   it("moves objectives without a candidate to no-supplier", async () => {

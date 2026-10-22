@@ -3,9 +3,11 @@ import { createLogger } from "@czar/logging";
 import type { Config } from "@czar/config";
 import { objectiveHash, taskSpecHash } from "@czar/hashing";
 import type { TaskSpec } from "@czar/schemas";
+import type { Plan, SubjectsRevision } from "@czar/schemas";
 import { loadConfig } from "@czar/config";
 import type { Pool } from "pg";
 import { createApp } from "#src/app";
+import type { AppReadOptions } from "#src/app/reads";
 import type { ModelClient } from "#src/models/proxy";
 
 export const TEST_NOW = new Date("2026-10-21T00:00:00.000Z");
@@ -16,7 +18,16 @@ let contextRandomOffset = 0;
 
 export function createTestContext(
   pool: Pool,
-  options: { modelClient?: ModelClient; config?: Config } = {},
+  options: {
+    modelClient?: ModelClient;
+    config?: Config;
+    appReadOptions?: AppReadOptions;
+    revisePlanSubjects?: (
+      userId: string,
+      planId: string,
+      revision: SubjectsRevision,
+    ) => Promise<Plan | null>;
+  } = {},
 ) {
   let currentTime = new Date(TEST_NOW);
   let randomCall = contextRandomOffset;
@@ -49,6 +60,8 @@ export function createTestContext(
     clock,
     random,
     ...(options.modelClient ? { modelClient: options.modelClient } : {}),
+    ...(options.appReadOptions ? { appReadOptions: options.appReadOptions } : {}),
+    ...(options.revisePlanSubjects ? { revisePlanSubjects: options.revisePlanSubjects } : {}),
   });
   return { app, clock, random, logger, logLines };
 }

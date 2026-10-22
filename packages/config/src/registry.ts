@@ -3206,4 +3206,22 @@ export const PARAMETERS = [
     source: "docs/specs/04-components/server/server-autonomy-roi-keys.md:64",
     readOnly: true,
   },
+  {
+    key: "app.challengeTtlSeconds",
+    type: "integer",
+    default: 300,
+    unit: "s",
+    reason: "single-use WebAuthn challenges expire after five minutes (SCR-125)",
+    source:
+      "docs/specs/06-review/change-requests/SCR-125-app-passkey-enrolment-reads-and-wallet-tests.md:45",
+  },
+  {
+    key: "app.bundlerEndpoints",
+    type: "object",
+    default: {},
+    unit: "bundler-endpoint-map",
+    reason: "test bundler URLs are supplied by the local wallet test setup (SCR-125)",
+    source:
+      "docs/specs/06-review/change-requests/SCR-125-app-passkey-enrolment-reads-and-wallet-tests.md:104",
+  },
 ] as const satisfies readonly ParameterSpec[];

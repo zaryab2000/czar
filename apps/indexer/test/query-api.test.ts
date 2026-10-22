@@ -12,6 +12,7 @@ import {
   pockets,
   pullbacks,
   reservations,
+  vaults,
 } from "@czar/indexer/schema";
 import { envelopeMirror, jobMirror, pocketMirror, reservationMirror } from "@czar/indexer/mirrors";
 import type { Address, Hex } from "viem";
@@ -177,6 +178,27 @@ beforeEach(async () => {
 });
 
 describe("T-034 query store (SQL)", () => {
+  it("finds a vault by its owner and pages envelopes by vault", async () => {
+    await db.insert(vaults).values({
+      id: lower(VAULT),
+      owner: lower(PAYEE),
+      version: 1,
+      agentSigner: lower(PAYEE),
+      autonomySigner: lower(PAYEE),
+      evaluator: lower(PAYEE),
+      createdBlock: 12n,
+    });
+    await seedEnvelope(VAULT, 1n);
+    await seedEnvelope(VAULT, 2n);
+    await seedEnvelope(OTHER_VAULT, 1n);
+    const store = createQueryStore(db);
+
+    expect((await store.vaultByOwner(lower(PAYEE)))?.["id"]).toBe(lower(VAULT));
+    const first = await store.envelopesForVault(lower(VAULT), null, 1);
+    const second = await store.envelopesForVault(lower(VAULT), { after: first[0]!.key }, 1);
+    expect([...first, ...second].map((row) => row.item["envelopeId"])).toEqual([1, 2]);
+  });
+
   it("pages reservationsNeedingFinalize in SQL across pages with no gaps or repeats", async () => {
     for (let id = 1n; id <= 7n; id += 1n) {
       await seedReservation(VAULT, id, { state: 1, validBefore: 100n + id });
@@ -356,6 +378,16 @@ describe("T-034 query store (SQL)", () => {
       createdAt: "2026-10-21T00:00:05.500Z",
     });
     expect(all[6]).toMatchObject({ amount: "400", stepIndex: 1, jobKey: hash("1") });
+    expect(all[0]).toMatchObject({
+      payer: lower(VAULT),
+      nonce: derivedNonce(VAULT, 1n, 0),
+      validBefore: 999,
+    });
+    expect(all[0]?.payee?.toLowerCase()).toBe(lower(PAYEE));
+    const response = await createIndexerApi(store).request(`/receipts?vault=${lower(VAULT)}`);
+    expect(response.status).toBe(200);
+    const page = (await response.json()) as { items: { validBefore: number | null }[] };
+    expect(page.items[0]?.validBefore).toBe(999);
   });
 
   it("pages receipts correctly when several rails share one timestamp", async () => {
@@ -424,6 +456,40 @@ describe("T-034 query store (SQL)", () => {
 
 describe("T-034 HTTP routes", () => {
   const config = loadConfig({ envFile: { "api.pageDefaultLimit": 2 } });
+
+  it("serves owner vault lookup and cursor-paged envelopes by vault", async () => {
+    await db.insert(vaults).values({
+      id: lower(VAULT),
+      owner: lower(PAYEE),
+      version: 1,
+      agentSigner: lower(PAYEE),
+      autonomySigner: lower(PAYEE),
+      evaluator: lower(PAYEE),
+      createdBlock: 12n,
+    });
+    for (let id = 1n; id <= 5n; id += 1n) await seedEnvelope(VAULT, id);
+    await seedEnvelope(OTHER_VAULT, 1n);
+    const app = createIndexerApi(createQueryStore(db), config);
+    expect((await app.request(`/vaults?owner=${lower(PAYEE)}`)).status).toBe(200);
+    expect((await app.request(`/vaults?owner=${lower(OTHER_VAULT)}`)).status).toBe(404);
+    expect((await app.request("/vaults?owner=invalid")).status).toBe(400);
+
+    const ids: number[] = [];
+    let url = `/envelopes?vault=${lower(VAULT)}`;
+    for (let pageNumber = 0; pageNumber < 5; pageNumber += 1) {
+      const response = await app.request(url);
+      expect(response.status).toBe(200);
+      const page = (await response.json()) as {
+        items: { envelopeId: number }[];
+        nextCursor: string | null;
+      };
+      ids.push(...page.items.map((envelope) => envelope.envelopeId));
+      if (!page.nextCursor) break;
+      url = `/envelopes?vault=${lower(VAULT)}&cursor=${page.nextCursor}`;
+    }
+    expect(ids.toSorted((left, right) => left - right)).toEqual([1, 2, 3, 4, 5]);
+    expect((await app.request("/envelopes?vault=invalid")).status).toBe(400);
+  });
 
   it("serves envelopeByRef with schema-valid mirrors and 404 for an unknown ref", async () => {
     const ref = await seedEnvelope(VAULT, 1n);

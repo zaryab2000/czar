@@ -8,6 +8,7 @@ import {
   seedDevice,
   seedPairingCode,
   TEST_TOKEN,
+  TEST_USER_ID,
 } from "#test/fixtures";
 
 const getPool = setupDatabase();
@@ -405,6 +406,37 @@ describe("CZ-12 daemon routes", () => {
       ["%goal-6df42c%"],
     );
     expect(Number(otherRows.rows[0]?.count)).toBe(0);
+  });
+});
+
+describe("CZ-22 app read routes", () => {
+  it("getSoulPointer_returnsUnavailableDesktopNoticeForAppSession", async () => {
+    const pool = getPool();
+    const appToken = Buffer.alloc(32, 21).toString("base64url");
+    const tokenHash = createHash("sha256").update(appToken).digest();
+    await pool.query("INSERT INTO users (user_id) VALUES ($1) ON CONFLICT DO NOTHING", [
+      TEST_USER_ID,
+    ]);
+    await pool.query(
+      `INSERT INTO sessions (token_hash,user_id,expires_at)
+       VALUES ($1,$2,now()+interval '24 hours')`,
+      [tokenHash, TEST_USER_ID],
+    );
+    const context = createTestContext(pool);
+    const response = await context.app.request("/v1/soul/pointer", {
+      headers: { Authorization: `Bearer ${appToken}` },
+    });
+    const body = (await response.json()) as Record<string, unknown>;
+    expect(response.status).toBe(200);
+    expect(body["available"]).toBe(false);
+    expect(body["desktopUrl"]).toBe("http://127.0.0.1/soul");
+    expect(String(body["message"]).length).toBeLessThanOrEqual(200);
+    expect(
+      validateRecordedExchange("getSoulPointer", {
+        responseStatus: response.status,
+        responseBody: body,
+      }).valid,
+    ).toBe(true);
   });
 });
 

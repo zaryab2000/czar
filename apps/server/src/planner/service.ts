@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import type { ObjectiveSubmission, Plan } from "@czar/schemas";
+import type { ObjectiveSubmission, Plan, SubjectsRevision } from "@czar/schemas";
 import { validateSchema, validationErrors } from "@czar/schemas";
 import type { Pool, PoolClient } from "pg";
 import { canTransition } from "#src/objectives/state";
@@ -63,8 +63,105 @@ export function createPlannerOperations(deps: PlannerOperationsDependencies) {
     shadowQuote: (objectiveId: string) => shadowQuote(objectiveId, deps, now, random),
     replan: (objectiveId: string, failures: readonly ReplanFailure[]) =>
       replan(objectiveId, failures, deps, now, random),
+    reviseSubjects: (userId: string, planId: string, revision: SubjectsRevision) =>
+      reviseSubjects(userId, planId, revision, deps, now, random),
     processNextReceived: () => processNextReceived(deps),
   };
+}
+
+async function reviseSubjects(
+  userId: string,
+  planId: string,
+  revision: SubjectsRevision,
+  deps: PlannerOperationsDependencies,
+  now: () => Date,
+  random: RandomSource,
+): Promise<Plan | null> {
+  const selected = await deps.pool.query<{
+    objective_id: string;
+    objective_hash: string;
+    submission: ObjectiveSubmission;
+    state: string;
+    plan_state: string;
+  }>(
+    `SELECT o.objective_id,o.objective_hash,o.submission,o.state,p.state AS plan_state
+     FROM plans p JOIN objectives o ON o.objective_id=p.objective_id
+     WHERE p.plan_id=$1 AND o.user_id=$2`,
+    [planId, userId],
+  );
+  const row = selected.rows[0];
+  if (!row) throw new Error("The plan was not found for this account.");
+  if (row.state !== "awaiting-approval" || row.plan_state !== "offered") {
+    throw new Error("The plan can no longer be revised.");
+  }
+  const taskSpec = {
+    ...row.submission.taskSpec,
+    subjects: revision.subjects.map((subject) => ({ ...subject })),
+  };
+  const submission = { ...row.submission, taskSpec };
+  const objective: ObjectiveRow = {
+    objective_id: row.objective_id,
+    user_id: userId,
+    device_id: submission.deviceId,
+    objective_hash: row.objective_hash,
+    submission,
+    state: row.state,
+  };
+  const result = await build(objective, deps, { now, random });
+  if (!result) return null;
+  await persistSubjectRevision(deps.pool, objective, planId, result.plan);
+  return result.plan;
+}
+
+async function persistSubjectRevision(
+  pool: Pool,
+  objective: ObjectiveRow,
+  previousPlanId: string,
+  plan: Plan,
+): Promise<void> {
+  if (!validateSchema("plan", plan)) {
+    throw new Error(
+      `Refusing to persist invalid revised plan: ${JSON.stringify(validationErrors("plan"))}`,
+    );
+  }
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const current = await client.query<{ plan_id: string }>(
+      `SELECT plan_id FROM objectives WHERE objective_id=$1 AND user_id=$2
+       AND state='awaiting-approval' AND plan_id=$3 FOR UPDATE`,
+      [objective.objective_id, objective.user_id, previousPlanId],
+    );
+    if (current.rowCount !== 1)
+      throw new Error("The plan changed while its subjects were revised.");
+    const updated = await client.query(
+      "UPDATE plans SET state='superseded',updated_at=now() WHERE plan_id=$1 AND state='offered'",
+      [previousPlanId],
+    );
+    if (updated.rowCount !== 1) throw new Error("The plan is no longer available for revision.");
+    await client.query(
+      `INSERT INTO plans (plan_id,objective_id,plan,plan_hash,payee_root,state,created_at,updated_at)
+       VALUES ($1,$2,$3::jsonb,$4,$5,'offered',now(),now())`,
+      [plan.planId, objective.objective_id, JSON.stringify(plan), plan.planHash, plan.payeeRoot],
+    );
+    for (const step of plan.steps) {
+      await client.query(
+        "INSERT INTO steps (plan_id,step_index,step,state,pocket) VALUES ($1,$2,$3::jsonb,'offered',$4)",
+        [plan.planId, step.stepIndex, JSON.stringify(step), plan.pocket ?? null],
+      );
+    }
+    await client.query(
+      `UPDATE objectives SET submission=$2::jsonb,plan_id=$3,updated_at=now()
+       WHERE objective_id=$1 AND state='awaiting-approval' AND plan_id=$4`,
+      [objective.objective_id, JSON.stringify(objective.submission), plan.planId, previousPlanId],
+    );
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 async function planObjective(

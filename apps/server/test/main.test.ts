@@ -49,6 +49,12 @@ describe("server composition root", () => {
       safeFetch: vi.fn(),
       settlement: { isSettled: async () => false },
       receiptInput: vi.fn(() => ({}) as never),
+      appReadOptions: {
+        rpcUrl: "http://127.0.0.1:8549",
+        factoryAddress: "0x0000000000000000000000000000000000000001",
+        indexerUrl: "http://127.0.0.1:42069",
+      },
+      revisePlanSubjects: async () => null,
       clock: { now: () => new Date("2026-10-21T00:00:00Z") },
       random: { bytes: (length: number) => Buffer.alloc(length, 7) },
     });

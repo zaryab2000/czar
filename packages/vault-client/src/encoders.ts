@@ -1,6 +1,7 @@
 // T-026: the signature envelopes the vault's isValidSignature reads (02 §6.3; 03 czar-vault.md §6 layout table).
 import { KIND_TAGS, type SlReceipt } from "@czar/hashing";
-import { encodeAbiParameters, hexToBigInt, size, slice, type Hex } from "viem";
+import { encodeAbiParameters, encodeFunctionData, hexToBigInt, size, slice, type Hex } from "viem";
+import { czarVaultAbi, czarVaultFactoryAbi } from "#src/abi";
 
 export type Address = `0x${string}`;
 export type Hash32 = `0x${string}`;
@@ -18,6 +19,65 @@ const WORD_BYTES = 32;
 export const SECP256K1_HALF_N = 0x7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0n;
 const V_LOW = 27;
 const V_HIGH = 28;
+
+export interface OpenEnvelopeParams {
+  readonly cap: bigint;
+  readonly maxStepAmount: bigint;
+  readonly pocketCapBps: number;
+  readonly expiresAt: bigint;
+  readonly categoryId: Hash32;
+  readonly objectiveHash: Hash32;
+  readonly planHash: Hash32;
+  readonly payeeRoot: Hash32;
+}
+
+/** ABI encodes the exact vault call, used before an owner signs an approval UserOp. */
+export function encodeOpenEnvelope(params: OpenEnvelopeParams): Hex {
+  return encodeFunctionData({
+    abi: czarVaultAbi,
+    functionName: "openEnvelope",
+    args: [params],
+  });
+}
+
+/** Encodes owner freeze and unfreeze actions for an app UserOperation. */
+export function encodeFreezeAction(action: "freeze" | "unfreeze"): Hex {
+  return encodeFunctionData({ abi: czarVaultAbi, functionName: action });
+}
+
+/** Encodes the deployed factory ABI's one-argument createVault call. */
+export function encodeCreateVault(ownerAccount: Address): Hex {
+  return encodeFunctionData({
+    abi: czarVaultFactoryAbi,
+    functionName: "createVault",
+    args: [ownerAccount],
+  });
+}
+
+/** Encodes the owner limit update for one category. */
+export function encodeSetCategoryLimits(
+  categoryId: Hash32,
+  userMax: bigint,
+  autoLimit: bigint,
+): Hex {
+  return encodeFunctionData({
+    abi: czarVaultAbi,
+    functionName: "setCategoryLimits",
+    args: [categoryId, userMax, autoLimit],
+  });
+}
+
+/** Encodes the owner P-256 key and WebAuthn RP ID hash into the vault. */
+export function encodeSetPasskey(qx: Hex, qy: Hex, rpIdHash: Hex): Hex {
+  if (size(qx) !== 32 || size(qy) !== 32 || size(rpIdHash) !== 32) {
+    throw new EncodingError("Passkey coordinates and RP ID hash must be bytes32 values.");
+  }
+  return encodeFunctionData({
+    abi: czarVaultAbi,
+    functionName: "setPasskey",
+    args: [qx, qy, rpIdHash],
+  });
+}
 
 export class EncodingError extends Error {
   override readonly name = "EncodingError";

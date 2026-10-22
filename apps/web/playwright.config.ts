@@ -22,10 +22,40 @@ export default defineConfig({
     },
     { name: "webkit-desktop", use: { ...devices["Desktop Safari"], viewport: DESKTOP_VIEWPORT } },
   ],
-  webServer: {
-    command: `pnpm exec next start --hostname localhost --port ${PORT}`,
-    url: `http://localhost:${PORT}`,
-    reuseExistingServer: false,
-    env: { NEXT_TELEMETRY_DISABLED: "1" },
-  },
+  webServer: [
+    {
+      command: "node e2e/mock-bundler.mjs",
+      url: "http://127.0.0.1:4337/health",
+      reuseExistingServer: false,
+      env: { CZAR_ARC_RPC_URL: "http://127.0.0.1:8549" },
+    },
+    {
+      command:
+        "node --experimental-strip-types --disable-warning=ExperimentalWarning e2e/indexer-fixture.mjs",
+      url: "http://127.0.0.1:42070/health",
+      reuseExistingServer: false,
+      env: {
+        CZAR_ARC_RPC_URL: "http://127.0.0.1:8549",
+      },
+    },
+    {
+      command:
+        "node --experimental-strip-types --disable-warning=ExperimentalWarning e2e/server-fixture.mjs",
+      url: "http://127.0.0.1:4310/health",
+      reuseExistingServer: false,
+      env: {
+        CZAR_ARC_RPC_URL: "http://127.0.0.1:8549",
+        CZAR_INDEXER_URL: "http://127.0.0.1:42070",
+      },
+    },
+    {
+      command: `pnpm exec next start --hostname localhost --port ${PORT}`,
+      url: `http://localhost:${PORT}`,
+      reuseExistingServer: false,
+      env: {
+        NEXT_TELEMETRY_DISABLED: "1",
+        CZAR_SERVER_URL: "http://127.0.0.1:4310",
+      },
+    },
+  ],
 });

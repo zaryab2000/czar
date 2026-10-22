@@ -6,7 +6,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { createApp } from "#src/app";
 
 const pool = new Pool({
-  connectionString: "postgres://postgres@127.0.0.1:15433/postgres",
+  connectionString: "postgres://postgres@127.0.0.1:1/postgres",
   connectionTimeoutMillis: 100,
 });
 const app = createApp({
