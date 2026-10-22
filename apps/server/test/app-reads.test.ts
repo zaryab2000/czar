@@ -60,6 +60,8 @@ describe("app read routes", () => {
       const response = await app.request("/v1/me", { headers: appHeaders() });
       const body = await response.json();
       expect(response.status).toBe(200);
+      expect(response.headers.get("X-Czar-Bundler-Order")).toBe("circle,pimlico,alchemy,zerodev");
+      expect(response.headers.get("X-Czar-Bundler-Endpoints")).toBe("{}");
       expect(body).toMatchObject({ vaultCreated: false, msca: MSCA, frozen: false, paused: false });
       expect(
         validateRecordedExchange("getMe", { responseStatus: response.status, responseBody: body })

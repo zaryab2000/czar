@@ -12,19 +12,28 @@ import { formatUsd } from "@czar/web/money-format";
 export default function ApprovalPage() {
   const { planId } = useParams<{ planId: string }>();
   const load = useCallback(() => appApi.getApproval(planId), [planId]);
-  const { data: plan, error, loading, refresh } = useAppData(load);
-  if (loading && !plan) return <p role="status">Loading this plan…</p>;
-  if (!plan)
+  const { data, error, loading, refresh } = useAppData(load);
+  if (loading && !data) return <p role="status">Loading this plan…</p>;
+  if (!data)
     return <LoadError message={error ?? "This plan could not be loaded."} retry={refresh} />;
-  return <ApprovalReview plan={plan} error={error} refresh={refresh} />;
+  return (
+    <ApprovalReview
+      plan={data.plan}
+      largeCapWarnBps={data.largeCapWarnBps}
+      error={error}
+      refresh={refresh}
+    />
+  );
 }
 
 function ApprovalReview({
   plan,
+  largeCapWarnBps,
   error,
   refresh,
 }: {
   readonly plan: AppPlan;
+  readonly largeCapWarnBps: number;
   readonly error: string | undefined;
   readonly refresh: () => void;
 }) {
@@ -49,7 +58,7 @@ function ApprovalReview({
       <h1 className="czar-title">Review this plan</h1>
       {error && <LoadError message={error} retry={refresh} />}
       <GoalPanel plan={currentPlan} />
-      {me && <CapWarning me={me} plan={currentPlan} />}
+      {me && <CapWarning me={me} plan={currentPlan} thresholdBps={largeCapWarnBps} />}
       {currentPlan.taskSpec && (
         <SubjectEditor
           plan={currentPlan}
@@ -93,9 +102,16 @@ function ApprovalReview({
   );
 }
 
-function CapWarning({ me, plan }: { readonly me: Me; readonly plan: AppPlan }) {
+function CapWarning({
+  me,
+  plan,
+  thresholdBps,
+}: {
+  readonly me: Me;
+  readonly plan: AppPlan;
+  readonly thresholdBps: number;
+}) {
   const userMax = me.limits.find((limit) => limit.category === plan.category)?.userMax;
-  const thresholdBps = Number(process.env["NEXT_PUBLIC_CZAR_LARGE_CAP_WARN_BPS"] ?? "5000");
   if (!userMax || !Number.isSafeInteger(thresholdBps) || thresholdBps < 1) return null;
   if (BigInt(plan.cap) * 10_000n <= BigInt(userMax) * BigInt(thresholdBps)) return null;
   return (

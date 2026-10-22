@@ -19,6 +19,21 @@ import type {
 
 const SESSION_KEY = "czar.appSession";
 const SESSION_EXPIRY_KEY = "czar.appSessionExpiresAt";
+const BUNDLERS = ["circle", "pimlico", "alchemy", "zerodev"] as const;
+
+export type AppBundler = (typeof BUNDLERS)[number];
+
+export interface AppWalletConfig {
+  readonly bundlerOrder: readonly AppBundler[];
+  readonly bundlerEndpoints: Partial<Record<AppBundler, string>>;
+}
+
+let appWalletConfig: AppWalletConfig | undefined;
+
+export function getAppWalletConfig(): AppWalletConfig {
+  if (!appWalletConfig) throw new Error("Load account settings before sending a wallet action.");
+  return appWalletConfig;
+}
 
 export class AppApiError extends Error {
   readonly status: number;
@@ -126,7 +141,11 @@ export const appApi = {
     storeSession(response);
     return response;
   },
-  getMe: () => request<Me>("/v1/me"),
+  getMe: async () => {
+    const result = await requestWithHeaders<Me>("/v1/me");
+    appWalletConfig = parseAppWalletConfig(result.headers);
+    return result.data;
+  },
   listApprovals: (status = "pending", cursor?: string) => {
     const query = new URLSearchParams({ status });
     if (cursor) query.set("cursor", cursor);
@@ -150,7 +169,14 @@ export const appApi = {
     }
     return { page: result.data, pollSeconds, confirmTimeoutSeconds };
   },
-  getApproval: (planId: string) => request<AppPlan>(`/v1/approvals/${encodeURIComponent(planId)}`),
+  getApproval: async (planId: string) => {
+    const result = await requestWithHeaders<AppPlan>(`/v1/approvals/${encodeURIComponent(planId)}`);
+    const largeCapWarnBps = Number(result.headers.get("X-Czar-Large-Cap-Warn-Bps"));
+    if (!Number.isSafeInteger(largeCapWarnBps) || largeCapWarnBps < 1) {
+      throw new Error("The server did not provide a valid large-cap warning setting.");
+    }
+    return { plan: result.data, largeCapWarnBps };
+  },
   revisePlanSubjects: (planId: string, body: SubjectsRevision) =>
     request<AppPlan>(`/v1/approvals/${encodeURIComponent(planId)}/subjects`, {
       method: "POST",
@@ -188,3 +214,47 @@ export const appApi = {
       body: JSON.stringify({ action }),
     }),
 };
+
+function parseAppWalletConfig(headers: Headers): AppWalletConfig {
+  const bundlerOrder = headers
+    .get("X-Czar-Bundler-Order")
+    ?.split(",")
+    .map((name) => name.trim());
+  const rawEndpoints = headers.get("X-Czar-Bundler-Endpoints");
+  if (!bundlerOrder || !rawEndpoints) {
+    throw new Error("The server did not provide wallet transport settings.");
+  }
+  let parsedEndpoints: unknown;
+  try {
+    parsedEndpoints = JSON.parse(rawEndpoints) as unknown;
+  } catch {
+    throw new Error("The server provided invalid wallet transport settings.");
+  }
+  if (
+    bundlerOrder.length === 0 ||
+    bundlerOrder.some((name) => !isBundler(name)) ||
+    typeof parsedEndpoints !== "object" ||
+    parsedEndpoints === null ||
+    Array.isArray(parsedEndpoints)
+  ) {
+    throw new Error("The server provided invalid wallet transport settings.");
+  }
+  const endpoints = parsedEndpoints as Record<string, unknown>;
+  const bundlerEndpoints: Partial<Record<AppBundler, string>> = {};
+  for (const name of BUNDLERS) {
+    const endpoint = endpoints[name];
+    if (endpoint === undefined) continue;
+    if (
+      typeof endpoint !== "string" ||
+      (new URL(endpoint).protocol !== "http:" && new URL(endpoint).protocol !== "https:")
+    ) {
+      throw new Error(`The server provided an invalid endpoint for ${name}.`);
+    }
+    bundlerEndpoints[name] = endpoint;
+  }
+  return { bundlerOrder: bundlerOrder as AppBundler[], bundlerEndpoints };
+}
+
+function isBundler(value: string): value is AppBundler {
+  return BUNDLERS.some((name) => name === value);
+}

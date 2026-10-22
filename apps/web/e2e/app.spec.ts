@@ -38,6 +38,10 @@ test("navigation reaches the owner home and privacy explanation", async ({ page 
   await page.route("**/v1/me", (route) =>
     route.fulfill({
       contentType: "application/json",
+      headers: {
+        "X-Czar-Bundler-Order": "circle,pimlico,alchemy,zerodev",
+        "X-Czar-Bundler-Endpoints": "{}",
+      },
       body: JSON.stringify({
         userId: "usr_01J00000000000000000000000",
         msca: "0x0000000000000000000000000000000000000001",
@@ -114,6 +118,7 @@ test("approval review shows the plan path and payment details", async ({ page })
   await page.route("**/v1/approvals/pln_01J00000000000000000000000", (route) =>
     route.fulfill({
       contentType: "application/json",
+      headers: { "X-Czar-Large-Cap-Warn-Bps": "5000" },
       body: JSON.stringify({
         schemaVersion: "1.2",
         planId: "pln_01J00000000000000000000000",

@@ -73,6 +73,10 @@ test("creates a passkey and later completes createSession", async ({ page, brows
     if (!registeredMsca) return route.fulfill({ status: 401, body: "{}" });
     await route.fulfill({
       contentType: "application/json",
+      headers: {
+        "X-Czar-Bundler-Order": "circle,pimlico,alchemy,zerodev",
+        "X-Czar-Bundler-Endpoints": "{}",
+      },
       body: JSON.stringify(await accountMe(registeredMsca)),
     });
   });
@@ -104,7 +108,11 @@ test("creates a passkey and later completes createSession", async ({ page, brows
     }),
   );
   await page.route(`**/v1/approvals/${plan.planId}`, (route) =>
-    route.fulfill({ contentType: "application/json", body: JSON.stringify(plan) }),
+    route.fulfill({
+      contentType: "application/json",
+      headers: { "X-Czar-Large-Cap-Warn-Bps": "5000" },
+      body: JSON.stringify(plan),
+    }),
   );
   await page.route(`**/v1/approvals/${plan.planId}/intent`, async (route) => {
     const request = route.request().postDataJSON() as { fillInPlace?: boolean };

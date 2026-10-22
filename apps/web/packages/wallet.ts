@@ -4,15 +4,13 @@ import { toCircleSmartAccount, toModularTransport } from "@circle-fin/modular-wa
 import { createPublicClient, defineChain, http, type Hex, type Transport } from "viem";
 import { createBundlerClient, toWebAuthnAccount } from "viem/account-abstraction";
 import { readEnvelopeCount as readCount } from "@czar/vault-client";
+import { getAppWalletConfig } from "#src/app-api";
 import type { BrowserPasskey } from "#src/passkey";
 
 const CHAIN_ID = 5042002;
 const ARC_RPC_URL = process.env["NEXT_PUBLIC_ARC_RPC_URL"] ?? "http://127.0.0.1:8549";
 const CIRCLE_URL = process.env["NEXT_PUBLIC_CIRCLE_CLIENT_URL"] ?? "http://127.0.0.1:4337";
 const CIRCLE_KEY = process.env["NEXT_PUBLIC_CIRCLE_CLIENT_KEY"] ?? "lane5-test-client-key";
-const BUNDLER_ORDER =
-  process.env["NEXT_PUBLIC_CZAR_BUNDLER_ORDER"] ?? "circle,pimlico,alchemy,zerodev";
-const BUNDLER_ENDPOINTS = readBundlerEndpoints(process.env["NEXT_PUBLIC_CZAR_BUNDLER_ENDPOINTS"]);
 const BUNDLERS = ["circle", "pimlico", "alchemy", "zerodev"] as const;
 const P256_ORDER = BigInt("0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551");
 
@@ -44,10 +42,11 @@ export async function sendOwnerUserOperation(
     client: publicClient as unknown as Parameters<typeof toCircleSmartAccount>[0]["client"],
     owner: owner as unknown as Parameters<typeof toCircleSmartAccount>[0]["owner"],
   });
+  const walletConfig = getAppWalletConfig();
   let lastError: unknown;
-  for (const name of BUNDLER_ORDER.split(",").map((item) => item.trim())) {
-    if (!isBundlerName(name)) continue;
-    const endpoint = BUNDLER_ENDPOINTS[name] ?? (name === "circle" ? CIRCLE_URL : undefined);
+  for (const name of walletConfig.bundlerOrder) {
+    const endpoint =
+      walletConfig.bundlerEndpoints[name] ?? (name === "circle" ? CIRCLE_URL : undefined);
     if (!endpoint) continue;
     try {
       const bundler = createBundlerClient({
@@ -81,33 +80,6 @@ export function normalizeP256LowS(signature: `0x${string}`): `0x${string}` {
   }
   const lowS = s > P256_ORDER / 2n ? P256_ORDER - s : s;
   return `0x${r.toString(16).padStart(64, "0")}${lowS.toString(16).padStart(64, "0")}`;
-}
-
-function isBundlerName(value: string): value is (typeof BUNDLERS)[number] {
-  return BUNDLERS.some((name) => name === value);
-}
-
-function readBundlerEndpoints(
-  value: string | undefined,
-): Partial<Record<(typeof BUNDLERS)[number], string>> {
-  if (!value) return {};
-  const parsed: unknown = JSON.parse(value);
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    throw new Error("NEXT_PUBLIC_CZAR_BUNDLER_ENDPOINTS must be a JSON object.");
-  }
-  const endpoints: Partial<Record<(typeof BUNDLERS)[number], string>> = {};
-  for (const name of BUNDLERS) {
-    const endpoint = (parsed as Record<string, unknown>)[name];
-    if (endpoint === undefined) continue;
-    if (
-      typeof endpoint !== "string" ||
-      (new URL(endpoint).protocol !== "http:" && new URL(endpoint).protocol !== "https:")
-    ) {
-      throw new Error(`Bundler endpoint for ${name} must be an HTTP(S) URL.`);
-    }
-    endpoints[name] = endpoint;
-  }
-  return endpoints;
 }
 
 export function getStoredPasskey(): Pick<BrowserPasskey, "credentialId" | "publicKey"> {

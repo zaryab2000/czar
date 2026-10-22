@@ -107,6 +107,7 @@ describe("approval app routes", () => {
 
     const detail = await app.request(`/v1/approvals/${PLAN_ID}`, { headers });
     expect(detail.status).toBe(200);
+    expect(detail.headers.get("X-Czar-Large-Cap-Warn-Bps")).toBe("5000");
     expect(await detail.json()).toMatchObject({ planId: PLAN_ID });
   });
 

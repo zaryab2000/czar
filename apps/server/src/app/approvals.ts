@@ -49,6 +49,10 @@ export async function getApprovalRoute(
   const plan = found.rows[0]?.plan;
   if (!plan) return problemResponse(context, 404, "validation");
   assertExchange("getApproval", 200, plan);
+  context.header(
+    "X-Czar-Large-Cap-Warn-Bps",
+    String(dependencies.config.get("app.largeCapWarnBps")),
+  );
   return context.json(plan);
 }
 
