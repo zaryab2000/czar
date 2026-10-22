@@ -159,7 +159,10 @@ export interface JobDeliveryDependencies {
   readonly pool: Pool;
   readonly config: Config;
   readonly now: () => Date;
-  readonly objectStore: { put(bytes: Uint8Array): Promise<string> };
+  readonly objectStore: {
+    put(bytes: Uint8Array): Promise<string>;
+    delete(bodyRef: string): Promise<void>;
+  };
 }
 
 export function buildJobDescription(input: JobDescriptionInput): JobDescription {
@@ -268,7 +271,8 @@ async function executeJobProviders(
     if (!provider) continue;
     const opened = await openOrRecoverJob(input, dependencies, provider, attempt, assertLeaseHeld);
     const funded = await awaitAndFundJob(input, dependencies, opened, attempt, assertLeaseHeld);
-    if (funded !== undefined) return funded;
+    if (funded !== undefined)
+      return index === 0 ? funded : { ...funded, alternateProvider: provider };
   }
   return { state: "Released" };
 }
@@ -606,7 +610,9 @@ async function persistBrief(
     expiredAt: job.expiredAt,
     submitBy: job.expiredAt - Number(dependencies.config.get("acceptance.evaluationWindowSeconds")),
     decisionCutoff:
-      job.expiredAt - Number(dependencies.config.get("acceptance.decisionMarginSeconds")),
+      job.expiredAt -
+      Number(dependencies.config.get("acceptance.decisionMarginSeconds")) -
+      Number(dependencies.config.get("acceptance.txMarginSeconds")),
     issuedAt: dependencies.now().toISOString(),
   });
   await dependencies.pool.query(
@@ -646,20 +652,15 @@ export async function uploadJobDeliverable(
   dependencies: JobDeliveryDependencies,
 ): Promise<{ readonly contentHash: Hash32; readonly bodyRef: string }> {
   assertIssuedAt(request.issuedAt, dependencies.now());
-  const row = await dependencies.pool.query<{ readonly provider: Address }>(
-    "SELECT provider FROM payer_job_briefs WHERE job_key=$1",
-    [request.jobKey],
-  );
+  const row = await dependencies.pool.query<{
+    readonly provider: Address;
+    readonly brief: JobBrief;
+  }>("SELECT provider,brief FROM payer_job_briefs WHERE job_key=$1", [request.jobKey]);
+  const brief = row.rows[0]?.brief;
   const provider = row.rows[0]?.provider;
-  if (!provider) throw new Error("ERC-8183 job brief not found.");
+  if (!brief || !provider) throw new Error("ERC-8183 job brief not found.");
   const contentHash = keccak256(request.body);
-  const brief = await dependencies.pool.query<{ readonly brief: JobBrief }>(
-    "SELECT brief FROM payer_job_briefs WHERE job_key=$1",
-    [request.jobKey],
-  );
-  const network = brief.rows[0]?.brief.network;
-  if (!network) throw new Error("ERC-8183 job brief not found.");
-  const digest = deliverableUploadDigest(parseChainId(network), {
+  const digest = deliverableUploadDigest(parseChainId(brief.network), {
     jobKey: request.jobKey,
     contentHash,
     issuedAt: request.issuedAt,
@@ -667,16 +668,105 @@ export async function uploadJobDeliverable(
   const signer = await recoverAddress({ hash: digest, signature: request.signature });
   if (signer.toLowerCase() !== provider.toLowerCase())
     throw new Error("Deliverable upload signature does not match the provider.");
-  const limit = Number(dependencies.config.get("acceptance.deliverableMaxBytes"));
+  const configuredLimit = Number(dependencies.config.get("acceptance.deliverableMaxBytes"));
+  const declaredLimit = brief.deliverable.maxBytes ?? configuredLimit;
+  const limit = Math.min(configuredLimit, declaredLimit);
   if (request.body.byteLength > limit)
     throw new RangeError("Job deliverable exceeds acceptance.deliverableMaxBytes.");
   const bodyRef = await dependencies.objectStore.put(request.body);
-  await dependencies.pool.query(
-    `INSERT INTO payer_job_deliverables (job_key,content_hash,body_ref,bytes)
-     VALUES ($1,$2,$3,$4) ON CONFLICT (job_key,content_hash) DO NOTHING`,
-    [request.jobKey, contentHash, bodyRef, request.body.byteLength],
+  try {
+    const stored = await persistDeliverableWithinLimits(
+      request.jobKey,
+      contentHash,
+      bodyRef,
+      request.body.byteLength,
+      dependencies,
+    );
+    if (stored.bodyRef !== bodyRef) await dependencies.objectStore.delete(bodyRef);
+    return { contentHash, bodyRef: stored.bodyRef };
+  } catch (error) {
+    await dependencies.objectStore.delete(bodyRef);
+    throw error;
+  }
+}
+
+async function persistDeliverableWithinLimits(
+  jobKeyValue: Hash32,
+  contentHash: Hash32,
+  bodyRef: string,
+  bytes: number,
+  dependencies: JobDeliveryDependencies,
+): Promise<{ readonly bodyRef: string }> {
+  const client = await dependencies.pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT job_key FROM payer_job_briefs WHERE job_key=$1 FOR UPDATE", [
+      jobKeyValue,
+    ]);
+    const existing = await client.query<{ readonly body_ref: string }>(
+      "SELECT body_ref FROM payer_job_deliverables WHERE job_key=$1 AND content_hash=$2",
+      [jobKeyValue, contentHash],
+    );
+    if (existing.rows[0]) {
+      await client.query("COMMIT");
+      return { bodyRef: existing.rows[0].body_ref };
+    }
+    const totals = await client.query<{ readonly count: number; readonly bytes: string }>(
+      `SELECT count(*)::int AS count,COALESCE(sum(bytes),0)::text AS bytes
+       FROM payer_job_deliverables WHERE job_key=$1`,
+      [jobKeyValue],
+    );
+    const uploads = Number(dependencies.config.get("acceptance.maxUploadsPerJob"));
+    const totalBytes = BigInt(totals.rows[0]?.bytes ?? "0");
+    const maxBytes = BigInt(Number(dependencies.config.get("acceptance.deliverableMaxBytes"))) * 2n;
+    if ((totals.rows[0]?.count ?? 0) >= uploads)
+      throw new RangeError("Job exceeds acceptance.maxUploadsPerJob.");
+    if (totalBytes + BigInt(bytes) > maxBytes)
+      throw new RangeError("Job deliverables exceed twice acceptance.deliverableMaxBytes.");
+    await client.query(
+      `INSERT INTO payer_job_deliverables (job_key,content_hash,body_ref,bytes)
+       VALUES ($1,$2,$3,$4)`,
+      [jobKeyValue, contentHash, bodyRef, bytes],
+    );
+    await client.query("COMMIT");
+    return { bodyRef };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function purgeUnmatchedJobDeliverables(
+  input: {
+    readonly jobKey: Hash32;
+    readonly matchedContentHash: Hash32;
+    readonly decisionAt: Date;
+  },
+  dependencies: JobDeliveryDependencies,
+): Promise<readonly Hash32[]> {
+  const retainMs =
+    Number(dependencies.config.get("acceptance.uploadRetentionHours")) *
+    MILLISECONDS_PER_SECOND *
+    SECONDS_PER_HOUR;
+  if (dependencies.now().getTime() < input.decisionAt.getTime() + retainMs) return [];
+  const rows = await dependencies.pool.query<{
+    readonly content_hash: Hash32;
+    readonly body_ref: string;
+  }>(
+    `SELECT content_hash,body_ref FROM payer_job_deliverables
+     WHERE job_key=$1 AND content_hash<>$2 ORDER BY uploaded_at`,
+    [input.jobKey, input.matchedContentHash],
   );
-  return { contentHash, bodyRef };
+  for (const row of rows.rows) await dependencies.objectStore.delete(row.body_ref);
+  if (rows.rows.length > 0) {
+    await dependencies.pool.query(
+      "DELETE FROM payer_job_deliverables WHERE job_key=$1 AND content_hash<>$2",
+      [input.jobKey, input.matchedContentHash],
+    );
+  }
+  return rows.rows.map((row) => row.content_hash);
 }
 
 function assertIssuedAt(issuedAt: bigint, now: Date): void {

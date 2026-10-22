@@ -481,19 +481,32 @@ async function runPullback(
     input.stepIndex,
     attempt,
   );
-  const savedConfirm = latestTrace.findLast((row) => row.phase === "pullback.confirmed");
-  if (!savedConfirm) {
-    const transaction = await signVaultCall(dependencies, input.vault, "confirmPullback", [
-      pullback.pullbackId,
-    ]);
-    await writePullbackPhase(dependencies, input, attempt, "pullback.confirm.sent", {
-      pullbackId: pullback.pullbackId.toString(),
-      transaction,
-    });
+  const confirmed = await dependencies.chain.readPullback(pullback.pullbackId);
+  const savedConfirm = latestTrace.findLast(
+    (row) =>
+      row.phase === "pullback.confirmed" &&
+      row.payload["pullbackId"] === pullback.pullbackId.toString(),
+  );
+  if (confirmed?.state !== "Confirmed" && !savedConfirm) {
+    const savedSent = latestTrace.findLast(
+      (row) =>
+        row.phase === "pullback.confirm.sent" &&
+        row.payload["pullbackId"] === pullback.pullbackId.toString(),
+    );
+    let transaction = savedSent?.payload["transaction"];
+    if (typeof transaction !== "string") {
+      transaction = await signVaultCall(dependencies, input.vault, "confirmPullback", [
+        pullback.pullbackId,
+      ]);
+      await writePullbackPhase(dependencies, input, attempt, "pullback.confirm.sent", {
+        pullbackId: pullback.pullbackId.toString(),
+        transaction,
+      });
+    }
     assertLeaseHeld();
     const txHash = await dependencies.chain.confirmPullback({
       pullbackId: pullback.pullbackId,
-      transaction,
+      transaction: transaction as `0x${string}`,
     });
     await writePullbackPhase(dependencies, input, attempt, "pullback.confirmed", {
       pullbackId: pullback.pullbackId.toString(),

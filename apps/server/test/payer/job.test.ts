@@ -1,17 +1,28 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { descriptionHash, inputCommit, jobKey } from "@czar/hashing";
+import {
+  deliverableUploadDigest,
+  descriptionHash,
+  inputCommit,
+  jobKey,
+  type Hash32,
+} from "@czar/hashing";
 import {
   buildJobBrief,
   buildJobDescription,
   claimJobRefund,
   executeJobStep,
   proofForJobProvider,
+  purgeUnmatchedJobDeliverables,
+  uploadJobDeliverable,
 } from "#src/payer/job";
 import type { TaskSpec } from "@czar/schemas";
 import { validateSchema } from "@czar/schemas";
 import { setupDatabase } from "#test/db";
 import { makeObjectiveSubmission, seedDevice, TEST_USER_ID } from "#test/fixtures";
 import { loadConfig } from "@czar/config";
+import type { SignRequest } from "@czar/signer";
+import { keccak256 } from "viem";
+import { generatePrivateKey, privateKeyToAccount, sign } from "viem/accounts";
 
 const getPool = setupDatabase();
 const PLAN_ID = "pln_01K7ZT9P4N5Q6R7S8T9V0W1X2Y";
@@ -119,6 +130,86 @@ describe("job brief commitments", () => {
     expect(validateSchema("job-brief", brief)).toBe(true);
   });
 
+  it("job_deliverables_enforce_upload_count_limit", async () => {
+    const privateKey = generatePrivateKey();
+    const provider = privateKeyToAccount(privateKey).address;
+    const currentTime = new Date("2026-10-22T00:00:00Z");
+    const issuedAt = BigInt(Math.floor(currentTime.getTime() / 1000));
+    const brief = buildJobBrief({
+      network: "eip155:5042002",
+      jobEscrow: "0x0000000000000000000000000000000000000001",
+      jobId: 1n,
+      planHash: `0x${"11".repeat(32)}`,
+      stepIndex: 0,
+      acceptanceProfileId: "prof_00000000000000000000000000000000",
+      capability: "web-search",
+      callInputs: [{ query: "Item price" }],
+      taskSpec,
+      inputSalt: `0x${"22".repeat(32)}`,
+      deliverable: { mimeType: "application/json", expectedKeys: ["price"] },
+      budgetCap: "2000",
+      targetBudget: "1000",
+      evaluator: "0x0000000000000000000000000000000000000002",
+      expiredAt: 1_800_000_000,
+      submitBy: 1_799_990_000,
+      decisionCutoff: 1_799_999_000,
+      issuedAt: currentTime.toISOString(),
+    });
+    const jobKeyHash = brief.jobKey as Hash32;
+    await getPool().query(
+      "INSERT INTO payer_job_briefs (job_key,plan_id,step_index,provider,brief) VALUES ($1,$2,0,$3,$4::jsonb)",
+      [brief.jobKey, PLAN_ID, provider, JSON.stringify(brief)],
+    );
+    const objects = new Map<string, Uint8Array>();
+    const dependencies = {
+      pool: getPool(),
+      config: loadConfig(),
+      now: () => currentTime,
+      objectStore: {
+        put: vi.fn(async (body: Uint8Array) => {
+          const ref = `body-${objects.size + 1}`;
+          objects.set(ref, body.slice());
+          return ref;
+        }),
+        delete: vi.fn(async (ref: string) => {
+          objects.delete(ref);
+        }),
+      },
+    };
+    const upload = async (body: Uint8Array) => {
+      const contentHash = keccak256(body) as Hash32;
+      const signature = await sign({
+        hash: deliverableUploadDigest(5042002, { jobKey: jobKeyHash, contentHash, issuedAt }),
+        privateKey,
+        to: "hex",
+      });
+      return uploadJobDeliverable({ jobKey: jobKeyHash, issuedAt, signature, body }, dependencies);
+    };
+    const uploads: { readonly contentHash: Hash32; readonly bodyRef: string }[] = [];
+    for (let index = 0; index < 10; index += 1)
+      uploads.push(await upload(new TextEncoder().encode(`deliverable-${index}`)));
+    await expect(upload(new TextEncoder().encode("eleventh-deliverable"))).rejects.toThrow(
+      "Job exceeds acceptance.maxUploadsPerJob.",
+    );
+    const matched = uploads[0];
+    if (!matched) throw new Error("First deliverable fixture was not uploaded.");
+    await expect(
+      purgeUnmatchedJobDeliverables(
+        {
+          jobKey: jobKeyHash,
+          matchedContentHash: matched.contentHash,
+          decisionAt: new Date("2026-10-20T00:00:00Z"),
+        },
+        dependencies,
+      ),
+    ).resolves.toHaveLength(9);
+    const remaining = await getPool().query(
+      "SELECT content_hash FROM payer_job_deliverables WHERE job_key=$1",
+      [brief.jobKey],
+    );
+    expect(remaining.rows).toEqual([{ content_hash: matched.contentHash }]);
+  });
+
   it("opens, waits for the provider budget, funds the observed amount and syncs", async () => {
     const chain = {
       findJob: vi.fn(async () => undefined),
@@ -152,6 +243,110 @@ describe("job brief commitments", () => {
         proof: [],
         planHash: `0x${"11".repeat(32)}`,
         network: "eip155:5042002",
+        jobEscrow: "0x0000000000000000000000000000000000000003" as const,
+        acceptanceProfileId: "prof_00000000000000000000000000000000",
+        capability: "web-search",
+        callInputs: [{ query: "Item price" }],
+        taskSpec,
+        deliverable: { mimeType: "application/json", expectedKeys: ["price"] },
+        targetBudget: "1000",
+        evaluator: "0x0000000000000000000000000000000000000002" as const,
+        envelopeExpiresAt: new Date("2027-01-01T00:00:00.000Z"),
+      },
+      {
+        pool: getPool(),
+        config: loadConfig(),
+        signer,
+        chain,
+        vault: "0x0000000000000000000000000000000000000001",
+        now: () => new Date("2026-10-22T00:00:00.000Z"),
+        randomSalt: () => `0x${"22".repeat(32)}`,
+      },
+    );
+    expect(result).toMatchObject({ state: "Funded", budget: "1000" });
+    expect(chain.fundJob).toHaveBeenCalledWith(expect.objectContaining({ expectedBudget: 1_000n }));
+    expect(chain.waitForBudget).toHaveBeenCalledWith(expect.any(String), 2 * 60 * 60 * 1000);
+    const storedBrief = await getPool().query<{ brief: { decisionCutoff: number } }>(
+      "SELECT brief FROM payer_job_briefs WHERE plan_id=$1 AND step_index=0",
+      [PLAN_ID],
+    );
+    const nowSeconds = Math.floor(new Date("2026-10-22T00:00:00.000Z").getTime() / 1000);
+    const expectedCutoff = nowSeconds + 24 * 60 * 60 - 900 - 300;
+    expect(storedBrief.rows[0]?.brief.decisionCutoff).toBe(expectedCutoff);
+  });
+
+  it("cancels a provider that misses the budget deadline and opens the approved alternate", async () => {
+    const provider = "0x0000000000000000000000000000000000000003" as const;
+    const alternate = "0x0000000000000000000000000000000000000004" as const;
+    const jobIds = new Map<string, bigint>();
+    let currentProvider: string = provider;
+    let currentJob = 0n;
+    let waitCount = 0;
+    let budget: bigint | undefined;
+    let state: "Opened" | "Funded" | "Released" = "Opened";
+    const chain = {
+      findJob: vi.fn(async (input: { provider: string }) => {
+        const jobId = jobIds.get(input.provider.toLowerCase());
+        return jobId === undefined
+          ? undefined
+          : { jobKey: jobKey("0x0000000000000000000000000000000000000003", jobId), jobId };
+      }),
+      openJob: vi.fn(async () => {
+        currentJob += 1n;
+        jobIds.set(currentProvider.toLowerCase(), currentJob);
+        budget = undefined;
+        state = "Opened";
+        return {
+          jobKey: jobKey("0x0000000000000000000000000000000000000003", currentJob),
+          jobId: currentJob,
+          txHash: "open-tx",
+        };
+      }),
+      getJob: vi.fn(async () => ({
+        state,
+        expiredAt: 1_800_000_000,
+        ...(budget ? { budget } : {}),
+      })),
+      waitForBudget: vi.fn(async () => {
+        waitCount += 1;
+        if (waitCount === 1) return undefined;
+        budget = 1_000n;
+        return budget;
+      }),
+      fundJob: vi.fn(async () => {
+        state = "Funded";
+        return "fund-tx";
+      }),
+      syncJob: vi.fn(async () => ({ state, txHash: "sync-tx" })),
+      cancelJob: vi.fn(async () => "cancel-tx"),
+      claimJobRefund: vi.fn(async () => "refund-tx"),
+      isFrozenOrPaused: vi.fn(async () => false),
+      envelopeOpen: vi.fn(async () => true),
+      hasDecisionPending: vi.fn(async () => false),
+    };
+    const signer = {
+      sign: vi.fn(async (_caller: string, request: SignRequest) => {
+        const payload = request.payload as Record<string, unknown>;
+        if (payload["selector"] === "openJob") {
+          const args = payload["args"] as unknown[];
+          currentProvider = args[2] as string;
+        }
+        return { signedTransaction: "0x1234" as const };
+      }),
+    };
+    const result = await executeJobStep(
+      {
+        planId: PLAN_ID,
+        envelopeRef: "eip155:5042002:0x0000000000000000000000000000000000000001:1",
+        envelopeId: 1n,
+        stepIndex: 0,
+        provider,
+        alternates: [alternate],
+        stepCap: 2_000n,
+        proof: [`0x${"11".repeat(32)}`],
+        alternateProofsByProvider: { [alternate]: [`0x${"22".repeat(32)}`] },
+        planHash: `0x${"11".repeat(32)}`,
+        network: "eip155:5042002",
         jobEscrow: "0x0000000000000000000000000000000000000003",
         acceptanceProfileId: "prof_00000000000000000000000000000000",
         capability: "web-search",
@@ -172,9 +367,105 @@ describe("job brief commitments", () => {
         randomSalt: () => `0x${"22".repeat(32)}`,
       },
     );
-    expect(result).toMatchObject({ state: "Funded", budget: "1000" });
-    expect(chain.fundJob).toHaveBeenCalledWith(expect.objectContaining({ expectedBudget: 1_000n }));
-    expect(chain.waitForBudget).toHaveBeenCalledWith(expect.any(String), 2 * 60 * 60 * 1000);
+    expect(result).toMatchObject({ state: "Funded", alternateProvider: alternate });
+    expect(chain.cancelJob).toHaveBeenCalledOnce();
+    expect(chain.fundJob).toHaveBeenCalledOnce();
+  });
+
+  it("job_killResume_matrix_rereadsChainStateWithoutOpeningOrFundingTwice", async () => {
+    const phases = ["open", "budget-wait", "fund", "submit", "sync"] as const;
+    for (const failAt of phases) {
+      await getPool().query("DELETE FROM step_executions");
+      let exists = failAt === "submit";
+      let state: "Opened" | "Funded" | "Submitted" = failAt === "submit" ? "Submitted" : "Opened";
+      let budget: bigint | undefined = state === "Submitted" ? 1_000n : undefined;
+      let failed = false;
+      const currentJobKey = jobKey("0x0000000000000000000000000000000000000003", 1n);
+      const chain = {
+        findJob: vi.fn(async () => (exists ? { jobKey: currentJobKey, jobId: 1n } : undefined)),
+        openJob: vi.fn(async () => {
+          exists = true;
+          if (failAt === "open" && !failed) {
+            failed = true;
+            throw new Error("executor stopped after openJob mined");
+          }
+          return { jobKey: currentJobKey, jobId: 1n, txHash: "open-tx" };
+        }),
+        getJob: vi.fn(async () => ({
+          state,
+          expiredAt: 1_800_000_000,
+          ...(budget ? { budget } : {}),
+        })),
+        waitForBudget: vi.fn(async () => {
+          budget = 1_000n;
+          if (failAt === "budget-wait" && !failed) {
+            failed = true;
+            throw new Error("executor stopped after budget was set");
+          }
+          return budget;
+        }),
+        fundJob: vi.fn(async () => {
+          state = "Funded";
+          if (failAt === "fund" && !failed) {
+            failed = true;
+            throw new Error("executor stopped after fundJob mined");
+          }
+          return "fund-tx";
+        }),
+        syncJob: vi.fn(async () => {
+          if (failAt === "sync" && !failed) {
+            failed = true;
+            throw new Error("executor stopped after syncJob mined");
+          }
+          return { state, txHash: "sync-tx" };
+        }),
+        cancelJob: vi.fn(async () => "cancel-tx"),
+        claimJobRefund: vi.fn(async () => "refund-tx"),
+        isFrozenOrPaused: vi.fn(async () => false),
+        envelopeOpen: vi.fn(async () => true),
+        hasDecisionPending: vi.fn(async () => false),
+      };
+      const input = {
+        planId: PLAN_ID,
+        envelopeRef: "eip155:5042002:0x0000000000000000000000000000000000000001:1",
+        envelopeId: 1n,
+        stepIndex: 0,
+        provider: "0x0000000000000000000000000000000000000003" as const,
+        alternates: [],
+        stepCap: 2_000n,
+        proof: [],
+        planHash: `0x${"11".repeat(32)}`,
+        network: "eip155:5042002",
+        jobEscrow: "0x0000000000000000000000000000000000000003" as const,
+        acceptanceProfileId: "prof_00000000000000000000000000000000",
+        capability: "web-search",
+        callInputs: [{ query: "Item price" }],
+        taskSpec,
+        deliverable: { mimeType: "application/json", expectedKeys: ["price"] },
+        targetBudget: "1000",
+        evaluator: "0x0000000000000000000000000000000000000002" as const,
+        envelopeExpiresAt: new Date("2027-01-01T00:00:00.000Z"),
+      };
+      const dependencies = {
+        pool: getPool(),
+        config: loadConfig(),
+        signer: { sign: vi.fn(async () => ({ signedTransaction: "0x1234" as const })) },
+        chain,
+        vault: "0x0000000000000000000000000000000000000001" as const,
+        now: () => new Date("2026-10-22T00:00:00.000Z"),
+        randomSalt: () => `0x${"22".repeat(32)}` as const,
+      };
+      if (failAt !== "submit")
+        await expect(executeJobStep(input, dependencies)).rejects.toThrow("executor stopped");
+      const result = await executeJobStep(input, dependencies);
+      expect(result.state).toBe(failAt === "submit" ? "Submitted" : "Funded");
+      expect(chain.openJob).toHaveBeenCalledTimes(
+        failAt === "open" ? 1 : failAt === "submit" ? 0 : 1,
+      );
+      expect(chain.fundJob).toHaveBeenCalledTimes(
+        failAt === "fund" ? 1 : failAt === "submit" ? 0 : 1,
+      );
+    }
   });
 
   it("never claims a refund while an evaluator decision is pending", async () => {

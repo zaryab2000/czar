@@ -132,23 +132,45 @@ describe("pocket funding", () => {
     await expect(readPlanPocketKey(getPool(), linkedPlanId)).resolves.toBe(POCKET);
   });
 
-  it("resumes an uncertain fund transaction without funding twice", async () => {
+  it("pocket_killResume_matrix_neverRegistersDelegatesOrFundsTwice", async () => {
     await getPool().query("INSERT INTO plan_pocket_keys (plan_id,pocket_address) VALUES ($1,$2)", [
       PLAN_ID,
       POCKET,
     ]);
+    let registered = false;
+    let granted = 0n;
+    let delegated = false;
     let funded = false;
+    let failAfter: "register" | "gas" | "delegate" | "fund" | undefined = "register";
+    const stopAfter = (phase: typeof failAfter) => {
+      if (failAfter !== phase) return;
+      failAfter = undefined;
+      throw new Error(`simulated executor exit after ${phase}`);
+    };
     const chain = {
-      isRegistered: vi.fn(async () => true),
-      registerPocket: vi.fn(),
-      pocketGasGranted: vi.fn(async () => 20_000n),
-      grantPocketGas: vi.fn(),
-      isDelegateReady: vi.fn(async () => true),
-      addDelegate: vi.fn(),
+      isRegistered: vi.fn(async () => registered),
+      registerPocket: vi.fn(async () => {
+        registered = true;
+        stopAfter("register");
+        return "register-tx";
+      }),
+      pocketGasGranted: vi.fn(async () => granted),
+      grantPocketGas: vi.fn(async () => {
+        granted = 20_000n;
+        stopAfter("gas");
+        return "gas-tx";
+      }),
+      isDelegateReady: vi.fn(async () => delegated),
+      addDelegate: vi.fn(async () => {
+        delegated = true;
+        stopAfter("delegate");
+        return "delegate-tx";
+      }),
       isFunded: vi.fn(async () => funded),
       fundPocket: vi.fn(async () => {
         funded = true;
-        throw new Error("simulated executor exit after mined fundPocket");
+        stopAfter("fund");
+        return "fund-tx";
       }),
     };
     const input = {
@@ -173,13 +195,22 @@ describe("pocket funding", () => {
       now: () => new Date("2026-10-22T00:00:00Z"),
     };
 
-    await expect(executePocketPreparation(input, dependencies)).rejects.toThrow(
-      "simulated executor exit",
-    );
+    for (const phase of ["register", "gas", "delegate", "fund"] as const) {
+      await expect(executePocketPreparation(input, dependencies)).rejects.toThrow(
+        `simulated executor exit after ${phase}`,
+      );
+      failAfter =
+        phase === "fund"
+          ? undefined
+          : ({ register: "gas", gas: "delegate", delegate: "fund" } as const)[phase];
+    }
     await expect(executePocketPreparation(input, dependencies)).resolves.toMatchObject({
       pocket: POCKET,
       funded: "250000",
     });
+    expect(chain.registerPocket).toHaveBeenCalledOnce();
+    expect(chain.grantPocketGas).toHaveBeenCalledOnce();
+    expect(chain.addDelegate).toHaveBeenCalledOnce();
     expect(chain.fundPocket).toHaveBeenCalledTimes(1);
   });
 
