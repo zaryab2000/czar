@@ -64,3 +64,70 @@ These are fixture-backed recovery checks, not Arc-Anvil crash tests.
 - Full `@czar/server` tests remain blocked by the 401/503 outage test failure listed above. Full `@czar/config` tests remain blocked by the two unrelated app parameter coverage findings.
 
 **Review state:** draft; do not mark ready until the Arc-Anvil acceptance and integration gaps above are resolved and the server suite is green.
+
+## Follow-up run (2026-10-22)
+
+**Task IDs:** T-052, T-053, T-054 follow-up. Branch remains `codex/lane2-bundle-b`; PR #52 remains draft.
+
+### Files changed in this follow-up
+
+- HTTP and composition: `apps/server/src/app.ts`, `apps/server/src/main.ts`.
+- Payer: `apps/server/src/payer/job.ts`, `apps/server/src/payer/pullback.ts`, new `pullback-scheduler.ts` and `runtime.ts`.
+- Storage and migration: new `apps/server/src/object-store.ts`, `apps/server/migrations/0008-payer-pullback-api-failures.sql`.
+- Tests: new `apps/server/test/job-routes.test.ts`, `object-store.test.ts`, `payer/pullback-scheduler.test.ts`, and `payer/runtime.test.ts`; updated `test/outage.test.ts`, `test/payer/pullback.test.ts`, `test/migrate.test.ts`, `test/main.test.ts`, and `test/evidence/receipt-arc.test.ts`.
+- Config: `packages/config/src/registry.ts`, `packages/config/test/loader.test.ts`, and its Vitest snapshot.
+
+### Verification
+
+- `fnm exec --using=22.22.0 pnpm --filter @czar/server test`
+  ```text
+  Test Files  34 passed (34)
+       Tests  176 passed (176)
+  Duration  11.30s
+  ```
+- `fnm exec --using=22.22.0 pnpm -r typecheck`
+  ```text
+  Scope: 14 of 15 workspace projects
+  All listed package and application typecheck scripts completed successfully.
+  ```
+- `fnm exec --using=22.22.0 pnpm lint`
+  ```text
+  > oxlint --deny-warnings && oxfmt --check
+  All matched files use the correct format.
+  Finished in 15ms on 321 files using 10 threads.
+  ```
+- `fnm exec --using=22.22.0 pnpm --filter @czar/config test`
+  ```text
+  Test Files  1 failed | 1 passed (2)
+       Tests  1 failed | 23 passed (24)
+  Existing failure: app.challengeTtlSeconds and app.bundlerEndpoints are absent from
+  app/app-and-notifications.md coverage. This follow-up did not change those entries.
+  ```
+- `fnm exec --using=22.22.0 pnpm --filter @czar/server exec vitest run test/outage.test.ts`
+  ```text
+  Test Files  1 passed (1)
+       Tests  1 passed (1)
+  ```
+- `fnm exec --using=22.22.0 pnpm --filter @czar/config exec vitest run test/loader.test.ts -u`
+  ```text
+  Test Files  1 passed (1)
+       Tests  21 passed (21)
+  ```
+- `git diff --check` passed. Test-generated `contracts/broadcast/` files were removed after the run.
+
+### Follow-up behavior and remaining acceptance gaps
+
+- The outage test now uses a valid 43-character Base64URL bearer token. Its local pool endpoint is port 1 so the test deterministically exercises the unavailable-Postgres path in this environment.
+- Job brief and deliverable HTTP routes now verify the provider signature, enforce upload type and size, and validate responses. The filesystem object store implements `put`, `get`, and `delete`.
+- The payer runtime now dispatches injected `Frozen`/`GuardianPaused` events to pocket draining and polls an injected pullback fallback scheduler. Gateway failures persist their first-failure time. Production composition still has no concrete vault event source or pullback chain adapter; the runtime hooks are not active unless those are provided.
+- `payer.job.minExpiryLeadSeconds` is configured as 360 seconds and cites the six-minute contract minimum. Pullback cancellation delay remains the parsed contract constant of 3,000 blocks; it is not a configurable threshold in the contract/spec.
+- **Arc-Anvil Bundle B acceptance is still not implemented.** No new `pocket-anvil.test.ts`, `pullback-anvil.test.ts`, or `job-anvil.test.ts` was added. The passing server suite includes the existing Arc-Anvil receipt/vault test, but that does not exercise the new pocket, pullback, or job loops against deployed contracts. Consequently none of the requested Bundle B Arc recovery matrices or end-to-end contract scenarios is claimed as passed.
+- Routes retain the canonical singular `/v1/jobs/:jobKey/deliverable` and also accept the follow-up's plural `/deliverables`; the API contract currently describes the singular form.
+
+### SCR candidates and open issues
+
+- **SCR candidate — pocket gas config:** the prompt names `signer.gas.pocket.minAtomic`, `maxAtomic`, and `targetAtomic`, absent from the accepted registry. The implementation uses existing `payer.pocketGasUnits` per CZ-15.
+- **SCR candidate — Gateway `/v1/transfer` body:** the exact request schema remains unspecified; current payload is `{ transferSpec, signature, contractSigner: true }`.
+- **Storage adapter:** a filesystem-backed object store with deletion was added for job deliverables.
+- Gateway API behavior remains fixture-backed; G0-05 is pending. Testnet execution remains deferred under T-050/D92.
+- PR #52 remains draft because the required deployed-contract Arc-Anvil scenarios and concrete production event/fallback adapters remain open.

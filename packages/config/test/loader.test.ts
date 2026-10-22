@@ -18,6 +18,9 @@ describe("loadConfig", () => {
     expect(config.get("indexer.getLogsBlockRange")).toBe(9999);
     expect(config.get("signer.backend")).toBe("local-keystore");
     expect(config.get("vault.maxAuthorizationsPerReservation")).toBe(128);
+    expect(config.get("payer.job.minExpiryLeadSeconds")).toBe(360);
+    expect(config.get("payer.pullbackFallbackPollSeconds")).toBe(60);
+    expect(config.get("payer.job.deliverableStorePath")).toBe("./var/job-deliverables");
   });
 
   it("env overlay overrides a default", () => {

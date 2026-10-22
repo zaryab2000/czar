@@ -11,6 +11,7 @@ import { createAcceptanceChecker } from "#src/acceptance/index";
 import type { AcceptancePorts } from "#src/acceptance/types";
 import { runBoundary } from "#src/boundary/index";
 import { createApp } from "#src/app";
+import { createFileObjectStore, type ObjectStore } from "#src/object-store";
 import type { PairDependencies } from "#src/devices/pair";
 import { migrate } from "#src/db/migrate";
 import {
@@ -26,6 +27,12 @@ import {
   type VaultDirectChain,
   type VaultDirectInput,
 } from "#src/payer/vault-direct";
+import { startPayerRuntime, type VaultHaltEventSource } from "#src/payer/runtime";
+import type { PocketHaltDependencies } from "#src/payer/pocket";
+import {
+  runPendingPullbackFallbacks,
+  type PullbackFallbackSchedulerDependencies,
+} from "#src/payer/pullback-scheduler";
 
 export interface ServerMainOptions extends PairDependencies {
   readonly pool: Pool;
@@ -34,10 +41,10 @@ export interface ServerMainOptions extends PairDependencies {
   readonly modelClient: ModelClient;
   readonly createSigner: () => Promise<Pick<Signer, "sign">>;
   readonly acceptancePorts: AcceptancePorts;
-  readonly objects: {
-    put(bytes: Uint8Array): Promise<string>;
-    get(ref: string): Promise<Uint8Array>;
-  };
+  readonly objects?: ObjectStore;
+  readonly vaultEvents?: VaultHaltEventSource;
+  readonly pocketHalt?: PocketHaltDependencies;
+  readonly pullbackFallbackChain?: PullbackFallbackSchedulerDependencies["chain"];
   readonly chain: VaultDirectChain;
   readonly safeFetch: SafeFetch;
   readonly settlement: PaymentReceiptDependencies["settlement"];
@@ -52,9 +59,13 @@ export interface ServerMain {
   readonly app: ReturnType<typeof createApp>;
   readonly acceptance: Awaited<ReturnType<typeof createAcceptanceChecker>>;
   executePayerStep(input: VaultDirectInput): ReturnType<typeof executeVaultDirectStep>;
+  close(): void;
 }
 
 export async function createServerMain(options: ServerMainOptions): Promise<ServerMain> {
+  const objects =
+    options.objects ??
+    createFileObjectStore(String(options.config.get("payer.job.deliverableStorePath")));
   await migrate(options.pool);
   const acceptance = await createAcceptanceChecker({
     pool: options.pool,
@@ -66,8 +77,28 @@ export async function createServerMain(options: ServerMainOptions): Promise<Serv
     "P-01": await computePromptHash("P-01"),
     "P-02": await computePromptHash("P-02"),
   } as const;
-  const boundary = createPayerBoundary(options, acceptance, promptHashes);
+  const boundary = createPayerBoundary(options, acceptance, promptHashes, objects);
   const signer = await options.createSigner();
+  const payerRuntime = startPayerRuntime({
+    ...(options.vaultEvents ? { events: options.vaultEvents } : {}),
+    ...(options.pocketHalt ? { pocketHalt: options.pocketHalt } : {}),
+    fallbackPollSeconds: Number(options.config.get("payer.pullbackFallbackPollSeconds")),
+    ...(options.pullbackFallbackChain
+      ? {
+          runFallbacks: () =>
+            runPendingPullbackFallbacks({
+              pool: options.pool,
+              config: options.config,
+              signer,
+              chain:
+                options.pullbackFallbackChain as PullbackFallbackSchedulerDependencies["chain"],
+              now: options.clock.now,
+            }),
+        }
+      : {}),
+    onError: (operation) =>
+      options.logger.error("payer_runtime_failure", { rule: operation, state: "error" }),
+  });
   const recordReceipt = createReceiptBuilder(options, signer);
   const payerDependencies = {
     pool: options.pool,
@@ -76,7 +107,7 @@ export async function createServerMain(options: ServerMainOptions): Promise<Serv
     chain: options.chain,
     safeFetch: options.safeFetch,
     now: options.clock.now,
-    objects: options.objects,
+    objects,
     boundary,
     recordReceipt,
   };
@@ -87,11 +118,18 @@ export async function createServerMain(options: ServerMainOptions): Promise<Serv
     clock: options.clock,
     random: options.random,
     modelClient: options.modelClient,
+    jobDelivery: {
+      pool: options.pool,
+      config: options.config,
+      now: options.clock.now,
+      objectStore: objects,
+    },
   });
   return {
     app,
     acceptance,
     executePayerStep: (input) => executeVaultDirectStep(input, payerDependencies),
+    close: () => payerRuntime.stop(),
   };
 }
 
@@ -99,6 +137,7 @@ function createPayerBoundary(
   options: ServerMainOptions,
   acceptance: Awaited<ReturnType<typeof createAcceptanceChecker>>,
   promptHashes: Readonly<Record<"P-01" | "P-02", string>>,
+  objects: ObjectStore,
 ) {
   return async (context: BoundaryInput): Promise<unknown> => {
     const { input, response, paymentRef } = context;
@@ -151,7 +190,7 @@ function createPayerBoundary(
         logger: options.logger,
         modelClient: options.modelClient,
         promptHashes,
-        objectStore: options.objects,
+        objectStore: objects,
         acceptance,
       },
     );

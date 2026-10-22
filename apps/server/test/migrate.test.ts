@@ -73,6 +73,7 @@ describe("CZ-12 migrations", () => {
       "pay_requests",
       "payer_job_briefs",
       "payer_job_deliverables",
+      "payer_pullback_gateway_failures",
       "plan_pocket_keys",
       "plans",
       "profiles",

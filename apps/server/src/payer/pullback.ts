@@ -617,20 +617,28 @@ async function obtainAttestation(
     signature: signed.signature,
   });
   assertLeaseHeld();
-  const response = await dependencies.safeFetch(dependencies.gatewayTransferUrl, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    timeoutMs: Number(dependencies.config.get("fetch.timeoutMs")),
-    body: new TextEncoder().encode(
-      JSON.stringify({
-        transferSpec: intent.encodedTransferSpec,
-        signature: signed.signature,
-        contractSigner: true,
-      }),
-    ),
-  });
-  if (response.status < 200 || response.status >= 300)
+  let response;
+  try {
+    response = await dependencies.safeFetch(dependencies.gatewayTransferUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      timeoutMs: Number(dependencies.config.get("fetch.timeoutMs")),
+      body: new TextEncoder().encode(
+        JSON.stringify({
+          transferSpec: intent.encodedTransferSpec,
+          signature: signed.signature,
+          contractSigner: true,
+        }),
+      ),
+    });
+  } catch (error) {
+    await recordGatewayPullbackFailure(input, pullback, dependencies);
+    throw error;
+  }
+  if (response.status < 200 || response.status >= 300) {
+    if (response.status >= 500) await recordGatewayPullbackFailure(input, pullback, dependencies);
     throw new Error(`Gateway transfer API failed with HTTP ${response.status}.`);
+  }
   const result = parseTransferAttestation(response.body);
   await writePullbackPhase(dependencies, input, attempt, "pullback.transfer.result", {
     pullbackId: pullback.pullbackId.toString(),
@@ -639,6 +647,27 @@ async function obtainAttestation(
     signature: result.signature,
   });
   return result;
+}
+
+async function recordGatewayPullbackFailure(
+  input: PullbackInput,
+  pullback: PullbackRecord,
+  dependencies: PullbackDependencies,
+): Promise<void> {
+  await dependencies.pool.query(
+    `INSERT INTO payer_pullback_gateway_failures
+       (plan_id,step_index,envelope_ref,pocket,value,unavailable_since,state)
+     VALUES ($1,$2,$3,$4,$5,$6,'pending')
+     ON CONFLICT (plan_id,step_index) DO NOTHING`,
+    [
+      input.planId,
+      input.stepIndex,
+      input.envelopeRef,
+      input.pocket,
+      pullback.value.toString(),
+      dependencies.now(),
+    ],
+  );
 }
 
 async function mintAttestation(

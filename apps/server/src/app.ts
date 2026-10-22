@@ -19,10 +19,12 @@ import { findOrCreateIdempotency, fingerprintRequest } from "#src/http/idempoten
 import { PairingRejected, consumePairingCode, type PairDependencies } from "#src/devices/pair";
 import { submitObjective } from "#src/objectives/service";
 import { completeModelCall, type ModelClient, type ModelCallRequest } from "#src/models/proxy";
+import { getJobBrief, uploadJobDeliverable, type JobDeliveryDependencies } from "#src/payer/job";
 
 export interface AppDependencies extends PairDependencies {
   logger: Logger;
   modelClient?: ModelClient;
+  jobDelivery?: JobDeliveryDependencies;
 }
 
 interface RequestState {
@@ -97,7 +99,119 @@ export function createApp(dependencies: AppDependencies): Hono {
   app.post("/v1/models/complete", (context) => modelRoute(context, dependencies));
   app.get("/v1/objectives", (context) => listRoute(context, dependencies));
   app.get("/v1/objectives/:objectiveId", (context) => getRoute(context, dependencies));
+  app.get("/v1/jobs/:jobKey/brief", (context) => jobBriefRoute(context, dependencies));
+  app.post("/v1/jobs/:jobKey/deliverable", (context) => jobDeliverableRoute(context, dependencies));
+  app.post("/v1/jobs/:jobKey/deliverables", (context) =>
+    jobDeliverableRoute(context, dependencies),
+  );
   return app;
+}
+
+async function jobBriefRoute(context: ServerContext, deps: AppDependencies): Promise<Response> {
+  const auth = providerRequest(context, "brief");
+  const rate = await applyRateLimit(deps.pool, deps.config, deps.clock.now(), "app", auth.address);
+  setRateHeaders(context, rate);
+  if (!rate.allowed) return problemResponse(context, 429, "rate-limited", true);
+  if (!deps.jobDelivery) return problemResponse(context, 503, "upstream-unavailable", true);
+  let result;
+  try {
+    result = await getJobBrief(auth.request, deps.jobDelivery);
+  } catch {
+    return problemResponse(context, 404, "validation");
+  }
+  assertExchange("getJobBrief", undefined, 200, result);
+  return jsonResponse(context, 200, result);
+}
+
+async function jobDeliverableRoute(
+  context: ServerContext,
+  deps: AppDependencies,
+): Promise<Response> {
+  const auth = providerRequest(context, "upload");
+  const rate = await applyRateLimit(deps.pool, deps.config, deps.clock.now(), "app", auth.address);
+  setRateHeaders(context, rate);
+  if (!rate.allowed) return problemResponse(context, 429, "rate-limited", true);
+  if (!deps.jobDelivery) return problemResponse(context, 503, "upstream-unavailable", true);
+  if (context.req.header("Content-Type")?.split(";")[0]?.trim() !== "application/octet-stream")
+    return problemResponse(context, 400, "validation");
+  const maxBytes = Number(deps.config.get("acceptance.deliverableMaxBytes"));
+  const declaredBytes = Number(context.req.header("Content-Length"));
+  if (Number.isFinite(declaredBytes) && declaredBytes > maxBytes)
+    return problemResponse(context, 413, "validation");
+  const body = await readLimitedBody(context, maxBytes);
+  if (!body) return problemResponse(context, 413, "validation");
+  let result;
+  try {
+    result = await uploadJobDeliverable({ ...auth.request, body }, deps.jobDelivery);
+  } catch (error) {
+    if (error instanceof RangeError) return problemResponse(context, 413, "validation");
+    return problemResponse(context, 404, "validation");
+  }
+  const response = { contentHash: result.contentHash };
+  assertResponseContract("uploadJobDeliverable", 201, response);
+  return jsonResponse(context, 201, response);
+}
+
+function providerRequest(
+  context: ServerContext,
+  kind: "brief" | "upload",
+): {
+  address: string;
+  request: {
+    jobKey: `0x${string}`;
+    issuedAt: bigint;
+    signature: `0x${string}`;
+    providerAddress: `0x${string}`;
+  };
+} {
+  const jobKey = context.req.param("jobKey") ?? "";
+  const address = context.req.header("X-Czar-Provider-Address") ?? "";
+  const issuedAt =
+    context.req.header(kind === "brief" ? "X-Czar-Brief-Issued-At" : "X-Czar-Upload-Issued-At") ??
+    "";
+  const signature =
+    context.req.header(kind === "brief" ? "X-Czar-Brief-Signature" : "X-Czar-Upload-Signature") ??
+    "";
+  if (!/^0x[0-9a-fA-F]{64}$/.test(jobKey) || !/^0x[0-9a-fA-F]{40}$/.test(address))
+    throw new RequestValidationError();
+  if (!/^\d+$/.test(issuedAt) || !/^0x[0-9a-fA-F]+$/.test(signature))
+    throw new RequestValidationError();
+  return {
+    address,
+    request: {
+      jobKey: jobKey as `0x${string}`,
+      issuedAt: BigInt(issuedAt),
+      signature: signature as `0x${string}`,
+      providerAddress: address as `0x${string}`,
+    },
+  };
+}
+
+async function readLimitedBody(
+  context: ServerContext,
+  maxBytes: number,
+): Promise<Uint8Array | null> {
+  const reader = context.req.raw.body?.getReader();
+  if (!reader) return new Uint8Array();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(value);
+  }
+  const body = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return body;
 }
 
 async function pairRoute(context: ServerContext, deps: AppDependencies): Promise<Response> {
@@ -369,6 +483,12 @@ function assertExchange(
   if (!result.valid) throw new Error(`Server response failed ${operationId} contract validation.`);
 }
 
+function assertResponseContract(operationId: string, status: number, body: unknown): void {
+  const validator = apiContracts.get(operationId)?.responses.get(String(status));
+  if (!validator || !validator(body))
+    throw new Error(`Server response failed ${operationId} contract validation.`);
+}
+
 async function applyRateLimit(
   pool: Pool,
   config: Config,
@@ -449,5 +569,10 @@ function operationFor(path: string, method: string): string {
   if (method === "POST" && path === "/v1/models/complete") return "completeModelCall";
   if (method === "GET" && path === "/v1/objectives") return "listObjectives";
   if (method === "GET" && path.startsWith("/v1/objectives/")) return "getObjective";
+  if (method === "GET" && /^\/v1\/jobs\/[^/]+\/brief$/.test(path)) return "getJobBrief";
+  if (method === "POST" && /^\/v1\/jobs\/[^/]+\/deliverable$/.test(path))
+    return "uploadJobDeliverable";
+  if (method === "POST" && /^\/v1\/jobs\/[^/]+\/deliverables$/.test(path))
+    return "uploadJobDeliverable";
   return "unknown";
 }

@@ -38,7 +38,11 @@ describe("server composition root", () => {
         },
         clock: { now: () => new Date("2026-10-21T00:00:00Z") },
       },
-      objects: { put: async () => "body-ref", get: async () => new Uint8Array() },
+      objects: {
+        put: async () => "body-ref",
+        get: async () => new Uint8Array(),
+        delete: async () => undefined,
+      },
       chain: {
         reserve: vi.fn(),
         settle: vi.fn(),

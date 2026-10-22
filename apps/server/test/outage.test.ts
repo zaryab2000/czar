@@ -6,7 +6,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { createApp } from "#src/app";
 
 const pool = new Pool({
-  connectionString: "postgres://postgres@127.0.0.1:15433/postgres",
+  connectionString: "postgres://postgres@127.0.0.1:1/postgres",
   connectionTimeoutMillis: 100,
 });
 const app = createApp({
@@ -22,7 +22,9 @@ afterAll(async () => pool.end());
 describe("database outage", () => {
   it("postgresUnavailable_returns503WithRateHeadersAndNoPartialWrite", async () => {
     const response = await app.request("/v1/objectives", {
-      headers: { Authorization: "Bearer unavailable-test-token" },
+      headers: {
+        Authorization: "Bearer AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      },
     });
     const body = (await response.json()) as any;
     expect(response.status).toBe(503);

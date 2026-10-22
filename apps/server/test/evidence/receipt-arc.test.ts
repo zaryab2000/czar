@@ -605,6 +605,9 @@ function memoryObjects() {
       if (!bytes) throw new Error("Object store body is missing.");
       return bytes.slice();
     },
+    async delete(ref: string) {
+      objects.delete(ref);
+    },
   };
 }
 

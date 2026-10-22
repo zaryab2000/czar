@@ -1277,6 +1277,18 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 30000,
   },
   {
+    "key": "payer.job.deliverableStorePath",
+    "source": "default",
+    "unit": "path",
+    "value": "./var/job-deliverables",
+  },
+  {
+    "key": "payer.job.minExpiryLeadSeconds",
+    "source": "default",
+    "unit": "s",
+    "value": 360,
+  },
+  {
     "key": "payer.jobBudgetWaitHours",
     "source": "default",
     "unit": "hours",
@@ -1329,6 +1341,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "source": "default",
     "unit": "hours",
     "value": 24,
+  },
+  {
+    "key": "payer.pullbackFallbackPollSeconds",
+    "source": "default",
+    "unit": "s",
+    "value": 60,
   },
   {
     "key": "payer.pullbackMaxFeeAtomic",

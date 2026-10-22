@@ -20,7 +20,6 @@ import {
   type ExecutionPhaseRow,
 } from "#src/payer/executions";
 
-const MIN_JOB_EXPIRY_LEAD_SECONDS = 360;
 const SECONDS_PER_HOUR = 60 * 60;
 const MILLISECONDS_PER_SECOND = 1000;
 
@@ -149,6 +148,7 @@ export interface BriefRequestInput {
   readonly jobKey: Hash32;
   readonly issuedAt: bigint;
   readonly signature: Hex;
+  readonly providerAddress?: Address;
 }
 
 export interface JobDeliverableInput extends BriefRequestInput {
@@ -303,6 +303,7 @@ async function openOrRecoverJob(
     dependencies.now(),
     jobDurationHours(dependencies.config, input.capability),
     input.envelopeExpiresAt,
+    Number(dependencies.config.get("payer.job.minExpiryLeadSeconds")),
   );
   if (existing) {
     const view = await dependencies.chain.getJob(existing.jobKey);
@@ -640,7 +641,11 @@ export async function getJobBrief(
     issuedAt: request.issuedAt,
   });
   const signer = await recoverAddress({ hash: digest, signature: request.signature });
-  if (signer.toLowerCase() !== row.provider.toLowerCase())
+  if (
+    signer.toLowerCase() !== row.provider.toLowerCase() ||
+    (request.providerAddress !== undefined &&
+      signer.toLowerCase() !== request.providerAddress.toLowerCase())
+  )
     throw new Error("Job brief request signature does not match the provider.");
   if (!validateSchema("job-brief", row.brief) || row.brief.jobKey !== request.jobKey)
     throw new Error("Stored ERC-8183 brief is invalid.");
@@ -666,7 +671,11 @@ export async function uploadJobDeliverable(
     issuedAt: request.issuedAt,
   });
   const signer = await recoverAddress({ hash: digest, signature: request.signature });
-  if (signer.toLowerCase() !== provider.toLowerCase())
+  if (
+    signer.toLowerCase() !== provider.toLowerCase() ||
+    (request.providerAddress !== undefined &&
+      signer.toLowerCase() !== request.providerAddress.toLowerCase())
+  )
     throw new Error("Deliverable upload signature does not match the provider.");
   const configuredLimit = Number(dependencies.config.get("acceptance.deliverableMaxBytes"));
   const declaredLimit = brief.deliverable.maxBytes ?? configuredLimit;
@@ -784,12 +793,17 @@ function parseChainId(network: string): number {
   return chainId;
 }
 
-function calculateJobExpiration(now: Date, durationHours: number, envelopeExpiresAt: Date): number {
+function calculateJobExpiration(
+  now: Date,
+  durationHours: number,
+  envelopeExpiresAt: Date,
+  minimumLeadSeconds: number,
+): number {
   const nowSeconds = Math.floor(now.getTime() / MILLISECONDS_PER_SECOND);
   const requested = nowSeconds + durationHours * SECONDS_PER_HOUR;
   const envelope = Math.floor(envelopeExpiresAt.getTime() / MILLISECONDS_PER_SECOND);
   const expiration = Math.min(requested, envelope);
-  if (expiration - nowSeconds < MIN_JOB_EXPIRY_LEAD_SECONDS)
+  if (expiration - nowSeconds < minimumLeadSeconds)
     throw new Error("Job expiry is below the contract's minimum lead time.");
   return expiration;
 }

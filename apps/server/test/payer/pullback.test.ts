@@ -42,6 +42,7 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await getPool().query("DELETE FROM step_executions");
+  await getPool().query("DELETE FROM payer_pullback_gateway_failures");
   await getPool().query("DELETE FROM steps WHERE plan_id=$1", [PLAN_ID]);
   await getPool().query(
     "INSERT INTO steps (plan_id,step_index,step,state) VALUES ($1,0,'{}','queued')",
@@ -50,6 +51,66 @@ beforeEach(async () => {
 });
 
 describe("pullback values", () => {
+  it("persists the first Gateway API failure time for the scheduler", async () => {
+    const input = {
+      planId: PLAN_ID,
+      stepIndex: 0,
+      envelopeRef: "eip155:5042002:0x0000000000000000000000000000000000000001:1",
+      vault: "0x0000000000000000000000000000000000000001",
+      pocket: "0x0000000000000000000000000000000000000002",
+      gatewayWallet: "0x0000000000000000000000000000000000000003",
+      gatewayMinter: "0x0000000000000000000000000000000000000004",
+      usdc: "0x0000000000000000000000000000000000000005",
+      gatewayDomain: 26,
+      outstanding: 900_000n,
+      pending: 0n,
+      availableBalance: 850_000n,
+      head: 6_400n,
+    } as const;
+    const now = new Date("2026-10-22T00:00:00Z");
+    const dependencies = {
+      pool: getPool(),
+      config: loadConfig(),
+      signer: {
+        sign: vi.fn(async (_caller: string, request: { kind: string }) =>
+          request.kind === "gateway-burn"
+            ? { signature: "0xbeef" as const, digest: `0x${"ef".repeat(32)}` as const }
+            : { signedTransaction: "0x1234" as const },
+        ),
+      },
+      chain: {
+        findPendingPullback: async () => undefined,
+        requestPullback: async () => ({
+          pullbackId: 9n,
+          value: 840_000n,
+          maxFee: 10_000n,
+          maxBlockHeight: 10_000n,
+          salt: `0x${"ab".repeat(32)}` as const,
+          transferSpecHash: `0x${"cd".repeat(32)}` as const,
+          state: "Pending" as const,
+        }),
+        isTransferSpecHashUsed: async () => false,
+        mintAttestation: async () => "mint-tx",
+        confirmPullback: async () => "confirm-tx",
+        cancelPullback: async () => "cancel-tx",
+        sendVaultTransaction: async () => undefined,
+        readPullback: async () => undefined,
+        getBlockNumber: async () => 6_400n,
+      },
+      safeFetch: vi.fn(async () => {
+        throw new Error("local Gateway unavailable");
+      }),
+      gatewayTransferUrl: "http://127.0.0.1:4999/v1/transfer",
+      now: () => now,
+    };
+    await expect(executePullback(input, dependencies)).rejects.toThrow("local Gateway unavailable");
+    const recorded = await getPool().query(
+      "SELECT unavailable_since,state FROM payer_pullback_gateway_failures WHERE plan_id=$1",
+      [PLAN_ID],
+    );
+    expect(recorded.rows).toEqual([{ unavailable_since: now, state: "pending" }]);
+  });
+
   it("pullback_fullBalanceDrain_valuePlusFeeFitsBalance", () => {
     expect(
       calculatePullbackValue({
