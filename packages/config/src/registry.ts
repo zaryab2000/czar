@@ -3218,4 +3218,13 @@ export const PARAMETERS = [
     notes: "Mirrors USDC_ADDRESS in contracts/src/libraries/CzarConstants.sol:9",
     readOnly: true,
   },
+  {
+    key: "chain.gatewayWalletAddress",
+    type: "string",
+    default: "0x007700000000000000000000000000000000019B",
+    unit: "address",
+    reason: "GatewayWallet contract on Arc testnet (A2-02)",
+    source: "docs/specs/03-smart-contracts/czar-vault.md:597",
+    readOnly: true,
+  },
 ] as const satisfies readonly ParameterSpec[];

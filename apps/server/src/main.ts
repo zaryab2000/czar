@@ -49,7 +49,6 @@ export interface ServerMainOptions extends PairDependencies {
   readonly pullbackFallbackChain?: PullbackFallbackSchedulerDependencies["chain"];
   readonly publicClient: PublicClient;
   readonly walletClient: WalletClient;
-  readonly withdrawalBlockReader?: (pocket: Address) => Promise<bigint>;
   readonly chain: VaultDirectChain;
   readonly safeFetch: SafeFetch;
   readonly settlement: PaymentReceiptDependencies["settlement"];
@@ -87,11 +86,15 @@ export async function createServerMain(options: ServerMainOptions): Promise<Serv
   const vaultEvents = options.vaultEvents ?? (await createDatabaseVaultEventSource(options));
   const pullbackFallbackChain =
     options.pullbackFallbackChain ??
-    createPullbackChainAdapter(options.publicClient, options.walletClient, {
-      config: options.config,
-      logger: options.logger,
-      ...(options.withdrawalBlockReader ? { withdrawalBlock: options.withdrawalBlockReader } : {}),
-    });
+    createPullbackChainAdapter(
+      options.publicClient,
+      options.walletClient,
+      options.config.get("chain.gatewayWalletAddress") as Address,
+      {
+        config: options.config,
+        logger: options.logger,
+      },
+    );
   const payerRuntime = startPayerRuntime({
     ...(vaultEvents ? { events: vaultEvents } : {}),
     ...(options.pocketHalt ? { pocketHalt: options.pocketHalt } : {}),

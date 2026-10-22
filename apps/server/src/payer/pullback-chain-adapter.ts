@@ -4,16 +4,28 @@ import { parseAbi, type Address, type PublicClient, type WalletClient } from "vi
 import type { SlowPullbackDependencies } from "#src/payer/pullback";
 
 const USDC_ABI = parseAbi(["function balanceOf(address account) view returns (uint256)"]);
+const withdrawalBlockAbi = [
+  {
+    type: "function",
+    name: "withdrawalBlock",
+    inputs: [
+      { name: "token", type: "address" },
+      { name: "depositor", type: "address" },
+    ],
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+  },
+] as const;
 
 export interface PullbackChainAdapterOptions {
   readonly config?: Config;
   readonly logger?: Logger;
-  readonly withdrawalBlock?: (pocket: Address) => Promise<bigint>;
 }
 
 export function createPullbackChainAdapter(
   client: PublicClient,
   walletClient: WalletClient,
+  gatewayWalletAddress: Address,
   options: PullbackChainAdapterOptions = {},
 ): SlowPullbackDependencies["chain"] {
   const config = options.config ?? loadConfig();
@@ -21,11 +33,13 @@ export function createPullbackChainAdapter(
   const usdc = config.get("chain.usdcAddress") as Address;
   return {
     getBlockNumber: () => client.getBlockNumber(),
-    withdrawalBlock: (pocket) => {
-      if (!options.withdrawalBlock)
-        throw new Error("Withdrawal block reader is unavailable for the registered pocket EOA.");
-      return options.withdrawalBlock(pocket);
-    },
+    withdrawalBlock: (pocket) =>
+      client.readContract({
+        address: gatewayWalletAddress,
+        abi: withdrawalBlockAbi,
+        functionName: "withdrawalBlock",
+        args: [usdc, pocket],
+      }),
     async pocketUsdcBalance(pocket) {
       return client.readContract({
         address: usdc,

@@ -23,6 +23,9 @@ describe("loadConfig", () => {
     expect(config.get("payer.job.deliverableStorePath")).toBe("./var/job-deliverables");
     expect(config.get("payer.vaultEventPollMs")).toBe(4000);
     expect(config.get("chain.usdcAddress")).toBe("0x3600000000000000000000000000000000000000");
+    expect(config.get("chain.gatewayWalletAddress")).toBe(
+      "0x007700000000000000000000000000000000019B",
+    );
   });
 
   it("env overlay overrides a default", () => {

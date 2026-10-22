@@ -284,6 +284,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 28,
   },
   {
+    "key": "chain.gatewayWalletAddress",
+    "source": "default",
+    "unit": "address",
+    "value": "0x007700000000000000000000000000000000019B",
+  },
+  {
     "key": "chain.usdcAddress",
     "source": "default",
     "unit": "address",
