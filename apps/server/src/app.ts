@@ -40,6 +40,7 @@ import {
 export interface AppDependencies extends PairDependencies {
   logger: Logger;
   modelClient?: ModelClient;
+  appOrigin?: string;
   appReadOptions?: AppReadOptions;
   revisePlanSubjects?: (
     userId: string,
@@ -225,6 +226,7 @@ function appAuthDependencies(dependencies: AppDependencies) {
   return {
     ...dependencies,
     rpcUrl: dependencies.appReadOptions?.rpcUrl ?? process.env["CZAR_ARC_RPC_URL"],
+    origin: dependencies.appOrigin ?? "http://localhost",
   };
 }
 
@@ -243,8 +245,11 @@ async function appRateLimit(
 
 async function publicAuthRoute(
   context: ServerContext,
-  dependencies: AppDependencies,
-  route: (context: ServerContext, dependencies: AppDependencies) => Promise<Response>,
+  dependencies: AppDependencies & { origin: string },
+  route: (
+    context: ServerContext,
+    dependencies: AppDependencies & { origin: string },
+  ) => Promise<Response>,
 ): Promise<Response> {
   const ip =
     context.req.header("CF-Connecting-IP") ?? context.req.header("X-Forwarded-For") ?? "unknown";

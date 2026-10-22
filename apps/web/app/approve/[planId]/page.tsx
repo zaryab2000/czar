@@ -1,6 +1,6 @@
 "use client";
 
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import type { AppPlan, Me, SubjectsRevision } from "@czar/schemas";
 import { AppApiError, appApi } from "#src/app-api";
@@ -40,6 +40,9 @@ function ApprovalReview({
   const [currentPlan, setCurrentPlan] = useState(plan);
   const loadMe = useCallback(() => appApi.getMe(), []);
   const { data: me } = useAppData(loadMe);
+  const loadApprovals = useCallback(() => appApi.listApprovals(), []);
+  const { data: approvalPage } = useAppData(loadApprovals);
+  const router = useRouter();
   const [subjects, setSubjects] = useState<string[]>([]);
   const [fillInPlace, setFillInPlace] = useState(true);
   const [notice, setNotice] = useState<string>();
@@ -72,7 +75,14 @@ function ApprovalReview({
           onRevised={setCurrentPlan}
         />
       )}
-      <StepsPanel plan={currentPlan} />
+      <StepsPanel
+        plan={currentPlan}
+        newPayees={
+          (approvalPage?.items.find((item) => item.planId === currentPlan.planId)?.newPayees ?? 0) >
+          0
+        }
+      />
+      <p>Network fee: paid from your network fee reserve</p>
       {currentPlan.marketReference && <MarketPanel plan={currentPlan} />}
       <p>This plan expires {currentPlan.expiresAt}</p>
       {notice && <p role="status">{notice}</p>}
@@ -86,17 +96,26 @@ function ApprovalReview({
             setBusy={setBusy}
             setNotice={setNotice}
           />
-          <button
-            disabled={busy}
-            onClick={() => {
-              setDeclined(true);
-              setNotice("Declined. Czar won't spend on this.");
-            }}
-            type="button"
-          >
+          <button disabled={busy} onClick={() => setDeclined(true)} type="button">
             Decline
           </button>
         </>
+      )}
+      {declined && (
+        <div role="dialog" aria-modal="true" aria-labelledby="decline-title" className="panel">
+          <h2 id="decline-title">Decline this plan?</h2>
+          <button onClick={() => setDeclined(false)} type="button">
+            Keep reviewing
+          </button>
+          <button
+            onClick={() => {
+              router.push("/approvals?declined=1");
+            }}
+            type="button"
+          >
+            Confirm decline
+          </button>
+        </div>
       )}
     </section>
   );
@@ -153,6 +172,7 @@ function SubjectEditor({
   readonly onRevised: (plan: AppPlan) => void;
 }) {
   const taskSpec = plan.taskSpec;
+  const [resultFormat, setResultFormat] = useState(taskSpec?.output?.format ?? "prose");
   if (!taskSpec) return null;
   const originalSubjects = taskSpec.subjects;
 
@@ -205,7 +225,21 @@ function SubjectEditor({
           Fill {taskSpec.fileName} when done
         </label>
       )}
-      {taskSpec.output && <p>Result as: {taskSpec.output.format}</p>}
+      {taskSpec.output && (
+        <label>
+          Result as:{" "}
+          <select
+            value={resultFormat}
+            onChange={(event) => setResultFormat(event.target.value as typeof resultFormat)}
+          >
+            {["markdown-table", "csv", "json", "markdown-list", "prose"].map((format) => (
+              <option key={format} value={format}>
+                {format}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
     </section>
   );
 }
@@ -223,7 +257,7 @@ function createSubjectsRevision(
   };
 }
 
-function StepsPanel({ plan }: { readonly plan: AppPlan }) {
+function StepsPanel({ plan, newPayees }: { readonly plan: AppPlan; readonly newPayees: boolean }) {
   return (
     <section className="panel page-stack">
       <h2>Steps and payees</h2>
@@ -241,10 +275,8 @@ function StepsPanel({ plan }: { readonly plan: AppPlan }) {
               Fills: {step.why.fills.join(", ")}. {step.why.summary}
             </p>
           )}
-          <p>
-            Payee: {hostFor(step.resource?.url) ?? step.payee ?? "No paid provider"}
-            {step.payee ? ` (${step.payee})` : ""}
-          </p>
+          <p>Payee: {hostFor(step.resource?.url) ?? step.payee ?? "No paid provider"}</p>
+          {newPayees && step.payee && <span className="badge">New payee</span>}
           {step.alternates && step.alternates.length > 0 && (
             <p>
               If a service fails, Czar may use up to 2 backup services under the same step limit.

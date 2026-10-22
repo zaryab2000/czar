@@ -115,6 +115,29 @@ test("pending approvals update the tab title from the server count", async ({ pa
 });
 
 test("approval review shows the plan path and payment details", async ({ page }) => {
+  await page.route("**/v1/approvals?status=pending", (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        items: [
+          {
+            planId: "pln_01J00000000000000000000000",
+            objectiveId: "obj_01J00000000000000000000000",
+            goal: "Research prices",
+            cap: "1000000",
+            capDisplay: "$1.00",
+            category: "research",
+            stepCount: 1,
+            newPayees: 1,
+            createdAt: "2026-10-21T00:00:00Z",
+            expiresAt: "2026-10-22T00:00:00Z",
+            status: "pending",
+          },
+        ],
+        nextCursor: null,
+      }),
+    }),
+  );
   await page.route("**/v1/approvals/pln_01J00000000000000000000000", (route) =>
     route.fulfill({
       contentType: "application/json",
@@ -176,9 +199,9 @@ test("approval review shows the plan path and payment details", async ({ page })
   await expect(
     page.getByText("Spend up to $1.00 (1000000 USDC) on “vendor pricing”"),
   ).toBeVisible();
-  await expect(
-    page.getByText("prices.example (0x0000000000000000000000000000000000000001)"),
-  ).toBeVisible();
+  await expect(page.getByText("Payee: prices.example")).toBeVisible();
+  await expect(page.getByText("New payee")).toBeVisible();
+  await expect(page.getByText("Network fee: paid from your network fee reserve")).toBeVisible();
   await expect(page.getByText("Held in escrow, money back if rejected")).toBeVisible();
   await expect(
     page.getByText(
@@ -187,6 +210,8 @@ test("approval review shows the plan path and payment details", async ({ page })
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "Approve $1.00" })).toBeVisible();
   await page.getByRole("button", { name: "Decline" }).click();
+  await expect(page.getByRole("dialog")).toContainText("Decline this plan?");
+  await page.getByRole("button", { name: "Confirm decline" }).click();
+  await expect(page).toHaveURL(/\/approvals$/);
   await expect(page.getByText("Declined. Czar won't spend on this.")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Approve $1.00" })).toHaveCount(0);
 });

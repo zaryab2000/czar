@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { categoryHash } from "@czar/hashing";
 import { encodeSetCategoryLimits } from "@czar/vault-client";
 import type { Me } from "@czar/schemas";
@@ -17,6 +17,19 @@ export default function LimitsOnboardingPage() {
   const [limits, setLimits] = useState<Record<string, { userMax: string; autoLimit: string }>>({});
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string>();
+
+  useEffect(() => {
+    if (!data?.vaultCreated || data.limits.length === 4) return;
+    let timer: number | undefined;
+    let active = true;
+    void appApi.listPendingApprovals().then(({ pollSeconds }) => {
+      if (active) timer = window.setInterval(refresh, pollSeconds * 1000);
+    });
+    return () => {
+      active = false;
+      if (timer !== undefined) window.clearInterval(timer);
+    };
+  }, [data?.limits.length, data?.vaultCreated, refresh]);
 
   async function saveLimits() {
     if (!data?.vaultCreated) return;

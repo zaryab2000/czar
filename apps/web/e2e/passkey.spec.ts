@@ -37,48 +37,23 @@ test("creates a passkey and later completes createSession", async ({ page, brows
       isUserVerified: true,
     },
   });
-  const challenge = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE";
   let challengeRequests = 0;
   let registrations = 0;
   let assertions = 0;
   let submittedNotices = 0;
   let registeredMsca: Address | undefined;
   const { plan, intent } = approvalFixture();
-  await page.route("**/v1/auth/challenge", async (route) => {
-    challengeRequests += 1;
-    await route.fulfill({
-      status: 201,
-      contentType: "application/json",
-      body: JSON.stringify({
-        challengeId: `ach_${challengeRequests}`,
-        challenge,
-        expiresAt: new Date(Date.now() + 300_000).toISOString(),
-      }),
-    });
-  });
-  await page.route("**/v1/auth/passkey", async (route) => {
-    registrations += 1;
-    const body = route.request().postDataJSON() as { credentialId?: string; msca?: string };
-    expect(body.credentialId).toBeTruthy();
-    expect(body.msca).toMatch(/^0x[\da-fA-F]{40}$/);
-    registeredMsca = body.msca as Address;
-    await rpc("anvil_setBalance", [registeredMsca, "0x3635c9adc5dea00000"]);
-    await route.fulfill({
-      status: 201,
-      contentType: "application/json",
-      body: JSON.stringify(sessionResponse()),
-    });
-  });
-  await page.route("**/v1/me", async (route) => {
-    if (!registeredMsca) return route.fulfill({ status: 401, body: "{}" });
-    await route.fulfill({
-      contentType: "application/json",
-      headers: {
-        "X-Czar-Bundler-Order": "circle,pimlico,alchemy,zerodev",
-        "X-Czar-Bundler-Endpoints": "{}",
-      },
-      body: JSON.stringify(await accountMe(registeredMsca)),
-    });
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname === "/v1/auth/challenge") challengeRequests += 1;
+    if (url.pathname === "/v1/auth/passkey") {
+      registrations += 1;
+      const body = request.postDataJSON() as { credentialId?: string; msca?: string };
+      expect(body.credentialId).toBeTruthy();
+      expect(body.msca).toMatch(/^0x[\da-fA-F]{40}$/);
+      registeredMsca = body.msca as Address;
+    }
+    if (url.pathname === "/v1/auth/session") assertions += 1;
   });
   await page.route("**/v1/approvals**", (route) =>
     route.fulfill({
@@ -145,20 +120,6 @@ test("creates a passkey and later completes createSession", async ({ page, brows
       }),
     });
   });
-  await page.route("**/v1/auth/session", async (route) => {
-    assertions += 1;
-    const body = route.request().postDataJSON() as Record<string, unknown>;
-    expect(body["challengeId"]).toBe("ach_2");
-    expect(body["authenticatorData"]).toBeTruthy();
-    expect(body["clientDataJSON"]).toBeTruthy();
-    expect(body["signature"]).toBeTruthy();
-    await route.fulfill({
-      status: 201,
-      contentType: "application/json",
-      body: JSON.stringify(sessionResponse()),
-    });
-  });
-
   await page.goto("/onboarding/passkey");
   await page.getByRole("button", { name: "Create passkey" }).click();
   await expect(
@@ -170,6 +131,8 @@ test("creates a passkey and later completes createSession", async ({ page, brows
   await expect.poll(() => assertions).toBe(1);
   expect(challengeRequests).toBe(2);
   expect(registrations).toBe(1);
+  expect(registeredMsca).toBeDefined();
+  await rpc("anvil_setBalance", [registeredMsca, "0x3635c9adc5dea00000"]);
   await expect(page).toHaveURL(/\/home$/);
   await expect(page.getByRole("heading", { name: "Finish setting up your vault" })).toBeVisible();
   await page.getByRole("link", { name: "Continue setup" }).click();
@@ -179,8 +142,6 @@ test("creates a passkey and later completes createSession", async ({ page, brows
   ).toBeVisible();
   await page.getByRole("button", { name: "Create vault" }).click();
   await expect(page.getByText("Your vault is ready.")).toBeVisible({ timeout: 30_000 });
-  await page.goto("/home");
-  await expect(page.getByRole("heading", { name: "Your Czar account" })).toBeVisible();
   await page.goto("/onboarding/limits");
   const maximums = page.locator('input[inputmode="decimal"]');
   await expect(maximums).toHaveCount(8);
@@ -194,6 +155,20 @@ test("creates a passkey and later completes createSession", async ({ page, brows
     )
     .toBe(4);
   await expect(page.getByText("Limits submitted. Waiting for LimitsSet to sync…")).toBeVisible();
+  await expect
+    .poll(async () => {
+      const account = await accountMe(registeredMsca!);
+      const response = await page.request.get(
+        `http://127.0.0.1:42070/__e2e/events?vault=${account.vault}`,
+      );
+      const indexed = (await response.json()) as { limitsSet: number };
+      return indexed.limitsSet;
+    })
+    .toBe(4);
+  await page.goto("/home");
+  await expect(page.getByRole("heading", { name: "Your Czar account" })).toBeVisible();
+  await page.goto("/approvals");
+  await expect(page.getByRole("heading", { name: "Approvals" })).toBeVisible();
   const account = await accountMe(registeredMsca!);
   await rpc("anvil_setBalance", [account.vault, "0x3635c9adc5dea00000"]);
   const client = createPublicClient({
@@ -437,11 +412,4 @@ async function rpc(method: string, params: unknown[]): Promise<unknown> {
   const body = (await response.json()) as { result?: unknown; error?: { message?: string } };
   if (body.error) throw new Error(body.error.message ?? `Local Arc RPC method ${method} failed.`);
   return body.result;
-}
-
-function sessionResponse() {
-  return {
-    sessionToken: "test-session-token-not-a-secret",
-    expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
-  };
 }

@@ -1,5 +1,5 @@
 import { createHash, timingSafeEqual } from "node:crypto";
-import { decodeFirstSync } from "cbor";
+import cbor from "cbor";
 import { p256 } from "@noble/curves/p256.js";
 import type {
   AuthChallenge,
@@ -21,7 +21,7 @@ import { problem } from "#src/http/problem";
 import { parseIdempotencyKey } from "#src/http/validate";
 
 const RP_ID = "localhost";
-const ORIGIN = "http://localhost";
+const { decodeFirstSync } = cbor;
 const MAX_CHALLENGE_BYTES = 32;
 const ATTESTED_DATA_FLAG = 0x40;
 const USER_PRESENT_FLAG = 0x01;
@@ -31,6 +31,7 @@ export interface AuthRouteDependencies {
   readonly config: Config;
   readonly clock: { now(): Date };
   readonly random: RandomSource;
+  readonly origin: string;
   readonly rpcUrl?: string;
 }
 
@@ -70,7 +71,7 @@ export async function registerPasskeyRoute(
   const request = await readJson<PasskeyRegistration>(context);
   if (!request || !validRegistrationShape(request))
     return problemResponse(context, 400, "validation");
-  const key = await registrationKey(request);
+  const key = await registrationKey(request, dependencies.origin);
   if (!key) return problemResponse(context, 422, "validation");
   const client = await dependencies.pool.connect();
   try {
@@ -143,7 +144,7 @@ export async function createSessionRoute(
   parseIdempotencyKey(context.req.header("Idempotency-Key"));
   const request = await readJson<SessionRequest>(context);
   if (!request || !validSessionShape(request)) return problemResponse(context, 400, "validation");
-  const assertion = await sessionAssertion(request);
+  const assertion = await sessionAssertion(request, dependencies.origin);
   if (!assertion) return problemResponse(context, 401, "validation");
   const client = await dependencies.pool.connect();
   try {
@@ -224,8 +225,11 @@ interface SessionAssertion extends VerifiedClientData {
   readonly signCount: number;
 }
 
-async function registrationKey(request: PasskeyRegistration): Promise<RegistrationKey | null> {
-  const clientData = verifyClientData(request.clientDataJSON, "webauthn.create");
+async function registrationKey(
+  request: PasskeyRegistration,
+  origin: string,
+): Promise<RegistrationKey | null> {
+  const clientData = verifyClientData(request.clientDataJSON, "webauthn.create", origin);
   const attestation = decodeBytes(request.attestationObject, 8192);
   if (!clientData || !attestation) return null;
   try {
@@ -251,8 +255,11 @@ async function registrationKey(request: PasskeyRegistration): Promise<Registrati
   }
 }
 
-async function sessionAssertion(request: SessionRequest): Promise<SessionAssertion | null> {
-  const clientData = verifyClientData(request.clientDataJSON, "webauthn.get");
+async function sessionAssertion(
+  request: SessionRequest,
+  origin: string,
+): Promise<SessionAssertion | null> {
+  const clientData = verifyClientData(request.clientDataJSON, "webauthn.get", origin);
   const authenticatorData = decodeBytes(request.authenticatorData, 4096);
   const signature = decodeBytes(request.signature, 1024);
   if (!clientData || !authenticatorData || !signature) return null;
@@ -261,14 +268,18 @@ async function sessionAssertion(request: SessionRequest): Promise<SessionAsserti
   return { ...clientData, authenticatorData, signature, signCount: parsed.signCount };
 }
 
-function verifyClientData(encoded: string, expectedType: string): VerifiedClientData | null {
+function verifyClientData(
+  encoded: string,
+  expectedType: string,
+  expectedOrigin: string,
+): VerifiedClientData | null {
   const bytes = decodeBytes(encoded, 4096);
   if (!bytes) return null;
   try {
     const data = JSON.parse(bytes.toString("utf8")) as Record<string, unknown>;
     if (
       data["type"] !== expectedType ||
-      data["origin"] !== ORIGIN ||
+      data["origin"] !== expectedOrigin ||
       typeof data["challenge"] !== "string"
     ) {
       return null;

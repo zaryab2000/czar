@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { encodeCreateVault, encodeSetPasskey } from "@czar/vault-client";
 import type { Me } from "@czar/schemas";
 import { appApi } from "#src/app-api";
@@ -17,6 +17,19 @@ export default function VaultOnboardingPage() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string>();
   const [fundNetworkFees, setFundNetworkFees] = useState(false);
+
+  useEffect(() => {
+    if (data?.vaultCreated) return;
+    let timer: number | undefined;
+    let active = true;
+    void appApi.listPendingApprovals().then(({ pollSeconds }) => {
+      if (active) timer = window.setInterval(refresh, pollSeconds * 1000);
+    });
+    return () => {
+      active = false;
+      if (timer !== undefined) window.clearInterval(timer);
+    };
+  }, [data?.vaultCreated, refresh]);
 
   async function createVault() {
     if (!data) return;
