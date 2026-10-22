@@ -92,6 +92,10 @@ export function createApp(dependencies: AppDependencies): Hono {
     return;
   });
 
+  app.get("/health", async (context) => {
+    await dependencies.pool.query("SELECT 1");
+    return context.json({ status: "ok" });
+  });
   app.post("/v1/devices/pair", (context) => pairRoute(context, dependencies));
   app.post("/v1/objectives", (context) => submitRoute(context, dependencies));
   app.post("/v1/models/complete", (context) => modelRoute(context, dependencies));
