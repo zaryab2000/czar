@@ -1,4 +1,5 @@
 import type { Address, Hash32 } from "@czar/hashing";
+import type { Config } from "@czar/config";
 import { czarVaultAbi, czarVaultFactoryAbi } from "@czar/vault-client";
 import { keccak256, stringToHex, type PublicClient } from "viem";
 import type { AuditQueryExecutor } from "./postgres-audit.ts";
@@ -22,6 +23,7 @@ type ChainClient = Pick<
   "getBlock" | "getBlockNumber" | "getBalance" | "readContract"
 >;
 type ProjectionInput = {
+  readonly config: Config;
   readonly database: AuditQueryExecutor;
   readonly chain: ChainClient;
   readonly factory: Address;
@@ -29,7 +31,7 @@ type ProjectionInput = {
 
 const VAULT = czarVaultAbi;
 const FACTORY = czarVaultFactoryAbi;
-const PERIOD_LENGTH = 604800;
+const BPS_BASE = 10_000n;
 const ZERO32 = `0x${"0".repeat(64)}` as Hash32;
 
 /** Production T-040 projection backed by the existing indexer and server Postgres tables. */
@@ -78,7 +80,7 @@ function chainProjection(
     reservation: (vault, id) => readReservation(input.chain, vault, id),
     pullback: (vault, id) => readPullback(input.chain, vault, id),
     blockNumber: () => input.chain.getBlockNumber(),
-    autonomy: (vault, categoryId) => readAutonomy(input.chain, vault, categoryId),
+    autonomy: (vault, categoryId) => readAutonomy(input, vault, categoryId),
     nativeBalance: (address) => input.chain.getBalance({ address }),
   };
 }
@@ -129,11 +131,11 @@ async function readPullback(
 }
 
 async function readAutonomy(
-  chain: ChainClient,
+  input: ProjectionInput,
   vault: Address,
   categoryId: Hash32,
 ): Promise<AutonomyView | undefined> {
-  const limits = await chain.readContract({
+  const limits = await input.chain.readContract({
     address: vault,
     abi: VAULT,
     functionName: "getLimits",
@@ -143,10 +145,17 @@ async function readAutonomy(
   return {
     autoLimit: limits.autoLimit,
     userMax: limits.userMax,
-    maxStepTo: limits.autoLimit + (limits.autoLimit * 2000n) / 10000n,
+    maxStepTo:
+      limits.autoLimit +
+      (limits.autoLimit * BigInt(Number(input.config.get("signer.projection.maxRaiseStepBps")))) /
+        BPS_BASE,
     lastRaiseAt: Number(limits.lastRaiseAt),
-    periodLength: PERIOD_LENGTH,
-    nonce: await chain.readContract({ address: vault, abi: VAULT, functionName: "autonomyNonce" }),
+    periodLength: Number(input.config.get("signer.projection.periodLengthSeconds")),
+    nonce: await input.chain.readContract({
+      address: vault,
+      abi: VAULT,
+      functionName: "autonomyNonce",
+    }),
   };
 }
 

@@ -111,6 +111,11 @@ contract Deploy is Script {
             jobEscrow: CIRCLE_JOB_ESCROW,
             jobEscrowKind: JOB_ESCROW_KIND_CIRCLE
         });
+        vm.serializeAddress(json, "usdc", cfg.usdc);
+        vm.serializeAddress(json, "gatewayWallet", cfg.gatewayWallet);
+        vm.serializeAddress(json, "gatewayMinter", cfg.gatewayMinter);
+        vm.serializeUint(json, "gatewayDomain", cfg.gatewayDomain);
+        vm.serializeAddress(json, "jobEscrow", cfg.jobEscrow);
         bytes memory args = abi.encode(cfg, d, guardian, admin);
         bytes memory factoryInit = abi.encodePacked(vm.getCode("src/CzarVaultFactory.sol:CzarVaultFactory"), args);
         address factory = _deploy(FACTORY_SALT, factoryInit);

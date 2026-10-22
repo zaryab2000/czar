@@ -30,13 +30,14 @@ export function createLocalSignerPolicy(): Pick<
 /** Create the RPC-backed EIP-1559 transaction filler used by the signer process. */
 export function createRpcTransactionPreparer(input: {
   readonly chainId: number;
+  readonly rpcUrl: string;
   readonly client: Pick<PublicClient, "getChainId" | "prepareTransactionRequest">;
 }): TransactionPreparer {
   const chain = defineChain({
     id: input.chainId,
     name: "Arc local",
     nativeCurrency: { name: "USDC", symbol: "USDC", decimals: 18 },
-    rpcUrls: { default: { http: ["http://127.0.0.1:8545"] } },
+    rpcUrls: { default: { http: [input.rpcUrl] } },
   });
   return async (from, call) => {
     const connectedChainId = await input.client.getChainId();
@@ -75,6 +76,7 @@ export function createRpcGasRefillAdapters(input: {
 
 /** Compose the local signer adapters shared by the server, merchant and relayer processes. */
 export function createLocalSignerAdapters(input: {
+  readonly rpcUrl: string;
   readonly postgres: AuditQueryExecutor;
   readonly client: Pick<
     PublicClient,

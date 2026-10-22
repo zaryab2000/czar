@@ -27,7 +27,15 @@ type PublicRpc = ReturnType<typeof createPublicClient>;
 type AnvilRpc = ReturnType<typeof createTestClient>;
 type LocalSigner = Awaited<ReturnType<typeof harness>>;
 type LocalSignerWithNetwork = LocalSigner & { network: { openEvidenceLog: Address } };
-type LocalDeployment = { chainId: number; OpenEvidenceLog: Address };
+type LocalDeployment = {
+  chainId: number;
+  OpenEvidenceLog: Address;
+  usdc: Address;
+  gatewayWallet: Address;
+  gatewayMinter: Address;
+  gatewayDomain: number;
+  jobEscrow: Address;
+};
 
 afterAll(async () => {
   await Promise.all(temporaryFiles.map((path) => rm(path, { force: true })));
@@ -48,6 +56,13 @@ describe.skipIf(!enabled)("K8 local arc-anvil acceptance", () => {
     const t = await createLocalSigner(publicClient);
     const deployment = await deployLocalContracts(t, sender);
     expect(deployment.chainId).toBe(31337);
+    expect(deployment).toMatchObject({
+      usdc: NETWORK.usdc,
+      gatewayWallet: NETWORK.gatewayWallet,
+      gatewayMinter: NETWORK.gatewayMinter,
+      gatewayDomain: NETWORK.gatewayDomain,
+      jobEscrow: NETWORK.jobEscrow,
+    });
     await assertK8Commit(t, testClient, publicClient, deployment);
     await assertGasRefill(t, testClient, publicClient);
   }, 180_000);

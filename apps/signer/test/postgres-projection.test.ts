@@ -1,4 +1,5 @@
 import type { Address, Hash32 } from "@czar/hashing";
+import { loadConfig } from "@czar/config";
 import { keccak256, stringToHex } from "viem";
 import { describe, expect, it } from "vitest";
 import { createPostgresProjection } from "../src/postgres-projection.ts";
@@ -10,6 +11,37 @@ const planHash = `0x${"ab".repeat(32)}` as Hash32;
 const payee = "0x00000000000000000000000000000000000000b1" as Address;
 
 describe("Postgres signer projection", () => {
+  it("projects autonomy limits using the registered protocol constants", async () => {
+    const projection = createPostgresProjection({
+      config: loadConfig(),
+      database: queryDatabase(() => []),
+      chain: {
+        async getBlock() {
+          return { timestamp: 1_800_000_000n };
+        },
+        async getBlockNumber() {
+          return 12n;
+        },
+        async getBalance() {
+          return 100n;
+        },
+        async readContract({ functionName }: { functionName: string }) {
+          if (functionName === "getLimits")
+            return { autoLimit: 100n, userMax: 500n, lastRaiseAt: 1_800_000_000n };
+          if (functionName === "autonomyNonce") return 7n;
+          throw new Error(`unexpected contract read: ${functionName}`);
+        },
+      } as never,
+      factory,
+    });
+
+    await expect(projection.autonomy(vault, planHash)).resolves.toMatchObject({
+      maxStepTo: 120n,
+      periodLength: 604800,
+      nonce: 7n,
+    });
+  });
+
   it("rebuilds stored plan leaves and used calls from server and indexer rows", async () => {
     const plan = {
       planHash,
@@ -33,6 +65,7 @@ describe("Postgres signer projection", () => {
       return [];
     });
     const projection = createPostgresProjection({
+      config: loadConfig(),
       database,
       chain: fakeChain(),
       factory,
@@ -52,13 +85,19 @@ describe("Postgres signer projection", () => {
     const database = queryDatabase((sql) =>
       sql.includes("SELECT mirror FROM envelopes") ? [{ mirror: { state: "Open", planHash } }] : [],
     );
-    const projection = createPostgresProjection({ database, chain: fakeChain(), factory });
+    const projection = createPostgresProjection({
+      config: loadConfig(),
+      database,
+      chain: fakeChain(),
+      factory,
+    });
 
     await expect(projection.envelope(vault, 4n)).rejects.toThrow("missing stored plan");
   });
 
   it("never claims Gateway balances when the local projection lacks them", async () => {
     const projection = createPostgresProjection({
+      config: loadConfig(),
       database: queryDatabase(() => []),
       chain: fakeChain(),
       factory,
@@ -75,7 +114,12 @@ describe("Postgres signer projection", () => {
         ? [{ vault, mirror: { envelopeId: 7, state: "Funded", funded: "100" } }]
         : [],
     );
-    const projection = createPostgresProjection({ database, chain: fakeChain(), factory });
+    const projection = createPostgresProjection({
+      config: loadConfig(),
+      database,
+      chain: fakeChain(),
+      factory,
+    });
 
     await expect(projection.pocket(payee)).resolves.toMatchObject({ slowWithdrawalOpen: true });
   });

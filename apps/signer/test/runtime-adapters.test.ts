@@ -30,6 +30,7 @@ describe("local signer runtime adapters", () => {
     const getChainId = vi.fn(async () => 5042002);
     const prepare = createRpcTransactionPreparer({
       chainId: 5042002,
+      rpcUrl: "http://127.0.0.1:18545",
       client: { getChainId, prepareTransactionRequest } as never,
     });
 
@@ -53,7 +54,10 @@ describe("local signer runtime adapters", () => {
         to: "0x0000000000000000000000000000000000000002",
         data: "0x1234",
         value: 3n,
-        chain: expect.objectContaining({ id: 5042002 }),
+        chain: expect.objectContaining({
+          id: 5042002,
+          rpcUrls: { default: { http: ["http://127.0.0.1:18545"] } },
+        }),
       }),
     );
   });
@@ -62,6 +66,7 @@ describe("local signer runtime adapters", () => {
     const prepareTransactionRequest = vi.fn();
     const prepare = createRpcTransactionPreparer({
       chainId: 5042002,
+      rpcUrl: "http://127.0.0.1:8545",
       client: {
         getChainId: async () => 31337,
         prepareTransactionRequest,
