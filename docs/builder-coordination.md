@@ -7,18 +7,25 @@ This file is context for every builder agent. Read it before starting any task.
 ## How we work
 
 - **5 builder agents** run in parallel, each in its own lane with its own worktree.
-- **1 architect** (Claude, in Zaryab's session) reviews every PR, fixes bugs on the PR branch, and tells Zaryab when a PR is safe to merge.
+- **The architect** remains the authority for canonical specifications and decisions.
+- **Codex GitHub review** reviews builder PRs; **Zaryab's designated Codex reviewer session**
+  prepares task briefs and performs final review. Builders fix findings on their own PR branches.
 - **Zaryab** merges PRs and approves anything that touches testnet funds, sign-ups, or real devices.
 - Base branch for all work: **`build-v1`**.
-- No hosted CI. All verification is local test runs.
-- No hosted model calls until G0-16 terms are recorded and the K18 account is approved. All model tests use recorded replies (offline mode).
+- Actions minutes are unavailable; verification runs locally. Existing workflows remain in
+  `.github/workflows/`; failed, missing, or skipped hosted checks are not passing evidence.
+- No Czar runtime hosted model calls until G0-16 terms are recorded and K18 is approved.
+  Product model tests use recorded replies. Zaryab has separately authorized Codex GitHub
+  code and security review of repository source and PR diffs; this does not satisfy G0-16/K18.
+- Read `docs/pr-review-workflow.md` for review requests, builder polling, fixes, and final review.
 - Testnet deployment is deferred until most backend and frontend builds are ready (D92).
 
 ---
 
 ## Lane assignments
 
-Each lane owns specific folders. **Work only in your lane's folders.** Do not edit files owned by another lane.
+Each lane owns specific folders. **Work only in your lane's folders.** Do not edit files owned by
+another lane.
 
 ### Lane 1 — Contracts and chain
 
@@ -68,32 +75,44 @@ git worktree add ../czar-<lane> -b codex/t<NNN>-<slug> origin/build-v1
 
 ## Shared packages — conflict rules
 
-These packages are shared across lanes: `@czar/schemas`, `@czar/hashing`, `@czar/config`, `@czar/api-contract`.
+These packages are shared across lanes: `@czar/schemas`, `@czar/hashing`, `@czar/config`,
+`@czar/api-contract`.
 
 - Edit a shared package **only** where your task requires it.
-- Put the shared-package change in a **separate small commit** so the architect can review it in isolation.
+- Put the shared-package change in a **separate small commit** so the architect can review it in
+  isolation.
 - **Config registry:** append keys only. Never rename or remove an existing key.
-- **Migrations:** before opening your PR, rebase on `origin/build-v1` and rename your migration file to the next free number.
+- **Migrations:** fetch `origin/build-v1` before opening the PR and check migration numbering.
+  Merge base updates into a published branch; do not rewrite already pushed commits.
+  Recheck numbering after other migration PRs merge.
 
 ---
 
 ## What you must not do
 
-1. **Do not edit another lane's folders.** If your task needs a change there, describe it in your task report and stop that item.
-2. **Do not edit anything under `docs/specs/`, `docs/product/`, or `docs/architecture/`.** Spec gaps are filed as SCRs using `docs/specs/05-build-plan/spec-change-request-template.md`.
-3. **Do not invent fields, routes, functions, events, parameters, or versions.** If it is not in the specs, it does not exist yet.
-4. **Do not make hosted model calls.** All model tests use recorded replies until G0-16 is done.
-5. **Do not deploy to testnet, request funds, create accounts, or use real devices.** These require Zaryab's explicit approval.
-6. **Do not read, print, log, or commit private keys, seed phrases, API keys, `*.key`, `*.key.json`, or `.env*` files.** Keys live behind the signer service, never in code or environment variables.
-7. **Do not merge your PR.** Open the PR into `build-v1`, post your task report, and wait for the architect's review.
-8. **Do not start the next task** until the architect says the current PR is merged.
+1. **Do not edit another lane's folders.** If your task needs a change there, describe it in your
+   task report and stop that item.
+2. **Do not edit anything under `docs/specs/`, `docs/product/`, or `docs/architecture/`.** Spec gaps
+   are filed as SCRs using `docs/specs/05-build-plan/spec-change-request-template.md`.
+3. **Do not invent fields, routes, functions, events, parameters, or versions.** If it is not in the
+   specs, it does not exist yet.
+4. **Do not make Czar runtime hosted model calls.** Product model tests use recorded replies
+   until G0-16/K18 approval. Codex GitHub source/PR review is separately authorized.
+5. **Do not deploy to testnet, request funds, create accounts, or use real devices.** These require
+   Zaryab's explicit approval.
+6. **Do not read, print, log, or commit private keys, seed phrases, API keys, `*.key`, `*.key.json`,
+   or `.env*` files.** Keys live behind the signer service, never in code or environment variables.
+7. **Do not merge your PR.** Open it into `build-v1`, post your report, and handle the review/fix
+   loop in `docs/pr-review-workflow.md`. Request final review after fixing confirmed findings.
+8. **Do not start the next task** until the reviewer confirms the current PR was merged.
 
 ---
 
 ## Postgres
 
 - Tests use `127.0.0.1:15432`.
-- Each test suite creates its own random database (`czar_t_<hex>`), so suites can run in parallel without conflicts.
+- Each test suite creates its own random database (`czar_t_<hex>`), so suites can run in parallel
+  without conflicts.
 
 ---
 
@@ -110,11 +129,15 @@ A task is done when:
    - SCRs filed, if any
    - Open issues and anything you could not verify
 
+After implementation, stay active for the review/fix loop or explicitly report that the
+builder session must be resumed. Awaiting final review is not permission to merge; Zaryab
+merges only after the designated reviewer's recommendation for the current head SHA.
+
 ---
 
 ## Review priority
 
-The architect reviews PRs in this order: Lane 1, Lane 2, Lane 3, Lane 5, Lane 4.
+The final reviewer prioritizes PRs in this order: Lane 1, Lane 2, Lane 3, Lane 5, Lane 4.
 
 ---
 
@@ -123,13 +146,21 @@ The architect reviews PRs in this order: Lane 1, Lane 2, Lane 3, Lane 5, Lane 4.
 ```
 You are a Czar builder on LANE <N> (<lane name>). Other builders work in parallel on other lanes.
 
-- Work only in your worktree: ../czar-<lane>. Branch: codex/t<NNN>-<slug> from the latest origin/build-v1.
-- You own: <folders>. Do not edit other lanes' folders. Edit shared packages (schemas, hashing, config, api-contract) only where your task requires it, in a separate small commit.
-- Config registry: append keys only. Migrations: before opening the PR, rebase on origin/build-v1 and rename your migration to the next free number.
+- Work only in your worktree: ../czar-<lane>. Branch: codex/t<NNN>-<slug> from the latest
+  origin/build-v1.
+- You own: <folders>. Do not edit other lanes' folders. Edit shared packages (schemas, hashing,
+  config, api-contract) only where your task requires it, in a separate small commit.
+- Config registry: append keys only. Migrations: fetch origin/build-v1, check numbering, and merge
+  base updates into published branches; never rewrite pushed commits.
 - Your local arc-anvil port is <port>. Postgres: 127.0.0.1:15432 (tests create their own database).
-- No hosted model calls (all model tests use recorded replies). No testnet, no funds, no accounts, no keys.
-- Never edit docs/specs, docs/product, docs/architecture. Spec gap → stop that item, describe it as an SCR in your report, continue with the rest.
-- Finish = all acceptance tests pass locally + PR opened into build-v1 + task report (task, files, commands and results, SCRs, open issues). Do not merge. Do not start another task.
+- No Czar runtime hosted model calls (product model tests use recorded replies). Codex GitHub
+  source/PR review is authorized. No testnet, no funds, no accounts, no keys.
+- Never edit docs/specs, docs/product, docs/architecture. Spec gap → stop that item, describe it as
+  an SCR in your report, continue with the rest.
+- Implementation handoff = acceptance tests pass locally + PR into build-v1 + task report.
+- Follow docs/pr-review-workflow.md: poll feedback while active, fix confirmed issues, push, and
+  request @codex review after each fix batch. Report awaiting final review with PR URL and head SHA.
+  Do not merge or start another task.
 ```
 
 Fill in `<N>`, `<lane name>`, `<folders>`, `<port>` from the lane table above.
