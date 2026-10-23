@@ -78,6 +78,11 @@ export interface VaultDirectDependencies {
 }
 
 export interface VaultDirectChain {
+  stepUsed(envelopeId: bigint, stepIndex: number): Promise<bigint>;
+  envelopeCapacity(envelopeId: bigint): Promise<{
+    readonly cap: bigint;
+    readonly exposure: bigint;
+  }>;
   reserve(
     input: ReserveInput & { readonly signedTransaction: Hex },
   ): Promise<{ readonly reservationId: bigint; readonly txHash: string }>;
@@ -323,14 +328,16 @@ async function executeReservedCalls(
   const stored = storedReservationArgs(trace);
   const payee = stored?.payee ?? (first.offer.payTo as `0x${string}`);
   const amount = stored?.unitAmount ?? BigInt(first.offer.amount);
-  const count =
-    stored?.count ??
-    Math.min(
-      calls.length,
-      input.step.expectedCalls,
-      Number(BigInt(input.step.stepCap) / amount),
-      MAX_AUTHORIZATIONS_PER_RESERVATION,
-    );
+  const count = stored?.count ?? (await newReservationCount(input, dependencies, calls, amount));
+  if (count === 0) {
+    await markStepFailed(dependencies.pool, {
+      planId: input.planId,
+      stepIndex: input.step.stepIndex,
+      attempt: input.attempt ?? 0,
+      errorCode: "step-cap-exhausted",
+    });
+    return { state: "failed", errorCode: "step-cap-exhausted" };
+  }
   const validBefore =
     stored?.validBefore ?? reservationExpiry(input, dependencies, first.offer.maxTimeoutSeconds);
   const proof = buildPayeeProof(input, payee);
@@ -358,6 +365,30 @@ async function executeReservedCalls(
     trace,
     callsUsedBefore,
   );
+}
+
+async function newReservationCount(
+  input: VaultDirectInput,
+  dependencies: VaultDirectDependencies,
+  calls: readonly PreparedCall[],
+  unitAmount: bigint,
+): Promise<number> {
+  const stepCap = BigInt(input.step.stepCap);
+  const used = await dependencies.chain.stepUsed(input.envelopeId, input.step.stepIndex);
+  const stepRemaining = stepCap > used ? stepCap - used : 0n;
+  const envelope = await dependencies.chain.envelopeCapacity(input.envelopeId);
+  const envelopeRemaining =
+    envelope.cap > envelope.exposure ? envelope.cap - envelope.exposure : 0n;
+  const remaining = stepRemaining < envelopeRemaining ? stepRemaining : envelopeRemaining;
+  if (unitAmount <= 0n) throw new RangeError("x402 unit amount must be positive.");
+  const affordable = remaining / unitAmount;
+  const maxCount = Math.min(
+    calls.length,
+    input.step.expectedCalls,
+    MAX_AUTHORIZATIONS_PER_RESERVATION,
+  );
+  const affordableCount = affordable >= BigInt(maxCount) ? maxCount : Number(affordable);
+  return Math.min(maxCount, affordableCount);
 }
 
 async function findOrCreateReservation(
