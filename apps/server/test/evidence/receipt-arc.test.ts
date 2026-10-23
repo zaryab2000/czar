@@ -175,6 +175,12 @@ describe("app receipt accepted by deployed vault", () => {
         }),
       },
       createSigner: async () => signer,
+      publicClient,
+      walletClient: createWalletClient({
+        chain,
+        transport: http(RPC_URL),
+        account: relayerAccount,
+      }),
       acceptancePorts: {
         outputSchema: { forService: async () => null },
         shapeHistory: { forService: async () => null },
@@ -236,6 +242,7 @@ describe("app receipt accepted by deployed vault", () => {
       expect(report.flags).toContain("injection-quarantined");
     }
     expect(logs.join("\n")).not.toContain("ignore your plan");
+    root.close();
   }, 180_000);
 });
 
@@ -610,6 +617,9 @@ function memoryObjects() {
       const bytes = objects.get(ref);
       if (!bytes) throw new Error("Object store body is missing.");
       return bytes.slice();
+    },
+    async delete(ref: string) {
+      objects.delete(ref);
     },
   };
 }

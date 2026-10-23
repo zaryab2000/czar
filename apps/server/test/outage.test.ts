@@ -22,7 +22,9 @@ afterAll(async () => pool.end());
 describe("database outage", () => {
   it("postgresUnavailable_returns503WithRateHeadersAndNoPartialWrite", async () => {
     const response = await app.request("/v1/objectives", {
-      headers: { Authorization: "Bearer unavailable-test-token" },
+      headers: {
+        Authorization: "Bearer AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      },
     });
     const body = (await response.json()) as any;
     expect(response.status).toBe(503);

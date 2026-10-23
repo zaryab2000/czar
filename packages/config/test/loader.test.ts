@@ -20,6 +20,14 @@ describe("loadConfig", () => {
     expect(config.get("indexer.getLogsBlockRange")).toBe(9999);
     expect(config.get("signer.backend")).toBe("local-keystore");
     expect(config.get("vault.maxAuthorizationsPerReservation")).toBe(128);
+    expect(config.get("payer.job.minExpiryLeadSeconds")).toBe(360);
+    expect(config.get("payer.pullbackFallbackPollSeconds")).toBe(60);
+    expect(config.get("payer.job.deliverableStorePath")).toBe("./var/job-deliverables");
+    expect(config.get("payer.vaultEventPollMs")).toBe(4000);
+    expect(config.get("chain.usdcAddress")).toBe("0x3600000000000000000000000000000000000000");
+    expect(config.get("chain.gatewayWalletAddress")).toBe(
+      "0x0077777d7EBA4688BDeF3E311b846F25870A19B9",
+    );
   });
 
   it("env overlay overrides a default", () => {

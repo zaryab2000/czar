@@ -1,5 +1,5 @@
-import { randomUUID } from "node:crypto";
-import { keccak256 } from "viem";
+import { randomBytes, randomUUID } from "node:crypto";
+import { keccak256, type Address, type PublicClient, type WalletClient } from "viem";
 import type { Config } from "@czar/config";
 import { paymentRefHash } from "@czar/hashing";
 import type { Logger } from "@czar/logging";
@@ -11,6 +11,7 @@ import { createAcceptanceChecker } from "#src/acceptance/index";
 import type { AcceptancePorts } from "#src/acceptance/types";
 import { runBoundary } from "#src/boundary/index";
 import { createApp } from "#src/app";
+import { createFileObjectStore, type ObjectStore } from "#src/object-store";
 import type { AppReadOptions } from "#src/app/reads";
 import type { Plan, SubjectsRevision } from "@czar/schemas";
 import type { PairDependencies } from "#src/devices/pair";
@@ -28,18 +29,49 @@ import {
   type VaultDirectChain,
   type VaultDirectInput,
 } from "#src/payer/vault-direct";
+import { startPayerRuntime, type VaultHaltEventSource } from "#src/payer/runtime";
+import type { PocketHaltDependencies } from "#src/payer/pocket";
+import {
+  executePocketPreparation,
+  payGatewaySteps,
+  refreshGatewayStatuses,
+  sweepAndRetirePocketKey,
+  type PocketCloseInput,
+  type PocketNanopaymentDependencies,
+  type PocketNanopaymentInput,
+  type PocketPreparationInput,
+} from "#src/payer/pocket";
+import { createPocketPreparationChain } from "#src/payer/pocket-chain";
+import {
+  cancelExpiredPullback,
+  executePullback,
+  type CancelPullbackInput,
+  type PullbackInput,
+} from "#src/payer/pullback";
+import { createPullbackExecutionChain } from "#src/payer/pullback-execution-chain";
+import { executeJobStep, type JobExecutionInput } from "#src/payer/job";
+import { createJobChainAdapter } from "#src/payer/job-chain-adapter";
+import { createDatabaseVaultEventSource } from "#src/payer/database-vault-event-source";
+import { createPullbackChainAdapter } from "#src/payer/pullback-chain-adapter";
+import {
+  runPendingPullbackFallbacks,
+  type PullbackFallbackSchedulerDependencies,
+} from "#src/payer/pullback-scheduler";
 
 export interface ServerMainOptions extends PairDependencies {
   readonly pool: Pool;
   readonly config: Config;
   readonly logger: Logger;
   readonly modelClient: ModelClient;
-  readonly createSigner: () => Promise<Pick<Signer, "sign">>;
+  readonly createSigner: () => Promise<Pick<Signer, "sign" | "retirePocketKey">>;
   readonly acceptancePorts: AcceptancePorts;
-  readonly objects: {
-    put(bytes: Uint8Array): Promise<string>;
-    get(ref: string): Promise<Uint8Array>;
-  };
+  readonly objects?: ObjectStore;
+  readonly vaultEvents?: VaultHaltEventSource;
+  readonly pocketHalt?: PocketHaltDependencies;
+  readonly gatewayStatus?: PocketNanopaymentDependencies["gatewayStatus"];
+  readonly pullbackFallbackChain?: PullbackFallbackSchedulerDependencies["chain"];
+  readonly publicClient: PublicClient;
+  readonly walletClient: WalletClient;
   readonly chain: VaultDirectChain;
   readonly safeFetch: SafeFetch;
   readonly settlement: PaymentReceiptDependencies["settlement"];
@@ -49,6 +81,13 @@ export interface ServerMainOptions extends PairDependencies {
     reportHashes: readonly string[],
   ) => PaymentReceiptInput;
   readonly appReadOptions: AppReadOptions;
+  readonly gatewayTransferUrl?: string;
+  readonly jobEvaluator?: {
+    reject(input: {
+      readonly jobKey: `0x${string}`;
+      readonly escrowState: "Submitted" | "Completed";
+    }): Promise<void>;
+  };
   readonly revisePlanSubjects: (
     userId: string,
     planId: string,
@@ -60,9 +99,26 @@ export interface ServerMain {
   readonly app: ReturnType<typeof createApp>;
   readonly acceptance: Awaited<ReturnType<typeof createAcceptanceChecker>>;
   executePayerStep(input: VaultDirectInput): ReturnType<typeof executeVaultDirectStep>;
+  executePocketPreparation(
+    input: PocketPreparationInput,
+  ): ReturnType<typeof executePocketPreparation>;
+  executePocketNanopayments(
+    input: PocketNanopaymentInput,
+  ): ReturnType<typeof refreshGatewayStatuses>;
+  closePocket(
+    input: PocketCloseInput,
+    chain: Parameters<typeof sweepAndRetirePocketKey>[1]["chain"],
+  ): ReturnType<typeof sweepAndRetirePocketKey>;
+  executePullback(input: PullbackInput): ReturnType<typeof executePullback>;
+  cancelExpiredPullback(input: CancelPullbackInput): ReturnType<typeof cancelExpiredPullback>;
+  executeJobStep(input: JobExecutionInput): ReturnType<typeof executeJobStep>;
+  close(): void;
 }
 
 export async function createServerMain(options: ServerMainOptions): Promise<ServerMain> {
+  const objects =
+    options.objects ??
+    createFileObjectStore(String(options.config.get("payer.job.deliverableStorePath")));
   await migrate(options.pool);
   const acceptance = await createAcceptanceChecker({
     pool: options.pool,
@@ -74,8 +130,63 @@ export async function createServerMain(options: ServerMainOptions): Promise<Serv
     "P-01": await computePromptHash("P-01"),
     "P-02": await computePromptHash("P-02"),
   } as const;
-  const boundary = createPayerBoundary(options, acceptance, promptHashes);
+  const boundary = createPayerBoundary(options, acceptance, promptHashes, objects);
   const signer = await options.createSigner();
+  const vaultEvents =
+    options.vaultEvents ??
+    (options.pocketHalt ? createDatabaseVaultEventSource(options) : undefined);
+  if (!options.vaultEvents && !options.pocketHalt)
+    options.logger.error("payer_halt_monitor_disabled", {
+      rule: "missing_pocket_halt_dependencies",
+      state: "disabled",
+    });
+  const pullbackFallbackChain =
+    options.pullbackFallbackChain ??
+    createPullbackChainAdapter(
+      options.publicClient,
+      options.walletClient,
+      options.config.get("chain.gatewayWalletAddress") as Address,
+      {
+        config: options.config,
+        logger: options.logger,
+      },
+    );
+  const payerRuntime = startPayerRuntime({
+    ...(vaultEvents ? { events: vaultEvents } : {}),
+    ...(options.pocketHalt ? { pocketHalt: options.pocketHalt } : {}),
+    fallbackPollSeconds: Number(options.config.get("payer.pullbackFallbackPollSeconds")),
+    runFallbacks: () =>
+      runPendingPullbackFallbacks({
+        pool: options.pool,
+        config: options.config,
+        signer,
+        cancelPendingPullback: async (input) => {
+          const chain = createPullbackExecutionChain({
+            client: options.publicClient,
+            pool: options.pool,
+            vault: input.vault,
+            gatewayMinter: input.gatewayMinter,
+          });
+          const record = await chain.readPullback(input.pullbackId);
+          if (!record || record.state === "Confirmed")
+            throw new Error("Gateway pullback is not cancellable before slow withdrawal.");
+          if (record.state === "Cancelled") return;
+          return cancelExpiredPullback(input, {
+            pool: options.pool,
+            config: options.config,
+            signer,
+            chain,
+            safeFetch: options.safeFetch,
+            gatewayTransferUrl: options.gatewayTransferUrl ?? "",
+            now: options.clock.now,
+          });
+        },
+        chain: pullbackFallbackChain,
+        now: options.clock.now,
+      }),
+    onError: (operation) =>
+      options.logger.error("payer_runtime_failure", { rule: operation, state: "error" }),
+  });
   const recordReceipt = createReceiptBuilder(options, signer);
   const payerDependencies = {
     pool: options.pool,
@@ -84,7 +195,7 @@ export async function createServerMain(options: ServerMainOptions): Promise<Serv
     chain: options.chain,
     safeFetch: options.safeFetch,
     now: options.clock.now,
-    objects: options.objects,
+    objects,
     boundary,
     recordReceipt,
   };
@@ -95,6 +206,13 @@ export async function createServerMain(options: ServerMainOptions): Promise<Serv
     clock: options.clock,
     random: options.random,
     modelClient: options.modelClient,
+    jobDelivery: {
+      pool: options.pool,
+      config: options.config,
+      now: options.clock.now,
+      publicClient: options.publicClient,
+      objectStore: objects,
+    },
     ...(options.appReadOptions ? { appReadOptions: options.appReadOptions } : {}),
     ...(options.revisePlanSubjects ? { revisePlanSubjects: options.revisePlanSubjects } : {}),
   });
@@ -102,6 +220,90 @@ export async function createServerMain(options: ServerMainOptions): Promise<Serv
     app,
     acceptance,
     executePayerStep: (input) => executeVaultDirectStep(input, payerDependencies),
+    executePocketPreparation: (input) =>
+      executePocketPreparation(input, {
+        pool: options.pool,
+        config: options.config,
+        signer,
+        chain: createPocketPreparationChain({
+          client: options.publicClient,
+          vault: input.vault,
+          usdc: options.config.get("chain.usdcAddress") as Address,
+          gatewayWallet: options.config.get("chain.gatewayWalletAddress") as Address,
+        }),
+        now: options.clock.now,
+      }),
+    executePocketNanopayments: async (input) => {
+      if (!options.gatewayStatus)
+        throw new Error("Gateway status lookup is required to execute pocket payments.");
+      const dependencies: PocketNanopaymentDependencies = {
+        pool: options.pool,
+        config: options.config,
+        signer,
+        safeFetch: options.safeFetch,
+        now: options.clock.now,
+        gatewayStatus: options.gatewayStatus,
+      };
+      await payGatewaySteps(input, dependencies);
+      return refreshGatewayStatuses(input, dependencies);
+    },
+    closePocket: (input, chain) =>
+      sweepAndRetirePocketKey(input, { pool: options.pool, signer, chain }),
+    executePullback: (input) => {
+      if (!options.gatewayTransferUrl)
+        throw new Error("Gateway transfer URL is required for pullback execution.");
+      return executePullback(input, {
+        pool: options.pool,
+        config: options.config,
+        signer,
+        chain: createPullbackExecutionChain({
+          client: options.publicClient,
+          pool: options.pool,
+          vault: input.vault,
+          gatewayMinter: input.gatewayMinter,
+        }),
+        safeFetch: options.safeFetch,
+        gatewayTransferUrl: options.gatewayTransferUrl,
+        now: options.clock.now,
+      });
+    },
+    cancelExpiredPullback: (input) => {
+      const dependencies = {
+        pool: options.pool,
+        config: options.config,
+        signer,
+        chain: createPullbackExecutionChain({
+          client: options.publicClient,
+          pool: options.pool,
+          vault: input.vault,
+          gatewayMinter: input.gatewayMinter,
+        }),
+        safeFetch: options.safeFetch,
+        gatewayTransferUrl: options.gatewayTransferUrl ?? "",
+        now: options.clock.now,
+      };
+      return cancelExpiredPullback(input, dependencies);
+    },
+    executeJobStep: (input) =>
+      executeJobStep(input, {
+        pool: options.pool,
+        config: options.config,
+        signer,
+        chain: createJobChainAdapter({
+          client: options.publicClient,
+          pool: options.pool,
+          config: options.config,
+          vault: input.vault,
+          jobEscrow: input.jobEscrow,
+          usdc: options.config.get("chain.usdcAddress") as Address,
+          now: options.clock.now,
+        }),
+        vault: input.vault,
+        now: options.clock.now,
+        randomSalt: () => `0x${randomBytes(32).toString("hex")}` as `0x${string}`,
+        ...(options.jobEvaluator ? { evaluator: options.jobEvaluator } : {}),
+      }),
+    close: () => payerRuntime.stop(),
   };
 }
 
@@ -109,6 +311,7 @@ function createPayerBoundary(
   options: ServerMainOptions,
   acceptance: Awaited<ReturnType<typeof createAcceptanceChecker>>,
   promptHashes: Readonly<Record<"P-01" | "P-02", string>>,
+  objects: ObjectStore,
 ) {
   return async (context: BoundaryInput): Promise<unknown> => {
     const { input, response, paymentRef } = context;
@@ -161,7 +364,7 @@ function createPayerBoundary(
         logger: options.logger,
         modelClient: options.modelClient,
         promptHashes,
-        objectStore: options.objects,
+        objectStore: objects,
         acceptance,
       },
     );

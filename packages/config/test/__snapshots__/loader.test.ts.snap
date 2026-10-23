@@ -296,6 +296,18 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 28,
   },
   {
+    "key": "chain.gatewayWalletAddress",
+    "source": "default",
+    "unit": "address",
+    "value": "0x0077777d7EBA4688BDeF3E311b846F25870A19B9",
+  },
+  {
+    "key": "chain.usdcAddress",
+    "source": "default",
+    "unit": "address",
+    "value": "0x3600000000000000000000000000000000000000",
+  },
+  {
     "key": "claims.fileCodeTtlHours",
     "source": "default",
     "unit": "hours",
@@ -1289,10 +1301,22 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 30000,
   },
   {
+    "key": "payer.job.deliverableStorePath",
+    "source": "default",
+    "unit": "path",
+    "value": "./var/job-deliverables",
+  },
+  {
+    "key": "payer.job.minExpiryLeadSeconds",
+    "source": "default",
+    "unit": "s",
+    "value": 360,
+  },
+  {
     "key": "payer.jobBudgetWaitHours",
     "source": "default",
     "unit": "hours",
-    "value": 12,
+    "value": 2,
   },
   {
     "key": "payer.jobDurationHours",
@@ -1341,6 +1365,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "source": "default",
     "unit": "hours",
     "value": 24,
+  },
+  {
+    "key": "payer.pullbackFallbackPollSeconds",
+    "source": "default",
+    "unit": "s",
+    "value": 60,
   },
   {
     "key": "payer.pullbackMaxFeeAtomic",
@@ -1401,6 +1431,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "source": "default",
     "unit": "ms",
     "value": 60000,
+  },
+  {
+    "key": "payer.vaultEventPollMs",
+    "source": "default",
+    "unit": "ms",
+    "value": 4000,
   },
   {
     "key": "planner.agentAssistCapabilities",
