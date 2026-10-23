@@ -6,7 +6,7 @@ import { createPullbackChainAdapter } from "#src/payer/pullback-chain-adapter";
 
 const POCKET = "0x0000000000000000000000000000000000000001" as Address;
 const USDC = "0x3600000000000000000000000000000000000000" as Address;
-const GATEWAY_WALLET = "0x007700000000000000000000000000000000019B" as Address;
+const GATEWAY_WALLET = "0x0077777d7EBA4688BDeF3E311b846F25870A19B9" as Address;
 const TRANSACTION = `0x${"ab".repeat(64)}` as Hex;
 const TX_HASH = `0x${"cd".repeat(32)}` as Hex;
 

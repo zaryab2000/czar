@@ -3221,7 +3221,7 @@ export const PARAMETERS = [
   {
     key: "chain.gatewayWalletAddress",
     type: "string",
-    default: "0x007700000000000000000000000000000000019B",
+    default: "0x0077777d7EBA4688BDeF3E311b846F25870A19B9",
     unit: "address",
     reason: "GatewayWallet contract on Arc testnet (A2-02)",
     source: "docs/specs/03-smart-contracts/czar-vault.md:597",

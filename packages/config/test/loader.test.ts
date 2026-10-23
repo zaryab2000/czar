@@ -24,7 +24,7 @@ describe("loadConfig", () => {
     expect(config.get("payer.vaultEventPollMs")).toBe(4000);
     expect(config.get("chain.usdcAddress")).toBe("0x3600000000000000000000000000000000000000");
     expect(config.get("chain.gatewayWalletAddress")).toBe(
-      "0x007700000000000000000000000000000000019B",
+      "0x0077777d7EBA4688BDeF3E311b846F25870A19B9",
     );
   });
 

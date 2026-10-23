@@ -4,7 +4,7 @@ import { parseAbi, type Address, type PublicClient, type WalletClient } from "vi
 import type { SlowPullbackDependencies } from "#src/payer/pullback";
 
 const USDC_ABI = parseAbi(["function balanceOf(address account) view returns (uint256)"]);
-const withdrawalBlockAbi = [
+const gatewayWalletWithdrawalAbi = [
   {
     type: "function",
     name: "withdrawalBlock",
@@ -36,7 +36,7 @@ export function createPullbackChainAdapter(
     withdrawalBlock: (pocket) =>
       client.readContract({
         address: gatewayWalletAddress,
-        abi: withdrawalBlockAbi,
+        abi: gatewayWalletWithdrawalAbi,
         functionName: "withdrawalBlock",
         args: [usdc, pocket],
       }),
