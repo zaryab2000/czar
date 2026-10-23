@@ -50,6 +50,9 @@ export function createPullbackChainAdapter(
     },
     async sendPocketTransaction(transaction, kind) {
       const hash = await walletClient.sendRawTransaction({ serializedTransaction: transaction });
+      const receipt = await client.waitForTransactionReceipt({ hash });
+      if (receipt.status !== "success")
+        throw new Error(`Pocket transaction failed for kind ${kind}.`);
       logger.info("pocket_transaction_submitted", { kind, hash });
       return hash;
     },

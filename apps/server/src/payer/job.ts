@@ -10,7 +10,9 @@ import { validateSchema, type JobBrief, type TaskSpec } from "@czar/schemas";
 import type { Config } from "@czar/config";
 import type { Signer } from "@czar/signer";
 import type { Pool } from "pg";
-import { keccak256, recoverAddress, type Address, type Hex } from "viem";
+import { decodeErrorResult, keccak256, type Address, type Hex, type PublicClient } from "viem";
+import { randomUUID } from "node:crypto";
+import { czarVaultAbi } from "@czar/vault-client";
 import {
   acquireExecutorLease,
   appendExecutionPhase,
@@ -51,7 +53,7 @@ export interface JobBriefInput {
     readonly mimeType: string;
     readonly expectedKeys?: readonly string[];
     readonly schema?: Readonly<Record<string, unknown>>;
-    readonly maxBytes?: number;
+    readonly maxBytes: number;
   };
   readonly budgetCap: string;
   readonly targetBudget: string;
@@ -66,6 +68,7 @@ export interface JobExecutionInput {
   readonly planId: string;
   readonly envelopeRef: string;
   readonly envelopeId: bigint;
+  readonly vault: Address;
   readonly stepIndex: number;
   readonly provider: Address;
   readonly alternates: readonly Address[];
@@ -79,7 +82,9 @@ export interface JobExecutionInput {
   readonly capability: string;
   readonly callInputs: readonly Readonly<Record<string, string | number | boolean>>[];
   readonly taskSpec: TaskSpec;
-  readonly deliverable: JobBriefInput["deliverable"];
+  readonly deliverable: Omit<JobBriefInput["deliverable"], "maxBytes"> & {
+    readonly maxBytes?: number;
+  };
   readonly targetBudget: string;
   readonly evaluator: Address;
   readonly envelopeExpiresAt: Date;
@@ -88,7 +93,7 @@ export interface JobExecutionInput {
 }
 
 export interface JobChainView {
-  readonly state:
+  readonly vaultState:
     | "Opened"
     | "Funded"
     | "Submitted"
@@ -96,6 +101,7 @@ export interface JobChainView {
     | "Rejected"
     | "Expired"
     | "Released";
+  readonly escrowState?: "Open" | "Funded" | "Submitted" | "Completed" | "Rejected" | "Expired";
   readonly budget?: bigint;
   readonly expiredAt: number;
 }
@@ -110,6 +116,7 @@ export interface JobChain {
     transaction: Hex,
   ): Promise<{ readonly jobKey: Hash32; readonly jobId: bigint; readonly txHash: string }>;
   getJob(jobKey: Hash32): Promise<JobChainView>;
+  waitForResult(jobKey: Hash32, expiredAt: number): Promise<JobChainView>;
   waitForBudget(jobKey: Hash32, timeoutMs: number): Promise<bigint | undefined>;
   fundJob(input: {
     readonly jobKey: Hash32;
@@ -119,7 +126,7 @@ export interface JobChain {
   syncJob(input: {
     readonly jobKey: Hash32;
     readonly transaction: Hex;
-  }): Promise<{ readonly state: JobChainView["state"]; readonly txHash: string }>;
+  }): Promise<{ readonly state: JobChainView["vaultState"]; readonly txHash: string }>;
   cancelJob(input: { readonly jobKey: Hash32; readonly transaction: Hex }): Promise<string>;
   claimJobRefund(input: { readonly jobKey: Hash32; readonly transaction: Hex }): Promise<string>;
   isFrozenOrPaused(vault: Address): Promise<boolean>;
@@ -135,10 +142,16 @@ export interface JobExecutionDependencies {
   readonly now: () => Date;
   readonly randomSalt: () => Hash32;
   readonly vault: Address;
+  readonly evaluator?: {
+    reject(input: {
+      readonly jobKey: Hash32;
+      readonly escrowState: "Submitted" | "Completed";
+    }): Promise<void>;
+  };
 }
 
 export interface JobExecutionResult {
-  readonly state: JobChainView["state"];
+  readonly state: JobChainView["vaultState"];
   readonly jobKey?: Hash32;
   readonly budget?: string;
   readonly alternateProvider?: Address;
@@ -159,10 +172,18 @@ export interface JobDeliveryDependencies {
   readonly pool: Pool;
   readonly config: Config;
   readonly now: () => Date;
+  readonly publicClient: Pick<PublicClient, "verifyHash">;
   readonly objectStore: {
     put(bytes: Uint8Array): Promise<string>;
     delete(bodyRef: string): Promise<void>;
   };
+}
+
+export class JobRequestRejected extends Error {
+  constructor() {
+    super("Job request was not authorized.");
+    this.name = "JobRequestRejected";
+  }
 }
 
 export function buildJobDescription(input: JobDescriptionInput): JobDescription {
@@ -208,7 +229,7 @@ export function buildJobBrief(input: JobBriefInput): JobBrief {
       ...(input.deliverable.schema ? { schema: input.deliverable.schema } : {}),
       delivery: "push",
       uploadRoute: "POST /v1/jobs/{jobKey}/deliverable",
-      ...(input.deliverable.maxBytes === undefined ? {} : { maxBytes: input.deliverable.maxBytes }),
+      maxBytes: input.deliverable.maxBytes,
     },
     budgetCap: input.budgetCap,
     targetBudget: input.targetBudget,
@@ -234,7 +255,7 @@ export async function executeJobStep(
   dependencies: JobExecutionDependencies,
 ): Promise<JobExecutionResult> {
   const attempt = input.attempt ?? 0;
-  const workerId = input.workerId ?? `job-${process.pid}`;
+  const workerId = input.workerId ?? `job-${process.pid}-${randomUUID()}`;
   const leaseSeconds = Number(dependencies.config.get("payer.leaseSeconds"));
   const leased = await acquireExecutorLease(
     dependencies.pool,
@@ -319,22 +340,37 @@ async function openOrRecoverJob(
     inputSalt,
   });
   const proof = proofForJobProvider(input, provider);
-  const transaction = await signVaultCall(dependencies, "openJob", [
-    input.envelopeId,
-    input.stepIndex,
-    provider,
-    input.stepCap,
-    proof,
-    BigInt(expiration),
-    description.descriptionHash,
-  ]);
-  await recordJobPhase(dependencies, input, attempt, "job.open.sent", {
-    provider,
-    transaction,
-    descriptionHash: description.descriptionHash,
-    expiredAt: expiration,
-    inputSalt,
-  });
+  const savedOpen = trace.findLast(
+    (row) => row.phase === "job.open.sent" && row.payload["provider"] === provider,
+  );
+  const savedTransaction = savedOpen?.payload["transaction"];
+  if (typeof savedTransaction === "string" && savedOpen) {
+    const ageSeconds =
+      (dependencies.now().getTime() - savedOpen.at.getTime()) / MILLISECONDS_PER_SECOND;
+    const waitSeconds = Number(dependencies.config.get("payer.txWaitSeconds"));
+    if (ageSeconds < waitSeconds)
+      throw new Error("Stored openJob transaction is still within payer.txWaitSeconds.");
+  }
+  const transaction =
+    typeof savedTransaction === "string"
+      ? (savedTransaction as Hex)
+      : await signVaultCall(dependencies, "openJob", {
+          envelopeId: input.envelopeId.toString(),
+          stepIndex: input.stepIndex.toString(),
+          provider,
+          stepCap: input.stepCap.toString(),
+          proof,
+          expiredAt: BigInt(expiration).toString(),
+          descriptionHash: description.descriptionHash,
+        });
+  if (typeof savedTransaction !== "string")
+    await recordJobPhase(dependencies, input, attempt, "job.open.sent", {
+      provider,
+      transaction,
+      descriptionHash: description.descriptionHash,
+      expiredAt: expiration,
+      inputSalt,
+    });
   assertLeaseHeld();
   const opened = await dependencies.chain.openJob(transaction);
   const job = { ...opened, provider, expiredAt: expiration, inputSalt };
@@ -368,13 +404,35 @@ async function awaitAndFundJob(
 ): Promise<JobExecutionResult | undefined> {
   let view = await dependencies.chain.getJob(job.jobKey);
   let budget = view.budget;
-  if (view.state === "Opened" && budget === undefined) {
+  if (view.vaultState === "Released") return undefined;
+  if (
+    view.vaultState === "Opened" &&
+    (view.escrowState === "Submitted" || view.escrowState === "Completed")
+  ) {
+    if (!dependencies.evaluator)
+      throw new Error("Job evaluator port is required for an escrow front-run outcome.");
+    await dependencies.evaluator.reject({ jobKey: job.jobKey, escrowState: view.escrowState });
+    return syncAndReturn(input, dependencies, job, view, attempt, assertLeaseHeld);
+  }
+  if (view.vaultState === "Opened" && budget === undefined) {
     const waitHours = Number(dependencies.config.get("payer.jobBudgetWaitHours"));
-    await recordJobPhase(dependencies, input, attempt, "job.budget.wait", { jobKey: job.jobKey });
-    budget = await dependencies.chain.waitForBudget(
-      job.jobKey,
-      waitHours * SECONDS_PER_HOUR * MILLISECONDS_PER_SECOND,
+    const trace = await getExecutionTrace(
+      dependencies.pool,
+      input.planId,
+      input.stepIndex,
+      attempt,
     );
+    const waiting = trace.find(
+      (row) => row.phase === "job.budget.wait" && row.payload["jobKey"] === job.jobKey,
+    );
+    if (!waiting)
+      await recordJobPhase(dependencies, input, attempt, "job.budget.wait", { jobKey: job.jobKey });
+    const timeoutMs = Math.max(
+      0,
+      waitHours * SECONDS_PER_HOUR * MILLISECONDS_PER_SECOND -
+        (waiting ? dependencies.now().getTime() - waiting.at.getTime() : 0),
+    );
+    budget = await dependencies.chain.waitForBudget(job.jobKey, timeoutMs);
     view = await dependencies.chain.getJob(job.jobKey);
     budget = view.budget ?? budget;
   }
@@ -382,8 +440,27 @@ async function awaitAndFundJob(
     await cancelOrSyncJob(input, dependencies, job, attempt, assertLeaseHeld);
     return undefined;
   }
-  if (view.state === "Funded" || view.state === "Submitted" || view.state === "Completed")
+  if (
+    view.escrowState === "Submitted" ||
+    view.escrowState === "Completed" ||
+    view.escrowState === "Rejected"
+  )
+    if (
+      view.vaultState === "Opened" &&
+      (view.escrowState === "Submitted" || view.escrowState === "Completed")
+    ) {
+      if (!dependencies.evaluator)
+        throw new Error("Job evaluator port is required for an escrow front-run outcome.");
+      await dependencies.evaluator.reject({ jobKey: job.jobKey, escrowState: view.escrowState });
+    }
+  if (
+    view.escrowState === "Submitted" ||
+    view.escrowState === "Completed" ||
+    view.escrowState === "Rejected"
+  )
     return await syncAndReturn(input, dependencies, job, view, attempt, assertLeaseHeld);
+  if (view.vaultState === "Funded")
+    return await waitForJobResult(input, dependencies, job, view, attempt, assertLeaseHeld);
   if (await dependencies.chain.isFrozenOrPaused(dependencies.vault))
     throw new Error("Cannot fund an ERC-8183 job while the vault is frozen or paused.");
   if (!(await dependencies.chain.envelopeOpen(input.envelopeId)))
@@ -417,8 +494,56 @@ async function awaitAndFundJob(
     budget: budget.toString(),
     txHash,
   });
-  view = await dependencies.chain.getJob(job.jobKey);
-  return await syncAndReturn(input, dependencies, job, view, attempt, assertLeaseHeld, budget);
+  const fundedView = await dependencies.chain.getJob(job.jobKey);
+  return await waitForJobResult(input, dependencies, job, fundedView, attempt, assertLeaseHeld);
+}
+
+async function waitForJobResult(
+  input: JobExecutionInput,
+  dependencies: JobExecutionDependencies,
+  job: OpenedJob,
+  view: JobChainView,
+  attempt: number,
+  assertLeaseHeld: () => void,
+): Promise<JobExecutionResult> {
+  const result = await dependencies.chain.waitForResult(job.jobKey, job.expiredAt);
+  if (
+    result.escrowState === "Submitted" ||
+    result.escrowState === "Completed" ||
+    result.escrowState === "Rejected"
+  )
+    return syncAndReturn(input, dependencies, job, result, attempt, assertLeaseHeld);
+  const expired =
+    result.escrowState === "Expired" ||
+    Math.floor(dependencies.now().getTime() / MILLISECONDS_PER_SECOND) >= job.expiredAt;
+  if (expired && !(await dependencies.chain.hasDecisionPending(job.jobKey))) {
+    const transaction =
+      (await priorJobTransaction(dependencies, input, attempt, "job.refund.sent", job.jobKey)) ??
+      (await signVaultCall(dependencies, "claimJobRefund", { jobKey: job.jobKey }));
+    if (!(await hasJobPhase(dependencies, input, attempt, "job.refund.sent", job.jobKey)))
+      await recordJobPhase(dependencies, input, attempt, "job.refund.sent", {
+        jobKey: job.jobKey,
+        transaction,
+      });
+    assertLeaseHeld();
+    const txHash = await dependencies.chain.claimJobRefund({ jobKey: job.jobKey, transaction });
+    await recordJobPhase(dependencies, input, attempt, "job.refund.claimed", {
+      jobKey: job.jobKey,
+      txHash,
+    });
+    await syncJob(input, dependencies, job.jobKey, attempt, assertLeaseHeld);
+    const synced = await dependencies.chain.getJob(job.jobKey);
+    return {
+      state: synced.vaultState,
+      jobKey: job.jobKey,
+      ...(view.budget ? { budget: view.budget.toString() } : {}),
+    };
+  }
+  return {
+    state: result.vaultState,
+    jobKey: job.jobKey,
+    ...(result.budget === undefined ? {} : { budget: result.budget.toString() }),
+  };
 }
 
 async function fundAtBudget(
@@ -429,12 +554,18 @@ async function fundAtBudget(
   attempt: number,
   assertLeaseHeld: () => void,
 ): Promise<string> {
-  const transaction = await signVaultCall(dependencies, "fundJob", [jobKeyValue, expectedBudget]);
-  await recordJobPhase(dependencies, input, attempt, "job.fund.sent", {
-    jobKey: jobKeyValue,
-    expectedBudget: expectedBudget.toString(),
-    transaction,
-  });
+  const transaction =
+    (await priorJobTransaction(dependencies, input, attempt, "job.fund.sent", jobKeyValue)) ??
+    (await signVaultCall(dependencies, "fundJob", {
+      jobKey: jobKeyValue,
+      expectedBudget: expectedBudget.toString(),
+    }));
+  if (!(await hasJobPhase(dependencies, input, attempt, "job.fund.sent", jobKeyValue)))
+    await recordJobPhase(dependencies, input, attempt, "job.fund.sent", {
+      jobKey: jobKeyValue,
+      expectedBudget: expectedBudget.toString(),
+      transaction,
+    });
   assertLeaseHeld();
   return dependencies.chain.fundJob({ jobKey: jobKeyValue, expectedBudget, transaction });
 }
@@ -446,11 +577,14 @@ async function cancelOrSyncJob(
   attempt: number,
   assertLeaseHeld: () => void,
 ): Promise<void> {
-  const transaction = await signVaultCall(dependencies, "cancelJob", [job.jobKey]);
-  await recordJobPhase(dependencies, input, attempt, "job.cancel.sent", {
-    jobKey: job.jobKey,
-    transaction,
-  });
+  const transaction =
+    (await priorJobTransaction(dependencies, input, attempt, "job.cancel.sent", job.jobKey)) ??
+    (await signVaultCall(dependencies, "cancelJob", { jobKey: job.jobKey }));
+  if (!(await hasJobPhase(dependencies, input, attempt, "job.cancel.sent", job.jobKey)))
+    await recordJobPhase(dependencies, input, attempt, "job.cancel.sent", {
+      jobKey: job.jobKey,
+      transaction,
+    });
   assertLeaseHeld();
   try {
     const txHash = await dependencies.chain.cancelJob({ jobKey: job.jobKey, transaction });
@@ -473,11 +607,14 @@ async function syncAndReturn(
   assertLeaseHeld: () => void,
   budget = view.budget,
 ): Promise<JobExecutionResult> {
-  const transaction = await signVaultCall(dependencies, "syncJob", [job.jobKey]);
-  await recordJobPhase(dependencies, input, attempt, "job.sync.sent", {
-    jobKey: job.jobKey,
-    transaction,
-  });
+  const transaction =
+    (await priorJobTransaction(dependencies, input, attempt, "job.sync.sent", job.jobKey)) ??
+    (await signVaultCall(dependencies, "syncJob", { jobKey: job.jobKey }));
+  if (!(await hasJobPhase(dependencies, input, attempt, "job.sync.sent", job.jobKey)))
+    await recordJobPhase(dependencies, input, attempt, "job.sync.sent", {
+      jobKey: job.jobKey,
+      transaction,
+    });
   assertLeaseHeld();
   const synced = await dependencies.chain.syncJob({ jobKey: job.jobKey, transaction });
   await recordJobPhase(dependencies, input, attempt, "job.synced", {
@@ -504,7 +641,7 @@ export async function claimJobRefund(
   dependencies: JobExecutionDependencies,
 ): Promise<string | undefined> {
   const attempt = input.attempt ?? 0;
-  const workerId = input.workerId ?? `job-refund-${process.pid}`;
+  const workerId = input.workerId ?? `job-refund-${process.pid}-${randomUUID()}`;
   const leaseSeconds = Number(dependencies.config.get("payer.leaseSeconds"));
   const leased = await acquireExecutorLease(
     dependencies.pool,
@@ -544,18 +681,21 @@ async function runJobRefund(
   if (await dependencies.chain.hasDecisionPending(input.jobKey)) return undefined;
   const view = await dependencies.chain.getJob(input.jobKey);
   if (
-    (view.state !== "Funded" && view.state !== "Submitted") ||
+    (view.vaultState !== "Funded" && view.vaultState !== "Submitted") ||
     Math.floor(dependencies.now().getTime() / 1000) < view.expiredAt
   )
     return undefined;
-  const transaction = await signVaultCall(dependencies, "claimJobRefund", [input.jobKey]);
-  await appendExecutionPhase(dependencies.pool, {
-    planId: input.planId,
-    stepIndex: input.stepIndex,
-    attempt,
-    phase: "job.refund.sent",
-    payload: { jobKey: input.jobKey, transaction },
-  });
+  const transaction =
+    (await priorJobTransaction(dependencies, input, attempt, "job.refund.sent", input.jobKey)) ??
+    (await signVaultCall(dependencies, "claimJobRefund", { jobKey: input.jobKey }));
+  if (!(await hasJobPhase(dependencies, input, attempt, "job.refund.sent", input.jobKey)))
+    await appendExecutionPhase(dependencies.pool, {
+      planId: input.planId,
+      stepIndex: input.stepIndex,
+      attempt,
+      phase: "job.refund.sent",
+      payload: { jobKey: input.jobKey, transaction },
+    });
   assertLeaseHeld();
   const txHash = await dependencies.chain.claimJobRefund({ jobKey: input.jobKey, transaction });
   await appendExecutionPhase(dependencies.pool, {
@@ -565,14 +705,17 @@ async function runJobRefund(
     phase: "job.refund.claimed",
     payload: { jobKey: input.jobKey, txHash },
   });
-  const syncTransaction = await signVaultCall(dependencies, "syncJob", [input.jobKey]);
-  await appendExecutionPhase(dependencies.pool, {
-    planId: input.planId,
-    stepIndex: input.stepIndex,
-    attempt,
-    phase: "job.sync.sent",
-    payload: { jobKey: input.jobKey, transaction: syncTransaction },
-  });
+  const syncTransaction =
+    (await priorJobTransaction(dependencies, input, attempt, "job.sync.sent", input.jobKey)) ??
+    (await signVaultCall(dependencies, "syncJob", { jobKey: input.jobKey }));
+  if (!(await hasJobPhase(dependencies, input, attempt, "job.sync.sent", input.jobKey)))
+    await appendExecutionPhase(dependencies.pool, {
+      planId: input.planId,
+      stepIndex: input.stepIndex,
+      attempt,
+      phase: "job.sync.sent",
+      payload: { jobKey: input.jobKey, transaction: syncTransaction },
+    });
   assertLeaseHeld();
   const synced = await dependencies.chain.syncJob({
     jobKey: input.jobKey,
@@ -604,7 +747,12 @@ async function persistBrief(
     callInputs: input.callInputs,
     taskSpec: input.taskSpec,
     inputSalt: job.inputSalt,
-    deliverable: input.deliverable,
+    deliverable: {
+      ...input.deliverable,
+      maxBytes:
+        input.deliverable.maxBytes ??
+        Number(dependencies.config.get("acceptance.deliverableMaxBytes")),
+    },
     budgetCap: input.stepCap.toString(),
     targetBudget: input.targetBudget,
     evaluator: input.evaluator,
@@ -627,28 +775,38 @@ export async function getJobBrief(
   request: BriefRequestInput,
   dependencies: JobDeliveryDependencies,
 ): Promise<JobBrief> {
-  assertIssuedAt(request.issuedAt, dependencies.now());
+  assertIssuedAt(
+    request.issuedAt,
+    dependencies.now(),
+    Number(dependencies.config.get("api.briefSignatureMaxAgeSeconds")),
+  );
   const result = await dependencies.pool.query<{
     readonly provider: Address;
     readonly brief: JobBrief;
-  }>("SELECT provider,brief FROM payer_job_briefs WHERE job_key=$1", [request.jobKey]);
+  }>("SELECT provider,brief FROM payer_job_briefs WHERE job_key=$1", [
+    request.jobKey.toLowerCase(),
+  ]);
   const row = result.rows[0];
-  if (!row) throw new Error("ERC-8183 job brief not found.");
+  if (!row) throw new JobRequestRejected();
   const network = row.brief.network;
   const chainId = parseChainId(network);
   const digest = briefRequestDigest(chainId, {
-    jobKey: request.jobKey,
+    jobKey: request.jobKey.toLowerCase() as Hash32,
     issuedAt: request.issuedAt,
   });
-  const signer = await recoverAddress({ hash: digest, signature: request.signature });
+  const signerAddress = request.providerAddress ?? row.provider;
+  const validSignature = await dependencies.publicClient.verifyHash({
+    address: signerAddress,
+    hash: digest,
+    signature: request.signature,
+  });
+  if (!validSignature || signerAddress.toLowerCase() !== row.provider.toLowerCase())
+    throw new JobRequestRejected();
   if (
-    signer.toLowerCase() !== row.provider.toLowerCase() ||
-    (request.providerAddress !== undefined &&
-      signer.toLowerCase() !== request.providerAddress.toLowerCase())
+    !validateSchema("job-brief", row.brief) ||
+    row.brief.jobKey.toLowerCase() !== request.jobKey.toLowerCase()
   )
-    throw new Error("Job brief request signature does not match the provider.");
-  if (!validateSchema("job-brief", row.brief) || row.brief.jobKey !== request.jobKey)
-    throw new Error("Stored ERC-8183 brief is invalid.");
+    throw new JobRequestRejected();
   return row.brief;
 }
 
@@ -656,27 +814,34 @@ export async function uploadJobDeliverable(
   request: JobDeliverableInput,
   dependencies: JobDeliveryDependencies,
 ): Promise<{ readonly contentHash: Hash32; readonly bodyRef: string }> {
-  assertIssuedAt(request.issuedAt, dependencies.now());
+  assertIssuedAt(
+    request.issuedAt,
+    dependencies.now(),
+    Number(dependencies.config.get("api.briefSignatureMaxAgeSeconds")),
+  );
   const row = await dependencies.pool.query<{
     readonly provider: Address;
     readonly brief: JobBrief;
-  }>("SELECT provider,brief FROM payer_job_briefs WHERE job_key=$1", [request.jobKey]);
+  }>("SELECT provider,brief FROM payer_job_briefs WHERE job_key=$1", [
+    request.jobKey.toLowerCase(),
+  ]);
   const brief = row.rows[0]?.brief;
   const provider = row.rows[0]?.provider;
-  if (!brief || !provider) throw new Error("ERC-8183 job brief not found.");
+  if (!brief || !provider) throw new JobRequestRejected();
   const contentHash = keccak256(request.body);
   const digest = deliverableUploadDigest(parseChainId(brief.network), {
-    jobKey: request.jobKey,
+    jobKey: request.jobKey.toLowerCase() as Hash32,
     contentHash,
     issuedAt: request.issuedAt,
   });
-  const signer = await recoverAddress({ hash: digest, signature: request.signature });
-  if (
-    signer.toLowerCase() !== provider.toLowerCase() ||
-    (request.providerAddress !== undefined &&
-      signer.toLowerCase() !== request.providerAddress.toLowerCase())
-  )
-    throw new Error("Deliverable upload signature does not match the provider.");
+  const signerAddress = request.providerAddress ?? provider;
+  const validSignature = await dependencies.publicClient.verifyHash({
+    address: signerAddress,
+    hash: digest,
+    signature: request.signature,
+  });
+  if (!validSignature || signerAddress.toLowerCase() !== provider.toLowerCase())
+    throw new JobRequestRejected();
   const configuredLimit = Number(dependencies.config.get("acceptance.deliverableMaxBytes"));
   const declaredLimit = brief.deliverable.maxBytes ?? configuredLimit;
   const limit = Math.min(configuredLimit, declaredLimit);
@@ -685,18 +850,53 @@ export async function uploadJobDeliverable(
   const bodyRef = await dependencies.objectStore.put(request.body);
   try {
     const stored = await persistDeliverableWithinLimits(
-      request.jobKey,
+      request.jobKey.toLowerCase() as Hash32,
       contentHash,
       bodyRef,
       request.body.byteLength,
       dependencies,
     );
-    if (stored.bodyRef !== bodyRef) await dependencies.objectStore.delete(bodyRef);
+    if (stored.bodyRef !== bodyRef) await deleteObjectIfUnreferenced(bodyRef, dependencies);
     return { contentHash, bodyRef: stored.bodyRef };
   } catch (error) {
-    await dependencies.objectStore.delete(bodyRef);
+    await deleteObjectIfUnreferenced(bodyRef, dependencies);
     throw error;
   }
+}
+
+export async function authorizeJobDeliverableRequest(
+  request: JobDeliverableInput,
+  dependencies: JobDeliveryDependencies,
+): Promise<void> {
+  assertIssuedAt(
+    request.issuedAt,
+    dependencies.now(),
+    Number(dependencies.config.get("api.briefSignatureMaxAgeSeconds")),
+  );
+  const rows = await dependencies.pool.query<{
+    readonly provider: Address;
+    readonly brief: JobBrief;
+  }>("SELECT provider,brief FROM payer_job_briefs WHERE job_key=$1", [
+    request.jobKey.toLowerCase(),
+  ]);
+  const row = rows.rows[0];
+  if (!row) throw new JobRequestRejected();
+  const hash = keccak256(request.body);
+  const digest = deliverableUploadDigest(parseChainId(row.brief.network), {
+    jobKey: request.jobKey.toLowerCase() as Hash32,
+    contentHash: hash,
+    issuedAt: request.issuedAt,
+  });
+  const address = request.providerAddress ?? row.provider;
+  if (
+    address.toLowerCase() !== row.provider.toLowerCase() ||
+    !(await dependencies.publicClient.verifyHash({
+      address,
+      hash: digest,
+      signature: request.signature,
+    }))
+  )
+    throw new JobRequestRejected();
 }
 
 async function persistDeliverableWithinLimits(
@@ -768,20 +968,33 @@ export async function purgeUnmatchedJobDeliverables(
      WHERE job_key=$1 AND content_hash<>$2 ORDER BY uploaded_at`,
     [input.jobKey, input.matchedContentHash],
   );
-  for (const row of rows.rows) await dependencies.objectStore.delete(row.body_ref);
   if (rows.rows.length > 0) {
     await dependencies.pool.query(
       "DELETE FROM payer_job_deliverables WHERE job_key=$1 AND content_hash<>$2",
       [input.jobKey, input.matchedContentHash],
     );
   }
+  for (const row of rows.rows) await deleteObjectIfUnreferenced(row.body_ref, dependencies);
   return rows.rows.map((row) => row.content_hash);
 }
 
-function assertIssuedAt(issuedAt: bigint, now: Date): void {
+function assertIssuedAt(issuedAt: bigint, now: Date, maxAgeSeconds: number): void {
   const nowSeconds = BigInt(Math.floor(now.getTime() / MILLISECONDS_PER_SECOND));
-  if (issuedAt <= 0n || issuedAt > nowSeconds)
-    throw new Error("Signed job request timestamp is invalid.");
+  if (issuedAt <= 0n || issuedAt > nowSeconds || nowSeconds - issuedAt > BigInt(maxAgeSeconds))
+    throw new JobRequestRejected();
+}
+
+async function deleteObjectIfUnreferenced(
+  bodyRef: string,
+  dependencies: JobDeliveryDependencies,
+): Promise<void> {
+  const refs = await dependencies.pool.query(
+    `SELECT 1 FROM payer_job_deliverables WHERE body_ref=$1
+     UNION ALL SELECT 1 FROM acceptance_reports WHERE body_ref=$1
+     UNION ALL SELECT 1 FROM evidence_receipts WHERE body_ref=$1 LIMIT 1`,
+    [bodyRef],
+  );
+  if (refs.rowCount === 0) await dependencies.objectStore.delete(bodyRef);
 }
 
 function parseChainId(network: string): number {
@@ -839,11 +1052,14 @@ async function syncJob(
   attempt: number,
   assertLeaseHeld: () => void,
 ): Promise<void> {
-  const transaction = await signVaultCall(dependencies, "syncJob", [jobKeyValue]);
-  await recordJobPhase(dependencies, input, attempt, "job.sync.sent", {
-    jobKey: jobKeyValue,
-    transaction,
-  });
+  const transaction =
+    (await priorJobTransaction(dependencies, input, attempt, "job.sync.sent", jobKeyValue)) ??
+    (await signVaultCall(dependencies, "syncJob", { jobKey: jobKeyValue }));
+  if (!(await hasJobPhase(dependencies, input, attempt, "job.sync.sent", jobKeyValue)))
+    await recordJobPhase(dependencies, input, attempt, "job.sync.sent", {
+      jobKey: jobKeyValue,
+      transaction,
+    });
   assertLeaseHeld();
   const synced = await dependencies.chain.syncJob({ jobKey: jobKeyValue, transaction });
   await recordJobPhase(dependencies, input, attempt, "job.synced", {
@@ -854,24 +1070,35 @@ async function syncJob(
 }
 
 function isJobNotCancellable(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    (error.message.includes("JobNotCancellable") ||
-      ("code" in error && error.code === "JobNotCancellable"))
-  );
+  const data = errorData(error);
+  if (!data) return false;
+  try {
+    return decodeErrorResult({ abi: czarVaultAbi, data }).errorName === "JobNotCancellable";
+  } catch {
+    return false;
+  }
 }
 
 function isBudgetChanged(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    (error.message.includes("BudgetChanged") || ("code" in error && error.code === "BudgetChanged"))
-  );
+  const data = errorData(error);
+  if (!data) return false;
+  try {
+    return decodeErrorResult({ abi: czarVaultAbi, data }).errorName === "BudgetChanged";
+  } catch {
+    return false;
+  }
+}
+
+function errorData(error: unknown): Hex | undefined {
+  if (typeof error !== "object" || error === null || !("data" in error)) return undefined;
+  const data = error.data;
+  return typeof data === "string" && /^0x[0-9a-fA-F]+$/.test(data) ? (data as Hex) : undefined;
 }
 
 async function signVaultCall(
   dependencies: JobExecutionDependencies,
   selector: string,
-  args: readonly unknown[],
+  args: Readonly<Record<string, unknown>>,
 ): Promise<Hex> {
   const result = await dependencies.signer.sign("cz-15", {
     keyId: "K3",
@@ -880,6 +1107,31 @@ async function signVaultCall(
   });
   if (!("signedTransaction" in result)) throw new Error(`K3 did not sign ${selector}.`);
   return result.signedTransaction;
+}
+
+async function priorJobTransaction(
+  dependencies: JobExecutionDependencies,
+  input: Pick<JobExecutionInput, "planId" | "stepIndex">,
+  attempt: number,
+  phase: string,
+  jobKeyValue: Hash32,
+): Promise<Hex | undefined> {
+  const trace = await getExecutionTrace(dependencies.pool, input.planId, input.stepIndex, attempt);
+  const transaction = trace.findLast(
+    (row) => row.phase === phase && row.payload["jobKey"] === jobKeyValue,
+  )?.payload["transaction"];
+  return typeof transaction === "string" ? (transaction as Hex) : undefined;
+}
+
+async function hasJobPhase(
+  dependencies: JobExecutionDependencies,
+  input: Pick<JobExecutionInput, "planId" | "stepIndex">,
+  attempt: number,
+  phase: string,
+  jobKeyValue: Hash32,
+): Promise<boolean> {
+  const trace = await getExecutionTrace(dependencies.pool, input.planId, input.stepIndex, attempt);
+  return trace.some((row) => row.phase === phase && row.payload["jobKey"] === jobKeyValue);
 }
 
 async function recordJobPhase(

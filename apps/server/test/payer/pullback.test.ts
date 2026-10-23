@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { transferSpecBytes, transferSpecHash } from "@czar/hashing";
+import type { SignRequest } from "@czar/signer";
 import {
   buildPullbackBurnIntent,
   cancelExpiredPullback,
@@ -11,7 +12,7 @@ import {
   PULLBACK_CANCEL_DELAY_BLOCKS,
 } from "#src/payer/pullback";
 import { setupDatabase } from "#test/db";
-import { appendExecutionPhase } from "#src/payer/executions";
+import { appendExecutionPhase, getExecutionTrace } from "#src/payer/executions";
 import { makeObjectiveSubmission, seedDevice, TEST_USER_ID } from "#test/fixtures";
 import { executePullback } from "#src/payer/pullback";
 import { loadConfig } from "@czar/config";
@@ -56,7 +57,7 @@ describe("pullback values", () => {
       planId: PLAN_ID,
       stepIndex: 0,
       envelopeRef: "eip155:5042002:0x0000000000000000000000000000000000000001:1",
-      vault: "0x0000000000000000000000000000000000000001",
+      vault: "0x0000000000000000000000000000000000000001" as const,
       pocket: "0x0000000000000000000000000000000000000002",
       gatewayWallet: "0x0000000000000000000000000000000000000003",
       gatewayMinter: "0x0000000000000000000000000000000000000004",
@@ -79,6 +80,8 @@ describe("pullback values", () => {
         ),
       },
       chain: {
+        maxPullbackFee: async () => 20_000n,
+        writeOffPocket: async () => "write-off-tx",
         findPendingPullback: async () => undefined,
         requestPullback: async () => ({
           pullbackId: 9n,
@@ -148,9 +151,54 @@ describe("pullback values", () => {
     ).toBe(0n);
   });
 
+  it("writes off a pocket when no value is withdrawable", async () => {
+    const writeOffPocket = vi.fn(async () => "write-off-tx");
+    const input = {
+      planId: PLAN_ID,
+      stepIndex: 0,
+      envelopeRef: "eip155:5042002:0x0000000000000000000000000000000000000001:1",
+      vault: "0x0000000000000000000000000000000000000001" as const,
+      pocket: "0x0000000000000000000000000000000000000002" as const,
+      gatewayWallet: "0x0000000000000000000000000000000000000003" as const,
+      gatewayMinter: "0x0000000000000000000000000000000000000004" as const,
+      usdc: "0x0000000000000000000000000000000000000005" as const,
+      gatewayDomain: 26,
+      outstanding: 100n,
+      pending: 0n,
+      availableBalance: 0n,
+      head: 6_400n,
+    } as const;
+    const dependencies = {
+      pool: getPool(),
+      config: loadConfig(),
+      signer: { sign: vi.fn(async () => ({ signedTransaction: "0x1234" as const })) },
+      chain: {
+        maxPullbackFee: vi.fn(async () => 20_000n),
+        findPendingPullback: vi.fn(async () => undefined),
+        writeOffPocket,
+        requestPullback: vi.fn(),
+        isTransferSpecHashUsed: vi.fn(async () => false),
+        mintAttestation: vi.fn(),
+        confirmPullback: vi.fn(),
+        cancelPullback: vi.fn(),
+        readPullback: vi.fn(),
+        getBlockNumber: vi.fn(async () => 6_400n),
+      },
+      safeFetch: vi.fn(),
+      gatewayTransferUrl: "http://127.0.0.1:4999/v1/transfer",
+      now: () => new Date("2026-10-22T00:00:00Z"),
+    };
+
+    await expect(executePullback(input, dependencies)).resolves.toMatchObject({
+      state: "written-off",
+    });
+    expect(writeOffPocket).toHaveBeenCalledWith(input.pocket, "0x1234");
+    expect(dependencies.safeFetch).not.toHaveBeenCalled();
+  });
+
   it("builds a same-chain burn intent that returns USDC only to the vault", () => {
     const intent = buildPullbackBurnIntent({
-      vault: "0x0000000000000000000000000000000000000001",
+      vault: "0x0000000000000000000000000000000000000001" as const,
       pocket: "0x0000000000000000000000000000000000000002",
       gatewayWallet: "0x0000000000000000000000000000000000000003",
       gatewayMinter: "0x0000000000000000000000000000000000000004",
@@ -179,13 +227,30 @@ describe("pullback values", () => {
   });
 
   it("uses the signed burn intent, obtains an attestation, mints and confirms", async () => {
+    await getPool().query(
+      `INSERT INTO payer_pullback_gateway_failures
+       (plan_id,step_index,envelope_ref,pocket,value,unavailable_since,state)
+       VALUES ($1,0,$2,$3,'1000',$4,'pending')`,
+      [
+        PLAN_ID,
+        "eip155:5042002:0x0000000000000000000000000000000000000001:1",
+        "0x0000000000000000000000000000000000000002",
+        new Date("2026-10-22T00:00:00Z"),
+      ],
+    );
     const safeFetch = vi.fn(async (_url: string, options?: { body?: Uint8Array }) => {
-      const request = JSON.parse(new TextDecoder().decode(options?.body)) as Record<
-        string,
-        unknown
-      >;
-      expect(request["contractSigner"]).toBe(true);
-      expect(request["transferSpec"]).toMatch(/^0x[0-9a-f]+$/);
+      const request = JSON.parse(new TextDecoder().decode(options?.body)) as unknown;
+      expect(request).toEqual([
+        {
+          burnIntent: {
+            maxBlockHeight: "10000",
+            maxFee: "10000",
+            spec: expect.objectContaining({ value: "840000" }),
+          },
+          signature: "0xbeef",
+          contractSigner: true,
+        },
+      ]);
       return {
         status: 201,
         url: "http://127.0.0.1:4999/v1/transfer",
@@ -203,6 +268,8 @@ describe("pullback values", () => {
     let minted = false;
     let mintCalls = 0;
     const chain = {
+      maxPullbackFee: vi.fn(async () => 20_000n),
+      writeOffPocket: vi.fn(async () => "write-off-tx"),
       findPendingPullback: vi.fn(async () => undefined),
       requestPullback: vi.fn(async (_request: { transaction: `0x${string}` }) => ({
         pullbackId: 9n,
@@ -274,16 +341,112 @@ describe("pullback values", () => {
       1,
     );
     expect(chain.mintAttestation).toHaveBeenCalledTimes(2);
+    const failures = await getPool().query(
+      "SELECT 1 FROM payer_pullback_gateway_failures WHERE plan_id=$1",
+      [PLAN_ID],
+    );
+    expect(failures.rowCount).toBe(0);
     expect(chain.requestPullback).toHaveBeenCalledWith(
       expect.objectContaining({ value: 840_000n, maxFee: 10_000n, maxBlockHeight: 10_000n }),
     );
     expect(calls).toEqual(["mint", "confirm"]);
   });
 
+  it("re-broadcasts a stored pullback request transaction after interruption", async () => {
+    const input = {
+      planId: PLAN_ID,
+      stepIndex: 0,
+      envelopeRef: "eip155:5042002:0x0000000000000000000000000000000000000001:1",
+      vault: "0x0000000000000000000000000000000000000001" as const,
+      pocket: "0x0000000000000000000000000000000000000002" as const,
+      gatewayWallet: "0x0000000000000000000000000000000000000003" as const,
+      gatewayMinter: "0x0000000000000000000000000000000000000004" as const,
+      usdc: "0x0000000000000000000000000000000000000005" as const,
+      gatewayDomain: 26,
+      outstanding: 900_000n,
+      pending: 0n,
+      availableBalance: 850_000n,
+      head: 6_400n,
+    } as const;
+    let requestCount = 0;
+    const transaction = vi.fn(async (_input: { transaction: `0x${string}` }) => {
+      requestCount += 1;
+      if (requestCount === 1) throw new Error("executor interrupted before request receipt");
+      return {
+        pullbackId: 9n,
+        value: 840_000n,
+        maxFee: 10_000n,
+        maxBlockHeight: 10_000n,
+        salt: `0x${"ab".repeat(32)}` as const,
+        transferSpecHash: `0x${"cd".repeat(32)}` as const,
+        state: "Pending" as const,
+      };
+    });
+    let minted = false;
+    const chain = {
+      maxPullbackFee: vi.fn(async () => 20_000n),
+      writeOffPocket: vi.fn(async () => "write-off-tx"),
+      findPendingPullback: vi.fn(async () => undefined),
+      requestPullback: transaction,
+      isTransferSpecHashUsed: vi.fn(async () => minted),
+      mintAttestation: vi.fn(async () => {
+        minted = true;
+        return "mint-tx";
+      }),
+      confirmPullback: vi.fn(async () => "confirm-tx"),
+      cancelPullback: vi.fn(async () => "cancel-tx"),
+      readPullback: vi.fn(async () => undefined),
+      getBlockNumber: vi.fn(async () => 6_400n),
+    };
+    const signer = {
+      sign: vi.fn(async (_caller: string, request: SignRequest) =>
+        request.kind === "gateway-burn"
+          ? { signature: "0xbeef" as const, digest: `0x${"ef".repeat(32)}` as const }
+          : { signedTransaction: "0x1234" as const },
+      ),
+    };
+    const dependencies = {
+      pool: getPool(),
+      config: loadConfig(),
+      signer,
+      chain,
+      safeFetch: vi.fn(async () => ({
+        status: 201,
+        url: "http://127.0.0.1:4999/v1/transfer",
+        headers: {},
+        body: new TextEncoder().encode(
+          JSON.stringify({ transferId: "new", attestation: "0x12", signature: "0x34" }),
+        ),
+      })),
+      gatewayTransferUrl: "http://127.0.0.1:4999/v1/transfer",
+      now: () => new Date("2026-10-22T00:00:00Z"),
+    };
+
+    await expect(executePullback(input, dependencies)).rejects.toThrow("executor interrupted");
+    await expect(executePullback(input, dependencies)).resolves.toMatchObject({
+      state: "confirmed",
+    });
+    expect(transaction).toHaveBeenCalledTimes(2);
+    expect(transaction.mock.calls.map(([args]) => args.transaction)).toEqual(["0x1234", "0x1234"]);
+    const requestCalls = signer.sign.mock.calls.filter(([, request]) => {
+      const payload = request.payload;
+      return (
+        request.kind === "vault-call" &&
+        typeof payload === "object" &&
+        payload !== null &&
+        "selector" in payload &&
+        payload.selector === "requestPullback"
+      );
+    });
+    expect(requestCalls).toHaveLength(1);
+  });
+
   it("cancels only after the expiry plus contract delay and records the cancellation", async () => {
     const cancelPullback = vi.fn(async () => "cancel-tx");
     let head = 3_999n;
     const chain = {
+      maxPullbackFee: vi.fn(async () => 20_000n),
+      writeOffPocket: vi.fn(async () => "write-off-tx"),
       findPendingPullback: vi.fn(async () => undefined),
       requestPullback: vi.fn(),
       isTransferSpecHashUsed: vi.fn(async () => false),
@@ -306,6 +469,8 @@ describe("pullback values", () => {
       stepIndex: 0,
       envelopeRef: "eip155:5042002:0x0000000000000000000000000000000000000001:1",
       pullbackId: 9n,
+      vault: "0x0000000000000000000000000000000000000001" as const,
+      gatewayMinter: "0x0000000000000000000000000000000000000004" as const,
     };
     const dependencies = {
       pool: getPool(),
@@ -350,20 +515,41 @@ describe("pullback values", () => {
         state: old.state,
       },
     });
-    let transferCheck = 0;
+    await appendExecutionPhase(getPool(), {
+      planId: PLAN_ID,
+      stepIndex: 0,
+      attempt: 0,
+      phase: "pullback.transfer.result",
+      payload: { pullbackId: "9", attestation: "0xold", signature: "0xold" },
+    });
+    await appendExecutionPhase(getPool(), {
+      planId: PLAN_ID,
+      stepIndex: 0,
+      attempt: 0,
+      phase: "pullback.mint.sent",
+      payload: { pullbackId: "9", transaction: "0xoldtx" },
+    });
+    let newPullbackMinted = false;
     const chain = {
+      maxPullbackFee: vi.fn(async () => 20_000n),
+      writeOffPocket: vi.fn(async () => "write-off-tx"),
       findPendingPullback: vi.fn(async () => undefined),
       readPullback: vi.fn(async () => old),
       getBlockNumber: vi.fn(async () => 4_000n),
       cancelPullback: vi.fn(async () => "cancel-tx"),
-      isTransferSpecHashUsed: vi.fn(async () => ++transferCheck > 1),
+      isTransferSpecHashUsed: vi.fn(
+        async (hash: `0x${string}`) => hash === `0x${"12".repeat(32)}` && newPullbackMinted,
+      ),
       requestPullback: vi.fn(async (_request: { transaction: `0x${string}` }) => ({
         ...old,
         pullbackId: 10n,
         salt: `0x${"ef".repeat(32)}` as `0x${string}`,
         transferSpecHash: `0x${"12".repeat(32)}` as `0x${string}`,
       })),
-      mintAttestation: vi.fn(),
+      mintAttestation: vi.fn(async () => {
+        newPullbackMinted = true;
+        return "mint-10";
+      }),
       confirmPullback: vi.fn(async () => "confirm-tx"),
     };
     const signer = {
@@ -396,6 +582,8 @@ describe("pullback values", () => {
         stepIndex: 0,
         envelopeRef: "eip155:5042002:0x0000000000000000000000000000000000000001:1",
         pullbackId: 9n,
+        vault: "0x0000000000000000000000000000000000000001" as const,
+        gatewayMinter: "0x0000000000000000000000000000000000000004" as const,
       },
       dependencies,
     );
@@ -420,10 +608,14 @@ describe("pullback values", () => {
         dependencies,
       ),
     ).resolves.toMatchObject({ state: "confirmed", pullbackId: "10" });
-    expect(transferCheck).toBe(3);
     expect(chain.requestPullback).toHaveBeenCalledOnce();
     expect(chain.requestPullback.mock.calls[0]?.[0].transaction).toBe("0x1234");
     expect(safeFetch).toHaveBeenCalledOnce();
+    expect(chain.mintAttestation).toHaveBeenCalledOnce();
+    const phases = await getExecutionTrace(getPool(), PLAN_ID, 0, 0);
+    expect(
+      phases.findLast((row) => row.phase === "pullback.transfer.result")?.payload["pullbackId"],
+    ).toBe("10");
   });
 
   it("uses the slow withdrawal path after Gateway API downtime and asks for manual credit", async () => {

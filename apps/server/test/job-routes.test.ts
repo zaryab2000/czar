@@ -35,7 +35,7 @@ const brief = buildJobBrief({
     sourceTrust: "user-file",
   },
   inputSalt: `0x${"22".repeat(32)}`,
-  deliverable: { mimeType: "application/json", expectedKeys: ["price"] },
+  deliverable: { mimeType: "application/json", expectedKeys: ["price"], maxBytes: 65_536 },
   budgetCap: "2000",
   targetBudget: "1000",
   evaluator: "0x0000000000000000000000000000000000000002",
@@ -60,6 +60,7 @@ beforeAll(async () => {
       pool,
       config,
       now: () => now,
+      publicClient: { verifyHash: async () => true } as never,
       objectStore: {
         put: async (bytes) => {
           const ref = `body-${objects.size}`;
@@ -122,6 +123,24 @@ describe("provider job routes", () => {
     expect(((await response.json()) as { jobKey: string }).jobKey).toBe(brief.jobKey);
   });
 
+  it("rejects a provider brief signature older than the configured maximum age", async () => {
+    const maxAge = Number(config.get("api.briefSignatureMaxAgeSeconds"));
+    const issuedAt = BigInt(Math.floor(now.getTime() / 1000) - maxAge - 1);
+    const signature = await sign({
+      hash: briefRequestDigest(5_042_002, { jobKey: brief.jobKey as Hash32, issuedAt }),
+      privateKey: providerPrivateKey,
+      to: "hex",
+    });
+    const response = await app.request(`/v1/jobs/${brief.jobKey}/brief`, {
+      headers: {
+        "X-Czar-Provider-Address": providerAccount.address,
+        "X-Czar-Brief-Issued-At": issuedAt.toString(),
+        "X-Czar-Brief-Signature": signature,
+      },
+    });
+    expect(response.status).toBe(404);
+  });
+
   it("stores a signed octet-stream deliverable and returns its contract shape", async () => {
     const body = new TextEncoder().encode('{"price":"1.00"}');
     const contentHash = keccak256(body) as Hash32;
@@ -151,12 +170,13 @@ describe("provider job routes", () => {
           pool: getPool(),
           config,
           now: () => now,
+          publicClient: { verifyHash: async () => true } as never,
           objectStore: { put: async () => "direct-body", delete: async () => undefined },
         },
       ),
     ).resolves.toMatchObject({ contentHash });
     await getPool().query("DELETE FROM payer_job_deliverables");
-    const response = await app.request(`/v1/jobs/${brief.jobKey}/deliverables`, {
+    const response = await app.request(`/v1/jobs/${brief.jobKey}/deliverable`, {
       method: "POST",
       headers: {
         "Content-Type": "application/octet-stream",

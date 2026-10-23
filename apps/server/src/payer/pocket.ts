@@ -28,6 +28,7 @@ import {
 } from "#src/payer/executions";
 
 const BASIS_POINTS = 10_000n;
+const HALT_PULLBACK_ATTEMPTS = 2;
 
 export interface PocketFundingInput {
   readonly stepCaps: readonly bigint[];
@@ -83,8 +84,36 @@ export async function drainPocketsAfterHalt(
   dependencies: PocketHaltDependencies,
 ): Promise<readonly Address[]> {
   const pockets = await dependencies.listFundedPockets(input.vault);
-  for (const pocket of pockets) await dependencies.pullback(pocket);
+  const failures: Address[] = [];
+  for (const pocket of pockets) {
+    try {
+      await dependencies.pullback(pocket);
+    } catch {
+      failures.push(pocket);
+    }
+  }
+  const remaining: Address[] = [];
+  for (const pocket of failures) {
+    if (!(await pullbackWithRetry(pocket, dependencies.pullback))) remaining.push(pocket);
+  }
+  if (remaining.length > 0)
+    throw new Error(`Pocket halt drain failed for ${remaining.length} funded pocket(s).`);
   return pockets;
+}
+
+async function pullbackWithRetry(
+  pocket: Address,
+  pullback: PocketHaltDependencies["pullback"],
+): Promise<boolean> {
+  for (let attempt = 0; attempt < HALT_PULLBACK_ATTEMPTS; attempt += 1) {
+    try {
+      await pullback(pocket);
+      return true;
+    } catch {
+      continue;
+    }
+  }
+  return false;
 }
 
 export async function sweepAndRetirePocketKey(
@@ -97,7 +126,7 @@ export async function sweepAndRetirePocketKey(
     const close = await dependencies.signer.sign("cz-15", {
       keyId: "K3",
       kind: "vault-call",
-      payload: { vault: input.vault, selector: "writeOffPocket", args: [input.pocket] },
+      payload: { vault: input.vault, selector: "writeOffPocket", args: { pocket: input.pocket } },
     });
     if (!("signedTransaction" in close)) throw new Error("K3 did not sign writeOffPocket.");
     await recordPocketPhase(dependencies.pool, input, "pocket.writeoff.sent", {
@@ -128,17 +157,27 @@ async function sweepPocketBalance(
       ? await dependencies.chain.sweepableNativeBalance(input.pocket)
       : (await dependencies.chain.pocketBalances(input.pocket)).usdc;
   if (amount <= 0n) return 0n;
-  const signed = await dependencies.signer.sign("cz-15", {
-    keyId: `K4:${input.pocket}`,
-    kind: "pocket-return",
-    payload: { pocket: input.pocket, kind, amount: amount.toString() },
-  });
-  if (!("signedTransaction" in signed)) throw new Error(`K4 did not sign ${kind} pocket return.`);
+  const trace = await getExecutionTrace(
+    dependencies.pool,
+    input.planId,
+    input.stepIndex,
+    input.attempt,
+  );
+  let transaction = phaseTransaction(trace, `pocket.return.${kind}.sent`);
+  if (!transaction) {
+    const signed = await dependencies.signer.sign("cz-15", {
+      keyId: `K4:${input.pocket}`,
+      kind: "pocket-return",
+      payload: { pocket: input.pocket, kind, amount: amount.toString() },
+    });
+    if (!("signedTransaction" in signed)) throw new Error(`K4 did not sign ${kind} pocket return.`);
+    transaction = signed.signedTransaction;
+  }
   await recordPocketPhase(dependencies.pool, input, `pocket.return.${kind}.sent`, {
     amount: amount.toString(),
-    transaction: signed.signedTransaction,
+    transaction,
   });
-  const txHash = await dependencies.chain.sendPocketTransaction(signed.signedTransaction);
+  const txHash = await dependencies.chain.sendPocketTransaction(transaction);
   await recordPocketPhase(dependencies.pool, input, `pocket.return.${kind}`, {
     amount: amount.toString(),
     txHash,
@@ -255,7 +294,7 @@ export async function executePocketPreparation(
 ): Promise<{ readonly pocket: Address; readonly funded: string }> {
   const pocket = await readPlanPocketKey(dependencies.pool, input.planId);
   const attempt = input.attempt ?? 0;
-  const workerId = input.workerId ?? `pocket-${process.pid}`;
+  const workerId = input.workerId ?? `pocket-${process.pid}-${randomBytes(16).toString("hex")}`;
   const ttl = Number(dependencies.config.get("payer.leaseSeconds"));
   const leased = await acquireExecutorLease(
     dependencies.pool,
@@ -289,12 +328,15 @@ async function preparePocket(
 ): Promise<{ readonly pocket: Address; readonly funded: string }> {
   const proof = pocketProof(input.plan, pocket);
   const chain = dependencies.chain;
+  const trace = await getExecutionTrace(dependencies.pool, input.planId, 0, attempt);
   if (!(await chain.isRegistered(pocket))) {
-    const transaction = await signVaultCall(dependencies, input.vault, "registerPocket", [
-      input.envelopeId,
-      pocket,
-      proof,
-    ]);
+    const transaction =
+      phaseTransaction(trace, "pocket.register.sent") ??
+      (await signVaultCall(dependencies, input.vault, "registerPocket", {
+        envelopeId: input.envelopeId.toString(),
+        pocket,
+        proof,
+      }));
     assertLeaseHeld();
     await recordPhase(dependencies, input, attempt, "pocket.register.sent", {
       pocket,
@@ -310,10 +352,12 @@ async function preparePocket(
   }
   const gasUnits = BigInt(Number(dependencies.config.get("payer.pocketGasUnits")));
   if ((await chain.pocketGasGranted(pocket)) < gasUnits) {
-    const transaction = await signVaultCall(dependencies, input.vault, "grantPocketGas", [
-      pocket,
-      gasUnits,
-    ]);
+    const transaction =
+      phaseTransaction(trace, "pocket.gas.sent") ??
+      (await signVaultCall(dependencies, input.vault, "grantPocketGas", {
+        pocket,
+        units: gasUnits.toString(),
+      }));
     assertLeaseHeld();
     await recordPhase(dependencies, input, attempt, "pocket.gas.sent", {
       pocket,
@@ -336,10 +380,12 @@ async function preparePocket(
     planCap: BigInt(input.plan.cap),
   });
   if (funded > 0n && !(await chain.isFunded(pocket))) {
-    const transaction = await signVaultCall(dependencies, input.vault, "fundPocket", [
-      pocket,
-      funded,
-    ]);
+    const transaction =
+      phaseTransaction(trace, "pocket.fund.sent") ??
+      (await signVaultCall(dependencies, input.vault, "fundPocket", {
+        pocket,
+        amount: funded.toString(),
+      }));
     assertLeaseHeld();
     await recordPhase(dependencies, input, attempt, "pocket.fund.sent", {
       pocket,
@@ -364,22 +410,27 @@ async function prepareDelegate(
   assertLeaseHeld: () => void,
 ): Promise<void> {
   if (await dependencies.chain.isDelegateReady({ pocket, vault: input.vault })) return;
-  const signed = await dependencies.signer.sign("cz-15", {
-    keyId: `K4:${pocket}`,
-    kind: "pocket-delegate",
-    payload: { pocket, vault: input.vault },
-  });
-  if (!("signedTransaction" in signed))
-    throw new Error("K4 did not return a delegate transaction.");
+  const trace = await getExecutionTrace(dependencies.pool, input.planId, 0, attempt);
+  let transaction = phaseTransaction(trace, "pocket.delegate.sent");
+  if (!transaction) {
+    const signed = await dependencies.signer.sign("cz-15", {
+      keyId: `K4:${pocket}`,
+      kind: "pocket-delegate",
+      payload: { pocket, vault: input.vault },
+    });
+    if (!("signedTransaction" in signed))
+      throw new Error("K4 did not return a delegate transaction.");
+    transaction = signed.signedTransaction;
+  }
   assertLeaseHeld();
   await recordPhase(dependencies, input, attempt, "pocket.delegate.sent", {
     pocket,
-    transaction: signed.signedTransaction,
+    transaction,
   });
   const txHash = await dependencies.chain.addDelegate({
     pocket,
     vault: input.vault,
-    transaction: signed.signedTransaction,
+    transaction,
   });
   await recordPhase(dependencies, input, attempt, "pocket.delegate", { pocket, txHash });
 }
@@ -388,7 +439,7 @@ async function signVaultCall(
   dependencies: PocketPreparationDependencies,
   vault: Address,
   selector: string,
-  args: readonly unknown[],
+  args: Readonly<Record<string, unknown>>,
 ): Promise<`0x${string}`> {
   const result = await dependencies.signer.sign("cz-15", {
     keyId: "K3",
@@ -441,7 +492,7 @@ export async function payGatewaySteps(
   input: PocketNanopaymentInput,
   dependencies: PocketNanopaymentDependencies,
 ): Promise<void> {
-  const workerId = `pocket-pay-${process.pid}`;
+  const workerId = `pocket-pay-${process.pid}-${randomBytes(16).toString("hex")}`;
   const attempt = input.attempt ?? 0;
   const ttl = Number(dependencies.config.get("payer.leaseSeconds"));
   const leased = await acquireExecutorLease(
@@ -667,6 +718,10 @@ async function fetchWithPaymentRetry(
         timeoutMs,
       });
       if (response.status >= 200 && response.status < 300) return response;
+      if (response.status === 409) {
+        lastError = new Error(`Gateway rejected authorization index ${callIndex} with HTTP 409.`);
+        break;
+      }
       lastError = new Error(`Gateway nanopayment failed with HTTP ${response.status}.`);
     } catch (error) {
       lastError = error;
@@ -717,6 +772,14 @@ function renderGatewayRequest(
       ...(method === "GET" ? {} : { body: new TextEncoder().encode(JSON.stringify(resolved)) }),
     },
   };
+}
+
+function phaseTransaction(
+  trace: readonly { readonly phase: string; readonly payload: Readonly<Record<string, unknown>> }[],
+  phase: string,
+): `0x${string}` | undefined {
+  const transaction = trace.findLast((row) => row.phase === phase)?.payload["transaction"];
+  return typeof transaction === "string" ? (transaction as `0x${string}`) : undefined;
 }
 
 export async function refreshGatewayStatuses(

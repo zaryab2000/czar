@@ -65,6 +65,63 @@ These are fixture-backed recovery checks, not Arc-Anvil crash tests.
 
 **Review state:** draft; do not mark ready until the Arc-Anvil acceptance and integration gaps above are resolved and the server suite is green.
 
+## PR #52 fix round (2026-10-23)
+
+**Base:** branch reset to architect head `c9e9a5b`; migrations remain `0008-pocket-jobs.sql` and `0009-payer-pullback-api-failures.sql`.
+**Status:** local unit suite, config suite, typecheck, and lint pass. PR remains draft because the production halt-drain default and several scheduled/recovery paths below are still incomplete. No Arc-Anvil Bundle B acceptance was run; D92 keeps those fork scenarios deferred.
+
+### B1–B7 changes and tests
+
+- **B1 — signer payloads:** `pocket.ts`, `pullback.ts`, and `job.ts` use named ABI argument records and decimal strings for uint arguments; cancelPullback includes `vault`. Added `signer-payload-contract.test.ts`, which sends representative vault-call and relayer-tx payloads through the real `parseRequest` and `coerceArgs` APIs and the vault ABI.
+- **B2 — Gateway transfer:** `pullback.ts` posts the required one-element JSON array with decimal-string burn-intent fields, rejects malformed attestation/signature hex, and checks configured max fee against the vault's `maxPullbackFee`. The pullback test asserts the serialized request shape.
+- **B3 — pullback retries:** trace reads are filtered by pullback id for transfer result, mint, and confirmation; cancellation delay is imported from `@czar/vault-client`; re-request uses a new pullback id after cancellation. A stored `pullback.request.sent` transaction is re-broadcast after interruption, but only if it was recorded after the latest cancellation. Tests cover stale #9 transfer/mint rows and request-transaction replay.
+- **B4 — production adapters:** added `pocket-chain.ts`, `pullback-execution-chain.ts`, and `job-chain-adapter.ts`; wired pocket preparation, pullback, cancellation, job execution, and the slow fallback adapter into `main.ts`. Added unit tests for the pocket and pullback adapters. **Open:** `createServerMain` still requires injected `pocketHalt` when a vault event source exists. A safe production default cannot yet construct the full pullback input from persisted state: the accepted config has no GatewayMinter/domain values and the payer does not persist a complete halt-drain context. The requested no-injection startup test is therefore not claimed as passing.
+- **B5 — job state handling:** keeps vault and escrow states separate; avoids sync immediately after funding; handles evaluator rejection for escrow Submitted/Completed while the vault is Opened; uses the recorded budget-wait time; decodes custom errors through `czarVaultAbi`; reuses stored open/fund/cancel/sync/refund transactions. Tests cover front-run rejection/sync and refund at expiry. **Open:** duplicate-job enumeration/release and the full crash-after-cancel, complete, reject, and alternate-provider recovery matrix are not fully covered.
+- **B6 — routes and storage:** uses only singular `/v1/jobs/:jobKey/deliverable`; checks signature age and ERC-1271 through viem `verifyHash`; rate-limits after verification; normalizes job keys; maps rejected auth/job lookup to 404 and upstream failures to 503; preserves shared content-addressed blobs. Added a same-content 11th upload assertion. **Open:** `purgeUnmatchedJobDeliverables` still has no scheduler call because no accepted decision source supplies its matched hash and decision timestamp.
+- **B7 — recovery fixes:** halt drain now continues through all pockets and retries only failed pockets once; gateway pullback failure rows clear after confirmation; slow-path transaction phases are recorded only after the adapter sees a successful receipt; pocket key addresses have a case-insensitive unique index; payer workers use per-execution ids. Tests cover halt retry, pullback request replay, and the zero-value write-off path. **Open:** startup scanning for already Frozen/Paused vaults, watching vaults created after startup, late-balance recovery for Closed pockets, and an app-visible `recordManualReturn` prompt are not implemented.
+
+### Files changed in this fix round
+
+- Payer/composition/routes: `apps/server/src/main.ts`, `apps/server/src/app.ts`, `apps/server/src/payer/job.ts`, `pocket.ts`, `pullback.ts`, `pullback-chain-adapter.ts`, plus new `job-chain-adapter.ts`, `pocket-chain.ts`, and `pullback-execution-chain.ts`.
+- Migration/client ABI exports: `apps/server/migrations/0008-pocket-jobs.sql`, `packages/vault-client/src/index.ts`, plus new `packages/vault-client/src/constants.ts` and `external-abis.ts`.
+- Tests: `apps/server/test/job-routes.test.ts`, payer job/pocket/pullback and pullback-chain-adapter tests, plus new `test/payer/pocket-chain.test.ts`, `pullback-execution-chain.test.ts`, and `signer-payload-contract.test.ts`.
+- This report: `apps/server/T-052-T-054-task-report.md`.
+
+### Verification output
+
+- `fnm exec --using=22.22.0 pnpm --filter @czar/server test`
+  ```text
+  Test Files  42 passed (42)
+       Tests  219 passed (219)
+  Duration  16.14s
+  ```
+- `fnm exec --using=22.22.0 pnpm --filter @czar/config test`
+  ```text
+  Test Files  3 passed (3)
+       Tests  27 passed (27)
+  Duration  361ms
+  ```
+- `fnm exec --using=22.22.0 pnpm -r typecheck`
+  ```text
+  Scope: 14 of 15 workspace projects
+  All package and application typecheck scripts completed successfully, including @czar/server and @czar/daemon.
+  ```
+- `fnm exec --using=22.22.0 pnpm lint`
+  ```text
+  > oxlint --deny-warnings && oxfmt --check
+  All matched files use the correct format.
+  Finished in 23ms on 385 files using 10 threads.
+  ```
+- `git diff --check` — passed.
+
+### SCRs and remaining items
+
+- SCR text only: pocket gas registry discrepancy (`signer.gas.pocket.minAtomic` / `maxAtomic` / `targetAtomic` are absent; implementation uses `payer.pocketGasUnits`).
+- SCR text only: production halt-drain needs the GatewayMinter/domain and persisted pullback context required to build a complete pullback request. No docs were edited and no SCR file was created.
+- Gateway `/v1/transfer` body follows the explicit array shape required by this fix round; no schema discrepancy is reported for that request.
+- Arc-Anvil fork acceptance remains deferred under D92. Gateway behavior remains fixture-backed and G0-05 is pending; no testnet call or key use occurred.
+- Keep PR #52 in draft until the B4 startup/default, B5 recovery matrix, B6 purge scheduler, and B7 startup/closed-pocket/manual-return gaps are resolved.
+
 ## Follow-up run (2026-10-22)
 
 **Task IDs:** T-052, T-053, T-054 follow-up. Branch remains `codex/lane2-bundle-b`; PR #52 remains draft.

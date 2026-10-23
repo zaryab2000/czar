@@ -53,20 +53,27 @@ describe("createPullbackChainAdapter", () => {
   it("submits the signed transaction and logs its kind and hash only", async () => {
     const sink: string[] = [];
     const sendRawTransaction = vi.fn(async () => TX_HASH);
+    const waitForTransactionReceipt = vi.fn(async () => ({ status: "success" as const }));
     const wallet = { sendRawTransaction } as unknown as WalletClient;
-    const adapter = createPullbackChainAdapter({} as PublicClient, wallet, GATEWAY_WALLET, {
-      config: loadConfig(),
-      logger: createLogger({
-        service: "server",
-        component: "CZ-15",
-        sink: (line) => sink.push(line),
-      }),
-    });
+    const adapter = createPullbackChainAdapter(
+      { waitForTransactionReceipt } as unknown as PublicClient,
+      wallet,
+      GATEWAY_WALLET,
+      {
+        config: loadConfig(),
+        logger: createLogger({
+          service: "server",
+          component: "CZ-15",
+          sink: (line) => sink.push(line),
+        }),
+      },
+    );
 
     await expect(adapter.sendPocketTransaction(TRANSACTION, "pocket-return")).resolves.toBe(
       TX_HASH,
     );
     expect(sendRawTransaction).toHaveBeenCalledWith({ serializedTransaction: TRANSACTION });
+    expect(waitForTransactionReceipt).toHaveBeenCalledWith({ hash: TX_HASH });
     expect(sink.join("\n")).toContain("pocket-return");
     expect(sink.join("\n")).toContain(TX_HASH);
     expect(sink.join("\n")).not.toContain(TRANSACTION);

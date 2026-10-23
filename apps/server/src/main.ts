@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { isAddress, keccak256, type Address, type PublicClient, type WalletClient } from "viem";
 import type { Config } from "@czar/config";
 import { paymentRefHash } from "@czar/hashing";
@@ -31,6 +31,17 @@ import {
 } from "#src/payer/vault-direct";
 import { startPayerRuntime, type VaultHaltEventSource } from "#src/payer/runtime";
 import type { PocketHaltDependencies } from "#src/payer/pocket";
+import { executePocketPreparation, type PocketPreparationInput } from "#src/payer/pocket";
+import { createPocketPreparationChain } from "#src/payer/pocket-chain";
+import {
+  cancelExpiredPullback,
+  executePullback,
+  type CancelPullbackInput,
+  type PullbackInput,
+} from "#src/payer/pullback";
+import { createPullbackExecutionChain } from "#src/payer/pullback-execution-chain";
+import { executeJobStep, type JobExecutionInput } from "#src/payer/job";
+import { createJobChainAdapter } from "#src/payer/job-chain-adapter";
 import { createVaultEventSource } from "#src/payer/vault-event-source";
 import { createPullbackChainAdapter } from "#src/payer/pullback-chain-adapter";
 import {
@@ -60,6 +71,13 @@ export interface ServerMainOptions extends PairDependencies {
     reportHashes: readonly string[],
   ) => PaymentReceiptInput;
   readonly appReadOptions: AppReadOptions;
+  readonly gatewayTransferUrl?: string;
+  readonly jobEvaluator?: {
+    reject(input: {
+      readonly jobKey: `0x${string}`;
+      readonly escrowState: "Submitted" | "Completed";
+    }): Promise<void>;
+  };
   readonly revisePlanSubjects: (
     userId: string,
     planId: string,
@@ -71,6 +89,12 @@ export interface ServerMain {
   readonly app: ReturnType<typeof createApp>;
   readonly acceptance: Awaited<ReturnType<typeof createAcceptanceChecker>>;
   executePayerStep(input: VaultDirectInput): ReturnType<typeof executeVaultDirectStep>;
+  executePocketPreparation(
+    input: PocketPreparationInput,
+  ): ReturnType<typeof executePocketPreparation>;
+  executePullback(input: PullbackInput): ReturnType<typeof executePullback>;
+  cancelExpiredPullback(input: CancelPullbackInput): ReturnType<typeof cancelExpiredPullback>;
+  executeJobStep(input: JobExecutionInput): ReturnType<typeof executeJobStep>;
   close(): void;
 }
 
@@ -141,6 +165,7 @@ export async function createServerMain(options: ServerMainOptions): Promise<Serv
       pool: options.pool,
       config: options.config,
       now: options.clock.now,
+      publicClient: options.publicClient,
       objectStore: objects,
     },
     ...(options.appReadOptions ? { appReadOptions: options.appReadOptions } : {}),
@@ -150,6 +175,73 @@ export async function createServerMain(options: ServerMainOptions): Promise<Serv
     app,
     acceptance,
     executePayerStep: (input) => executeVaultDirectStep(input, payerDependencies),
+    executePocketPreparation: (input) =>
+      executePocketPreparation(input, {
+        pool: options.pool,
+        config: options.config,
+        signer,
+        chain: createPocketPreparationChain({
+          client: options.publicClient,
+          vault: input.vault,
+          usdc: options.config.get("chain.usdcAddress") as Address,
+          gatewayWallet: options.config.get("chain.gatewayWalletAddress") as Address,
+        }),
+        now: options.clock.now,
+      }),
+    executePullback: (input) => {
+      if (!options.gatewayTransferUrl)
+        throw new Error("Gateway transfer URL is required for pullback execution.");
+      return executePullback(input, {
+        pool: options.pool,
+        config: options.config,
+        signer,
+        chain: createPullbackExecutionChain({
+          client: options.publicClient,
+          pool: options.pool,
+          vault: input.vault,
+          gatewayMinter: input.gatewayMinter,
+        }),
+        safeFetch: options.safeFetch,
+        gatewayTransferUrl: options.gatewayTransferUrl,
+        now: options.clock.now,
+      });
+    },
+    cancelExpiredPullback: (input) => {
+      const dependencies = {
+        pool: options.pool,
+        config: options.config,
+        signer,
+        chain: createPullbackExecutionChain({
+          client: options.publicClient,
+          pool: options.pool,
+          vault: input.vault,
+          gatewayMinter: input.gatewayMinter,
+        }),
+        safeFetch: options.safeFetch,
+        gatewayTransferUrl: options.gatewayTransferUrl ?? "",
+        now: options.clock.now,
+      };
+      return cancelExpiredPullback(input, dependencies);
+    },
+    executeJobStep: (input) =>
+      executeJobStep(input, {
+        pool: options.pool,
+        config: options.config,
+        signer,
+        chain: createJobChainAdapter({
+          client: options.publicClient,
+          pool: options.pool,
+          config: options.config,
+          vault: input.vault,
+          jobEscrow: input.jobEscrow,
+          usdc: options.config.get("chain.usdcAddress") as Address,
+          now: options.clock.now,
+        }),
+        vault: input.vault,
+        now: options.clock.now,
+        randomSalt: () => `0x${randomBytes(32).toString("hex")}` as `0x${string}`,
+        ...(options.jobEvaluator ? { evaluator: options.jobEvaluator } : {}),
+      }),
     close: () => payerRuntime.stop(),
   };
 }

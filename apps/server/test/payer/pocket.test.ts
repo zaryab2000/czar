@@ -42,6 +42,9 @@ beforeAll(async () => {
 beforeEach(async () => {
   await getPool().query("DELETE FROM step_executions");
   await getPool().query("DELETE FROM plan_pocket_keys WHERE plan_id=$1", [PLAN_ID]);
+  await getPool().query("DELETE FROM plan_pocket_keys WHERE lower(pocket_address)=lower($1)", [
+    POCKET,
+  ]);
   await getPool().query("DELETE FROM steps WHERE plan_id=$1", [PLAN_ID]);
   await getPool().query(
     "INSERT INTO steps (plan_id,step_index,step,state) VALUES ($1,0,'{}','queued')",
@@ -70,6 +73,46 @@ describe("pocket funding", () => {
     ]);
     expect(listFundedPockets).toHaveBeenCalledOnce();
     expect(pullback).toHaveBeenCalledTimes(2);
+  });
+
+  it("continues draining funded pockets after one pullback failure", async () => {
+    const pulls: string[] = [];
+    await expect(
+      drainPocketsAfterHalt(
+        { vault: "0x0000000000000000000000000000000000000003", event: "Frozen" },
+        {
+          listFundedPockets: async () => [
+            "0x0000000000000000000000000000000000000001",
+            "0x0000000000000000000000000000000000000002",
+          ],
+          pullback: async (pocket) => {
+            pulls.push(pocket);
+            if (pocket.endsWith("01")) throw new Error("fixture failure");
+          },
+        },
+      ),
+    ).rejects.toThrow("failed for 1 funded pocket(s)");
+    expect(pulls).toHaveLength(4);
+  });
+
+  it("retries only the pockets whose halt pullback failed", async () => {
+    const first = "0x0000000000000000000000000000000000000001" as const;
+    const second = "0x0000000000000000000000000000000000000002" as const;
+    let failures = 0;
+    const pullback = vi.fn(async (pocket: string) => {
+      if (pocket === first && failures === 0) {
+        failures += 1;
+        throw new Error("temporary pullback failure");
+      }
+    });
+
+    await expect(
+      drainPocketsAfterHalt(
+        { vault: "0x0000000000000000000000000000000000000003", event: "Frozen" },
+        { listFundedPockets: async () => [first, second], pullback },
+      ),
+    ).resolves.toEqual([first, second]);
+    expect(pullback.mock.calls.map(([pocket]) => pocket)).toEqual([first, second, first]);
   });
 
   it("sweeps gas and retires a pocket key only after every balance is zero", async () => {
@@ -150,26 +193,26 @@ describe("pocket funding", () => {
     const chain = {
       isRegistered: vi.fn(async () => registered),
       registerPocket: vi.fn(async () => {
-        registered = true;
         stopAfter("register");
+        registered = true;
         return "register-tx";
       }),
       pocketGasGranted: vi.fn(async () => granted),
       grantPocketGas: vi.fn(async () => {
-        granted = 20_000n;
         stopAfter("gas");
+        granted = 20_000n;
         return "gas-tx";
       }),
       isDelegateReady: vi.fn(async () => delegated),
       addDelegate: vi.fn(async () => {
-        delegated = true;
         stopAfter("delegate");
+        delegated = true;
         return "delegate-tx";
       }),
       isFunded: vi.fn(async () => funded),
       fundPocket: vi.fn(async () => {
-        funded = true;
         stopAfter("fund");
+        funded = true;
         return "fund-tx";
       }),
     };
@@ -208,10 +251,10 @@ describe("pocket funding", () => {
       pocket: POCKET,
       funded: "250000",
     });
-    expect(chain.registerPocket).toHaveBeenCalledOnce();
-    expect(chain.grantPocketGas).toHaveBeenCalledOnce();
-    expect(chain.addDelegate).toHaveBeenCalledOnce();
-    expect(chain.fundPocket).toHaveBeenCalledTimes(1);
+    expect(chain.registerPocket).toHaveBeenCalledTimes(2);
+    expect(chain.grantPocketGas).toHaveBeenCalledTimes(2);
+    expect(chain.addDelegate).toHaveBeenCalledTimes(2);
+    expect(chain.fundPocket).toHaveBeenCalledTimes(2);
   });
 
   it("sends four Gateway calls and records pending then completed fixture status", async () => {
@@ -387,5 +430,86 @@ describe("pocket funding", () => {
     expect(signer.sign).toHaveBeenCalledOnce();
     expect(signedHeaders).toHaveLength(2);
     expect(signedHeaders[0]).toBe(signedHeaders[1]);
+  });
+
+  it("stops retries for a Gateway 409 on one authorization index", async () => {
+    const payTo = "0x0000000000000000000000000000000000000003";
+    const encodedRequired = encodePaymentRequired({
+      ...buildPaymentRequired({
+        url: "http://127.0.0.1:4021/data",
+        description: "Gateway fixture",
+        serviceName: "fixture",
+        tags: [],
+        network: "eip155:5042002",
+        amount: "1000",
+        payTo,
+        maxTimeoutSeconds: 30,
+      }),
+      accepts: [
+        {
+          scheme: "exact",
+          network: "eip155:5042002",
+          amount: "1000",
+          asset: "0x3600000000000000000000000000000000000000",
+          payTo,
+          maxTimeoutSeconds: 30,
+          extra: { name: "GatewayWalletBatched" },
+        },
+      ],
+    });
+    let calls = 0;
+    const input = {
+      planId: PLAN_ID,
+      envelopeRef: "eip155:5042002:0x0000000000000000000000000000000000000002:1",
+      plan: { network: "eip155:5042002" },
+      pocket: POCKET as `0x${string}`,
+      steps: [
+        {
+          stepIndex: 0,
+          stepId: "stp_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
+          kind: "gateway-nano" as const,
+          capability: "lookup",
+          payee: payTo,
+          unitAmount: "1000",
+          expectedCalls: 1,
+          stepCap: "1000",
+          routingReason: "below-pocket-threshold",
+          acceptanceProfileId: "prof_00000000000000000000000000000000",
+          resource: { url: "http://127.0.0.1:4021/data", method: "GET" as const },
+          callInputs: [{ callIndex: 0, input: { n: 0 } }],
+        },
+      ],
+    };
+    await expect(
+      payGatewaySteps(input, {
+        pool: getPool(),
+        config: loadConfig(),
+        signer: {
+          sign: vi.fn(async () => ({
+            signature: `0x${"ab".repeat(65)}` as const,
+            digest: `0x${"cd".repeat(32)}` as const,
+          })),
+        },
+        safeFetch: vi.fn(async () => {
+          calls += 1;
+          return calls === 1
+            ? {
+                status: 402,
+                url: "http://127.0.0.1:4021/data",
+                headers: { "payment-required": encodedRequired },
+                body: new Uint8Array(),
+              }
+            : {
+                status: 409,
+                url: "http://127.0.0.1:4021/data",
+                headers: {},
+                body: new Uint8Array(),
+              };
+        }),
+        now: () => new Date("2026-10-22T00:00:00Z"),
+        gatewayStatus: vi.fn(async (): Promise<"pending" | "completed"> => "pending"),
+      }),
+    ).rejects.toThrow("HTTP 409");
+    expect(calls).toBe(2);
   });
 });

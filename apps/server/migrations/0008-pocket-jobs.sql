@@ -3,6 +3,7 @@ CREATE TABLE plan_pocket_keys (
   pocket_address text NOT NULL CHECK (pocket_address ~ '^0x[0-9a-fA-F]{40}$'),
   created_at timestamptz NOT NULL DEFAULT now()
 );
+CREATE UNIQUE INDEX plan_pocket_keys_address ON plan_pocket_keys(lower(pocket_address));
 
 CREATE FUNCTION link_plan_pocket_key() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
