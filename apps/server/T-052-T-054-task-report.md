@@ -11,7 +11,7 @@
 
 - `apps/server/src/payer/pocket.ts`: plan-to-pocket lookup, pocket proof validation, register/gas/delegate/fund phases, Gateway call rendering and retries, status polling, halt drain hook, and close/sweep/key retirement.
 - `apps/server/test/payer/pocket.test.ts`: funding cap, plan key linkage, pause drain, retirement, preparation recovery at register/gas/delegate/fund, four Gateway calls, status fixtures, and same-authorization retry.
-- `apps/server/migrations/0007-pocket-jobs.sql`: `plan_pocket_keys`, linked from planner plan inserts with a trigger.
+- `apps/server/migrations/0008-pocket-jobs.sql`: `plan_pocket_keys`, linked from planner plan inserts with a trigger.
 
 ### Pullback (T-053)
 
@@ -22,7 +22,7 @@
 
 - `apps/server/src/payer/job.ts`: job description/brief, open/budget/fund/sync/refund flow, alternate-provider proofs, signed provider brief and deliverable upload, upload limits and retention cleanup.
 - `apps/server/test/payer/job.test.ts`: brief hashes/schema, alternate proofs, budget timeout/alternate provider, open/budget/fund/submit/sync recovery, upload limits and purge, refund decision gate.
-- `apps/server/migrations/0007-pocket-jobs.sql`: `payer_job_briefs` and append-only `payer_job_deliverables`.
+- `apps/server/migrations/0008-pocket-jobs.sql`: `payer_job_briefs` and append-only `payer_job_deliverables`.
 
 ### Shared files
 
@@ -73,7 +73,7 @@ These are fixture-backed recovery checks, not Arc-Anvil crash tests.
 
 - HTTP and composition: `apps/server/src/app.ts`, `apps/server/src/main.ts`.
 - Payer: `apps/server/src/payer/job.ts`, `apps/server/src/payer/pullback.ts`, new `pullback-scheduler.ts` and `runtime.ts`.
-- Storage and migration: new `apps/server/src/object-store.ts`, `apps/server/migrations/0008-payer-pullback-api-failures.sql`.
+- Storage and migration: new `apps/server/src/object-store.ts`, `apps/server/migrations/0009-payer-pullback-api-failures.sql`.
 - Tests: new `apps/server/test/job-routes.test.ts`, `object-store.test.ts`, `payer/pullback-scheduler.test.ts`, and `payer/runtime.test.ts`; updated `test/outage.test.ts`, `test/payer/pullback.test.ts`, `test/migrate.test.ts`, `test/main.test.ts`, and `test/evidence/receipt-arc.test.ts`.
 - Config: `packages/config/src/registry.ts`, `packages/config/test/loader.test.ts`, and its Vitest snapshot.
 
