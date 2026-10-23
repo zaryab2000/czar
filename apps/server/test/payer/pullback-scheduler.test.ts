@@ -1,6 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadConfig } from "@czar/config";
 import { runPendingPullbackFallbacks } from "#src/payer/pullback-scheduler";
+import type { CancelPullbackInput } from "#src/payer/pullback";
 import { setupDatabase } from "#test/db";
 import { makeObjectiveSubmission, seedDevice, TEST_USER_ID } from "#test/fixtures";
 
@@ -41,9 +42,17 @@ beforeEach(async () => {
   );
   await getPool().query(
     `INSERT INTO payer_pullback_gateway_failures
-       (plan_id,step_index,envelope_ref,pocket,value,unavailable_since,state)
-     VALUES($1,0,$2,$3,90000,$4,'pending')`,
-    [PLAN_ID, "eip155:31337:0xvault:1", POCKET, new Date(NOW.getTime() - 86_400_000)],
+       (plan_id,step_index,envelope_ref,pocket,value,unavailable_since,state,
+        pullback_id,vault_address,gateway_minter,attempt)
+     VALUES($1,0,$2,$3,90000,$4,'pending',9,$5,$6,0)`,
+    [
+      PLAN_ID,
+      "eip155:31337:0xvault:1",
+      POCKET,
+      new Date(NOW.getTime() - 86_400_000),
+      "0x0000000000000000000000000000000000000002",
+      "0x0000000000000000000000000000000000000004",
+    ],
   );
 });
 
@@ -54,6 +63,10 @@ describe("slow pullback scheduler", () => {
       pool: getPool(),
       config: loadConfig({ envFile: { "payer.pullbackApiDownHours": 24 } }),
       signer: { sign: vi.fn(async () => ({ signedTransaction: "0x1234" as const })) },
+      cancelPendingPullback: async (input: CancelPullbackInput) => {
+        expect(input).toMatchObject({ pullbackId: 9n, attempt: 0 });
+        phases.push("pullback.cancelled");
+      },
       chain: {
         getBlockNumber: async () => 1n,
         withdrawalBlock: async () => 5n,
@@ -66,7 +79,7 @@ describe("slow pullback scheduler", () => {
       now: () => NOW,
     };
     await expect(runPendingPullbackFallbacks(dependencies)).resolves.toBe(1);
-    expect(phases).toEqual(["pullback.slow.initiate"]);
+    expect(phases).toEqual(["pullback.cancelled", "pullback.slow.initiate"]);
     const rows = await getPool().query(
       "SELECT phase FROM step_executions WHERE plan_id=$1 ORDER BY execution_id",
       [PLAN_ID],

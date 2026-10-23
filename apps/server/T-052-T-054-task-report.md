@@ -188,3 +188,61 @@ These are fixture-backed recovery checks, not Arc-Anvil crash tests.
 - **Storage adapter:** a filesystem-backed object store with deletion was added for job deliverables.
 - Gateway API behavior remains fixture-backed; G0-05 is pending. Testnet execution remains deferred under T-050/D92.
 - PR #52 remains draft because the required deployed-contract Arc-Anvil scenarios and concrete production event/fallback adapters remain open.
+
+## PR #52 review follow-up (2026-10-23)
+
+### Review findings addressed
+
+- **Code review, `14ebf7a`:** zero Circle budget now maps to unset while a provider is waiting; slow withdrawal cancels the expired Gateway pullback before initiating; server startup no longer starts a halt watcher without drain dependencies; the composition exposes the Gateway nanopayment/status and pocket close/sweep phases; pocket recovery reads execution phases at the first Gateway step index.
+- **Security review, `14ebf7a`:** the database vault event source now discovers vaults linked after startup, checks existing `frozen` and `guardianPaused` state when a vault is discovered, and retries halt drains whose listener failed. This source is only enabled when `pocketHalt` dependencies are supplied.
+- **Unresolved production gap:** the normal composition still has no concrete `pocketHalt` dependency that can reconstruct a complete pullback for every funded pocket. Therefore the default runtime logs `payer_halt_monitor_disabled` and does not subscribe automatically. Dynamic discovery/reconciliation is verified for the configured-source path; production halt-drain remains unimplemented pending the GatewayMinter/pullback context and adapter.
+
+### Files changed in this review follow-up
+
+- `apps/server/src/main.ts`
+- `apps/server/src/payer/database-vault-event-source.ts` (new)
+- `apps/server/src/payer/job-chain-adapter.ts`
+- `apps/server/src/payer/pocket.ts`
+- `apps/server/src/payer/pullback-scheduler.ts`
+- `apps/server/src/payer/pullback.ts`
+- `apps/server/migrations/0010-payer-pullback-recovery-context.sql` (new)
+- `apps/server/test/main.test.ts`
+- `apps/server/test/payer/database-vault-event-source.test.ts` (new)
+- `apps/server/test/payer/job-chain-adapter.test.ts` (new)
+- `apps/server/test/payer/pocket.test.ts`
+- `apps/server/test/payer/pullback-scheduler.test.ts`
+- `apps/server/T-052-T-054-task-report.md`
+
+### Verification for this follow-up
+
+- `fnm exec --using=22.22.0 pnpm --filter @czar/server test`
+  ```text
+  Test Files  44 passed (44)
+       Tests  222 passed (222)
+  Duration  10.96s
+  ```
+- `fnm exec --using=22.22.0 pnpm --filter @czar/config test`
+  ```text
+  Test Files  3 passed (3)
+       Tests  27 passed (27)
+  Duration  92ms
+  ```
+- `fnm exec --using=22.22.0 pnpm -r typecheck`
+  ```text
+  Scope: 14 of 15 workspace projects
+  All package and application typecheck scripts completed successfully.
+  ```
+- `fnm exec --using=22.22.0 pnpm lint`
+  ```text
+  > oxlint --deny-warnings && oxfmt --check
+  All matched files use the correct format.
+  Finished in 18ms on 388 files using 10 threads.
+  ```
+- The targeted review tests passed: 5 files, 15 tests.
+- `git diff --check` — pending final commit check.
+- No Arc-Anvil or testnet checks were run; the Bundle B fork scenarios remain deferred under D92.
+
+### Review status
+
+- Code and security reviews completed for `14ebf7a`; their findings are being addressed in this follow-up. Fresh review requests will be posted for the new commit.
+- No docs/specs files were edited. No secrets, funds, or live provider calls were used.

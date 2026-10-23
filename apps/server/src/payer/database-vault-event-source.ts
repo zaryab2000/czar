@@ -1,0 +1,117 @@
+import type { Config } from "@czar/config";
+import type { Logger } from "@czar/logging";
+import { czarVaultAbi, czarVaultFactoryAbi } from "@czar/vault-client";
+import { isAddress, type Address, type PublicClient } from "viem";
+import type { Pool } from "pg";
+import { createVaultEventSource } from "#src/payer/vault-event-source";
+import type { VaultHaltEvent, VaultHaltEventSource } from "#src/payer/runtime";
+
+interface DatabaseVaultEventSourceInput {
+  readonly pool: Pool;
+  readonly publicClient: PublicClient;
+  readonly config: Config;
+  readonly logger: Logger;
+}
+
+export function createDatabaseVaultEventSource(
+  input: DatabaseVaultEventSourceInput,
+): VaultHaltEventSource {
+  return {
+    subscribe(listener) {
+      let stopped = false;
+      let scanning = false;
+      const seenVaults = new Set<Address>();
+      const seenHalts = new Set<string>();
+      const retryVaults = new Set<Address>();
+      const unsubscribe: (() => void)[] = [];
+      const emit = async (event: VaultHaltEvent) => {
+        const key = `${event.name}:${event.vault.toLowerCase()}`;
+        if (seenHalts.has(key)) return;
+        try {
+          await listener(event);
+          seenHalts.add(key);
+        } catch (error) {
+          retryVaults.add(event.vault);
+          throw error;
+        }
+      };
+      const scan = async () => {
+        if (stopped || scanning) return;
+        scanning = true;
+        try {
+          const rows = await input.pool.query<{ vault: string }>(
+            "SELECT DISTINCT vault FROM users WHERE vault IS NOT NULL ORDER BY vault",
+          );
+          for (const row of rows.rows) {
+            if (!isAddress(row.vault)) {
+              logSourceError(input.logger, "invalid_address");
+              continue;
+            }
+            const vault = row.vault;
+            try {
+              if (!seenVaults.has(vault)) {
+                seenVaults.add(vault);
+                const source = createVaultEventSource(
+                  input.publicClient,
+                  vault,
+                  input.config,
+                  input.logger,
+                );
+                unsubscribe.push(source.subscribe(emit));
+                retryVaults.add(vault);
+              }
+              if (!retryVaults.has(vault)) continue;
+              await reconcileHalt(input.publicClient, vault, emit);
+              retryVaults.delete(vault);
+            } catch {
+              retryVaults.add(vault);
+              logSourceError(input.logger, "reconcile_failed");
+            }
+          }
+        } catch {
+          logSourceError(input.logger, "scan_failed");
+        } finally {
+          scanning = false;
+        }
+      };
+      const interval = Number(input.config.get("payer.vaultEventPollMs"));
+      const timer = setInterval(() => void scan(), interval);
+      timer.unref();
+      void scan();
+      return () => {
+        stopped = true;
+        clearInterval(timer);
+        for (const stop of unsubscribe) stop();
+      };
+    },
+  };
+}
+
+async function reconcileHalt(
+  client: PublicClient,
+  vault: Address,
+  emit: (event: VaultHaltEvent) => Promise<void>,
+): Promise<void> {
+  const factory = await client.readContract({
+    address: vault,
+    abi: czarVaultAbi,
+    functionName: "factory",
+  });
+  const [frozen, paused] = await Promise.all([
+    client.readContract({ address: vault, abi: czarVaultAbi, functionName: "frozen" }),
+    client.readContract({
+      address: factory,
+      abi: czarVaultFactoryAbi,
+      functionName: "guardianPaused",
+    }),
+  ]);
+  if (frozen) await emit({ name: "Frozen", vault });
+  if (paused) await emit({ name: "GuardianPaused", vault });
+}
+
+function logSourceError(
+  logger: Logger,
+  rule: "invalid_address" | "scan_failed" | "reconcile_failed",
+): void {
+  logger.error("vault_event_source_failure", { rule, state: "error" });
+}

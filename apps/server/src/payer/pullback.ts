@@ -737,8 +737,9 @@ async function recordGatewayPullbackFailure(
 ): Promise<void> {
   await dependencies.pool.query(
     `INSERT INTO payer_pullback_gateway_failures
-       (plan_id,step_index,envelope_ref,pocket,value,unavailable_since,state)
-     VALUES ($1,$2,$3,$4,$5,$6,'pending')
+       (plan_id,step_index,envelope_ref,pocket,value,unavailable_since,state,
+        pullback_id,vault_address,gateway_minter,attempt)
+     VALUES ($1,$2,$3,$4,$5,$6,'pending',$7,$8,$9,$10)
      ON CONFLICT (plan_id,step_index) DO NOTHING`,
     [
       input.planId,
@@ -747,6 +748,10 @@ async function recordGatewayPullbackFailure(
       input.pocket,
       pullback.value.toString(),
       dependencies.now(),
+      pullback.pullbackId.toString(),
+      input.vault,
+      input.gatewayMinter,
+      input.attempt ?? 0,
     ],
   );
 }

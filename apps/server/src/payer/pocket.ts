@@ -328,7 +328,12 @@ async function preparePocket(
 ): Promise<{ readonly pocket: Address; readonly funded: string }> {
   const proof = pocketProof(input.plan, pocket);
   const chain = dependencies.chain;
-  const trace = await getExecutionTrace(dependencies.pool, input.planId, 0, attempt);
+  const trace = await getExecutionTrace(
+    dependencies.pool,
+    input.planId,
+    firstGatewayStepIndex(input.plan.steps),
+    attempt,
+  );
   if (!(await chain.isRegistered(pocket))) {
     const transaction =
       phaseTransaction(trace, "pocket.register.sent") ??

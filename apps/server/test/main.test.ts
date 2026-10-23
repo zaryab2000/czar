@@ -16,11 +16,14 @@ describe("server composition root", () => {
 
   it("migrates and seeds acceptance before constructing the in-process T-035 signer", async () => {
     const order: string[] = [];
+    const gatewayStatus = vi.fn(async () => "completed" as const);
     const vault = "0x0000000000000000000000000000000000000001" as const;
     const factory = "0x0000000000000000000000000000000000000002" as const;
     const watchContractEvent = vi.fn(() => vi.fn());
     await getPool().query("UPDATE users SET vault=$1 WHERE user_id=$2", [vault, TEST_USER_ID]);
-    const signer = await testSigner();
+    const signer = Object.assign(await testSigner(), {
+      retirePocketKey: vi.fn(async () => ({ destroyAfterMs: 0 })),
+    });
     const root = await createServerMain({
       pool: getPool(),
       config: loadConfig(),
@@ -32,7 +35,6 @@ describe("server composition root", () => {
         watchContractEvent,
       } as never,
       walletClient: { sendRawTransaction: vi.fn(async () => `0x${"11".repeat(32)}`) } as never,
-      pocketHalt: { listFundedPockets: async () => [], pullback: async () => undefined },
       createSigner: async () => {
         const profiles = await getPool().query(
           "SELECT profile_id FROM profiles WHERE task_class='data-json'",
@@ -62,6 +64,7 @@ describe("server composition root", () => {
         finalize: vi.fn(),
       },
       safeFetch: vi.fn(),
+      gatewayStatus,
       settlement: { isSettled: async () => false },
       receiptInput: vi.fn(() => ({}) as never),
       appReadOptions: {
@@ -79,7 +82,7 @@ describe("server composition root", () => {
     expect((await root.app.request("/not-found")).status).toBe(404);
     expect(root.executePayerStep).toBeTypeOf("function");
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(watchContractEvent).toHaveBeenCalledTimes(2);
+    expect(watchContractEvent).not.toHaveBeenCalled();
     await getPool().query("UPDATE users SET vault=NULL WHERE user_id=$1", [TEST_USER_ID]);
     root.close();
 
@@ -104,6 +107,55 @@ describe("server composition root", () => {
     await getPool().query(
       "INSERT INTO steps (plan_id,step_index,step,state) VALUES ($1,0,'{}','queued')",
       [planId],
+    );
+    await getPool().query(
+      `INSERT INTO step_executions(plan_id,step_index,attempt,phase,payload)
+       VALUES($1,0,0,'pocket.paid[0]',$2::jsonb)`,
+      [planId, JSON.stringify({ nonce: `0x${"11".repeat(32)}`, index: 0, transferId: "tr_1" })],
+    );
+    const statuses = await root.executePocketNanopayments({
+      planId,
+      envelopeRef: "eip155:5042002:0x0000000000000000000000000000000000000001:1",
+      plan: { network: "eip155:5042002" },
+      pocket: "0x0000000000000000000000000000000000000005",
+      steps: [
+        {
+          stepIndex: 0,
+          kind: "gateway-nano",
+          expectedCalls: 1,
+          stepCap: "1000",
+          callInputs: [{ callIndex: 0, input: {}, subjectIndex: 0 }],
+        },
+      ] as never,
+    });
+    expect(statuses).toEqual(["completed"]);
+    expect(gatewayStatus).toHaveBeenCalledWith({
+      pocket: "0x0000000000000000000000000000000000000005",
+      nonce: `0x${"11".repeat(32)}`,
+      transferId: "tr_1",
+    });
+    await expect(
+      root.closePocket(
+        {
+          planId,
+          stepIndex: 0,
+          attempt: 0,
+          vault: "0x0000000000000000000000000000000000000001",
+          pocket: "0x0000000000000000000000000000000000000005",
+        },
+        {
+          isClosed: async () => true,
+          hasPendingPullback: async () => false,
+          writeOffPocket: async () => "writeoff",
+          sweepableNativeBalance: async () => 0n,
+          pocketBalances: async () => ({ native: 0n, usdc: 0n, gateway: 0n }),
+          sendPocketTransaction: async () => "sweep",
+        },
+      ),
+    ).resolves.toMatchObject({ state: "retiring", sweptNative: "0" });
+    expect(signer.retirePocketKey).toHaveBeenCalledWith(
+      "cz-15",
+      "0x0000000000000000000000000000000000000005",
     );
     const payerResult = await root.executePayerStep({
       planId,

@@ -53,6 +53,76 @@ beforeEach(async () => {
 });
 
 describe("pocket funding", () => {
+  it("reuses a registration transaction when the first Gateway step is not step zero", async () => {
+    await getPool().query("INSERT INTO plan_pocket_keys(plan_id,pocket_address) VALUES($1,$2)", [
+      PLAN_ID,
+      POCKET,
+    ]);
+    await getPool().query(
+      "INSERT INTO steps(plan_id,step_index,step,state) VALUES($1,4,'{}','queued')",
+      [PLAN_ID],
+    );
+    let registered = false;
+    let interrupt = true;
+    const signed: string[] = [];
+    const chain = {
+      isRegistered: async () => registered,
+      registerPocket: vi.fn(async ({ transaction }: { transaction: `0x${string}` }) => {
+        if (interrupt) {
+          interrupt = false;
+          throw new Error("executor stopped after registration transaction was sent");
+        }
+        registered = true;
+        return transaction;
+      }),
+      pocketGasGranted: async () => 20_000n,
+      grantPocketGas: async () => "gas",
+      isDelegateReady: async () => true,
+      addDelegate: async () => "delegate",
+      isFunded: async () => true,
+      fundPocket: async () => "fund",
+    };
+    const input = {
+      planId: PLAN_ID,
+      envelopeRef: "eip155:5042002:0x0000000000000000000000000000000000000002:1",
+      envelopeId: 1n,
+      vault: "0x0000000000000000000000000000000000000002" as const,
+      plan: {
+        payeeRoot: buildTree([pocketLeaf(POCKET as `0x${string}`)]).root,
+        payeeLeaves: [{ payee: POCKET, kind: 4 as const, stepIndex: 4294967295, stepCap: "0" }],
+        pocketCapBps: 2500,
+        cap: "1000000",
+        steps: [{ stepIndex: 4, kind: "gateway-nano" as const, stepCap: "250000" }],
+      },
+    };
+    const dependencies = {
+      pool: getPool(),
+      config: loadConfig(),
+      signer: {
+        sign: vi.fn(async () => {
+          const transaction = `0x${String(signed.length + 1).padStart(4, "0")}` as const;
+          signed.push(transaction);
+          return { signedTransaction: transaction };
+        }),
+      },
+      chain,
+      now: () => new Date("2026-10-22T00:00:00Z"),
+    };
+
+    await expect(executePocketPreparation(input, dependencies)).rejects.toThrow(
+      "executor stopped after registration transaction was sent",
+    );
+    await expect(executePocketPreparation(input, dependencies)).resolves.toMatchObject({
+      pocket: POCKET,
+    });
+
+    expect(signed).toHaveLength(1);
+    expect(chain.registerPocket).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ transaction: signed[0] }),
+    );
+  });
+
   it("drains every funded pocket when frozen or guardian-paused", async () => {
     const pullback = vi.fn(async (pocket: string) => pocket);
     const listFundedPockets = vi.fn(

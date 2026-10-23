@@ -50,7 +50,7 @@ export function createJobChainAdapter(input: {
     return {
       vaultState: mapVaultState(Number(vaultJob.state)),
       escrowState: mapEscrowState(Number(escrowJob.status)),
-      budget: BigInt(escrowJob.budget),
+      ...(BigInt(escrowJob.budget) > 0n ? { budget: BigInt(escrowJob.budget) } : {}),
       expiredAt: Number(vaultJob.expiredAt),
       jobId: BigInt(vaultJob.jobId),
     };

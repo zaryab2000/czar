@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { isAddress, keccak256, type Address, type PublicClient, type WalletClient } from "viem";
+import { keccak256, type Address, type PublicClient, type WalletClient } from "viem";
 import type { Config } from "@czar/config";
 import { paymentRefHash } from "@czar/hashing";
 import type { Logger } from "@czar/logging";
@@ -31,7 +31,16 @@ import {
 } from "#src/payer/vault-direct";
 import { startPayerRuntime, type VaultHaltEventSource } from "#src/payer/runtime";
 import type { PocketHaltDependencies } from "#src/payer/pocket";
-import { executePocketPreparation, type PocketPreparationInput } from "#src/payer/pocket";
+import {
+  executePocketPreparation,
+  payGatewaySteps,
+  refreshGatewayStatuses,
+  sweepAndRetirePocketKey,
+  type PocketCloseInput,
+  type PocketNanopaymentDependencies,
+  type PocketNanopaymentInput,
+  type PocketPreparationInput,
+} from "#src/payer/pocket";
 import { createPocketPreparationChain } from "#src/payer/pocket-chain";
 import {
   cancelExpiredPullback,
@@ -42,7 +51,7 @@ import {
 import { createPullbackExecutionChain } from "#src/payer/pullback-execution-chain";
 import { executeJobStep, type JobExecutionInput } from "#src/payer/job";
 import { createJobChainAdapter } from "#src/payer/job-chain-adapter";
-import { createVaultEventSource } from "#src/payer/vault-event-source";
+import { createDatabaseVaultEventSource } from "#src/payer/database-vault-event-source";
 import { createPullbackChainAdapter } from "#src/payer/pullback-chain-adapter";
 import {
   runPendingPullbackFallbacks,
@@ -54,11 +63,12 @@ export interface ServerMainOptions extends PairDependencies {
   readonly config: Config;
   readonly logger: Logger;
   readonly modelClient: ModelClient;
-  readonly createSigner: () => Promise<Pick<Signer, "sign">>;
+  readonly createSigner: () => Promise<Pick<Signer, "sign" | "retirePocketKey">>;
   readonly acceptancePorts: AcceptancePorts;
   readonly objects?: ObjectStore;
   readonly vaultEvents?: VaultHaltEventSource;
   readonly pocketHalt?: PocketHaltDependencies;
+  readonly gatewayStatus?: PocketNanopaymentDependencies["gatewayStatus"];
   readonly pullbackFallbackChain?: PullbackFallbackSchedulerDependencies["chain"];
   readonly publicClient: PublicClient;
   readonly walletClient: WalletClient;
@@ -92,6 +102,13 @@ export interface ServerMain {
   executePocketPreparation(
     input: PocketPreparationInput,
   ): ReturnType<typeof executePocketPreparation>;
+  executePocketNanopayments(
+    input: PocketNanopaymentInput,
+  ): ReturnType<typeof refreshGatewayStatuses>;
+  closePocket(
+    input: PocketCloseInput,
+    chain: Parameters<typeof sweepAndRetirePocketKey>[1]["chain"],
+  ): ReturnType<typeof sweepAndRetirePocketKey>;
   executePullback(input: PullbackInput): ReturnType<typeof executePullback>;
   cancelExpiredPullback(input: CancelPullbackInput): ReturnType<typeof cancelExpiredPullback>;
   executeJobStep(input: JobExecutionInput): ReturnType<typeof executeJobStep>;
@@ -115,7 +132,14 @@ export async function createServerMain(options: ServerMainOptions): Promise<Serv
   } as const;
   const boundary = createPayerBoundary(options, acceptance, promptHashes, objects);
   const signer = await options.createSigner();
-  const vaultEvents = options.vaultEvents ?? (await createDatabaseVaultEventSource(options));
+  const vaultEvents =
+    options.vaultEvents ??
+    (options.pocketHalt ? createDatabaseVaultEventSource(options) : undefined);
+  if (!options.vaultEvents && !options.pocketHalt)
+    options.logger.error("payer_halt_monitor_disabled", {
+      rule: "missing_pocket_halt_dependencies",
+      state: "disabled",
+    });
   const pullbackFallbackChain =
     options.pullbackFallbackChain ??
     createPullbackChainAdapter(
@@ -136,6 +160,27 @@ export async function createServerMain(options: ServerMainOptions): Promise<Serv
         pool: options.pool,
         config: options.config,
         signer,
+        cancelPendingPullback: async (input) => {
+          const chain = createPullbackExecutionChain({
+            client: options.publicClient,
+            pool: options.pool,
+            vault: input.vault,
+            gatewayMinter: input.gatewayMinter,
+          });
+          const record = await chain.readPullback(input.pullbackId);
+          if (!record || record.state === "Confirmed")
+            throw new Error("Gateway pullback is not cancellable before slow withdrawal.");
+          if (record.state === "Cancelled") return;
+          return cancelExpiredPullback(input, {
+            pool: options.pool,
+            config: options.config,
+            signer,
+            chain,
+            safeFetch: options.safeFetch,
+            gatewayTransferUrl: options.gatewayTransferUrl ?? "",
+            now: options.clock.now,
+          });
+        },
         chain: pullbackFallbackChain,
         now: options.clock.now,
       }),
@@ -188,6 +233,22 @@ export async function createServerMain(options: ServerMainOptions): Promise<Serv
         }),
         now: options.clock.now,
       }),
+    executePocketNanopayments: async (input) => {
+      if (!options.gatewayStatus)
+        throw new Error("Gateway status lookup is required to execute pocket payments.");
+      const dependencies: PocketNanopaymentDependencies = {
+        pool: options.pool,
+        config: options.config,
+        signer,
+        safeFetch: options.safeFetch,
+        now: options.clock.now,
+        gatewayStatus: options.gatewayStatus,
+      };
+      await payGatewaySteps(input, dependencies);
+      return refreshGatewayStatuses(input, dependencies);
+    },
+    closePocket: (input, chain) =>
+      sweepAndRetirePocketKey(input, { pool: options.pool, signer, chain }),
     executePullback: (input) => {
       if (!options.gatewayTransferUrl)
         throw new Error("Gateway transfer URL is required for pullback execution.");
@@ -243,30 +304,6 @@ export async function createServerMain(options: ServerMainOptions): Promise<Serv
         ...(options.jobEvaluator ? { evaluator: options.jobEvaluator } : {}),
       }),
     close: () => payerRuntime.stop(),
-  };
-}
-
-async function createDatabaseVaultEventSource(
-  options: ServerMainOptions,
-): Promise<VaultHaltEventSource | undefined> {
-  const rows = await options.pool.query<{ vault: string }>(
-    "SELECT DISTINCT vault FROM users WHERE vault IS NOT NULL ORDER BY vault",
-  );
-  const vaults = rows.rows.map((row) => row.vault).filter((vault) => isAddress(vault));
-  if (vaults.length !== rows.rows.length)
-    options.logger.error("vault_event_invalid_address", {
-      rule: "vault_event_source",
-      state: "invalid",
-    });
-  const sources = vaults.map((vault) =>
-    createVaultEventSource(options.publicClient, vault, options.config, options.logger),
-  );
-  if (sources.length === 0) return undefined;
-  return {
-    subscribe(listener) {
-      const unsubscribe = sources.map((source) => source.subscribe(listener));
-      return () => unsubscribe.forEach((stop) => stop());
-    },
   };
 }
 
