@@ -1,4 +1,4 @@
-import { decodeEventLog, type Address, type Hex, type PublicClient } from "viem";
+import { decodeEventLog, parseAbi, type Address, type Hex, type PublicClient } from "viem";
 import { czarJobEscrowAbi, czarVaultAbi, czarVaultFactoryAbi } from "@czar/vault-client";
 import type { Config } from "@czar/config";
 import type { JobBrief } from "@czar/schemas";
@@ -18,7 +18,26 @@ const ESCROW_SUBMITTED = 2;
 const ESCROW_COMPLETED = 3;
 const ESCROW_REJECTED = 4;
 const ESCROW_EXPIRED = 5;
+const CIRCLE_TESTNET_KIND = 0;
+const CZAR_BASE_KIND = 1;
 const MILLISECONDS_PER_SECOND = 1_000;
+const CIRCLE_JOB_ABI = parseAbi([
+  "function jobs(uint256 jobId) view returns (uint256 id,address client,address provider,address evaluator,string description,uint256 budget,uint256 expiredAt,uint8 status,address hook)",
+  "event JobCreated(uint256 indexed jobId,address indexed client,address indexed provider,address evaluator,uint256 expiredAt,address hook)",
+  "event BudgetSet(uint256 indexed jobId,uint256 amount)",
+  "event JobFunded(uint256 indexed jobId,address indexed client,uint256 amount)",
+  "event JobSubmitted(uint256 indexed jobId,address indexed provider,bytes32 deliverable)",
+  "event JobCompleted(uint256 indexed jobId,address indexed evaluator,bytes32 reason)",
+  "event JobRejected(uint256 indexed jobId,address indexed rejector,bytes32 reason)",
+  "event JobExpired(uint256 indexed jobId)",
+  "event Refunded(uint256 indexed jobId,address indexed client,uint256 amount)",
+]);
+
+interface EscrowJobView {
+  readonly budget: bigint;
+  readonly expiredAt: bigint;
+  readonly status: number;
+}
 
 export function createJobChainAdapter(input: {
   readonly client: PublicClient;
@@ -43,19 +62,53 @@ export function createJobChainAdapter(input: {
       functionName: "getJob",
       args: [jobKeyValue],
     });
-    const escrowJob = await input.client.readContract({
-      address: input.jobEscrow,
-      abi: czarJobEscrowAbi,
-      functionName: "getJob",
-      args: [vaultJob.jobId],
-    });
+    const escrowJob = await readEscrowJob(vaultJob.jobId);
     return {
       vaultState: mapVaultState(Number(vaultJob.state)),
-      escrowState: mapEscrowState(Number(escrowJob.status)),
+      escrowState: mapEscrowState(escrowJob.status),
       ...(BigInt(escrowJob.budget) > 0n ? { budget: BigInt(escrowJob.budget) } : {}),
-      expiredAt: Number(vaultJob.expiredAt),
+      expiredAt: Number(escrowJob.expiredAt),
       jobId: BigInt(vaultJob.jobId),
     };
+  }
+
+  async function readEscrowKind(): Promise<number> {
+    return input.client.readContract({
+      address: input.vault,
+      abi: czarVaultAbi,
+      functionName: "jobEscrowKind",
+    });
+  }
+
+  async function readEscrowJob(jobId: bigint): Promise<EscrowJobView> {
+    const kind = await readEscrowKind();
+    if (kind === CIRCLE_TESTNET_KIND) {
+      const circleJob = await input.client.readContract({
+        address: input.jobEscrow,
+        abi: CIRCLE_JOB_ABI,
+        functionName: "jobs",
+        args: [jobId],
+      });
+      return {
+        budget: circleJob[5],
+        expiredAt: circleJob[6],
+        status: Number(circleJob[7]),
+      };
+    }
+    if (kind === CZAR_BASE_KIND) {
+      const czarJob = await input.client.readContract({
+        address: input.jobEscrow,
+        abi: czarJobEscrowAbi,
+        functionName: "getJob",
+        args: [jobId],
+      });
+      return {
+        budget: czarJob.budget,
+        expiredAt: BigInt(czarJob.expiredAt),
+        status: Number(czarJob.status),
+      };
+    }
+    throw new Error(`Unsupported job escrow kind: ${kind}`);
   }
 
   async function waitForStatus(
@@ -66,6 +119,7 @@ export function createJobChainAdapter(input: {
     const first = await readView(jobKeyValue);
     if (isComplete(first)) return first;
     const pollingInterval = Number(input.config.get("payer.vaultEventPollMs"));
+    const abi = escrowEventAbi(await readEscrowKind());
     return new Promise((resolve, reject) => {
       let closed = false;
       let stop: (() => void) | undefined;
@@ -89,7 +143,7 @@ export function createJobChainAdapter(input: {
       };
       stop = input.client.watchContractEvent({
         address: input.jobEscrow,
-        abi: czarJobEscrowAbi,
+        abi,
         pollingInterval,
         onLogs: () => {
           void readView(jobKeyValue).then((view) => {
@@ -200,6 +254,12 @@ export function createJobChainAdapter(input: {
       return input.now().getTime() < cutoff * MILLISECONDS_PER_SECOND;
     },
   };
+}
+
+function escrowEventAbi(kind: number) {
+  if (kind === CIRCLE_TESTNET_KIND) return CIRCLE_JOB_ABI;
+  if (kind === CZAR_BASE_KIND) return czarJobEscrowAbi;
+  throw new Error(`Unsupported job escrow kind: ${kind}`);
 }
 
 function mapVaultState(state: number): JobChainView["vaultState"] {

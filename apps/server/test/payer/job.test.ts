@@ -69,6 +69,124 @@ beforeEach(async () => {
 });
 
 describe("job brief commitments", () => {
+  it("still refuses to open a new job when its minimum lead time is unavailable", async () => {
+    const current = new Date("2026-10-23T00:00:00Z");
+    const input = recoveryInput(new Date(current.getTime() + 60_000));
+    const chain = { findJob: vi.fn(async () => undefined), openJob: vi.fn() };
+    await expect(
+      executeJobStep(input, {
+        pool: getPool(),
+        config: loadConfig(),
+        chain: chain as never,
+        signer: { sign: vi.fn() },
+        vault: input.vault,
+        now: () => current,
+        randomSalt: () => `0x${"22".repeat(32)}`,
+      }),
+    ).rejects.toThrow("minimum lead time");
+    expect(chain.openJob).not.toHaveBeenCalled();
+  });
+
+  it("recovers a claimed expired refund without claiming it twice", async () => {
+    const current = new Date("2026-10-23T00:00:00Z");
+    const expiredAt = Math.floor(current.getTime() / 1000) - 60;
+    const input = recoveryInput(new Date(expiredAt * 1000));
+    const key = jobKey(input.jobEscrow, 7n);
+    let refundClaimed = false;
+    let refundAttempts = 0;
+    let vaultSynced = false;
+    const chain = {
+      findJob: vi.fn(async () => ({ jobKey: key, jobId: 7n })),
+      getJob: vi.fn(async () => ({
+        vaultState: vaultSynced ? "Expired" : "Funded",
+        escrowState: refundClaimed ? "Expired" : "Funded",
+        budget: 1_000n,
+        expiredAt,
+      })),
+      waitForResult: vi.fn(async () => ({
+        vaultState: "Funded",
+        escrowState: "Funded",
+        budget: 1_000n,
+        expiredAt,
+      })),
+      hasDecisionPending: vi.fn(async () => false),
+      claimJobRefund: vi.fn(async () => {
+        refundAttempts += 1;
+        refundClaimed = true;
+        if (refundAttempts === 1) throw new Error("refund receipt was not recorded");
+        return "refund-tx";
+      }),
+      syncJob: vi.fn(async () => {
+        vaultSynced = true;
+        return { state: "Expired" as const, txHash: "sync-tx" };
+      }),
+      openJob: vi.fn(),
+      fundJob: vi.fn(),
+      isFrozenOrPaused: vi.fn(async () => false),
+      envelopeOpen: vi.fn(async () => true),
+    };
+    await expect(
+      executeJobStep(input, {
+        pool: getPool(),
+        config: loadConfig(),
+        chain: chain as never,
+        signer: { sign: vi.fn(async () => ({ signedTransaction: "0x1234" as const })) },
+        vault: input.vault,
+        now: () => current,
+        randomSalt: () => `0x${"22".repeat(32)}`,
+      }),
+    ).rejects.toThrow("refund receipt was not recorded");
+    const resumed = await executeJobStep(input, {
+      pool: getPool(),
+      config: loadConfig(),
+      chain: chain as never,
+      signer: { sign: vi.fn(async () => ({ signedTransaction: "0x1234" as const })) },
+      vault: input.vault,
+      now: () => current,
+      randomSalt: () => `0x${"22".repeat(32)}`,
+    });
+    expect(resumed).toMatchObject({ state: "Expired", jobKey: key });
+    expect(chain.claimJobRefund).toHaveBeenCalledOnce();
+    expect(chain.openJob).not.toHaveBeenCalled();
+    expect(chain.fundJob).not.toHaveBeenCalled();
+    expect(chain.syncJob).toHaveBeenCalledOnce();
+  });
+
+  it.each([60, -60])(
+    "recovers a completed job with envelope expiry offset %s seconds",
+    async (offset) => {
+      const current = new Date("2026-10-23T00:00:00Z");
+      const expiredAt = Math.floor(current.getTime() / 1000) + offset;
+      const input = recoveryInput(new Date(expiredAt * 1000));
+      const key = jobKey(input.jobEscrow, 7n);
+      const chain = {
+        findJob: vi.fn(async () => ({ jobKey: key, jobId: 7n })),
+        getJob: vi.fn(async () => ({
+          vaultState: "Funded",
+          escrowState: "Completed",
+          budget: 1_000n,
+          expiredAt,
+        })),
+        syncJob: vi.fn(async () => ({ state: "Completed", txHash: "sync-tx" })),
+        openJob: vi.fn(),
+        fundJob: vi.fn(),
+      };
+      const result = await executeJobStep(input, {
+        pool: getPool(),
+        config: loadConfig(),
+        chain: chain as never,
+        signer: { sign: vi.fn(async () => ({ signedTransaction: "0x1234" as const })) },
+        vault: input.vault,
+        now: () => current,
+        randomSalt: () => `0x${"22".repeat(32)}`,
+      });
+      expect(result).toMatchObject({ state: "Completed", jobKey: key });
+      expect(chain.openJob).not.toHaveBeenCalled();
+      expect(chain.fundJob).not.toHaveBeenCalled();
+      expect(chain.syncJob).toHaveBeenCalledOnce();
+    },
+  );
+
   it("requires each alternate job provider to have its own approved leaf proof", () => {
     const primary = "0x0000000000000000000000000000000000000003";
     const alternate = "0x0000000000000000000000000000000000000004";
@@ -685,4 +803,71 @@ describe("job brief commitments", () => {
     expect(claim).not.toHaveBeenCalled();
     expect(signer.sign).not.toHaveBeenCalled();
   });
+
+  it("syncs a refund already visible on chain without claiming it again", async () => {
+    const key = `0x${"55".repeat(32)}` as Hash32;
+    const current = new Date("2026-10-23T00:00:00Z");
+    const expiredAt = Math.floor(current.getTime() / 1_000) - 60;
+    const claim = vi.fn();
+    const sync = vi.fn(async () => ({ state: "Expired" as const, txHash: "sync-tx" }));
+    const signer = { sign: vi.fn(async () => ({ signedTransaction: "0x1234" as const })) };
+    const chain = {
+      hasDecisionPending: vi.fn(async () => false),
+      getJob: vi.fn(async () => ({
+        vaultState: "Funded",
+        escrowState: "Expired",
+        budget: 1_000n,
+        expiredAt,
+      })),
+      claimJobRefund: claim,
+      syncJob: sync,
+    };
+
+    await expect(
+      claimJobRefund(
+        {
+          planId: PLAN_ID,
+          stepIndex: 0,
+          envelopeRef: "eip155:5042002:0x0000000000000000000000000000000000000001:1",
+          jobKey: key,
+        },
+        {
+          pool: getPool(),
+          config: loadConfig(),
+          chain,
+          signer,
+          vault: "0x0000000000000000000000000000000000000001",
+          now: () => current,
+        } as never,
+      ),
+    ).resolves.toBe("sync-tx");
+    expect(claim).not.toHaveBeenCalled();
+    expect(sync).toHaveBeenCalledOnce();
+    expect(signer.sign).toHaveBeenCalledOnce();
+  });
 });
+
+function recoveryInput(envelopeExpiresAt: Date) {
+  return {
+    planId: PLAN_ID,
+    envelopeRef: "eip155:5042002:0x0000000000000000000000000000000000000001:1",
+    envelopeId: 1n,
+    vault: "0x0000000000000000000000000000000000000001" as const,
+    stepIndex: 0,
+    provider: "0x0000000000000000000000000000000000000003" as const,
+    alternates: [],
+    stepCap: 2_000n,
+    proof: [],
+    planHash: `0x${"11".repeat(32)}`,
+    network: "eip155:5042002",
+    jobEscrow: "0x0000000000000000000000000000000000000003" as const,
+    acceptanceProfileId: "prof_00000000000000000000000000000000",
+    capability: "web-search",
+    callInputs: [{ query: "Item price" }],
+    taskSpec,
+    deliverable: { mimeType: "application/json", expectedKeys: ["price"] },
+    targetBudget: "1000",
+    evaluator: "0x0000000000000000000000000000000000000002" as const,
+    envelopeExpiresAt,
+  };
+}

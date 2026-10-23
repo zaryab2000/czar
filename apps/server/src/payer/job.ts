@@ -320,18 +320,18 @@ async function openOrRecoverJob(
     provider,
   });
   const inputSalt = priorSalt(trace) ?? dependencies.randomSalt();
-  const expiration = calculateJobExpiration(
-    dependencies.now(),
-    jobDurationHours(dependencies.config, input.capability),
-    input.envelopeExpiresAt,
-    Number(dependencies.config.get("payer.job.minExpiryLeadSeconds")),
-  );
   if (existing) {
     const view = await dependencies.chain.getJob(existing.jobKey);
     const recovered = { ...existing, provider, expiredAt: view.expiredAt, inputSalt };
     await persistBrief(input, dependencies, recovered);
     return recovered;
   }
+  const expiration = calculateJobExpiration(
+    dependencies.now(),
+    jobDurationHours(dependencies.config, input.capability),
+    input.envelopeExpiresAt,
+    Number(dependencies.config.get("payer.job.minExpiryLeadSeconds")),
+  );
   const description = buildJobDescription({
     planHash: input.planHash,
     stepIndex: input.stepIndex,
@@ -406,6 +406,16 @@ async function awaitAndFundJob(
   let budget = view.budget;
   if (view.vaultState === "Released") return undefined;
   if (
+    view.vaultState === "Completed" ||
+    view.vaultState === "Rejected" ||
+    view.vaultState === "Expired"
+  )
+    return {
+      state: view.vaultState,
+      jobKey: job.jobKey,
+      ...(budget === undefined ? {} : { budget: budget.toString() }),
+    };
+  if (
     view.vaultState === "Opened" &&
     (view.escrowState === "Submitted" || view.escrowState === "Completed")
   ) {
@@ -414,6 +424,8 @@ async function awaitAndFundJob(
     await dependencies.evaluator.reject({ jobKey: job.jobKey, escrowState: view.escrowState });
     return syncAndReturn(input, dependencies, job, view, attempt, assertLeaseHeld);
   }
+  if (view.escrowState === "Expired")
+    return syncAndReturn(input, dependencies, job, view, attempt, assertLeaseHeld);
   if (view.vaultState === "Opened" && budget === undefined) {
     const waitHours = Number(dependencies.config.get("payer.jobBudgetWaitHours"));
     const trace = await getExecutionTrace(
@@ -510,11 +522,11 @@ async function waitForJobResult(
   if (
     result.escrowState === "Submitted" ||
     result.escrowState === "Completed" ||
-    result.escrowState === "Rejected"
+    result.escrowState === "Rejected" ||
+    result.escrowState === "Expired"
   )
     return syncAndReturn(input, dependencies, job, result, attempt, assertLeaseHeld);
   const expired =
-    result.escrowState === "Expired" ||
     Math.floor(dependencies.now().getTime() / MILLISECONDS_PER_SECOND) >= job.expiredAt;
   if (expired && !(await dependencies.chain.hasDecisionPending(job.jobKey))) {
     const transaction =
@@ -685,26 +697,30 @@ async function runJobRefund(
     Math.floor(dependencies.now().getTime() / 1000) < view.expiredAt
   )
     return undefined;
-  const transaction =
-    (await priorJobTransaction(dependencies, input, attempt, "job.refund.sent", input.jobKey)) ??
-    (await signVaultCall(dependencies, "claimJobRefund", { jobKey: input.jobKey }));
-  if (!(await hasJobPhase(dependencies, input, attempt, "job.refund.sent", input.jobKey)))
+  const refundAlreadyClaimed = view.escrowState === "Expired" || view.escrowState === "Rejected";
+  let txHash: string | undefined;
+  if (!refundAlreadyClaimed) {
+    const transaction =
+      (await priorJobTransaction(dependencies, input, attempt, "job.refund.sent", input.jobKey)) ??
+      (await signVaultCall(dependencies, "claimJobRefund", { jobKey: input.jobKey }));
+    if (!(await hasJobPhase(dependencies, input, attempt, "job.refund.sent", input.jobKey)))
+      await appendExecutionPhase(dependencies.pool, {
+        planId: input.planId,
+        stepIndex: input.stepIndex,
+        attempt,
+        phase: "job.refund.sent",
+        payload: { jobKey: input.jobKey, transaction },
+      });
+    assertLeaseHeld();
+    txHash = await dependencies.chain.claimJobRefund({ jobKey: input.jobKey, transaction });
     await appendExecutionPhase(dependencies.pool, {
       planId: input.planId,
       stepIndex: input.stepIndex,
       attempt,
-      phase: "job.refund.sent",
-      payload: { jobKey: input.jobKey, transaction },
+      phase: "job.refund.claimed",
+      payload: { jobKey: input.jobKey, txHash },
     });
-  assertLeaseHeld();
-  const txHash = await dependencies.chain.claimJobRefund({ jobKey: input.jobKey, transaction });
-  await appendExecutionPhase(dependencies.pool, {
-    planId: input.planId,
-    stepIndex: input.stepIndex,
-    attempt,
-    phase: "job.refund.claimed",
-    payload: { jobKey: input.jobKey, txHash },
-  });
+  }
   const syncTransaction =
     (await priorJobTransaction(dependencies, input, attempt, "job.sync.sent", input.jobKey)) ??
     (await signVaultCall(dependencies, "syncJob", { jobKey: input.jobKey }));
@@ -728,7 +744,7 @@ async function runJobRefund(
     phase: "job.synced",
     payload: { jobKey: input.jobKey, state: synced.state, txHash: synced.txHash },
   });
-  return txHash;
+  return txHash ?? synced.txHash;
 }
 
 async function persistBrief(
