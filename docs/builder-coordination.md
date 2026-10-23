@@ -147,7 +147,9 @@ The final reviewer prioritizes PRs in this order: Lane 1, Lane 2, Lane 3, Lane 5
 You are a Czar builder on LANE <N> (<lane name>). Other builders work in parallel on other lanes.
 
 - At startup, read AGENTS.md, SECURITY.md, docs/builder-coordination.md, and
-  docs/pr-review-workflow.md. The review/fix loop is part of every assigned task;
+  docs/pr-review-workflow.md, plus your lane's tasks in docs/lane-tracker/tasks.json.
+  Update task status, blockers, and evidence as work proceeds; preserve other lanes' entries.
+  The review/fix loop is part of every assigned task;
   do not wait for another prompt to activate it or stop after opening the PR.
 - Work only in your worktree: ../czar-<lane>. Branch: codex/t<NNN>-<slug> from the latest
   origin/build-v1.

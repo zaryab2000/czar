@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Czar · Lane tracker</title>
+    <link rel="stylesheet" href="/style.css" />
+    <script type="module" src="/app.js"></script>
+  </head>
+  <body>
+    <aside>
+      <a class="brand" href="/">czar<span>BUILD / V1</span></a>
+      <p class="overline">Development lanes</p>
+      <nav id="lanes" aria-label="Lanes"></nav>
+      <div class="aside-note">Merged ≠ accepted.<br />Close a task with evidence.</div>
+      <button id="export" class="quiet">Export JSON</button>
+    </aside>
+    <main>
+      <header>
+        <div>
+          <p class="overline" id="context">Project control</p>
+          <h1 id="heading">All lanes</h1>
+          <p id="summary"></p>
+        </div>
+        <button id="add">+ Add task</button>
+      </header>
+      <div id="message" role="status" aria-live="polite"></div>
+      <section id="metrics" aria-label="Task totals"></section>
+      <div class="toolbar">
+        <label
+          >Find a task<input id="search" type="search" placeholder="Title, task ID, blocker…"
+        /></label>
+        <label
+          >Status<select id="status" aria-label="Status">
+            <option value="">All statuses</option>
+          </select></label
+        >
+        <button id="reload" class="quiet">Reload</button>
+      </div>
+      <div id="tasks"></div>
+      <footer id="footer"></footer>
+    </main>
+    <dialog id="editor">
+      <form id="form">
+        <div class="dialog-head">
+          <h2 id="editor-title">Edit task</h2>
+          <button type="button" id="cancel" class="quiet">Close</button>
+        </div>
+        <label>Title<input name="title" required maxlength="250" /></label>
+        <div class="form-row">
+          <label>Lane<select name="lane" aria-label="Lane"></select></label>
+          <label>Status<select name="status" aria-label="Status"></select></label>
+          <label
+            >Priority<select name="priority" aria-label="Priority">
+              <option>P1</option>
+              <option>P2</option>
+              <option>P3</option>
+            </select></label
+          >
+        </div>
+        <div class="form-row">
+          <label>Specification task IDs<input name="taskIds" placeholder="T-052, T-053" /></label
+          ><label>Owner<input name="owner" /></label>
+        </div>
+        <label>Scope / remaining work<textarea name="details" rows="3"></textarea></label>
+        <label>Acceptance criteria<textarea name="acceptance" rows="3"></textarea></label>
+        <label>Blocker / dependency<textarea name="blocker" rows="2"></textarea></label>
+        <label>Evidence / PR / reviewed commit<textarea name="evidence" rows="3"></textarea></label>
+        <p id="form-error" role="alert"></p>
+        <button type="button" id="refresh-base" class="quiet" hidden>
+          Reload latest tasks, keep draft
+        </button>
+        <button id="save" type="submit">Save task</button>
+      </form>
+    </dialog>
+  </body>
+</html>

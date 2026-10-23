@@ -24,6 +24,8 @@ interfaces or silently change canonical specifications.
 - Start feature branches from freshly fetched `origin/build-v1` in a separate worktree.
 - Every builder PR targets `build-v1`, even while GitHub's default branch is `main`.
 - Follow `docs/pr-review-workflow.md` for the builder's review and fix loop.
+- Track lane work in `docs/lane-tracker/tasks.json`; run `pnpm tracker` for the editable board.
+  Update status, blockers, and evidence with task progress; preserve other lanes' entries.
 - The designated reviewer in Zaryab's Codex session performs final review; Zaryab merges.
 - Builders may push fixes to their PR branches within the assigned scope. Do not merge,
   push directly to `build-v1` or `main`, or rewrite commits already pushed to shared branches.

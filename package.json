@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "tracker": "node scripts/lane-tracker.mjs",
     "lint": "oxlint --deny-warnings && oxfmt --check",
     "format": "oxfmt",
     "typecheck": "pnpm -r typecheck",
