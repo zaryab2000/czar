@@ -10,7 +10,8 @@
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "start:local": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/local-main.ts"
   },
   "dependencies": {
     "@czar/config": "workspace:*",

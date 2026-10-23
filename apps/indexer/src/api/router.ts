@@ -23,6 +23,27 @@ export function createIndexerApi(store: QueryStore, config: Config = loadConfig(
   const app = new Hono();
   const clock = { now: () => Date.now() };
 
+  app.get("/vaults", async (context) => {
+    const owner = context.req.query("owner")?.toLowerCase();
+    if (!owner || !ADDRESS.test(owner)) return problem(context, 400, "validation");
+    const vault = await store.vaultByOwner(owner);
+    if (!vault) return problem(context, 404, "not-found");
+    return context.json({ ...vault, createdBlock: String(vault["createdBlock"]) });
+  });
+
+  app.get("/envelopes", async (context) => {
+    const vault = context.req.query("vault")?.toLowerCase();
+    if (!vault || !ADDRESS.test(vault)) return problem(context, 400, "validation");
+    return idPage(
+      context,
+      config,
+      clock,
+      "envelopes",
+      (cursor, limit) => store.envelopesForVault(vault, cursor, limit),
+      (item) => assertValid(validateEnvelope, item, "Envelope"),
+    );
+  });
+
   app.get("/envelopes/:envelopeRef", async (context) => {
     const found = await store.envelopeByRef(context.req.param("envelopeRef"));
     if (!found) return problem(context, 404, "not-found");

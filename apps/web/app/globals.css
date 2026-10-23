@@ -19,6 +19,39 @@ body {
   border-bottom: 1px solid color-mix(in srgb, currentColor 15%, transparent);
 }
 
+.czar-header button,
+.primary-button {
+  border: 0;
+  border-radius: 8px;
+  padding: 10px 14px;
+  background: #354f32;
+  color: white;
+  cursor: pointer;
+}
+
+.czar-header button {
+  margin-left: 24px;
+}
+
+.czar-header button:disabled,
+.primary-button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.czar-nav {
+  display: flex;
+  gap: 24px;
+  margin-left: auto;
+}
+
+.czar-nav a,
+.panel a {
+  color: inherit;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
+}
+
 .czar-wordmark {
   font-weight: 600;
 }
@@ -32,4 +65,108 @@ body {
 .czar-title {
   font-size: 24px;
   font-weight: 600;
+}
+
+.welcome-card,
+.panel,
+.balance-card,
+.error-panel {
+  border: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+  border-radius: 12px;
+  padding: 24px;
+}
+
+.welcome-card {
+  max-width: 640px;
+  margin: 80px auto;
+}
+
+.eyebrow {
+  color: #586b4c;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.primary-link {
+  display: inline-block;
+  margin-top: 16px;
+  border-radius: 8px;
+  padding: 12px 16px;
+  background: #354f32;
+  color: white;
+  text-decoration: none;
+}
+
+.page-stack {
+  display: grid;
+  gap: 24px;
+}
+
+.balance-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+}
+
+.balance-card {
+  display: grid;
+  gap: 12px;
+}
+
+.balance-card strong {
+  font-size: 24px;
+}
+
+.panel h2 {
+  margin-top: 0;
+}
+
+.rows {
+  display: grid;
+  gap: 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.rows li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 12px 0;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 10%, transparent);
+}
+
+.notice {
+  border-left: 4px solid #9f3b30;
+  padding: 12px 16px;
+  background: color-mix(in srgb, #9f3b30 8%, transparent);
+}
+
+.global-notice {
+  max-width: var(--czar-max-width);
+  margin: 16px auto 0;
+  padding: 12px 16px;
+  border-left: 4px solid #9f3b30;
+  background: color-mix(in srgb, #9f3b30 8%, transparent);
+}
+
+.step-card {
+  border-top: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+  padding: 12px 0;
+}
+
+.step-card h3 {
+  margin-top: 0;
+}
+
+.error-panel button {
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  padding: 8px 12px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
 }

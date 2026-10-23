@@ -183,6 +183,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 120,
   },
   {
+    "key": "app.bundlerEndpoints",
+    "source": "default",
+    "unit": "bundler-endpoint-map",
+    "value": {},
+  },
+  {
     "key": "app.bundlerOrder",
     "source": "default",
     "unit": "",
@@ -192,6 +198,12 @@ exports[`registry > matches the dump snapshot 1`] = `
       "alchemy",
       "zerodev",
     ],
+  },
+  {
+    "key": "app.challengeTtlSeconds",
+    "source": "default",
+    "unit": "s",
+    "value": 300,
   },
   {
     "key": "app.largeCapWarnBps",
@@ -2072,6 +2084,18 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": "~/Library/Application Support/Czar/signer/keystore/",
   },
   {
+    "key": "signer.local.dbPort",
+    "source": "default",
+    "unit": "port",
+    "value": 15433,
+  },
+  {
+    "key": "signer.local.rpcPort",
+    "source": "default",
+    "unit": "port",
+    "value": 8545,
+  },
+  {
     "key": "signer.pocketDustAtomic",
     "source": "default",
     "unit": "atomic",
@@ -2082,6 +2106,18 @@ exports[`registry > matches the dump snapshot 1`] = `
     "source": "default",
     "unit": "hours",
     "value": 24,
+  },
+  {
+    "key": "signer.projection.maxRaiseStepBps",
+    "source": "default",
+    "unit": "bps",
+    "value": 2000,
+  },
+  {
+    "key": "signer.projection.periodLengthSeconds",
+    "source": "default",
+    "unit": "s",
+    "value": 604800,
   },
   {
     "key": "signer.slowWithdrawMarginHours",

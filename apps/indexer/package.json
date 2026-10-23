@@ -16,7 +16,8 @@
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json && tsc -p test/fixtures/resume/tsconfig.json && tsc -p test/fixtures/replay/tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "start:local": "ponder dev --port 42069"
   },
   "dependencies": {
     "@czar/config": "workspace:*",

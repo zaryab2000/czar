@@ -204,6 +204,12 @@ describe("app receipt accepted by deployed vault", () => {
           requestSize: 0,
           responseSize: context.response.body.length,
         }),
+      appReadOptions: {
+        rpcUrl: "http://127.0.0.1:8549",
+        factoryAddress: "0x0000000000000000000000000000000000000001",
+        indexerUrl: "http://127.0.0.1:42069",
+      },
+      revisePlanSubjects: async () => null,
       clock,
       random: { bytes: (length) => Buffer.alloc(length, 9) },
     });

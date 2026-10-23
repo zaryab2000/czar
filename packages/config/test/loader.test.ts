@@ -14,6 +14,8 @@ function errorOf(run: () => unknown): ConfigError {
 describe("loadConfig", () => {
   it("returns spec defaults", () => {
     const config = loadConfig();
+    expect(config.get("app.challengeTtlSeconds")).toBe(300);
+    expect(config.get("app.bundlerEndpoints")).toEqual({});
     expect(config.get("daemon.hookPort")).toBe(47011);
     expect(config.get("indexer.getLogsBlockRange")).toBe(9999);
     expect(config.get("signer.backend")).toBe("local-keystore");
@@ -117,7 +119,9 @@ describe("registry", () => {
   it("every entry has a unit field, a reason and a spec source", () => {
     for (const spec of PARAMETERS) {
       expect(spec.reason.length, spec.key).toBeGreaterThan(0);
-      expect(spec.source, spec.key).toMatch(/^docs\/specs\/0[0-5][^:]*\.md:\d+$/);
+      expect(spec.source, spec.key).toMatch(
+        /^docs\/specs\/(0[0-5][^:]*|06-review\/[^:]*)\.md:\d+$/,
+      );
     }
   });
 

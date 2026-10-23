@@ -17,7 +17,7 @@ export interface SignerProcessOptions {
   readonly callers: Readonly<Record<string, readonly KeyId[]>>;
   readonly prepareTransaction: TransactionPreparer;
   readonly auditExecutor: AuditQueryExecutor;
-  readonly refill: Omit<GasRefillOptions, "config" | "signer">;
+  readonly refill: Omit<GasRefillOptions, "config" | "signer" | "keyAddress">;
   readonly allowedCallers: Readonly<Record<string, readonly string[]>>;
   readonly keychainOpen?: KeychainOpen;
   readonly argv?: readonly string[];
@@ -63,9 +63,21 @@ export async function startSignerProcess(
     identity,
     allowedCallers: options.allowedCallers,
   });
-  const stopRefill = startGasRefillJob({ ...options.refill, config, signer }, () => {
-    process.emitWarning("signer gas refill job failed; inspect the configured alert sink");
-  });
+  const stopRefill = startGasRefillJob(
+    {
+      ...options.refill,
+      config,
+      signer,
+      keyAddress: (key) => {
+        const address = backend.address(key);
+        if (address === undefined) throw new Error(`local keystore has no ${key} key`);
+        return address;
+      },
+    },
+    () => {
+      process.emitWarning("signer gas refill job failed; inspect the configured alert sink");
+    },
+  );
   return {
     signer,
     async stop() {

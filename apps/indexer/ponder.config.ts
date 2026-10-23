@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { createConfig } from "ponder";
 import { getAbiItem } from "viem";
-import { loadConfig } from "@czar/config";
+import { loadConfig, parameterEnvironment, parseParameterToml } from "@czar/config";
 import { ARC_TESTNET_CHAIN_ID, ARC_TESTNET_PUBLIC_RPC } from "@czar/indexer/chain";
 import { arcTransport } from "@czar/indexer/rpc";
 import { czarVaultAbi, czarVaultFactoryAbi } from "@czar/vault-client";
@@ -17,7 +17,12 @@ import {
 } from "#src/external-abis";
 import { EXTERNAL_ADDRESSES } from "#src/external-events";
 
-const config = loadConfig({ env: process.env });
+const localConfigPath =
+  process.env["CZAR_LOCAL_CONFIG"] ?? new URL("../../../env/local.toml", import.meta.url);
+const config = loadConfig({
+  envFile: parseParameterToml(readFileSync(localConfigPath, "utf8")),
+  env: parameterEnvironment(process.env),
+});
 const MS_PER_SECOND = 1000;
 const deploymentPath =
   process.env["CZAR_INDEXER_DEPLOYMENT_PATH"] ??

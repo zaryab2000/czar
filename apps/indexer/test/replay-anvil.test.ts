@@ -409,7 +409,7 @@ async function indexedMirrors(): Promise<{
         CZAR_TEST_FACTORY: factory,
         CZAR_TEST_OPEN_EVIDENCE: openEvidenceAddress,
         CZAR_TEST_PGLITE_DIR: pgliteDir,
-        CZAR_TEST_GATEWAY_POLL_DISABLED: "1",
+        CZAR_INDEXER_DISABLE_EXTERNAL_POLL: "1",
       },
       stdio: ["ignore", "pipe", "pipe"],
     },
@@ -647,8 +647,9 @@ it(
     // T-034: every CZ-19 §5.4 query through the real Ponder/Postgres API process.
     const query = async (path: string) => {
       const response = await fetch(`${API}/q${path}`);
-      expect(response.status, path).toBe(200);
-      return (await response.json()) as Record<string, unknown>;
+      const body = await response.text();
+      expect(response.status, `${path}: ${body}\n${ponderLogs}`).toBe(200);
+      return JSON.parse(body) as Record<string, unknown>;
     };
     const envelopeRef = String(mirrors.envelopes[0]?.["envelopeRef"]);
     const byRef = await query(`/envelopes/${encodeURIComponent(envelopeRef)}`);
