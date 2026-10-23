@@ -9,18 +9,18 @@ const FACTORY = "0x0000000000000000000000000000000000000002" as Address;
 
 describe("createVaultEventSource", () => {
   let watchContractEvent: ReturnType<typeof vi.fn>;
-  let unwatchFrozen: ReturnType<typeof vi.fn>;
-  let unwatchPaused: ReturnType<typeof vi.fn>;
+  let unwatch: Record<string, ReturnType<typeof vi.fn>>;
 
   beforeEach(() => {
-    unwatchFrozen = vi.fn();
-    unwatchPaused = vi.fn();
-    watchContractEvent = vi.fn((request: Record<string, unknown>) =>
-      request["eventName"] === "Frozen" ? unwatchFrozen : unwatchPaused,
+    unwatch = Object.fromEntries(
+      ["Frozen", "Unfrozen", "GuardianPaused", "GuardianUnpaused"].map((name) => [name, vi.fn()]),
+    );
+    watchContractEvent = vi.fn(
+      (request: Record<string, unknown>) => unwatch[String(request["eventName"])],
     );
   });
 
-  it("watches vault Frozen and factory GuardianPaused using configured polling", async () => {
+  it("watches vault halt and recovery events using configured polling", async () => {
     const client = mockClient(watchContractEvent);
     const source = createVaultEventSource(
       client,
@@ -31,7 +31,15 @@ describe("createVaultEventSource", () => {
     source.subscribe(vi.fn(async () => undefined));
     await flushPromises();
 
-    expect(watchContractEvent).toHaveBeenCalledTimes(2);
+    expect(watchContractEvent).toHaveBeenCalledTimes(4);
+    expect(watchContractEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        address: VAULT,
+        abi: czarVaultAbi,
+        eventName: "Unfrozen",
+        pollingInterval: 2_500,
+      }),
+    );
     expect(watchContractEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         address: VAULT,
@@ -48,9 +56,17 @@ describe("createVaultEventSource", () => {
         pollingInterval: 2_500,
       }),
     );
+    expect(watchContractEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        address: FACTORY,
+        abi: czarVaultFactoryAbi,
+        eventName: "GuardianUnpaused",
+        pollingInterval: 2_500,
+      }),
+    );
   });
 
-  it("maps both event types to the configured vault and unsubscribes", async () => {
+  it("maps halt and recovery events to the configured vault and unsubscribes", async () => {
     const client = mockClient(watchContractEvent);
     const source = createVaultEventSource(client, VAULT);
     const listener = vi.fn(async () => undefined);
@@ -59,23 +75,37 @@ describe("createVaultEventSource", () => {
     const frozen = watchContractEvent.mock.calls.find(
       ([request]) => request["eventName"] === "Frozen",
     )?.[0];
+    const unfrozen = watchContractEvent.mock.calls.find(
+      ([request]) => request["eventName"] === "Unfrozen",
+    )?.[0];
     const paused = watchContractEvent.mock.calls.find(
       ([request]) => request["eventName"] === "GuardianPaused",
     )?.[0];
+    const unpaused = watchContractEvent.mock.calls.find(
+      ([request]) => request["eventName"] === "GuardianUnpaused",
+    )?.[0];
 
-    if (!frozen || !paused) throw new Error("Expected both vault event subscriptions.");
+    if (!frozen || !unfrozen || !paused || !unpaused)
+      throw new Error("Expected all four vault event subscriptions.");
     await (frozen["onLogs"] as (logs: readonly { eventName: string }[]) => Promise<void>)([
       { eventName: "Frozen" },
     ]);
     await (paused["onLogs"] as (logs: readonly { eventName: string }[]) => Promise<void>)([
       { eventName: "GuardianPaused" },
     ]);
+    await (unfrozen["onLogs"] as (logs: readonly { eventName: string }[]) => Promise<void>)([
+      { eventName: "Unfrozen" },
+    ]);
+    await (unpaused["onLogs"] as (logs: readonly { eventName: string }[]) => Promise<void>)([
+      { eventName: "GuardianUnpaused" },
+    ]);
 
     expect(listener).toHaveBeenNthCalledWith(1, { name: "Frozen", vault: VAULT });
     expect(listener).toHaveBeenNthCalledWith(2, { name: "GuardianPaused", vault: VAULT });
+    expect(listener).toHaveBeenNthCalledWith(3, { name: "Unfrozen", vault: VAULT });
+    expect(listener).toHaveBeenNthCalledWith(4, { name: "GuardianUnpaused", vault: VAULT });
     unsubscribe();
-    expect(unwatchFrozen).toHaveBeenCalledOnce();
-    expect(unwatchPaused).toHaveBeenCalledOnce();
+    for (const cleanup of Object.values(unwatch)) expect(cleanup).toHaveBeenCalledOnce();
   });
 });
 

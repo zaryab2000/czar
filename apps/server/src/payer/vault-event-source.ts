@@ -56,25 +56,35 @@ async function watchEvents(
       abi: czarVaultAbi,
       eventName: "Frozen",
       pollingInterval,
-      onLogs: async (logs) => {
-        await notifyListeners(logs, "Frozen", vaultAddress, listener);
-      },
+      onLogs: (logs) => notifyListeners(logs, "Frozen", vaultAddress, listener),
+    }),
+    client.watchContractEvent({
+      address: vaultAddress,
+      abi: czarVaultAbi,
+      eventName: "Unfrozen",
+      pollingInterval,
+      onLogs: (logs) => notifyListeners(logs, "Unfrozen", vaultAddress, listener),
     }),
     client.watchContractEvent({
       address: factory,
       abi: czarVaultFactoryAbi,
       eventName: "GuardianPaused",
       pollingInterval,
-      onLogs: async (logs) => {
-        await notifyListeners(logs, "GuardianPaused", vaultAddress, listener);
-      },
+      onLogs: (logs) => notifyListeners(logs, "GuardianPaused", vaultAddress, listener),
+    }),
+    client.watchContractEvent({
+      address: factory,
+      abi: czarVaultFactoryAbi,
+      eventName: "GuardianUnpaused",
+      pollingInterval,
+      onLogs: (logs) => notifyListeners(logs, "GuardianUnpaused", vaultAddress, listener),
     }),
   );
 }
 
 async function notifyListeners(
   logs: readonly { readonly eventName?: string }[],
-  eventName: "Frozen" | "GuardianPaused",
+  eventName: "Frozen" | "Unfrozen" | "GuardianPaused" | "GuardianUnpaused",
   vault: Address,
   listener: (event: VaultHaltEvent) => Promise<void>,
 ): Promise<void> {

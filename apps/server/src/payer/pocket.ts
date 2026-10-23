@@ -14,10 +14,11 @@ import {
   encodePaymentSignature,
   readPaymentRequired,
   selectOffer,
+  type SanitizedExtensions,
   type SafeFetch,
 } from "@czar/x402";
 import type { Pool } from "pg";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { toHex, type Address } from "viem";
 import {
   acquireExecutorLease,
@@ -577,6 +578,7 @@ async function payGatewayStep(
       request,
       read.resource,
       choice.offer,
+      read.extensions.paymentIdentifier,
       dependencies,
       attempt,
       assertLeaseHeld,
@@ -592,6 +594,7 @@ async function sendGatewayCall(
   request: RenderedGatewayRequest,
   resource: { readonly url: string; readonly description?: string; readonly mimeType?: string },
   offer: import("@czar/x402").PaymentRequirements,
+  paymentIdentifier: SanitizedExtensions["paymentIdentifier"],
   dependencies: PocketNanopaymentDependencies,
   attempt: number,
   assertLeaseHeld: () => void,
@@ -631,6 +634,7 @@ async function sendGatewayCall(
         nonce,
       },
       signature: signed.signature,
+      ...(paymentIdentifier ? { advertised: paymentIdentifier, paymentId: randomUUID() } : {}),
     });
     await recordGatewayPhase(
       dependencies,

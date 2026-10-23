@@ -1,6 +1,7 @@
 import { decodeEventLog, type Address, type Hex, type PublicClient } from "viem";
 import { czarJobEscrowAbi, czarVaultAbi, czarVaultFactoryAbi } from "@czar/vault-client";
 import type { Config } from "@czar/config";
+import type { JobBrief } from "@czar/schemas";
 import type { Pool } from "pg";
 import type { Hash32 } from "@czar/hashing";
 import type { JobChain, JobChainView } from "#src/payer/job";
@@ -17,6 +18,7 @@ const ESCROW_SUBMITTED = 2;
 const ESCROW_COMPLETED = 3;
 const ESCROW_REJECTED = 4;
 const ESCROW_EXPIRED = 5;
+const MILLISECONDS_PER_SECOND = 1_000;
 
 export function createJobChainAdapter(input: {
   readonly client: PublicClient;
@@ -188,7 +190,14 @@ export function createJobChainAdapter(input: {
     },
     async hasDecisionPending(jobKeyValue) {
       const view = await readView(jobKeyValue);
-      return view.escrowState === "Submitted";
+      if (view.escrowState !== "Submitted") return false;
+      const rows = await input.pool.query<{ readonly brief: JobBrief }>(
+        "SELECT brief FROM payer_job_briefs WHERE lower(job_key)=lower($1)",
+        [jobKeyValue],
+      );
+      const cutoff = rows.rows[0]?.brief.decisionCutoff;
+      if (typeof cutoff !== "number" || !Number.isSafeInteger(cutoff)) return true;
+      return input.now().getTime() < cutoff * MILLISECONDS_PER_SECOND;
     },
   };
 }

@@ -43,4 +43,34 @@ describe("payer runtime wiring", () => {
     expect(runFallbacks).toHaveBeenCalledTimes(1);
     runtime.stop();
   });
+
+  it("propagates a failed halt drain after logging so its source can retry", async () => {
+    let listener: ((event: { name: string; vault: `0x${string}` }) => Promise<void>) | undefined;
+    const source: VaultHaltEventSource = {
+      subscribe: (next) => {
+        listener = next;
+        return () => undefined;
+      },
+    };
+    const onError = vi.fn();
+    const runtime = startPayerRuntime({
+      events: source,
+      pocketHalt: {
+        listFundedPockets: async () => ["0x0000000000000000000000000000000000000001"],
+        pullback: async () => {
+          throw new Error("temporary signer failure");
+        },
+      },
+      onError,
+    });
+
+    await expect(
+      listener?.({
+        name: "Frozen",
+        vault: "0x0000000000000000000000000000000000000002",
+      }),
+    ).rejects.toThrow("failed for 1 funded pocket(s)");
+    expect(onError).toHaveBeenCalledWith("halt-drain", expect.any(Error));
+    runtime.stop();
+  });
 });

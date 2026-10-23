@@ -12,7 +12,7 @@ import { setupDatabase } from "#test/db";
 import { makeObjectiveSubmission, seedDevice, TEST_USER_ID } from "#test/fixtures";
 import { loadConfig } from "@czar/config";
 import { buildTree, pocketLeaf } from "@czar/hashing";
-import { buildPaymentRequired, encodePaymentRequired } from "@czar/x402";
+import { buildPaymentRequired, decodeBase64Json, encodePaymentRequired } from "@czar/x402";
 
 const getPool = setupDatabase();
 const PLAN_ID = "pln_01K7ZT9P4N5Q6R7S8T9V0W1X2Y";
@@ -351,6 +351,19 @@ describe("pocket funding", () => {
           extra: { name: "GatewayWalletBatched" },
         },
       ],
+      extensions: {
+        "payment-identifier": {
+          info: { required: true },
+          schema: {
+            type: "object",
+            properties: {
+              required: { type: "boolean" },
+              id: { type: "string", minLength: 16, maxLength: 128 },
+            },
+            required: ["required"],
+          },
+        },
+      },
     });
     let callNumber = 0;
     const safeFetch = vi.fn(async () => {
@@ -439,6 +452,19 @@ describe("pocket funding", () => {
           extra: { name: "GatewayWalletBatched" },
         },
       ],
+      extensions: {
+        "payment-identifier": {
+          info: { required: true },
+          schema: {
+            type: "object",
+            properties: {
+              required: { type: "boolean" },
+              id: { type: "string", minLength: 16, maxLength: 128 },
+            },
+            required: ["required"],
+          },
+        },
+      },
     });
     const signedHeaders: string[] = [];
     const safeFetch = vi.fn(
@@ -500,6 +526,16 @@ describe("pocket funding", () => {
     expect(signer.sign).toHaveBeenCalledOnce();
     expect(signedHeaders).toHaveLength(2);
     expect(signedHeaders[0]).toBe(signedHeaders[1]);
+    const payload = decodeBase64Json(signedHeaders[0] ?? "");
+    expect(payload.ok).toBe(true);
+    if (!payload.ok) throw new Error("Expected an encoded Gateway payment payload.");
+    expect(payload.value).toMatchObject({
+      extensions: {
+        "payment-identifier": {
+          info: { required: true, id: expect.stringMatching(/^[A-Za-z0-9_-]{16,128}$/) },
+        },
+      },
+    });
   });
 
   it("stops retries for a Gateway 409 on one authorization index", async () => {

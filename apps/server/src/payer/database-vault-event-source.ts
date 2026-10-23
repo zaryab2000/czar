@@ -25,7 +25,17 @@ export function createDatabaseVaultEventSource(
       const retryVaults = new Set<Address>();
       const unsubscribe: (() => void)[] = [];
       const emit = async (event: VaultHaltEvent) => {
-        const key = `${event.name}:${event.vault.toLowerCase()}`;
+        const vaultKey = event.vault.toLowerCase();
+        if (event.name === "Unfrozen") {
+          seenHalts.delete(`Frozen:${vaultKey}`);
+          return;
+        }
+        if (event.name === "GuardianUnpaused") {
+          seenHalts.delete(`GuardianPaused:${vaultKey}`);
+          return;
+        }
+        if (event.name !== "Frozen" && event.name !== "GuardianPaused") return;
+        const key = `${event.name}:${vaultKey}`;
         if (seenHalts.has(key)) return;
         try {
           await listener(event);

@@ -246,3 +246,65 @@ These are fixture-backed recovery checks, not Arc-Anvil crash tests.
 
 - Code and security reviews completed for `14ebf7a`; their findings are being addressed in this follow-up. Fresh review requests will be posted for the new commit.
 - No docs/specs files were edited. No secrets, funds, or live provider calls were used.
+
+## PR #52 review follow-up, round 2 (2026-10-23)
+
+### Code review findings from `fc7c59a`
+
+- **Fixed:** halt drain errors are logged and rethrown so the database event source can retry them.
+- **Fixed:** `Unfrozen` and `GuardianUnpaused` events clear halt deduplication, allowing a later freeze/pause epoch to drain again.
+- **Fixed:** submitted jobs are considered decision-pending only before their stored `JobBrief.decisionCutoff`; missing brief/cutoff fails closed as pending.
+- **Fixed:** a mined `requestPullback` is recovered by hashing the persisted signed transaction, reading its receipt, decoding `PullbackRequested`, then reading the vault record.
+- **Fixed:** Gateway payment identifiers advertised by the seller are server-generated and stored in the signed payload, so retries reuse the same identifier.
+- **Escalated / unresolved interface gap:** after slow withdrawal, the app needs to show an owner a `recordManualReturn` action. The current OpenAPI and app schemas define no response or route for this owner action. I did not invent a wire contract; the existing fallback row and amount remain stored, but no app-visible prompt is claimed.
+
+### Files changed in round 2
+
+- `apps/server/src/payer/database-vault-event-source.ts`
+- `apps/server/src/payer/job-chain-adapter.ts`
+- `apps/server/src/payer/pocket.ts`
+- `apps/server/src/payer/pullback-execution-chain.ts`
+- `apps/server/src/payer/runtime.ts`
+- `apps/server/src/payer/vault-event-source.ts`
+- `apps/server/test/payer/database-vault-event-source.test.ts`
+- `apps/server/test/payer/job-chain-adapter.test.ts`
+- `apps/server/test/payer/pocket.test.ts`
+- `apps/server/test/payer/pullback-execution-chain.test.ts`
+- `apps/server/test/payer/runtime.test.ts`
+- `apps/server/test/payer/vault-event-source.test.ts`
+- `apps/server/T-052-T-054-task-report.md`
+
+### Validation
+
+- `fnm exec --using=22.22.0 pnpm --filter @czar/server test`
+  ```text
+  Test Files  44 passed (44)
+       Tests  227 passed (227)
+  Duration  11.03s
+  ```
+- `fnm exec --using=22.22.0 pnpm --filter @czar/config test`
+  ```text
+  Test Files  3 passed (3)
+       Tests  27 passed (27)
+  Duration  93ms
+  ```
+- `fnm exec --using=22.22.0 pnpm -r typecheck`
+  ```text
+  Scope: 14 of 15 workspace projects
+  All package and application typecheck scripts completed successfully.
+  ```
+- `fnm exec --using=22.22.0 pnpm lint`
+  ```text
+  > oxlint --deny-warnings && oxfmt --check
+  All matched files use the correct format.
+  Finished in 16ms on 388 files using 10 threads.
+  ```
+- `git diff --check` — passed.
+- Targeted review regressions passed: 6 files, 23 tests.
+- Arc-Anvil Bundle B acceptance remains deferred under D92; no testnet activity was performed.
+
+### Review status and remaining gaps
+
+- Code review completed for `fc7c59a`; five of its six findings were implemented here. The owner-visible manual-return action is escalated as an unspecified app/API contract.
+- Security review completed for `fc7c59a`. Dynamic discovery and halt-state reconciliation work when a `pocketHalt` dependency is supplied, but the production composition still lacks the context to construct that dependency and logs that halt monitoring is disabled by default.
+- Fresh code and security reviews will be requested for the next commit. No docs/specs were changed.

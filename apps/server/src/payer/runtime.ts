@@ -43,7 +43,7 @@ function subscribeHaltEvents(options: PayerRuntimeOptions): (() => void) | undef
       );
     } catch (error) {
       options.onError?.("halt-drain", error);
-      if (!options.onError) throw error;
+      throw error;
     }
   });
 }
