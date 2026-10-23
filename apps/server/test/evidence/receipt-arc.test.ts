@@ -490,6 +490,30 @@ function paidStep(
 
 function arcPayerChain(): VaultDirectChain {
   return {
+    envelopeCapacity: async (envelopeId) => {
+      const envelope = await publicClient.readContract({
+        address: vault,
+        abi: czarVaultAbi,
+        functionName: "getEnvelope",
+        args: [envelopeId],
+      });
+      return {
+        cap: envelope.cap,
+        exposure:
+          envelope.spent +
+          envelope.reserved +
+          envelope.pocketOutstanding +
+          envelope.jobEscrowed +
+          envelope.shortfall,
+      };
+    },
+    stepUsed: async (envelopeId, stepIndex) =>
+      publicClient.readContract({
+        address: vault,
+        abi: czarVaultAbi,
+        functionName: "stepUsed",
+        args: [envelopeId, stepIndex],
+      }),
     reserve: async ({ signedTransaction }) => {
       const txHash = await sendSigned(signedTransaction);
       const reservationId = await publicClient.readContract({

@@ -58,6 +58,113 @@ beforeEach(async () => {
 });
 
 describe("payer acceptance boundaries", () => {
+  it("bounds a new reservation by chain stepUsed after prior spending", async () => {
+    const leaf = payeeLeaf(PAYEE, PAYEE_KIND.X402_PAY_TO, 0, AMOUNT * BigInt(SUBJECT_COUNT));
+    const tree = buildTree([leaf]);
+    const required = buildPaymentRequired({
+      url: "http://127.0.0.1:4021/search",
+      description: "recorded merchant fixture",
+      serviceName: "fixture",
+      tags: [],
+      network: "eip155:5042002",
+      amount: AMOUNT.toString(),
+      payTo: PAYEE,
+      maxTimeoutSeconds: 30,
+    });
+    const reserve = vi.fn(async () => ({ reservationId: 4n, txHash: HASH }));
+    const sign = vi.fn(async (_caller: string, request: { readonly kind: string }) =>
+      request.kind === "usdc-3009"
+        ? { signature: `0x${"ab".repeat(416)}` as `0x${string}`, digest: HASH as `0x${string}` }
+        : { signedTransaction: "0x1234" as `0x${string}` },
+    );
+    const fakeNow = new Date("2026-10-21T00:00:00Z");
+    const chain = {
+      stepUsed: vi.fn(async () => AMOUNT * 2n),
+      envelopeCapacity: vi.fn(async () => ({ cap: 10_000n, exposure: 6_000n })),
+      reserve,
+      settle: vi.fn(async () => HASH),
+      authorizationState: vi.fn(async () => true),
+      isSettled: vi.fn(async () => true),
+      finalize: vi.fn(async () => ({ txHash: HASH, final: true })),
+      reservationFinal: vi.fn(async () => true),
+    };
+    const input = paidInput(tree.root);
+    const result = await executeVaultDirectStep(input, {
+      pool: getPool(),
+      config: loadConfig(),
+      signer: { sign } as never,
+      chain: chain as never,
+      safeFetch: vi.fn(async (url, options) => ({
+        status: options?.headers?.["payment-signature"] ? 200 : 402,
+        url,
+        headers: options?.headers?.["payment-signature"]
+          ? { "payment-response": encodeBase64Json({ success: true, transaction: HASH }) }
+          : { "payment-required": encodePaymentRequired(required) },
+        body: new TextEncoder().encode('{"ok":true}'),
+      })),
+      now: () => fakeNow,
+      objects: { put: async () => "body-ref", get: async () => new Uint8Array() },
+      boundary: async () => ({ accepted: true }),
+      recordReceipt: async () => undefined,
+    } as never);
+
+    expect(result).toMatchObject({ state: "done" });
+    expect(chain.stepUsed).toHaveBeenCalledWith(1n, 0);
+    expect(reserve).toHaveBeenCalledWith(expect.objectContaining({ count: 3 }));
+  });
+
+  it("bounds a new reservation by remaining envelope exposure", async () => {
+    const leaf = payeeLeaf(PAYEE, PAYEE_KIND.X402_PAY_TO, 0, AMOUNT * BigInt(SUBJECT_COUNT));
+    const tree = buildTree([leaf]);
+    const required = buildPaymentRequired({
+      url: "http://127.0.0.1:4021/search",
+      description: "recorded merchant fixture",
+      serviceName: "fixture",
+      tags: [],
+      network: "eip155:5042002",
+      amount: AMOUNT.toString(),
+      payTo: PAYEE,
+      maxTimeoutSeconds: 30,
+    });
+    const reserve = vi.fn(async () => ({ reservationId: 4n, txHash: HASH }));
+    const result = await executeVaultDirectStep(paidInput(tree.root), {
+      pool: getPool(),
+      config: loadConfig(),
+      signer: {
+        sign: vi.fn(async (_caller: string, request: { readonly kind: string }) =>
+          request.kind === "usdc-3009"
+            ? { signature: `0x${"ab".repeat(416)}` as `0x${string}`, digest: HASH as `0x${string}` }
+            : { signedTransaction: "0x1234" as `0x${string}` },
+        ),
+      } as never,
+      chain: {
+        stepUsed: vi.fn(async () => 0n),
+        envelopeCapacity: vi.fn(async () => ({ cap: 10_000n, exposure: 8_000n })),
+        reserve,
+        settle: vi.fn(async () => HASH),
+        authorizationState: vi.fn(async () => true),
+        isSettled: vi.fn(async () => true),
+        finalize: vi.fn(async () => ({ txHash: HASH, final: true })),
+        reservationFinal: vi.fn(async () => true),
+      } as never,
+      safeFetch: vi.fn(async (url, options) => ({
+        status: options?.headers?.["payment-signature"] ? 200 : 402,
+        url,
+        headers: options?.headers?.["payment-signature"]
+          ? { "payment-response": encodeBase64Json({ success: true, transaction: HASH }) }
+          : { "payment-required": encodePaymentRequired(required) },
+        body: new TextEncoder().encode('{"ok":true}'),
+      })),
+      now: () => new Date("2026-10-21T00:00:00Z"),
+      objects: { put: async () => "body-ref", get: async () => new Uint8Array() },
+      boundary: async () => ({ accepted: true }),
+      recordReceipt: async () => undefined,
+    } as never);
+
+    expect(result).toMatchObject({ state: "done" });
+    expect(reserve).toHaveBeenCalledWith(expect.objectContaining({ count: 2 }));
+  });
+
   it("keeps five subject calls distinct and ignores hostile merchant bodies for payment policy", async () => {
     const leaf = payeeLeaf(PAYEE, PAYEE_KIND.X402_PAY_TO, 0, AMOUNT * BigInt(SUBJECT_COUNT));
     const tree = buildTree([leaf]);
@@ -110,6 +217,8 @@ describe("payer acceptance boundaries", () => {
       config: loadConfig(),
       signer,
       chain: {
+        stepUsed: vi.fn(async () => 0n),
+        envelopeCapacity: vi.fn(async () => ({ cap: 10_000n, exposure: 0n })),
         reserve: vi.fn(async () => ({ reservationId: 4n, txHash: HASH })),
         settle: vi.fn(async () => HASH),
         authorizationState: vi.fn(async () => true),

@@ -57,6 +57,8 @@ describe("server composition root", () => {
         delete: async () => undefined,
       },
       chain: {
+        stepUsed: vi.fn(async () => 0n),
+        envelopeCapacity: vi.fn(async () => ({ cap: 10_000n, exposure: 0n })),
         reserve: vi.fn(),
         settle: vi.fn(),
         authorizationState: vi.fn(),

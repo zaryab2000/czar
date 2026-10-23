@@ -228,6 +228,8 @@ describe("vault-direct executor", () => {
       .mockRejectedValueOnce(new Error("simulated worker death before finalize result"))
       .mockResolvedValue({ txHash: HASH, final: true });
     const chain = {
+      stepUsed: vi.fn(async () => 0n),
+      envelopeCapacity: vi.fn(async () => ({ cap: 10_000n, exposure: 0n })),
       reserve,
       settle: vi.fn(async () => {
         settled = true;

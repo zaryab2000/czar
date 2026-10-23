@@ -29,6 +29,19 @@ export function createViemVaultDirectChain(input: {
   }
 
   return {
+    async stepUsed(envelopeId, stepIndex) {
+      return BigInt(await vault.read.stepUsed([envelopeId, stepIndex]));
+    },
+    async envelopeCapacity(envelopeId) {
+      const envelope = await vault.read.getEnvelope([envelopeId]);
+      const exposure =
+        envelope.spent +
+        envelope.reserved +
+        envelope.pocketOutstanding +
+        envelope.jobEscrowed +
+        envelope.shortfall;
+      return { cap: envelope.cap, exposure };
+    },
     async reserve(args) {
       const txHash = await send(args.signedTransaction);
       const receipt = await input.client.getTransactionReceipt({ hash: txHash });
