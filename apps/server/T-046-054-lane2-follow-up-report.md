@@ -5,6 +5,12 @@
 - Tasks reviewed: T-046, T-048, T-049, T-050, T-052, T-053 and T-054.
 - P1 prerequisite: PR #60 is merged into `build-v1`; the existing
   `codex/lane2-job-followup` worktree was inspected and preserved.
+- Base commit: `b3dcc4653ffbc52e33681dbe834ff6149454a317`.
+- Local commits: `8fce1d0` (reservation sizing) and `4dd2830` (handoff reports).
+- PR status: not opened. The tool hook blocked both pushes to the feature ref
+  `codex/lane2-remaining` with `BLOCKED: Use feature branches, not direct push
+  to main`. No alternate remote write was attempted; review requests cannot
+  start until the feature branch is published.
 - This follow-up is based on the latest `origin/build-v1` at start. No canonical
   specs, product decisions, architecture docs, contracts, signer implementation,
   Lane 3 implementation, Lane 4 implementation, or Lane 5 route/UI files were
