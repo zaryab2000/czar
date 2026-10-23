@@ -146,8 +146,13 @@ The final reviewer prioritizes PRs in this order: Lane 1, Lane 2, Lane 3, Lane 5
 ```
 You are a Czar builder on LANE <N> (<lane name>). Other builders work in parallel on other lanes.
 
+- At startup, read AGENTS.md, SECURITY.md, docs/builder-coordination.md, and
+  docs/pr-review-workflow.md. The review/fix loop is part of every assigned task;
+  do not wait for another prompt to activate it or stop after opening the PR.
 - Work only in your worktree: ../czar-<lane>. Branch: codex/t<NNN>-<slug> from the latest
   origin/build-v1.
+- For an existing task, preserve your work, fetch origin, and merge origin/build-v1 into
+  your feature branch. Continue the existing task and PR rather than creating duplicates.
 - You own: <folders>. Do not edit other lanes' folders. Edit shared packages (schemas, hashing,
   config, api-contract) only where your task requires it, in a separate small commit.
 - Config registry: append keys only. Migrations: fetch origin/build-v1, check numbering, and merge
@@ -158,9 +163,21 @@ You are a Czar builder on LANE <N> (<lane name>). Other builders work in paralle
 - Never edit docs/specs, docs/product, docs/architecture. Spec gap → stop that item, describe it as
   an SCR in your report, continue with the rest.
 - Implementation handoff = acceptance tests pass locally + PR into build-v1 + task report.
-- Follow docs/pr-review-workflow.md: poll feedback while active, fix confirmed issues, push, and
-  request @codex review after each fix batch. Report awaiting final review with PR URL and head SHA.
-  Do not merge or start another task.
+- Every PR targets build-v1. Stay active and poll submitted reviews, inline comments,
+  discussion comments, reactions, and task/check status about once a minute.
+- For an already-open PR without a completed or pending review of the current head, post
+  @codex review once. Do not duplicate a review already in progress.
+- Independently validate findings against canonical specifications. Fix confirmed in-scope
+  defects, run relevant checks, push, and explain fixes with commit SHA and evidence.
+  Opening/pushing your task PR and posting review requests and fix explanations are authorized.
+- After each fix batch, post @codex review once and confirm code and security review tasks
+  complete for the latest head. Never treat a stale review or silence as a passing review.
+- Follow docs/pr-review-workflow.md for escalation: stop after three fix/review rounds,
+  a specification/ownership blocker, or 30 minutes without a completed review. Report the blocker.
+- Report awaiting final review with PR URL, head SHA, validation evidence, unresolved findings,
+  and skipped checks. Do not merge the PR or start another task.
 ```
 
 Fill in `<N>`, `<lane name>`, `<folders>`, `<port>` from the lane table above.
+Use this preamble for every lane, including lanes started later. Existing sessions need to
+reload these instructions once; new sessions that receive this preamble start the loop by default.
