@@ -71,3 +71,15 @@ and the local object store. No secret values are recorded here.
 No testnet activity, funds, accounts, secrets or live service calls were used.
 This report records implementation status only; it does not claim T-050
 acceptance passed.
+
+## PR and review status
+
+- PR [#61](https://github.com/zaryab2000/czar/pull/61) targets `build-v1` and
+  remains draft; current reviewed head before this report correction is
+  `e01fa1e0a85d0bad34a63519d66e1019da9beba5`.
+- The designated reviewer completed a local code review at `e01fa1e` and found
+  no blocking code defect. Hosted Codex code and security reviews remain
+  running on that SHA; no duplicate hosted review request was made.
+- The full workspace typecheck passed for 14 of 15 projects with typecheck
+  scripts. This is typecheck evidence only; the full server tests and T-050
+  process/acceptance scenarios remain unrun or deferred as listed above.

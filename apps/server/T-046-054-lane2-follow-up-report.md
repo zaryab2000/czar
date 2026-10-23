@@ -6,12 +6,9 @@
 - P1 prerequisite: PR #60 is merged into `build-v1`; the existing
   `codex/lane2-job-followup` worktree was inspected and preserved.
 - Base commit: `b3dcc4653ffbc52e33681dbe834ff6149454a317`.
-- Primary commits before this status note: `8fce1d0` (reservation sizing) and
-  `4dd2830` (handoff reports).
-- PR status: not opened. The tool hook blocked both pushes to the feature ref
-  `codex/lane2-remaining` with `BLOCKED: Use feature branches, not direct push
-  to main`. No alternate remote write was attempted; review requests cannot
-  start until the feature branch is published.
+- PR: [#61](https://github.com/zaryab2000/czar/pull/61), open as draft against
+  `build-v1`.
+- Reviewed head: `e01fa1e0a85d0bad34a63519d66e1019da9beba5`.
 - This follow-up is based on the latest `origin/build-v1` at start. No canonical
   specs, product decisions, architecture docs, contracts, signer implementation,
   Lane 3 implementation, Lane 4 implementation, or Lane 5 route/UI files were
@@ -81,6 +78,8 @@ Files: `apps/server/src/payer/vault-direct.ts`,
 
 - `fnm exec --using=22.22.0 pnpm --filter @czar/server exec vitest run test/payer/acceptance.test.ts test/payer/vault-direct.test.ts`
   — passed: 2 files, 5 tests.
+- Designated reviewer inspected PR #61 at `e01fa1e` and reported no blocking
+  code defect. Focused payer/composition checks passed: 3 files, 6 tests.
 - `fnm exec --using=22.22.0 pnpm --filter @czar/server typecheck`
   — passed.
 - `fnm exec --using=22.22.0 pnpm -r typecheck`
@@ -88,11 +87,16 @@ Files: `apps/server/src/payer/vault-direct.ts`,
 - `fnm exec --using=22.22.0 pnpm lint`
   — passed: oxlint with warnings denied; oxfmt clean.
 - `git diff --check` — passed.
+- Local review is complete for `e01fa1e`; hosted Codex code and security reviews
+  are still running against that same SHA. No second hosted review request was
+  posted. The initial hosted workflow runs failed during job initialization
+  before steps ran; they supplied no logs and are not counted as local or review
+  evidence.
 - Baseline regression evidence: the first reservation test failed before the
   fix because `stepUsed` was never consulted. The focused tests now prove a
   prior 2,000 atomic step use limits a 5-call request to 3 calls, and 2,000
   atomic envelope capacity limits it to 2 calls.
-- Full server test suite, full workspace typecheck, Arc Anvil, crash/restart
+- Full server test suite, Arc Anvil, crash/restart
   matrices, live Gateway/model calls, testnet and deployment were not run in
   this development phase.
 
