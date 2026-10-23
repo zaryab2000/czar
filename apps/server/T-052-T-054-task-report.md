@@ -194,7 +194,7 @@ These are fixture-backed recovery checks, not Arc-Anvil crash tests.
 ### Review findings addressed
 
 - **Code review, `14ebf7a`:** zero Circle budget now maps to unset while a provider is waiting; slow withdrawal cancels the expired Gateway pullback before initiating; server startup no longer starts a halt watcher without drain dependencies; the composition exposes the Gateway nanopayment/status and pocket close/sweep phases; pocket recovery reads execution phases at the first Gateway step index.
-- **Security review, `14ebf7a`:** the database vault event source now discovers vaults linked after startup, checks existing `frozen` and `guardianPaused` state when a vault is discovered, and retries halt drains whose listener failed. This source is only enabled when `pocketHalt` dependencies are supplied.
+- **Security review, `14ebf7a`:** the database vault event source now discovers vaults linked after startup, checks existing `frozen` and `guardianPaused` state when a vault is discovered, and retries halt drains whose listener failed without leaking callback rejections. This source is only enabled when `pocketHalt` dependencies are supplied.
 - **Unresolved production gap:** the normal composition still has no concrete `pocketHalt` dependency that can reconstruct a complete pullback for every funded pocket. Therefore the default runtime logs `payer_halt_monitor_disabled` and does not subscribe automatically. Dynamic discovery/reconciliation is verified for the configured-source path; production halt-drain remains unimplemented pending the GatewayMinter/pullback context and adapter.
 
 ### Files changed in this review follow-up
@@ -219,7 +219,7 @@ These are fixture-backed recovery checks, not Arc-Anvil crash tests.
   ```text
   Test Files  44 passed (44)
        Tests  222 passed (222)
-  Duration  10.96s
+  Duration  10.88s
   ```
 - `fnm exec --using=22.22.0 pnpm --filter @czar/config test`
   ```text
@@ -236,10 +236,10 @@ These are fixture-backed recovery checks, not Arc-Anvil crash tests.
   ```text
   > oxlint --deny-warnings && oxfmt --check
   All matched files use the correct format.
-  Finished in 18ms on 388 files using 10 threads.
+  Finished in 20ms on 388 files using 10 threads.
   ```
 - The targeted review tests passed: 5 files, 15 tests.
-- `git diff --check` — pending final commit check.
+- `git diff --check` — passed.
 - No Arc-Anvil or testnet checks were run; the Bundle B fork scenarios remain deferred under D92.
 
 ### Review status

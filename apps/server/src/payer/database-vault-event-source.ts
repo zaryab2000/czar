@@ -30,9 +30,9 @@ export function createDatabaseVaultEventSource(
         try {
           await listener(event);
           seenHalts.add(key);
-        } catch (error) {
+        } catch {
           retryVaults.add(event.vault);
-          throw error;
+          logSourceError(input.logger, "halt_drain_failed");
         }
       };
       const scan = async () => {
@@ -61,8 +61,8 @@ export function createDatabaseVaultEventSource(
                 retryVaults.add(vault);
               }
               if (!retryVaults.has(vault)) continue;
-              await reconcileHalt(input.publicClient, vault, emit);
               retryVaults.delete(vault);
+              await reconcileHalt(input.publicClient, vault, emit);
             } catch {
               retryVaults.add(vault);
               logSourceError(input.logger, "reconcile_failed");
@@ -111,7 +111,7 @@ async function reconcileHalt(
 
 function logSourceError(
   logger: Logger,
-  rule: "invalid_address" | "scan_failed" | "reconcile_failed",
+  rule: "invalid_address" | "scan_failed" | "reconcile_failed" | "halt_drain_failed",
 ): void {
   logger.error("vault_event_source_failure", { rule, state: "error" });
 }
