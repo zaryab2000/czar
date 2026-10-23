@@ -68,7 +68,7 @@ These are fixture-backed recovery checks, not Arc-Anvil crash tests.
 ## PR #52 fix round (2026-10-23)
 
 **Base:** branch reset to architect head `c9e9a5b`; migrations remain `0008-pocket-jobs.sql` and `0009-payer-pullback-api-failures.sql`.
-**Status:** local unit suite, config suite, typecheck, and lint pass. PR remains draft because the production halt-drain default and several scheduled/recovery paths below are still incomplete. No Arc-Anvil Bundle B acceptance was run; D92 keeps those fork scenarios deferred.
+**Status:** local unit suite, config suite, typecheck, and lint pass. At the final remote check PR #52 was open and `isDraft=false`; this fix round did not change the PR review state. The production halt-drain default and several scheduled/recovery paths below remain incomplete. No Arc-Anvil Bundle B acceptance was run; D92 keeps those fork scenarios deferred.
 
 ### B1–B7 changes and tests
 
@@ -120,7 +120,7 @@ These are fixture-backed recovery checks, not Arc-Anvil crash tests.
 - SCR text only: production halt-drain needs the GatewayMinter/domain and persisted pullback context required to build a complete pullback request. No docs were edited and no SCR file was created.
 - Gateway `/v1/transfer` body follows the explicit array shape required by this fix round; no schema discrepancy is reported for that request.
 - Arc-Anvil fork acceptance remains deferred under D92. Gateway behavior remains fixture-backed and G0-05 is pending; no testnet call or key use occurred.
-- Keep PR #52 in draft until the B4 startup/default, B5 recovery matrix, B6 purge scheduler, and B7 startup/closed-pocket/manual-return gaps are resolved.
+- The B4 startup/default, B5 recovery matrix, B6 purge scheduler, and B7 startup/closed-pocket/manual-return gaps remain open. The PR state was not changed by this fix round.
 
 ## Follow-up run (2026-10-22)
 
