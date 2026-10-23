@@ -197,6 +197,53 @@ These are fixture-backed recovery checks, not Arc-Anvil crash tests.
 - **Security review, `14ebf7a`:** the database vault event source now discovers vaults linked after startup, checks existing `frozen` and `guardianPaused` state when a vault is discovered, and retries halt drains whose listener failed without leaking callback rejections. This source is only enabled when `pocketHalt` dependencies are supplied.
 - **Unresolved production gap:** the normal composition still has no concrete `pocketHalt` dependency that can reconstruct a complete pullback for every funded pocket. Therefore the default runtime logs `payer_halt_monitor_disabled` and does not subscribe automatically. Dynamic discovery/reconciliation is verified for the configured-source path; production halt-drain remains unimplemented pending the GatewayMinter/pullback context and adapter.
 
+## Focused P1 follow-up (2026-10-23)
+
+**Task:** Close the three P1 findings carried forward from merged PR #52. Branch `codex/lane2-job-followup`, based on `build-v1` at `59ffdb63c4a36ff976938f1bb8f6d9a7b782c1d4`.
+
+### P1 fixes and regression evidence
+
+- **Circle job ABI:** `job-chain-adapter.ts` reads the vault's immutable `jobEscrowKind`, uses Circle's canonical `jobs(uint256)` tuple and event ABI for `CircleTestnet`, preserves the CzarBase `getJob(uint256)` path, and throws a clear error for unknown kinds. Event logs trigger a fresh chain read; outcome values are never taken from log arguments. Tests use distinct tuple values to catch index shifts and cover CzarBase, unsupported kinds, and event-triggered rereads. Baseline defect demonstration: the new Circle cases failed against untouched base code because its adapter attempted unsupported `getJob` and then decoded mismatched events (`Circle does not expose getJob` / `Unknown external escrow state NaN`).
+- **Recovery near or after envelope expiry:** existing jobs are looked up and their escrow expiry loaded before applying minimum-lead validation for a new job. Recovery uses chain state, avoids refunding an already-expired/rejected escrow, and syncs terminal outcomes without reissuing money-moving calls. Tests cover completed jobs with envelope expiry 60 seconds in the future and 60 seconds in the past, an already-funded expired job after a lost refund response, and repeated recovery with no duplicate refund. New-job insufficient-lead validation remains covered. Baseline demonstration: the completed-job recovery cases failed on the original code because expiry validation ran before existing-job recovery; the expired-refund recovery case also showed no sync of a refund already reflected on chain.
+- **Runnable local server delivery wiring:** `local-main.ts` now uses `createLocalApp`, which supplies the existing database, config, clock, RPC public client, and file object store to the job delivery routes. A child-process smoke test starts the actual `local-main.ts`, signs and fetches an authenticated provider brief, uploads a deliverable, and checks the persisted bytes. Existing route tests continue to cover authentication/authorization failures. Baseline demonstration: the same smoke test against untouched `local-main.ts` returned 503 for the authenticated brief because `jobDelivery` dependencies were absent.
+
+### Files changed in this focused follow-up
+
+- `apps/server/src/payer/job-chain-adapter.ts`
+- `apps/server/src/payer/job.ts`
+- `apps/server/src/local-main.ts`
+- `apps/server/src/local-app.ts` (new)
+- `apps/server/test/payer/job-chain-adapter.test.ts`
+- `apps/server/test/payer/job.test.ts`
+- `apps/server/test/job-routes.test.ts`
+- `apps/server/test/db.ts`
+- `apps/server/T-052-T-054-task-report.md`
+
+### Validation on this worktree
+
+- `fnm exec --using=22.22.0 pnpm --filter @czar/server exec vitest run test/payer/job-chain-adapter.test.ts test/payer/job.test.ts test/job-routes.test.ts`
+  ```text
+  Test Files  3 passed (3)
+       Tests  27 passed (27)
+  ```
+- `fnm exec --using=22.22.0 pnpm --filter @czar/server test`
+  ```text
+  Test Files  1 failed | 43 passed (44)
+       Tests  1 failed | 237 passed (238)
+  Failure: test/app-reads.test.ts > app read routes > returns contract-valid Me with an uncreated predicted vault
+           expected 200, received 503
+  ```
+  The test calls its fixed RPC URL `127.0.0.1:8549`, which is not listening in this environment. The same test was run against an untouched detached worktree at base `59ffdb6` and failed with the same 503; it is not caused by this follow-up. No Arc node was required by the scoped acceptance tests; no testnet, funds, accounts, or secrets were used.
+- `fnm exec --using=22.22.0 pnpm -r typecheck` — passed (14 of 15 workspace projects; all projects with typecheck scripts completed).
+- `fnm exec --using=22.22.0 pnpm lint` — passed (`oxlint --deny-warnings`; oxfmt clean on 389 files).
+- `git diff --check` — passed.
+
+### Remaining limitations
+
+- Arc-chain fork acceptance for the broader Bundle B pocket, pullback, and job loops remains deferred under D92 and is outside these three P1s.
+- The full server suite is not entirely green in this environment due to the base-reproduced missing RPC fixture above. All scoped P1 regressions and the real local-main HTTP smoke test pass.
+- No canonical specification gap or out-of-scope dependency was found for these three fixes.
+
 ### Files changed in this review follow-up
 
 - `apps/server/src/main.ts`

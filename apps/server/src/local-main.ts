@@ -7,7 +7,7 @@ import { Readable } from "node:stream";
 import { loadConfigFile, parameterEnvironment } from "@czar/config";
 import { createLogger } from "@czar/logging";
 import { Pool } from "pg";
-import { createApp } from "#src/app";
+import { createLocalApp } from "#src/local-app";
 import { migrate } from "#src/db/migrate";
 
 const config = await loadConfigFile(
@@ -26,12 +26,15 @@ const pool = new Pool({
     process.env["CZAR_DATABASE_URL"] ?? "postgres://postgres@127.0.0.1:15433/postgres",
 });
 await migrate(pool);
-const app = createApp({
+const app = createLocalApp({
   pool,
   config,
   logger: createLogger({ service: "server", component: "CZ-15" }),
   clock: { now: () => new Date() },
   random: { bytes: (size) => randomBytes(size) },
+  rpcUrl:
+    process.env["CZAR_ARC_RPC_URL"] ?? `http://127.0.0.1:${config.get("signer.local.rpcPort")}`,
+  objectStorePath,
 });
 
 const server = createServer(async (incoming, outgoing) => {
