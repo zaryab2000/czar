@@ -1801,6 +1801,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 30,
   },
   {
+    "key": "routing.gatewayEnabled",
+    "source": "default",
+    "unit": "",
+    "value": false,
+  },
+  {
     "key": "routing.gatewayFeeAtomic",
     "source": "default",
     "unit": "atomic",
