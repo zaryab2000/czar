@@ -166,7 +166,10 @@ describe("planner fallback", () => {
 
     await expect(
       makePlanner({ capabilities: ["table-build"], profileSource }),
-    ).rejects.toMatchObject({ name: LocalTemplateProfileUnavailableError.name });
+    ).rejects.toMatchObject({
+      name: LocalTemplateProfileUnavailableError.name,
+      message: expect.stringContaining("Lane 3 acceptance/profile.ts"),
+    });
   });
 
   it("keeps the paid web-search path on the seeded data-json profile", async () => {

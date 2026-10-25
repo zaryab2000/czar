@@ -88,3 +88,19 @@ confirmation was posted on PR #75.
   was not rerun; Arc-backed failures remain as listed above.
 - PR #80 bot run 2 reviewed `754d7c4`. No third bot review was requested. A manual final
   review is needed for the new head; the local-profile dependency remains unresolved.
+
+### Fresh base and final review follow-up
+
+- Merged fresh `origin/build-v1` (including PR #82) into the existing branch without
+  rewriting history. Merge commit: `93d9936`. Resolved the `test/main.test.ts` conflict by
+  preserving the planner adapter assertions and the base's `testAppConfig`/model-client
+  setup.
+- `LocalTemplateProfileUnavailableError` now names Lane 3's `acceptance/profile.ts` as the
+  required producer. The planner regression asserts both the error name and producer path
+  for an objective with `table-build`; the paid web-search planner regression remains green.
+- `fnm exec --using=22.22.0 pnpm --filter @czar/server exec vitest run test/main.test.ts test/planner/planner.test.ts test/migrate.test.ts test/app-wallet-config.test.ts` — 4 files, 29 tests passed.
+- `fnm exec --using=22.22.0 pnpm -r typecheck` — passed for 14 workspace projects.
+- `fnm exec --using=22.22.0 pnpm lint` — passed; no warnings, 420 files formatted.
+- A broader focused run adding `test/app-reads.test.ts` had 4 files pass and 1 test fail (31 passed, 1 failed): `/v1/me` returned 503 instead of 200 because that fixture uses Arc RPC `127.0.0.1:8549`, which was unavailable. This check is not counted as passing.
+- PR #80 remains draft pending PR #83's accepted spec merge. No third Codex review was
+  requested; manual review should use the post-merge branch head.

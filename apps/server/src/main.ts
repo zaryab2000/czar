@@ -669,7 +669,7 @@ export function createPlannerProfileSource(
 
 export class LocalTemplateProfileUnavailableError extends Error {
   constructor() {
-    super("The local-template-v1 profile ID must be supplied by the CZ-11 assembler.");
+    super("The local-template-v1 profile ID must be supplied by Lane 3 acceptance/profile.ts.");
     this.name = "LocalTemplateProfileUnavailableError";
   }
 }
