@@ -19,6 +19,7 @@ export type PocketBalanceRow = {
   apiConsecutiveFailures: number;
   apiLastError: GatewayBalanceError | null;
   closedZeroSince: string | null;
+  pollEndedAt: string | null;
 };
 
 export type PocketBalanceStore = {
@@ -38,6 +39,7 @@ export type PocketBalancePollInput = {
   apiBase: string;
   timeoutMs: number;
   quietMs: number;
+  apiMaxAgeMs: number;
 };
 
 export type PocketBalancePollDependencies = {
@@ -55,6 +57,7 @@ export async function pollPocketBalance(
   const now = dependencies.now?.() ?? Date.now();
   const previous = await dependencies.store.find(pocket);
   const row = previous ?? emptyPocketBalance(input.pocket, input.vault);
+  if (row.pollEndedAt !== null) return { apiError: false, chainError: false, row };
   let apiError = false;
   let chainError = false;
   let apiSucceeded = false;
@@ -109,6 +112,23 @@ export async function pollPocketBalance(
   }
 
   row.closedZeroSince = closedZeroSince(input, row, previous, now, apiSucceeded, chainSucceeded);
+  if (
+    row.pollEndedAt === null &&
+    isClosedPocketQuiet({
+      now,
+      quietMs: input.quietMs,
+      zeroSince: row.closedZeroSince,
+      gatewayAvailable: BigInt(row.gatewayAvailableAtomic ?? "0"),
+      gatewayPendingBatch: BigInt(row.gatewayPendingBatchAtomic ?? "0"),
+      gatewayWithdrawing: BigInt(row.gatewayWithdrawingAtomic ?? "0"),
+      usdc: BigInt(row.pocketUsdcAtomic ?? "0"),
+      apiObservedAt: row.apiObservedAt,
+      apiMaxAgeMs: input.apiMaxAgeMs,
+      chainReadSucceeded: chainSucceeded,
+    })
+  ) {
+    row.pollEndedAt = new Date(now).toISOString();
+  }
   await dependencies.store.save(row);
   return { apiError, chainError, row };
 }
@@ -150,6 +170,7 @@ function emptyPocketBalance(pocket: Address, vault: Address): PocketBalanceRow {
     apiConsecutiveFailures: 0,
     apiLastError: null,
     closedZeroSince: null,
+    pollEndedAt: null,
   };
 }
 

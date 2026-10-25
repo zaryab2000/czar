@@ -231,6 +231,7 @@ describe("T-034 query store (SQL)", () => {
         apiConsecutiveFailures: 0,
         apiLastError: null,
         closedZeroSince: null,
+        pollEndedAt: null,
       },
       {
         pocket: lower(closedPocket),
@@ -245,6 +246,7 @@ describe("T-034 query store (SQL)", () => {
         apiConsecutiveFailures: 0,
         apiLastError: null,
         closedZeroSince: null,
+        pollEndedAt: null,
       },
     ]);
     await db.insert(indexedEvents).values({
@@ -268,6 +270,7 @@ describe("T-034 query store (SQL)", () => {
     });
     expect(balanceBody).not.toHaveProperty("closedZeroSince");
     expect(balanceBody).not.toHaveProperty("pocketUsdcAtomic");
+    expect(balanceBody).not.toHaveProperty("pollEndedAt");
     const fundedResponse = await app.request(`/pockets/funded?vault=${lower(VAULT)}`);
     expect(await fundedResponse.json()).toMatchObject({
       items: [{ envelopeRef: fundedRef, outstanding: "500", pendingPullback: "100" }],
@@ -281,6 +284,7 @@ describe("T-034 query store (SQL)", () => {
       .items;
     expect(closedItems[0]?.balance).not.toHaveProperty("closedZeroSince");
     expect(closedItems[0]?.balance).not.toHaveProperty("pocketUsdcAtomic");
+    expect(closedItems[0]?.balance).not.toHaveProperty("pollEndedAt");
   });
 
   it("finds a vault by its owner and pages envelopes by vault", async () => {

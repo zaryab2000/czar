@@ -187,6 +187,7 @@ describe("Gateway balance projection rules", () => {
         apiBase: "http://127.0.0.1:4999",
         timeoutMs: 1000,
         quietMs: 48 * 60 * 60 * 1000,
+        apiMaxAgeMs: 120_000,
       },
       {
         fetch: fetcher,
@@ -206,6 +207,7 @@ describe("Gateway balance projection rules", () => {
       apiObservedAt: new Date(now).toISOString(),
       chainObservedBlock: 123n,
       closedZeroSince: null,
+      pollEndedAt: null,
     });
     expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toEqual({
       token: "USDC",
@@ -213,6 +215,97 @@ describe("Gateway balance projection rules", () => {
     });
     expect(readContract).toHaveBeenCalledTimes(3);
     expect(readContract.mock.calls.every((call) => call[0].blockNumber === 123n)).toBe(true);
+  });
+
+  it("ends all Closed-pocket polling durably after the fresh zero quiet-period cycle", async () => {
+    const now = Date.parse("2026-10-26T12:00:00.000Z");
+    const quietMs = 48 * 60 * 60 * 1000;
+    const persisted = new Map<string, PocketBalanceRow>([
+      [
+        pocket,
+        {
+          pocket,
+          vault,
+          gatewayAvailableAtomic: "0",
+          gatewayPendingBatchAtomic: "0",
+          gatewayWithdrawingAtomic: "0",
+          withdrawalBlock: 0n,
+          pocketUsdcAtomic: "0",
+          apiObservedAt: new Date(now - 30_000).toISOString(),
+          chainObservedBlock: 123n,
+          apiConsecutiveFailures: 0,
+          apiLastError: null,
+          closedZeroSince: new Date(now - quietMs).toISOString(),
+          pollEndedAt: null,
+        },
+      ],
+    ]);
+    const save = vi.fn(async (row: PocketBalanceRow) => {
+      persisted.set(row.pocket, { ...row });
+    });
+    const store = {
+      async find(address: string) {
+        return persisted.get(address) ?? null;
+      },
+      save,
+    };
+    const fetcher = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          token: "USDC",
+          balances: [{ domain: 26, depositor: pocket, balance: "0", pendingBatch: "0" }],
+        }),
+        { status: 200 },
+      ),
+    );
+    const readContract = vi.fn(async () => 0n);
+    const input = {
+      pocket,
+      vault,
+      state: "Closed",
+      domain: 26,
+      gatewayWallet: vault,
+      usdc: vault,
+      apiBase: "http://127.0.0.1:4999",
+      timeoutMs: 1000,
+      quietMs,
+      apiMaxAgeMs: 120_000,
+    };
+    const finalRead = await pollPocketBalance(input, {
+      fetch: fetcher,
+      chain: { getBlockNumber: async () => 124n, readContract } as never,
+      store,
+      now: () => now,
+    });
+
+    const endedAt = new Date(now).toISOString();
+    expect(finalRead.row.pollEndedAt).toBe(endedAt);
+    expect(persisted.get(pocket)).toMatchObject({
+      gatewayAvailableAtomic: "0",
+      gatewayPendingBatchAtomic: "0",
+      gatewayWithdrawingAtomic: "0",
+      pocketUsdcAtomic: "0",
+      chainObservedBlock: 124n,
+      pollEndedAt: endedAt,
+    });
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save.mock.calls[0]?.[0].pollEndedAt).toBe(endedAt);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(readContract).toHaveBeenCalledTimes(3);
+
+    const restartedStore = memoryStore(persisted.get(pocket) ?? null);
+    const restartedFetch = vi.fn();
+    const restartedRead = vi.fn();
+    const afterRestart = await pollPocketBalance(input, {
+      fetch: restartedFetch,
+      chain: { getBlockNumber: vi.fn(), readContract: restartedRead } as never,
+      store: restartedStore,
+      now: () => now + 24 * 60 * 60 * 1000,
+    });
+
+    expect(afterRestart.row.pollEndedAt).toBe(endedAt);
+    expect(restartedFetch).not.toHaveBeenCalled();
+    expect(restartedRead).not.toHaveBeenCalled();
   });
 
   it("retains Closed quiet time after malformed or failed reads and resets for pending batches", async () => {
@@ -229,6 +322,7 @@ describe("Gateway balance projection rules", () => {
       apiConsecutiveFailures: 0,
       apiLastError: null,
       closedZeroSince: "2026-10-24T12:00:00.000Z",
+      pollEndedAt: null,
     };
     const store = memoryStore(previous);
     const result = await pollPocketBalance(
@@ -242,6 +336,7 @@ describe("Gateway balance projection rules", () => {
         apiBase: "http://127.0.0.1:4999",
         timeoutMs: 1000,
         quietMs: 48 * 60 * 60 * 1000,
+        apiMaxAgeMs: 120_000,
       },
       {
         fetch: vi
@@ -260,6 +355,7 @@ describe("Gateway balance projection rules", () => {
       apiConsecutiveFailures: 1,
       apiLastError: "malformed",
       closedZeroSince: "2026-10-24T12:00:00.000Z",
+      pollEndedAt: null,
     });
 
     const failedChainStore = memoryStore(previous);
@@ -274,6 +370,7 @@ describe("Gateway balance projection rules", () => {
         apiBase: "http://127.0.0.1:4999",
         timeoutMs: 1000,
         quietMs: 48 * 60 * 60 * 1000,
+        apiMaxAgeMs: 120_000,
       },
       {
         fetch: vi.fn().mockResolvedValue(
@@ -310,6 +407,7 @@ describe("Gateway balance projection rules", () => {
         apiBase: "http://127.0.0.1:4999",
         timeoutMs: 1000,
         quietMs: 48 * 60 * 60 * 1000,
+        apiMaxAgeMs: 120_000,
       },
       {
         fetch: vi.fn().mockResolvedValue(
@@ -343,6 +441,7 @@ describe("Gateway balance projection rules", () => {
       apiConsecutiveFailures: 0,
       apiLastError: null,
       closedZeroSince: "2026-10-24T12:00:00.000Z",
+      pollEndedAt: null,
     };
     const apiFundStore = memoryStore(previous);
     await pollPocketBalance(
@@ -356,6 +455,7 @@ describe("Gateway balance projection rules", () => {
         apiBase: "http://127.0.0.1:4999",
         timeoutMs: 1000,
         quietMs: 48 * 60 * 60 * 1000,
+        apiMaxAgeMs: 120_000,
       },
       {
         fetch: vi.fn().mockResolvedValue(
@@ -391,6 +491,7 @@ describe("Gateway balance projection rules", () => {
         apiBase: "http://127.0.0.1:4999",
         timeoutMs: 1000,
         quietMs: 48 * 60 * 60 * 1000,
+        apiMaxAgeMs: 120_000,
       },
       {
         fetch: vi.fn().mockRejectedValue(new Error("api down")),

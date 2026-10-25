@@ -213,8 +213,8 @@ export const gatewayTransfers = onchainTable(
   (t) => ({ pocketIdx: index("gateway_transfers_pocket_idx").on(t.pocketAddress) }),
 );
 
-// SCR-127 balance observations. `closedZeroSince` is indexer-internal state used to enforce the
-// Closed-pocket quiet period; it is never returned by the query API.
+// SCR-127 balance observations and SCR-142's durable end of Closed-pocket polling. These fields
+// are indexer-internal and never returned by the query API.
 export const pocketBalances = onchainTable(
   "pocket_balances",
   (t) => ({
@@ -230,6 +230,7 @@ export const pocketBalances = onchainTable(
     apiConsecutiveFailures: t.integer().notNull(),
     apiLastError: t.text(),
     closedZeroSince: t.text(),
+    pollEndedAt: t.text(),
   }),
   (t) => ({ vaultIdx: index("pocket_balances_vault_idx").on(t.vault) }),
 );
