@@ -34,6 +34,8 @@ export interface SearchRouteOptions {
   readonly maxTimeoutSeconds: number;
   /** `merchants.handlerTimeoutMs`. */
   readonly handlerTimeoutMs: number;
+  /** Requests accepted per verified payer in one minute. */
+  readonly perPayerPerMin?: number;
   readonly facilitator: Facilitator;
   readonly store: PaymentIdStore;
   /** Application events with allowlisted fields only (CZ-20 §4); inputs appear as hashes. */
@@ -70,6 +72,7 @@ export function createSearchRoute(
   const offer = paymentRequired.accepts[0] as PaymentRequiredV2["accepts"][number];
   const emit = options.emit ?? (() => undefined);
   const handler = options.handler ?? (async (q: string) => search(q));
+  const payerWindows = new Map<string, { start: number; count: number }>();
 
   const challenge = (error?: string) => {
     const body: PaymentRequiredV2 =
@@ -164,6 +167,25 @@ export function createSearchRoute(
       if (!verified.isValid) {
         await release();
         return challenge(verified.invalidReason ?? "verify-rejected");
+      }
+      if (options.perPayerPerMin !== undefined) {
+        const payer = verified.payer?.toLowerCase();
+        if (payer === undefined) {
+          await release();
+          return json(502, { error: "payment facilitator omitted verified payer" });
+        }
+        const now = Date.now();
+        for (const [key, entry] of payerWindows)
+          if (now - entry.start >= 60_000) payerWindows.delete(key);
+        const window = payerWindows.get(payer);
+        if (window === undefined || now - window.start >= 60_000) {
+          payerWindows.set(payer, { start: now, count: 1 });
+        } else if (window.count >= options.perPayerPerMin) {
+          await release();
+          return json(429, { error: "payer rate limit exceeded" }, { "retry-after": "60" });
+        } else {
+          window.count += 1;
+        }
       }
       emit("merchant.verified", { route: SEARCH_PATH, inputHash });
 

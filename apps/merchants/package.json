@@ -6,6 +6,8 @@
   "exports": {
     "./facilitator": "./src/facilitator.ts",
     "./payment-id-store": "./src/payment-id-store.ts",
+    "./postgres-payment-id-store": "./src/postgres-payment-id-store.ts",
+    "./runtime": "./src/runtime.ts",
     "./search": "./src/search/index.ts"
   },
   "scripts": {
@@ -16,8 +18,14 @@
   "dependencies": {
     "@czar/config": "workspace:*",
     "@czar/hashing": "workspace:*",
+    "@czar/logging": "workspace:*",
+    "@czar/signer": "workspace:*",
     "@czar/x402": "workspace:*",
     "@x402/extensions": "2.28.0",
+    "pg": "8.23.1",
     "viem": "2.57.7"
+  },
+  "devDependencies": {
+    "@types/pg": "8.23.1"
   }
 }

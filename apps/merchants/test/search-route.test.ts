@@ -44,6 +44,7 @@ function mockFacilitator(
 function setup(
   options: Parameters<typeof mockFacilitator>[0] & {
     handler?: (q: string) => Promise<unknown>;
+    perPayerPerMin?: number;
   } = {},
 ) {
   const { facilitator, calls } = mockFacilitator(options);
@@ -61,6 +62,7 @@ function setup(
     priceAtomic: "50000",
     maxTimeoutSeconds: 300,
     handlerTimeoutMs: 10_000,
+    ...(options.perPayerPerMin === undefined ? {} : { perPayerPerMin: options.perPayerPerMin }),
     facilitator,
     store,
     emit: (event, fields) => events.push({ event, fields }),
@@ -207,6 +209,22 @@ describe("czar-search verify → handler → settle", () => {
     expect(response.status).toBe(402);
     expect(((await response.json()) as { error: string }).error).toBe("insufficient_funds");
     expect(ran).toBe(false);
+    expect(calls).toEqual(["verify"]);
+  });
+
+  it("limits a verified payer after Facilitator verification", async () => {
+    const { route, calls } = setup({ perPayerPerMin: 1 });
+    const first = await route(get("eip", { "payment-signature": paymentHeader() }));
+    const second = await route(get("arc", { "payment-signature": paymentHeader() }));
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(429);
+    expect(calls).toEqual(["verify", "settle", "verify"]);
+  });
+
+  it("withholds service when the verified payer identity is missing", async () => {
+    const { route, calls } = setup({ verify: { isValid: true }, perPayerPerMin: 1 });
+    const response = await route(get("eip", { "payment-signature": paymentHeader() }));
+    expect(response.status).toBe(502);
     expect(calls).toEqual(["verify"]);
   });
 
