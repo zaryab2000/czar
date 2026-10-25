@@ -33,6 +33,7 @@ import {
   encodePaymentRequired,
 } from "@czar/x402";
 import { createLogger } from "@czar/logging";
+import { testAppConfig } from "#test/fixtures";
 import type { PaymentRef, Plan, Step } from "@czar/schemas";
 import type { SafeFetch } from "@czar/x402";
 import { setupDatabase } from "#test/db";
@@ -151,7 +152,7 @@ describe("app receipt accepted by deployed vault", () => {
     const clock = { now: () => new Date() };
     const root = await createServerMain({
       pool: getPool(),
-      config: loadConfig(),
+      config: testAppConfig(),
       logger: createLogger({
         service: "server",
         component: "CZ-15",

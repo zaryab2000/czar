@@ -10,6 +10,29 @@ test("loads the app shell at /", async ({ page }) => {
   await expect(page.getByRole("link", { name: "Create your account" })).toBeVisible();
 });
 
+test("loads public wallet config from the same-origin server", async ({ page }) => {
+  await page.goto("/");
+
+  const config = await page.evaluate(async () => {
+    const response = await fetch("/v1/app/wallet-config", { cache: "no-store" });
+    return {
+      status: response.status,
+      cacheControl: response.headers.get("Cache-Control"),
+      body: await response.json(),
+    };
+  });
+
+  expect(config.status).toBe(200);
+  expect(config.cacheControl).toContain("no-store");
+  expect(config.body).toMatchObject({
+    circleClientUrl: "http://127.0.0.1:4337",
+    circleClientKey: "e2e-public-client-key",
+    arcRpcUrl: "http://127.0.0.1:8549",
+    bundlerOrder: ["circle", "pimlico", "alchemy", "zerodev"],
+    bundlerEndpoints: {},
+  });
+});
+
 test("routes an unknown path to the not-found page with 404", async ({ page }) => {
   const response = await page.goto("/no-such-page");
   expect(response?.status()).toBe(404);
@@ -38,10 +61,6 @@ test("navigation reaches the owner home and privacy explanation", async ({ page 
   await page.route("**/v1/me", (route) =>
     route.fulfill({
       contentType: "application/json",
-      headers: {
-        "X-Czar-Bundler-Order": "circle,pimlico,alchemy,zerodev",
-        "X-Czar-Bundler-Endpoints": "{}",
-      },
       body: JSON.stringify({
         userId: "usr_01J00000000000000000000000",
         msca: "0x0000000000000000000000000000000000000001",
@@ -120,10 +139,6 @@ test("submitted approvals show their network wait state without an approve actio
   await page.route("**/v1/me", (route) =>
     route.fulfill({
       contentType: "application/json",
-      headers: {
-        "X-Czar-Bundler-Order": "circle,pimlico,alchemy,zerodev",
-        "X-Czar-Bundler-Endpoints": "{}",
-      },
       body: JSON.stringify({
         userId: "usr_01J00000000000000000000000",
         msca: "0x0000000000000000000000000000000000000001",
