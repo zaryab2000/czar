@@ -54,6 +54,11 @@ function makePlanner(
     readonly candidateCount?: number;
     readonly amount?: string;
     readonly rankingQueries?: RankingQuery[];
+    readonly probeInput?: PlannerService["probeInput"];
+    readonly probeCalls?: Array<{
+      resource: PlannerService["resource"];
+      probeInput?: PlannerService["probeInput"];
+    }>;
   } = {},
 ) {
   const spec = {
@@ -95,20 +100,24 @@ function makePlanner(
         },
       },
       directory: {
-        get: async (id) =>
-          options.service ??
-          fakeService(id, {
-            ...offer,
-            amount: options.amount ?? offer.amount,
-            payTo: `0x${id.slice(4, 5).repeat(40)}`,
-          }),
+        get: async (id) => {
+          const service =
+            options.service ??
+            fakeService(id, {
+              ...offer,
+              amount: options.amount ?? offer.amount,
+              payTo: `0x${id.slice(4, 5).repeat(40)}`,
+            });
+          return options.probeInput ? { ...service, probeInput: options.probeInput } : service;
+        },
       },
       profiles: { profileIdFor: () => `prof_${"b".repeat(32)}` },
       pocketKeys: { createPocketKey: async () => `0x${"3".repeat(40)}` },
       agentHosts: { hasAgentHost: async () => options.hasAgent ?? true },
       allowance: { remaining: async () => "0" },
       prober: {
-        probe: async (resource) => {
+        probe: async (resource, probeInput) => {
+          options.probeCalls?.push({ resource, ...(probeInput ? { probeInput } : {}) });
           const id = resource.url.split("/").at(-1) ?? serviceId;
           const live = {
             ...offer,
@@ -297,16 +306,26 @@ describe("planner fallback", () => {
     ).toBe(false);
   });
 
-  it("probes a local HTTP 402 through the configured safe fetch", async () => {
-    const server = createServer((_request, response) => {
-      response.statusCode = 402;
-      response.setHeader("content-type", "application/json");
-      response.end(
-        JSON.stringify({
-          x402Version: 1,
-          accepts: [{ ...offer, maxAmountRequired: "1000000", resource: "http://127.0.0.1" }],
-        }),
-      );
+  it("sends registered GET and POST probeInput through safeFetch", async () => {
+    const received: Array<{ url: string; method: string; body: string }> = [];
+    const server = createServer((request, response) => {
+      const chunks: Buffer[] = [];
+      request.on("data", (chunk: Buffer) => chunks.push(chunk));
+      request.on("end", () => {
+        received.push({
+          url: request.url ?? "",
+          method: request.method ?? "",
+          body: Buffer.concat(chunks).toString("utf8"),
+        });
+        response.statusCode = 402;
+        response.setHeader("content-type", "application/json");
+        response.end(
+          JSON.stringify({
+            x402Version: 1,
+            accepts: [{ ...offer, maxAmountRequired: "1000000", resource: "http://127.0.0.1" }],
+          }),
+        );
+      });
     });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const address = server.address();
@@ -314,8 +333,17 @@ describe("planner fallback", () => {
     const origin = `http://127.0.0.1:${address.port}`;
     try {
       const config = loadConfig({ envFile: { "fetch.localMerchantOrigins": [origin] } });
-      const probe = await createSafeProber(config).probe({ url: origin, method: "GET" });
-      expect(probe).toMatchObject({ ok: true });
+      const prober = createSafeProber(config);
+      await expect(
+        prober.probe({ url: `${origin}/search`, method: "GET" }, { query: { q: "fixed" } }),
+      ).resolves.toMatchObject({ ok: true });
+      await expect(
+        prober.probe({ url: `${origin}/search`, method: "POST" }, { body: { q: "fixed" } }),
+      ).resolves.toMatchObject({ ok: true });
+      expect(received).toEqual([
+        { url: "/search?q=fixed", method: "GET", body: "" },
+        { url: "/search", method: "POST", body: '{"q":"fixed"}' },
+      ]);
     } finally {
       await new Promise<void>((resolve, reject) =>
         server.close((error) => (error ? reject(error) : resolve())),
@@ -330,6 +358,23 @@ describe("planner fallback", () => {
     expect(JSON.stringify(rankingQueries[0])).not.toContain("merchant.example");
     expect(rankingQueries[0]).not.toHaveProperty("goal");
     expect(rankingQueries[0]).not.toHaveProperty("description");
+  });
+
+  it("passes registered probeInput only to the unpaid probe", async () => {
+    const probeCalls: Array<{
+      resource: PlannerService["resource"];
+      probeInput?: PlannerService["probeInput"];
+    }> = [];
+    const built = await makePlanner({
+      probeInput: { query: { q: "fixed registration query" } },
+      probeCalls,
+    });
+
+    expect(probeCalls[0]?.probeInput).toEqual({ query: { q: "fixed registration query" } });
+    expect(JSON.stringify(built?.plan)).not.toContain("probeInput");
+    expect(JSON.stringify(built?.plan.steps[0]?.callInputs)).not.toContain(
+      "fixed registration query",
+    );
   });
 
   it("preserves the router D37 hard rule over seeded random amounts", () => {

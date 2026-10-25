@@ -353,7 +353,7 @@ async function probeRanked(args: {
       }
       continue;
     }
-    const probe = await ports.prober.probe(service.resource);
+    const probe = await ports.prober.probe(service.resource, service.probeInput);
     if (!probe.ok) {
       failures.push(probe.reason);
       continue;

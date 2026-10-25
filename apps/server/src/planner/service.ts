@@ -69,6 +69,29 @@ export function createPlannerOperations(deps: PlannerOperationsDependencies) {
   };
 }
 
+export async function reclaimStalePlanningClaims(
+  pool: Pool,
+  claimTimeoutSeconds: number,
+  now: Date,
+): Promise<number> {
+  if (!Number.isSafeInteger(claimTimeoutSeconds) || claimTimeoutSeconds <= 0)
+    throw new RangeError("planner.claimTimeoutSeconds must be a positive integer.");
+  if (!canTransition("planning", "received"))
+    throw new Error("Invalid objective transition: planning -> received");
+  const cutoff = new Date(now.getTime() - claimTimeoutSeconds * 1000);
+  const result = await pool.query(
+    `UPDATE objectives AS o SET state='received',updated_at=$2
+     WHERE o.state='planning' AND o.updated_at <= $1
+       AND NOT EXISTS (SELECT 1 FROM plans p WHERE p.objective_id=o.objective_id)
+       AND EXISTS (
+         SELECT 1 FROM outbox_events e WHERE e.objective_id=o.objective_id
+           AND e.name='objective.received' AND e.delivered_at IS NULL
+       )`,
+    [cutoff, now],
+  );
+  return result.rowCount ?? 0;
+}
+
 async function reviseSubjects(
   userId: string,
   planId: string,
