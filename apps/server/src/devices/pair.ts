@@ -17,11 +17,22 @@ export async function issuePairingCode(
   clock: { now(): Date },
   random: RandomSource,
 ): Promise<string> {
+  return (await issuePairingCodeWithExpiry(pool, userId, config, clock, random)).code;
+}
+
+export async function issuePairingCodeWithExpiry(
+  pool: Pick<Pool, "query"> | PoolClient,
+  userId: string,
+  config: Config,
+  clock: { now(): Date },
+  random: RandomSource,
+): Promise<{ code: string; expiresAt: string }> {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     const number = randomInteger(random, 100_000_000);
     const code = String(number).padStart(8, "0");
+    const now = clock.now();
     const expires = new Date(
-      clock.now().getTime() + Number(config.get("app.pairingCodeTtlMinutes")) * 60_000,
+      now.getTime() + Number(config.get("app.pairingCodeTtlMinutes")) * 60_000,
     );
     const result = await pool.query(
       `INSERT INTO pairing_codes (code_digest, user_id, expires_at)
@@ -29,9 +40,9 @@ export async function issuePairingCode(
        ON CONFLICT (code_digest) DO UPDATE SET user_id=EXCLUDED.user_id,
          expires_at=EXCLUDED.expires_at,used_at=NULL,created_at=EXCLUDED.created_at
        WHERE pairing_codes.expires_at <= $4`,
-      [hash(code), userId, expires, clock.now()],
+      [hash(code), userId, expires, now],
     );
-    if (result.rowCount) return code;
+    if (result.rowCount) return { code, expiresAt: expires.toISOString() };
   }
   throw new Error("Could not issue a unique pairing code after 100 attempts.");
 }

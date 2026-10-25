@@ -5,6 +5,7 @@ import type {
   AuthChallenge,
   AppPage,
   AppPlan,
+  Device,
   EnvelopeDetail,
   FreezeIntent,
   LedgerReceipt,
@@ -12,6 +13,7 @@ import type {
   SessionRequest,
   SessionResponse,
   PasskeyRegistration,
+  PairingCode,
   SoulPointer,
   SubjectsRevision,
   SubmittedNotice,
@@ -207,6 +209,21 @@ export const appApi = {
     return request<AppPage<LedgerReceipt>>(`/v1/ledger/receipts?${query}`);
   },
   getSoulPointer: () => request<SoulPointer>("/v1/soul/pointer"),
+  createPairingCode: () =>
+    request<PairingCode>("/v1/devices/pairing-codes", {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey() },
+    }),
+  listDevices: (cursor?: string) => {
+    const query = new URLSearchParams();
+    if (cursor) query.set("cursor", cursor);
+    return request<AppPage<Device>>(`/v1/devices?${query}`);
+  },
+  revokeDevice: (deviceId: string) =>
+    request<void>(`/v1/devices/${encodeURIComponent(deviceId)}/revoke`, {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey() },
+    }),
   createFreezeIntent: (action: "freeze" | "unfreeze") =>
     request<FreezeIntent>("/v1/freeze/intent", {
       method: "POST",
