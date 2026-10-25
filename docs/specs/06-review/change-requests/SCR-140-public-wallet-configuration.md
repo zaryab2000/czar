@@ -34,9 +34,9 @@ cross-origin access grant. The client fetches it from the current origin with
 counterfactual address derivation during registration.
 
 Missing or invalid values fail clearly before that operation. In particular,
-there is no hardcoded localhost, test key, or `NEXT_PUBLIC_*` fallback. URL
-validation allows HTTPS; HTTP is allowed only for loopback values under the
-existing SCR-130 local-only guard. The server fails startup when its required
+there is no hardcoded localhost, test key, or `NEXT_PUBLIC_*` fallback. The
+two SCR-135 URL keys obey SCR-130's HTTPS/loopback guard; existing bundler
+endpoint validation is unchanged. The server fails startup when its required
 SCR-135 keys are missing. The browser validates the response and uses the same
 configuration for passkey and wallet code. A page reload obtains fresh values.
 
