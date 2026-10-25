@@ -176,6 +176,19 @@ export interface SoulPointer {
   readonly desktopUrl?: "http://127.0.0.1/soul";
 }
 
+export interface PairingCode {
+  readonly code: string;
+  readonly expiresAt: string;
+}
+
+export interface Device {
+  readonly deviceId: string;
+  readonly deviceName: string;
+  readonly platform: "macos" | "linux" | "windows";
+  readonly createdAt: string;
+  readonly revokedAt?: string;
+}
+
 export interface SubjectsRevision {
   readonly subjects: readonly {
     readonly label: string;
