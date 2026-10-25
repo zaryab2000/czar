@@ -81,6 +81,12 @@ export interface SignerOptions {
 }
 
 const RATE_WINDOW_MS = 60_000;
+const ADDRESS_KEY_OWNERS: Readonly<Record<string, { caller: string; keyId: KeyId }>> = {
+  K3: { caller: "cz-15", keyId: "K3" },
+  K5: { caller: "cz-24", keyId: "K5" },
+  K7: { caller: "cz-16", keyId: "K7" },
+  K8: { caller: "cz-17", keyId: "K8" },
+};
 
 /** `kms.maxSignaturesPerMin.<key>`; K4 counts per pocket. */
 function rateLimitFor(config: Config, keyId: KeyId): number {
@@ -91,6 +97,8 @@ function rateLimitFor(config: Config, keyId: KeyId): number {
 
 export interface Signer {
   sign(caller: string, request: SignRequest): Promise<SignResult>;
+  /** Returns a key address only when the caller already owns that key (SCR-129). */
+  keyAddress(caller: string, keyRef: string): Promise<Address>;
   /** CZ-13 at planning (D71): a fresh pocket key; the address goes into the plan's `payeeRoot`. */
   createPocketKey(caller: string): Promise<Address>;
   /** Refused unless every balance is zero (RV-004); the key is destroyed `signer.pocketKeyRetainHours` later. */
@@ -102,6 +110,7 @@ export function createSigner(options: SignerOptions): Signer {
   const { backend, projection, network, config, audit, callers } = options;
   const nowMs = options.nowMs ?? Date.now;
   const windows = new Map<string, number[]>();
+  const keyAddressWindows = new Map<string, number[]>();
   const retiring = new Map<string, number>();
 
   const keyAddress = (key: "K3" | "K7" | "K8"): Address => {
@@ -139,6 +148,29 @@ export function createSigner(options: SignerOptions): Signer {
     }
     recent.push(now);
     windows.set(keyRef, recent);
+  }
+
+  function takeKeyAddressRateSlot(caller: string) {
+    const limit = Number(config.get("signer.keyAddressPerMin"));
+    const now = nowMs();
+    const recent = (keyAddressWindows.get(caller) ?? []).filter((at) => now - at < RATE_WINDOW_MS);
+    if (recent.length >= limit) {
+      keyAddressWindows.set(caller, recent);
+      throw new Denied("rate-limit");
+    }
+    recent.push(now);
+    keyAddressWindows.set(caller, recent);
+  }
+
+  function mayReadAddress(caller: string, keyRef: string): boolean {
+    if (keyRef.startsWith("K10:")) {
+      const service = keyRef.slice(4);
+      return (
+        service.length > 0 && network.merchantServices.includes(service) && owns(caller, "K10")
+      );
+    }
+    const owner = ADDRESS_KEY_OWNERS[keyRef];
+    return owner !== undefined && owner.caller === caller && owns(caller, owner.keyId);
   }
 
   async function sign(caller: string, request: SignRequest): Promise<SignResult> {
@@ -222,6 +254,13 @@ export function createSigner(options: SignerOptions): Signer {
 
   return {
     sign,
+    async keyAddress(caller, keyRef) {
+      if (!mayReadAddress(caller, keyRef)) throw new Denied("key-not-allowed");
+      takeKeyAddressRateSlot(caller);
+      const address = backend.address(keyRef);
+      if (address === undefined) throw new Denied("key-not-allowed");
+      return address;
+    },
     async createPocketKey(caller) {
       if (!owns(caller, "K4")) throw new Denied("caller-not-owner");
       return (await backend.createKey("K4")).address;

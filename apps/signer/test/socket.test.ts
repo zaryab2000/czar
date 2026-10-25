@@ -23,7 +23,7 @@ describe("signer Unix socket", () => {
   it("authenticates a service and round-trips a signer request", async () => {
     const dir = await mkdtemp(join(tmpdir(), "czar-signer-"));
     const socketPath = join(dir, "signer.sock");
-    const tokens = { server: "server-secret-token" };
+    const tokens = { server: "server-secret-token", merchants: "merchant-secret-token" };
     const identity: SignerSocketIdentity = {
       tokenFor: async (service) => tokens[service as keyof typeof tokens],
     };
@@ -35,7 +35,7 @@ describe("signer Unix socket", () => {
       signer,
       audit,
       identity,
-      allowedCallers: { server: ["cz-15"] },
+      allowedCallers: { server: ["cz-15", "cz-16"], merchants: ["cz-20"] },
     });
     try {
       const client = await createSignerClient({
@@ -48,6 +48,20 @@ describe("signer Unix socket", () => {
       expect(result).toEqual(expected);
       expect("signature" in result && result.digest).toMatch(/^0x[0-9a-f]{64}$/);
       expect(await client.createPocketKey("cz-15")).toMatch(/^0x[0-9a-fA-F]{40}$/);
+      expect(await client.keyAddress("cz-16", "K7")).toBe(fixture.address("K7"));
+      const merchant = await createSignerClient({
+        socketPath,
+        service: "merchants",
+        identity,
+      });
+      const address = await merchant.keyAddress("cz-20", "K10:czar-search");
+      expect(typeof address).toBe("string");
+      expect(address).toBe(fixture.address("K10:czar-search"));
+      await expect(merchant.keyAddress("cz-20", "K3")).rejects.toMatchObject({
+        rule: "key-not-allowed",
+      });
+      expect(fixture.audit.rows.map((row) => row.kind)).toEqual(["usdc-3009", "usdc-3009"]);
+      expect(audit.rows).toEqual([]);
       expect((await lstat(socketPath)).mode & 0o777).toBe(0o600);
     } finally {
       await stop();
@@ -60,11 +74,14 @@ describe("signer Unix socket", () => {
     const socketPath = join(dir, "signer.sock");
     const audit = memoryAudit();
     const identity: SignerSocketIdentity = { tokenFor: async () => "expected-token" };
-    const signer: Pick<Signer, "sign" | "createPocketKey"> = {
+    const signer: Pick<Signer, "sign" | "createPocketKey" | "keyAddress"> = {
       async sign() {
         throw new Error("must not reach signer");
       },
       async createPocketKey() {
+        throw new Error("must not reach signer");
+      },
+      async keyAddress() {
         throw new Error("must not reach signer");
       },
     };
