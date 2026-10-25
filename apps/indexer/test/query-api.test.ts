@@ -2,6 +2,13 @@ import { readFileSync } from "node:fs";
 import { loadConfig } from "@czar/config";
 import { derivedNonce } from "@czar/hashing";
 import {
+  validateEnvelope,
+  validateJobRecord,
+  validatePocketRecord,
+  validateReservation,
+  validationErrors,
+} from "@czar/schemas";
+import {
   anchors,
   authorizations,
   haltFlags,
@@ -502,6 +509,69 @@ describe("T-034 HTTP routes", () => {
     expect(body.reservations).toHaveLength(1);
     expect(body.jobs).toHaveLength(1);
     expect((await app.request("/envelopes/eip155%3A5042002%3A0x00%3A1")).status).toBe(404);
+  });
+
+  it("serves envelopeByPlanHash with the SCR-119 response and validates its mirrors", async () => {
+    const ref = await seedEnvelope(VAULT, 1n);
+    await seedReservation(VAULT, 1n, { state: 1, validBefore: 999n });
+    await db.insert(pockets).values({
+      id: `${lower(VAULT)}:${lower(POCKET)}`,
+      vault: lower(VAULT),
+      envelopeId: 1n,
+      pocket: lower(POCKET),
+      mirror: pocketMirror({
+        vault: VAULT,
+        pocket: POCKET,
+        view: {
+          envelopeId: 1n,
+          state: 2,
+          funded: 1000n,
+          gasGranted: 0n,
+          outstanding: 1000n,
+          pendingPullback: 0n,
+        },
+        pullbacks: [],
+        delegateReady: false,
+      }),
+    });
+    await seedJob(1n, 2, "Funded");
+    const app = createIndexerApi(createQueryStore(db), config);
+
+    const response = await app.request(`/envelopes/by-plan-hash/${HASH}`);
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      envelope: unknown;
+      reservations: unknown[];
+      pockets: unknown[];
+      jobs: unknown[];
+    };
+    expect(body.envelope).toMatchObject({ envelopeRef: ref, planHash: HASH });
+    expect(validateEnvelope(body.envelope)).toBe(true);
+    expect(body.reservations.every(validateReservation)).toBe(true);
+    expect(body.pockets).toHaveLength(1);
+    const validPocket = validatePocketRecord(body.pockets[0]);
+    const pocketErrors = validationErrors("pocket-record");
+    expect(
+      validPocket ||
+        pocketErrors.every(
+          (error) => error.keyword === "required" && error.params["missingProperty"] === "keyRef",
+        ),
+    ).toBe(true);
+    expect(body.jobs.every(validateJobRecord)).toBe(true);
+  });
+
+  it("returns 404 when no envelope has the requested plan hash", async () => {
+    const app = createIndexerApi(createQueryStore(db), config);
+
+    expect((await app.request(`/envelopes/by-plan-hash/${HASH}`)).status).toBe(404);
+  });
+
+  it("rejects plan hashes that are not lowercase 32-byte hex", async () => {
+    const app = createIndexerApi(createQueryStore(db), config);
+
+    expect((await app.request(`/envelopes/by-plan-hash/0x${"A".repeat(64)}`)).status).toBe(400);
+    expect((await app.request("/envelopes/by-plan-hash/0x1234")).status).toBe(400);
   });
 
   it("pages over HTTP with opaque cursors bound to the query, and rejects bad input", async () => {
