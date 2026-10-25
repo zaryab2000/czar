@@ -31,7 +31,7 @@
 - **Wave 1:** TA-01, TA-02, TA-03, TA-04, TA-06, TA-07, TA-10, TA-11, TA-14, TA-16
 - **Wave 2:** TA-05, TA-08
 - **Wave 3:** TA-09, TA-12
-- **Phase A2:** TA-20 → TA-21 → TA-22a → TA-22b → TA-22c; TA-13 and TA-15 whenever their SCRs are accepted
+- **Phase A2:** TA-20 → TA-21 → TA-22a → TA-22b → TA-22c; TA-13 and TA-15 any time (SCR-135 and SCR-134 are applied)
 
 ## Brief table
 

@@ -3336,7 +3336,7 @@ export const PARAMETERS = [
     key: "payer.manualReturnHoldHours",
     type: "integer",
     default: 72,
-    unit: "h",
+    unit: "hours",
     reason:
       "owner gets three days to record a slow-path return before the pocket is written off; the USDC is already in the vault (SCR-133)",
     source: "docs/specs/04-components/server/server-planning-and-payment.md:395",
@@ -3399,7 +3399,7 @@ export const PARAMETERS = [
     key: "selection.registeredRecrawlHours",
     type: "integer",
     default: 24,
-    unit: "h",
+    unit: "hours",
     reason: "CZ-20: registered services are re-crawled every 24 h (SCR-131)",
     source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:672",
   },
@@ -3431,5 +3431,14 @@ export const PARAMETERS = [
       "app-side Arc RPC for chain reads; https on testnet, loopback only in the local overlay (SCR-135)",
     source: "docs/specs/04-components/app/app-and-notifications.md:40",
     noDefault: true,
+  },
+  {
+    key: "indexer.closedPocketQuietHours",
+    type: "integer",
+    default: 48,
+    unit: "hours",
+    reason:
+      "a Closed pocket stays polled until every balance reads zero this long; covers an attestation re-credit (A2-18) and a late nanopayment status (A2-26) (SCR-127)",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:147",
   },
 ] as const satisfies readonly ParameterSpec[];

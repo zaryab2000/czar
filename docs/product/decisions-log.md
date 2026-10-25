@@ -578,6 +578,8 @@ Approved by Zaryab. Each entry cites the review finding it resolves.
 ### D92. Live Arc testnet comes last
 - **Date:** 2026-10-21 (Zaryab). Recorded here on 2026-10-25 (SCR-136); until then it lived only in `docs/specs/05-build-plan/phase-1-tasks.md`.
 - **Decided:** Until T-121, every M1–M7 step or acceptance test that says "on testnet" runs on a local `arc-anvil --network arc` deployment (`contracts/script/deploy.sh` → `deployments/arc-local.json`), with Circle contracts and APIs replaced by the T-010 mocks and recorded fixtures. No task before T-121 sends a transaction to Arc testnet, needs testnet funds or creates testnet keys' gas balances. An `arc-anvil` fork of testnet (T-022) stays allowed: it reads the public RPC and spends nothing. The live-testnet versions of those tests (T-050, T-059, T-082, T-084, T-085, T-087, T-106, T-107's live check, T-108, T-118) run in M8 after T-121, before T-102. **Risk accepted:** real Circle Facilitator, Gateway and ERC-8183 behaviour is first exercised in M8.
+- **Why:** prove the money paths and their recovery on a local deployment before any real funds or vendor accounts are involved.
+- **Amends:** every "on testnet" step and test in M1–M7 (`phase-1-tasks.md` note at the top); cross-cutting §3.1 local row.
 
 ### D93. Evidence and discoverability (I-F-6): owner calls on the five open points
 - **Date:** 2026-10-23 (Zaryab, after the architect's final review `docs-internal/imperative-features/evidence_and_discoverability/6r2_senior-architect-final-review.md` §4).
@@ -587,11 +589,14 @@ Approved by Zaryab. Each entry cites the review finding it resolves.
   3. Latency stays in the ranking at weight 0.1, measured to the first byte.
   4. The test-buyer refreshes evidence every 3 days inside its weekly budget; K22 funding still needs approval.
   5. Product §6.14 and §6.21 wording is amended as the I-F-6 proposal v2 §10 states.
+- **Why:** the five points were the owner calls the I-F-6 review left open; recording them lets the evidence replan start from settled direction.
+- **Amends:** nothing yet; product §6.14 and §6.21 change when the Track B SCRs are applied.
 - **Not yet applied:** the I-F-6 spec changes. They are reconciled and filed as SCRs in the evidence and social-network replan (Track B), against the current code.
 
 ### D94. Development-phase acceptance boundary
 - **Date:** 2026-10-25 (Zaryab; SCR-136 §3).
 - **Decided:** until the implementation and integration plan is settled, a PR is reviewed on focused unit and integration tests for the new code (failing tests first on money paths), `pnpm lint`, the package typecheck and the package's existing tests. Acceptance tests that need local `arc-anvil`, crash/restart matrices, live Circle or model calls, real devices or testnet are reported `NOT RUN / DEFERRED`. A task is not marked done while any of its listed acceptance tests is deferred; a merged PR records merged code, not task completion. Contract changes still run their tests on pinned `arc-anvil`.
+- **Amends:** how task reports record skipped checks (`docs/builder-coordination.md`, `docs/pr-review-workflow.md`); `CLAUDE.md`'s definition of done is unchanged.
 - **Why:** finish development and review across the lanes first, without counting test campaigns or deployment as development progress, and without weakening the definition of done.
 
 ---

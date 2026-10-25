@@ -24,11 +24,11 @@
 - **`@czar/vault-client`:** add `encodeRecordManualReturn(pocket, amount)`.
 - **Server persistence (Lane 2 migration):**
   - Widen the `payer_pullback_gateway_failures.state` CHECK to `pending | manual-return-required | recorded | expired`.
-  - Add `returned_amount numeric(78,0)`, `return_tx text`, `recorded_credit numeric(78,0)`, `recorded_tx text`, `recorded_at timestamptz`.
+  - Add `returned_amount numeric(78,0)`, `return_tx text`, `return_block bigint`, `return_log_index integer`, `recorded_credit numeric(78,0)`, `recorded_tx text`, `recorded_at timestamptz`.
   - When the slow path reaches `manual-return-required`, the existing `pocket-return` result fills `returned_amount` and `return_tx`.
 - **CZ-19 §5.4 query:** `manualReturnsForVault(vault)`, consumed by CZ-15. It returns `ManualReturnRecorded` events of the vault's pockets as `{pocket, credit, txHash, block}`. The indexer stores `pocket` and `credit` from the event, replacing today's name-only row.
 - **Reconciliation (CZ-15):** every `payer.gatewayRecoveryPollSeconds` (SCR-127), for each `manual-return-required` row:
-  - A matching `ManualReturnRecorded` for the pocket at a block after `return_tx` → `recorded`, with the credit and transaction stored.
+  - A matching `ManualReturnRecorded` for the pocket ordered after `return_tx` by `(block, logIndex)` → `recorded`, with the credit and transaction stored.
   - The pocket became `Closed` first → `expired`. The contract can no longer credit it, and the USDC already sits in the vault as free balance.
 - **Write-off hold, with an end:**
   - CZ-15 holds `writeOffPocket` for a pocket whose row is `manual-return-required`, for at most `payer.manualReturnHoldHours` (new key, default 72; reason: gives the owner three days to record the return before the envelope's committed room is released).
@@ -49,6 +49,7 @@
     - Button: "Record {returnedAmount}"
     - After: "Recorded {recordedCredit}"
     - Expired: "This pocket closed before the return was recorded. The money is already in your vault."
+    - Home notice: "{count} pocket returns to record"
   - The amount submitted is `returnedAmount`. The UI shows `recordedCredit` from the event, which may be lower (contract bound).
 
 ## Affected tasks

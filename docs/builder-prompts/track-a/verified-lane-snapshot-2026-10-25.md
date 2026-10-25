@@ -11,7 +11,7 @@
   - `DECISION`: an unresolved spec conflict or silence.
   - `DEFERRED-VALIDATION`: only local-chain, live, device or testnet acceptance remains.
   - `GAP`: searched for and not found.
-- **Not read:** the uncommitted contents of the `codex/lane2-runtime-integration` worktree (`/Users/zar/Code/ai-on-chain/czar-2-runtime`). Folder access was refused by the permission check. Its committed handoff (PR #61: `apps/server/T-046-054-lane2-follow-up-report.md`, `reports/m3-thin-slice.md`) was read and verified.
+- **Not read:** the uncommitted contents of the `codex/lane2-runtime-integration` worktree (a separate local worktree). Folder access was refused by the permission check. Its committed handoff (PR #61: `apps/server/T-046-054-lane2-follow-up-report.md`, `reports/m3-thin-slice.md`) was read and verified.
 
 ## Headline
 - **Nothing in the running stack moves money today.**

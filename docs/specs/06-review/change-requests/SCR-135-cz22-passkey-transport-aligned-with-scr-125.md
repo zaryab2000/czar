@@ -15,6 +15,7 @@
 - `toPasskeyTransport` routes the ceremony through Circle's RP service, which needs a Circle client key. D92 defers Circle client keys to the testnet stage.
 
 ## Evidence
+- The verification reports cited here are architect working papers outside the repository; every claim also carries a repository file:line.
 - Verification report DE §E4.
 
 ## Proposed change

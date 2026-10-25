@@ -26,6 +26,7 @@ Lane 2 owns the server composition root (SCR-126 §2) and, under SCR-136, `local
     - claims one `objective.received`
     - reclaims a stuck claim after the timeout without a duplicate outbox row
   - Opening watcher:
+    - scope: every `opening` objective, plus `awaiting-approval` objectives whose plan is `approved`
     - matches only an `Open` envelope of the user's own vault with the same `planHash`
     - ignores other vaults and `Closed` envelopes
     - after the timeout: the objective is `awaiting-approval`, the plan stays `approved`, and a late `EnvelopeOpened` still matches
@@ -47,14 +48,14 @@ Lane 2 owns the server composition root (SCR-126 §2) and, under SCR-136, `local
     - `receiptInput` from the step trace
     - every `sl-receipt` request carries the full `PaymentRef` (SCR-128)
   - **Completion** per SCR-132 §4:
-    - K3 `closeEnvelope` once every reservation is `Final`
+    - K3 `closeEnvelope` once every reservation is `Final`, every pocket `Closed` and every job terminal (03 preconditions)
     - one `results` row
     - `delivered`/`failed`; `result-quarantined` for an all-quarantined objective
     - the matching objective event
 - **Tests first (money path):**
   - dispatcher: `dependsOn` order; a lease held elsewhere is not entered; an expired lease resumes without a second reserve; a frozen vault starts no step
   - receipts: the request's `PaymentRef` hashes to `paymentRefHash`; an unsettled authorization means no receipt is requested
-  - completion: idempotent on retry; `closeEnvelope` is not sent before every reservation is `Final`; all-quarantined → `failed` with `result-quarantined` and no merchant content in `rendered_body`
+  - completion: idempotent on retry; `closeEnvelope` is not sent before every reservation is `Final`, every pocket `Closed` and every job terminal; all-quarantined → `failed` with `result-quarantined` and no merchant content in `rendered_body`
   - `viem-chain.ts` unit tests on a mocked transport
 - **Acceptance:** tests, server tests for the touched suites, typecheck, lint.
 - **Deferred:** T-050a, crash/restart matrix, T-050b (M8).
@@ -63,8 +64,7 @@ Lane 2 owns the server composition root (SCR-126 §2) and, under SCR-136, `local
 - **Gate:** SCR-136 §2 (T-085 split). **Deps:** TA-08.
 - **Files:** `apps/server/src/payer/runtime.ts` (the existing `Frozen` subscriber), a small autonomy module in `payer/`.
 - **Build:**
-  - On `Frozen`, lower to 0 every category the vault has used (CZ-15 `:413`; CZ-24 `:77` "every category").
-  - The category set is `planner.categoryByCapability`'s categories. It equals the set the app's limits screen writes (`apps/web/app/onboarding/limits/page.tsx:12`); assert that equality in a test.
+  - On `Frozen`, lower to 0 every category in `planner.categoryByCapability`, skipping those already at 0 (CZ-24 "`0` for every category"; T-085 split in SCR-136 §2). It equals the set the app's limits screen writes (`apps/web/app/onboarding/limits/page.tsx:12`); assert that equality in a test.
   - Skip categories whose `getLimits(...).autoLimit` is already 0.
   - Sign `vault-call lowerAutoLimit(categoryId, 0)` with K3 as `cz-15`. The contract accepts the agent while frozen (`AutonomyLogic.sol:57-67`).
   - Idempotent per `Frozen` event.
@@ -83,7 +83,7 @@ Lane 2 owns the server composition root (SCR-126 §2) and, under SCR-136, `local
   - Rules:
     - write-off at or below the fee (SCR-127 §4)
     - one slow withdrawal per pocket, for the whole available balance
-    - the recovery pass every `payer.gatewayRecoveryPollSeconds`
+    - the recovery pass every `payer.gatewayRecoveryPollSeconds`, with recovery `value = gatewayAvailableAtomic − payer.pullbackMaxFeeAtomic − payer.pullbackSafetyAtomic` (no `outstanding` bound)
     - never `writeOffPocket` on a `Closed` pocket
 - **Tests first:**
   - `payer_pocketClose_sweepsGasAndRecoversLateBalance`
@@ -98,7 +98,7 @@ Lane 2 owns the server composition root (SCR-126 §2) and, under SCR-136, `local
 - **Gate:** SCR-133. **Deps:** TA-21, TA-22a.
 - **Files:** a new migration (the next free number after `0010`, rechecked at PR time); `payer/pullback.ts` and `pullback-scheduler.ts`; the reconciliation pass; the write-off hold.
 - **Tests first:**
-  - `recorded` on a matching event after `return_tx`
+  - `recorded` on a matching event ordered after `return_tx` by `(block, logIndex)` (store `return_block`, `return_log_index`)
   - `expired` when the pocket closed first
   - the hold blocks write-off until `payer.manualReturnHoldHours`, then write-off proceeds and the row expires
   - rows are scoped to their user

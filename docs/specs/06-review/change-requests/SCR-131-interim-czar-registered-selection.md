@@ -14,6 +14,7 @@
 - CZ-18 says "Czar's own merchants are ranked by the same rules" (`:663`). With no receipts, `n_eff = 0`, so a Czar merchant is `unverified`. Under N1 (`:657`, `selection.unverifiedWithApproval` default `true`) it can be offered only in `exploration_slot`, and a plan using it always needs approval.
 
 ## Evidence
+- The verification reports cited here are architect working papers outside the repository; every claim also carries a repository file:line.
 - Verification report A §5 and §7.4; the file:line references above.
 
 ## Proposed change

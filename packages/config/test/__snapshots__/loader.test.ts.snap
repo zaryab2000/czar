@@ -698,6 +698,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 8000,
   },
   {
+    "key": "indexer.closedPocketQuietHours",
+    "source": "default",
+    "unit": "hours",
+    "value": 48,
+  },
+  {
     "key": "indexer.confirmationBlocks",
     "source": "default",
     "unit": "blocks",
@@ -1405,7 +1411,7 @@ exports[`registry > matches the dump snapshot 1`] = `
   {
     "key": "payer.manualReturnHoldHours",
     "source": "default",
-    "unit": "h",
+    "unit": "hours",
     "value": 72,
   },
   {
@@ -1971,7 +1977,7 @@ exports[`registry > matches the dump snapshot 1`] = `
   {
     "key": "selection.registeredRecrawlHours",
     "source": "default",
-    "unit": "h",
+    "unit": "hours",
     "value": 24,
   },
   {

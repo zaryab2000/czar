@@ -18,6 +18,7 @@
 - SCR-109 left `merchant-seller-proof`'s `payTo` semantics open. The signer fills `payTo` with its own K10 address (`apps/signer/src/policy.ts:554`).
 
 ## Evidence
+- The verification reports cited here are architect working papers outside the repository; every claim also carries a repository file:line.
 - File:line references above; verification report B §3–§4.
 
 ## Proposed change

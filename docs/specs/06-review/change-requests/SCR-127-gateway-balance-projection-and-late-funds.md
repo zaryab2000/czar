@@ -24,6 +24,7 @@
   - the slow-withdrawal `value`, and what happens on a repeat call (A2-15: a repeat call resets the timer)
 
 ## Evidence
+- The verification reports cited below are architect working papers outside the repository; every claim also carries a repository file:line.
 - The four verification reports for this replan (C §0–§7, DE §E1). The same facts can be checked directly at the file:line references above.
 - A2-29 (`00-ground-truth/part2.md:167`): `/v1/balances` returns `balance` and `pendingBatch`, and a buyer's pending payment is already subtracted from `balance`. The recorded response stores amounts as decimal strings (`docs/research/evidence/experiments/a2-gateway-e2e/raw/merchant-balance.json`).
 
@@ -48,7 +49,7 @@
 - **Available balance is `balance`.** It is not `balance − pendingBatch` (A2-29: pending payments are already subtracted).
 - **Decimal conversion is exact.** Parse the decimal string with at most 6 fraction digits into an integer `Amount6`. Any other form counts as a `malformed` failure, never a rounded value.
 - **Poll scope** replaces §5.6's "every pocket in `Funded`/`Draining`":
-  - Every pocket whose K4 has not been destroyed: `Registered`, `DelegateReady` (`apps/indexer/src/mirrors.ts:160`), `Funded`, `Draining` and `Closed`, until the signer's retirement destroys K4.
+  - Every pocket in `Registered`, `DelegateReady` (`apps/indexer/src/mirrors.ts:160`), `Funded` or `Draining`, and every `Closed` pocket until its Gateway balance, `withdrawingBalance` and EOA USDC have all read zero for `indexer.closedPocketQuietHours`. The indexer never learns of K4 destruction, which is signer-internal, so the scope ends on observed balances instead (amended during application, 2026-10-25).
   - The interval is `indexer.gatewayPollSeconds`.
   - Covered calls: `/v1/x402/transfers?from=`, `/v1/balances`, and the two on-chain views.
 - **Stale or failing data** is never replaced by a guess. The row keeps the last good figures with their observation time, and consumers apply §3.
@@ -61,13 +62,14 @@
 |---|---|---|
 | `pocketBalance(pocket)` | CZ-15, CZ-27 signer | the `pocket_balances` row, plus `apiAgeSeconds`/`chainAgeBlocks` computed at read time |
 | `fundedPocketsForVault(vault)` | CZ-15 halt drain | pockets of the vault in `Registered`/`DelegateReady`/`Funded`/`Draining`, each with `envelopeRef`, `outstanding`, `pendingPullback`. CZ-15 maps pocket → `planId` itself through its own `plan_pocket_keys` table (`apps/server/migrations/0008-pocket-jobs.sql:1`), so the indexer never reads a server table |
-| `closedPocketsWithBalance()` | CZ-15 late-funds recovery | `Closed` pockets with `gatewayAvailableAtomic > 0` or `gatewayWithdrawingAtomic > 0` and K4 not destroyed |
+| `closedPocketsWithBalance()` | CZ-15 late-funds recovery | `Closed` pockets with `gatewayAvailableAtomic > 0` or `gatewayWithdrawingAtomic > 0`, still in poll scope (§1) |
 
 ### 3. Freshness and error rules (new config keys)
 
 | Key | Default | Reason |
 |---|---|---|
 | `indexer.gatewayBalanceMaxAgeSeconds` | 120 | four polls at `indexer.gatewayPollSeconds` 30; older figures are stale |
+| `indexer.closedPocketQuietHours` | 48 | a `Closed` pocket stays polled until every balance reads zero this long; covers an attestation re-credit after `expirationBlock` (A2-18) and a late nanopayment status (A2-26) with margin |
 | `payer.gatewayRecoveryPollSeconds` | 60 | interval of the closed-pocket recovery pass (§5) and the SCR-133 manual-return reconciliation; slower than the 30 s indexer poll it reads |
 
 - **No new keys for the Gateway domain or minter address.**
@@ -110,7 +112,7 @@
 
 ### 5. Late funds after close (CZ-15 §5.3 step 8; implements 03 §5.4 row "Funds reach a pocket after it closed")
 - CZ-15 runs a recovery pass every `payer.gatewayRecoveryPollSeconds` over `closedPocketsWithBalance()`:
-  - if `gatewayAvailableAtomic > maxFee + payer.pullbackSafetyAtomic`: a recovery `requestPullback(pocket, value, …)` (the contract creates a `recovery` record on a `Closed` pocket, `PocketLogic.sol:141-153`), then the normal `/v1/transfer` → mint → `confirmPullback`. The mint lands as free vault balance.
+  - if `gatewayAvailableAtomic > maxFee + payer.pullbackSafetyAtomic`: a recovery `requestPullback(pocket, value, …)` with `value = gatewayAvailableAtomic − payer.pullbackMaxFeeAtomic − payer.pullbackSafetyAtomic` from a fresh read (no `outstanding` bound: a `Closed` pocket's `outstanding` is 0 and the 03 §5.4 recovery row has no such bound) (the contract creates a `recovery` record on a `Closed` pocket, `PocketLogic.sol:141-153`), then the normal `/v1/transfer` → mint → `confirmPullback`. The mint lands as free vault balance.
   - else if dust: the slow path, then `pocket-return` of the withdrawn USDC to the vault.
     - For a `Closed` pocket the USDC lands as free balance and no `recordManualReturn` is needed.
     - The contract accepts `recordManualReturn` only for `Funded`/`Draining` pockets (`PocketLogic.sol:245-247`).
@@ -133,6 +135,6 @@
 - CZ-27 §5.2 write-off and slow-withdraw rows, §5.3 retirement rule, signer reads, nano caps (`server-autonomy-roi-keys.md`)
 - CZ-15 §5.3 step 7 value and write-off, late-funds pass, slow-path value (`server-planning-and-payment.md`)
 - 03 `czar-vault.md` `writeOffPocket` signer note (contract unchanged)
-- `@czar/config`: `indexer.gatewayBalanceMaxAgeSeconds`, `payer.gatewayRecoveryPollSeconds`; `chain.gatewayApiBaseUrl` is defined by SCR-130
+- `@czar/config`: `indexer.gatewayBalanceMaxAgeSeconds`, `indexer.closedPocketQuietHours`, `payer.gatewayRecoveryPollSeconds`; `chain.gatewayApiBaseUrl` is defined by SCR-130
 - Spec 01 §8.4 already marks the on-chain `availableBalance` view as GAP; no change needed there
 - Task T-124 and the T-053 note (`phase-1-tasks.md`)

@@ -26,6 +26,7 @@
 - Code emits `approval.intent-issued` and `approval.submitted` (`approvals.ts:249,356`), which the CZ-12 §4 event list does not include.
 
 ## Evidence
+- The verification reports cited below are architect working papers outside the repository; every claim also carries a repository file:line.
 - Verification report A §3, §4, §6, §7; fact-check rows 6–15 and G1, G4, G11.
 
 ## Proposed change
@@ -41,7 +42,7 @@
   - Returns the `envelopeByRef` response shape (SCR-119), or 404.
   - The mirror already stores `planHash` (written at `apps/indexer/src/mirrors.ts:101`; read by the signer at `apps/signer/src/postgres-projection.ts:280`).
 - **CZ-12 opening watcher**, every `api.openingPollMs`:
-  - **Scope:** every objective whose plan is `approved` (owner submitted) and whose state is `opening` or `awaiting-approval`, until the plan's `expiresAt`.
+  - **Scope:** every objective in `opening` (owner-approved or, once that path is built, agent-opened), and every objective in `awaiting-approval` whose plan is `approved` (owner submitted), until the plan's `expiresAt`.
   - **On a match:** an `Open` envelope of the user's vault. In one transaction it:
     - sets `objectives.envelope_ref` (an existing column, `migrations/0001-cz12.sql:42`; CZ-12 storage `:66`)
     - moves the objective to `executing`
@@ -65,6 +66,10 @@
   - **New CZ-12 §5 transition `planning → received` (reclaim):** a `planning` objective older than `planner.claimTimeoutSeconds` with no stored plan moves back to `received`.
   - No new outbox row is written. The original `objective.received` row is still undelivered and is claimed again by `processNextReceived`.
   - `apps/server/src/objectives/state.ts` gains this edge.
+- **Planner ports with no other producer yet** (added during application, 2026-10-25):
+  - `allowance` follows the contract's own rule (03 `czar-vault.md` `openEnvelope` row and §5.6): `remaining = sat(autoLimit, usedInPeriod)` when `periodId == now / PERIOD_LENGTH`, else `autoLimit`, read through `@czar/vault-client`. Any read error gives `"0"` (approval required).
+  - `agentHosts` answers `false` until `ingestReport` (T-070) records agent hosts.
+  - `pocketKeys` is the signer's `createPocketKey`.
 - **Dispatcher (CZ-15):**
   - Claims one `executing` envelope through `executor_leases` (TTL `payer.leaseSeconds`).
   - Runs the steps in `dependsOn` order through the existing step executors. One executor per envelope (CZ-15 `:271`).
@@ -73,7 +78,7 @@
 
 ### 4. Completion
 - When every step is terminal, CZ-15:
-  1. Closes the envelope with K3 `closeEnvelope(envelopeId)` once every reservation is `Final`. This is CZ-15 §2 (`:267`) "close envelopes"; it is on the K3 allowlist (`apps/signer/src/abi.ts:96`) and the agent may call it (`contracts/src/vault/logic/EnvelopeLogic.sol:92`).
+  1. Closes the envelope with K3 `closeEnvelope(envelopeId)` once every reservation is `Final`, every pocket of the envelope is `Closed` and every job is terminal (the 03 `closeEnvelope` preconditions; otherwise `EnvelopeBusy`). This is CZ-15 §2 (`:267`) "close envelopes"; it is on the K3 allowlist (`apps/signer/src/abi.ts:96`) and the agent may call it (`contracts/src/vault/logic/EnvelopeLogic.sol:92`).
   2. Stores one `results` row in the 02 Result shape and sets `objectives.result_id`.
   3. Moves the objective to:
      - `delivered` when at least one step's content was delivered
@@ -127,7 +132,7 @@
 
 ## Applied
 - CZ-12 §4 events, §5 state diagram and table, opening watcher and one-trigger rule
-- CZ-15 §3 loops, completion, model gate, composition (amends SCR-126 §2)
+- CZ-15 §3 loops, completion, model gate, composition (amends SCR-126 §2); CZ-13 planner ports `allowance`, `agentHosts`, `pocketKeys`
 - CZ-19 §5.4 `envelopeByPlanHash`
 - CZ-22 "Approval sent" wording
 - `@czar/config`: `planner.pollMs`, `planner.claimTimeoutSeconds`, `payer.dispatchPollMs`, `api.openingPollMs`

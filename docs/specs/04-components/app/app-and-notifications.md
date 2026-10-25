@@ -36,7 +36,7 @@
 
 | Direction | Interface | Notes |
 |---|---|---|
-| App → server | `createSession` (`SessionRequest` WebAuthn assertion → `SessionResponse`), `getMe` (`Me`), `listApprovals` (`ApprovalSummary` page), `getApproval` (`Plan`), `createApprovalIntent` (`ApprovalIntent`), `notifySubmitted` (`SubmittedNotice`), `listEnvelopes`, `getEnvelope` (`EnvelopeDetail`), `createFreezeIntent` (`FreezeIntent`), `listReceipts` (`LedgerReceipt`), `getMonthlyStatement` (`MonthlyStatement`), `getSoulPointer` (`SoulPointer`); `createPushSubscription` / `deletePushSubscription` stay defined in 02 but are **stage 2** (D69) and not called in Phase 1. Route: `getSoulPointer` (`SoulPointer`) | 02 §9.2 app surface; bearer `AppSession` |
+| App → server | `createSession` (`SessionRequest` WebAuthn assertion → `SessionResponse`), `getMe` (`Me`), `listApprovals` (`ApprovalSummary` page), `getApproval` (`Plan`), `createApprovalIntent` (`ApprovalIntent`), `notifySubmitted` (`SubmittedNotice`), `listEnvelopes`, `getEnvelope` (`EnvelopeDetail`), `createFreezeIntent` (`FreezeIntent`), `listReceipts` (`LedgerReceipt`), `listManualReturns` (`ManualReturn` page, SCR-133), `createPairingCode` (`PairingCode`), `listDevices` (`Device` page), `revokeDevice` (SCR-134), `getMonthlyStatement` (`MonthlyStatement`), `getSoulPointer` (`SoulPointer`); `createPushSubscription` / `deletePushSubscription` stay defined in 02 but are **stage 2** (D69) and not called in Phase 1. Route: `getSoulPointer` (`SoulPointer`) | 02 §9.2 app surface; bearer `AppSession` |
 | App → Circle | `@circle-fin/modular-wallets-core` 1.0.16. The passkey is created and used with browser WebAuthn against Czar's own relying party (SCR-125); the owner account is viem `toWebAuthnAccount` wrapped by Circle `toCircleSmartAccount`; the bundler transport is `toModularTransport(clientUrl + "/arcTestnet", clientKey)` (A6-19). `toPasskeyTransport` is not used: Circle's RP service would hold the credential registration, which SCR-125 keeps in Czar's `passkey_credentials` (SCR-135). `clientUrl`, the `K2` client key (a public-facing credential) and the app's RPC URL come from `app.circleClientUrl`, `app.circleClientKey` and `app.arcRpcUrl` | A6-05, A6-06 |
 | App → Arc (through the bundler) | UserOps that call `CzarVaultFactory.createVault(ownerAccount, salt)` (03 `czar-vault-factory.md` §5), `ICzarVault.openEnvelope(p)`, `freeze()`, `unfreeze()`, `setCategoryLimits(categoryId, userMax, autoLimit)`, `withdraw(to, amount)`, `recordManualReturn(pocket, amount)` (SCR-133, calldata from `@czar/vault-client`), USDC `transfer` into the vault | calldata comes from the server intents for approvals and freeze; the app re-encodes `ApprovalIntent.decoded` with `@czar/vault-client` and refuses if it differs from `calldata` |
 | App → secondary bundlers | Pimlico, Alchemy, ZeroDev (all support Arc testnet and mainnet, A6-15 to A6-17) when Circle's transport fails | `SubmittedNotice.bundler` records which one |
@@ -53,7 +53,7 @@
 | Create vault | `/onboarding/vault` | `getMe` (vault address predicted by the factory) | submit `createVault` UserOp |
 | Add money | `/onboarding/fund` | `Me.balances`, faucet or onramp outline | copy address, open onramp |
 | Set limits | `/onboarding/limits` | categories, amounts in USD (D51) | `setCategoryLimits` UserOp per category |
-| Home | `/home` | `Me`, pending count, last receipts | approve, freeze |
+| Home | `/home` | `Me`, pending count, last receipts, manual returns waiting (`listManualReturns`, SCR-133) | approve, freeze; open a manual return |
 | Pending approvals | `/approvals` | `listApprovals?status=pending` | open one; a plan whose approval was sent but not yet seen on-chain shows "Approval sent" with no approve action (SCR-132) |
 | Approval | `/approve/{planId}` | `getApproval` (`Plan`), `createApprovalIntent` | approve, decline |
 | Envelopes | `/envelopes`, `/envelopes/{envelopeRef}` | `listEnvelopes`, `getEnvelope`, `listManualReturns` | record a manual return (SCR-133); close (owner, after expiry) later phase |
@@ -276,7 +276,7 @@ Idempotency: every creating call sends `Idempotency-Key`; `notifySubmitted` with
 | Stage 2 (D69) | Home Screen install, notifications and the native-app notice keep their wording for stage 2: "Add Czar to your Home Screen to get approval requests as notifications."; "Turn on notifications"; "Passkeys did not work in the installed app on this phone…" (D28) |
 | Privacy | "Raw work data stays on your computer. Only redacted excerpts are sent to compile your Work Soul, through a Czar relay that stores nothing. Objectives sent to Czar's server are redacted first." (D31 wording rule; never "never leaves") |
 | Work Soul | "Your Work Soul is viewable on your computer. Open the Czar viewer there to read, edit or delete any line." (D34) Before the first soul version, the pointer message is: "Open the Czar viewer on your computer to tell Czar about your work (about five minutes, optional)." (D90; text only, ≤ 200 characters, no soul content in the app) |
-| Devices | "Pair your computer: enter this code in the Czar daemon within 5 minutes: {code}" |
+| Devices | **Superseded by SCR-134** (see the Track A additions below): "Pair your computer: enter this code in the Czar daemon within 5 minutes: {code}" |
 
 **Track A additions (SCR-132, SCR-133, SCR-134)**
 

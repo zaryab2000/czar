@@ -14,6 +14,7 @@
 - SCR-113 assumes "revoke the old device in the app" without a route. The Devices page is a static placeholder (`apps/web/app/settings/devices/page.tsx:1-11`).
 
 ## Evidence
+- The verification reports cited here are architect working papers outside the repository; every claim also carries a repository file:line.
 - Verification report DE §E3; the file:line references above.
 
 ## Proposed change

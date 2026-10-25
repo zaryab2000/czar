@@ -5,7 +5,7 @@
 | ID | SCR-109 |
 | Filed by | Czar builder (tier 2), 2026-10-19 |
 | Spec and section | `docs/specs/04-components/server/server-autonomy-roi-keys.md` CZ-27 §5.2 (`gateway-nano`, `merchant-seller-proof`); `docs/specs/02-data-and-protocol/data-and-protocol.md` §6 |
-| Status | Open |
+| Status | Open (`merchant-seller-proof` part resolved by SCR-129, 2026-10-25) |
 
 ## Problem
 - **`gateway-nano`:** spec 00 G2 / A2-11 name the domain `GatewayWalletBatched` v1 and the EIP-3009 struct. No spec gives the domain's `chainId` and `verifyingContract`, and 02 §6.4 has no vector. The signer takes the whole domain from configuration (`SignerNetwork.nanoDomain`).

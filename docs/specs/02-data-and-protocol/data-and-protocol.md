@@ -949,7 +949,7 @@ Hook configuration shape in the plugin's `hooks/hooks.json` (B1-08, B1-09, B1-38
 
 ## 9. Messages and APIs
 
-Full definition: `api/openapi.yaml` (OpenAPI 3.1; 28 paths, 29 operations; parsed with Ruby `YAML.safe_load` on 2026-10-18). This section is the summary.
+Full definition: `api/openapi.yaml` (OpenAPI 3.1; operation ids are checked by the `@czar/api-contract` tests; 2026-10-25 adds `listManualReturns`, `createPairingCode`, `listDevices`, `revokeDevice`). **Superseded:** "28 paths, 29 operations; parsed with Ruby `YAML.safe_load` on 2026-10-18". This section is the summary.
 
 ### 9.1 Auth model
 

@@ -59,7 +59,7 @@
 | Wallet production config | SCR-135 | app | Lane 5 | TA-13 | no test defaults in production |
 
 ## 4. Waves
-- **Wave 1 (each starts when its gate is Accepted):**
+- **Wave 1 (all gates applied; start now):**
   - TA-01 (L1, SCR-128)
   - TA-02 (L1, SCR-129)
   - TA-03 (L1, SCR-136)
@@ -78,6 +78,6 @@
   - TA-12 (L2; after TA-08; SCR-136)
 - **Phase A2:**
   - TA-20 (L1) → TA-21 (L2) → TA-22a (L1) → TA-22b (L2) → TA-22c (L5)
-  - TA-13 and TA-15 (L5) when their SCRs are accepted
+  - TA-13 and TA-15 (L5) any time
 - **Load:** Lane 1 carries seven Wave-1 briefs. All are small and independent, and Lane 1 has review priority (`docs/builder-coordination.md`).
 - **Validation after Wave 3:** T-050a (local thin slice) is the first deferred acceptance run. It needs Zaryab's local key creation (an operator step, T-105 local mode, G0-13).

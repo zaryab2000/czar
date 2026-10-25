@@ -31,11 +31,11 @@
 | `fetch.localStandinOrigins` | string[] | no default (`noDefault`) | exact `http://127.0.0.1:<port>` origins of the D92 stand-ins; a second loopback exception beside `fetch.localMerchantOrigins`, same rules (D70) |
 
 ### 2. Local-only guard (replaces any chain-id test)
-- A loopback URL (`http://127.0.0.1:<port>`) in any of the four keys, and any value in `fetch.localStandinOrigins`, is accepted only when all three conditions hold:
+- A loopback URL (`http://127.0.0.1:<port>`) in any of the four keys above or in `app.circleClientUrl` / `app.arcRpcUrl` (SCR-135), and any value in `fetch.localStandinOrigins`, is accepted only when all three conditions hold:
   1. The loaded overlay is `local` (`env/local.toml`, via `CZAR_LOCAL_CONFIG`).
-  2. The configured Arc RPC URL is itself `http://127.0.0.1:<port>`.
+  2. The process's Arc RPC URL is itself `http://127.0.0.1:<port>` (`CZAR_ARC_RPC_URL` for server-side processes; `app.arcRpcUrl` for the app).
   3. At startup, the RPC answers `anvil_nodeInfo`. The real Arc RPC does not implement anvil methods. If the pinned `arc-anvil` build does not answer it, the builder stops and reports. No weaker check may be substituted.
-- Config load fails otherwise. Production and testnet values must be `https://`.
+- Config load fails otherwise. Every other value of these six keys must be `https://`; a non-loopback `http://` value fails config load.
 - The chain id is **not** used as the discriminator, because local and testnet are both 5042002.
 
 ### 3. D92 local stand-ins (ops tooling, never product components)
@@ -54,7 +54,7 @@
 - The local overlay sets `fixture`. Choosing the `live` source stays a Zaryab decision for M8 (vendor account).
 
 ### 5. Cross-cutting §3.1
-- Amend the existing `local` row's Circle services cell (`:72`) to "the D92 stand-ins in `ops/local/circle-standins/` (origins in `fetch.localStandinOrigins`)". No new column.
+- Amend the existing `local` row's Circle services cell (`:72`) to "the D92 stand-ins in `ops/local/circle-standins/` (origins in `fetch.localStandinOrigins`), or mocked by the test harness" (unit tests still mock). No new column.
 
 ## Affected tasks
 - T-040 (local hosting), T-043 (merchant), T-053 (pullback base URL), T-032 (indexer poll base URL), T-121 (testnet overlay must use defaults).

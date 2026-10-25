@@ -14,13 +14,13 @@
   - Apply the SCR-128 rail binding. A failure is `payment-not-this-vault`.
   - Check the settled fact from indexer tables:
     - `authorizations` (vault, nonce, amount, `settled`)
-    - `gateway_transfers` (`from`, nonce, `completed`)
-    - the `jobs` mirror (`Completed`)
+    - `gateway_transfers` (`from`, nonce, `to` = `payTo`, `amount`, `completed`)
+    - the `jobs` mirror (`Completed`, `provider` and `budget` equal to the `PaymentRef`)
   - Remove the `evidence_receipts` read from this check. Leave `checksCommitExists` unchanged.
 - **Tests first:**
   - a settled x402 payment signs; an unsettled one is denied `payment-not-settled`
   - a wrong hash is denied `payment-ref-mismatch`; payer ≠ vault is denied `payment-not-this-vault`
-  - Gateway: `completed` signs, `confirmed` is denied
+  - Gateway: `completed` signs, `confirmed` is denied; a `PaymentRef` amount larger than the settled transfer is denied
   - job: `Completed` signs, `Submitted` is denied
   - a regression proving no `evidence_receipts` row is needed
 - **Acceptance:** the tests above, `pnpm --filter @czar/signer test`, typecheck, `pnpm lint`.
@@ -64,7 +64,7 @@
 ## TA-04 D92 Circle stand-ins and the local-only guard
 - **Gate:** SCR-130. **Branch:** `codex/ta04-circle-standins`.
 - **Files:**
-  - `packages/config` validator for the SCR-130 §2 local-only guard (the keys themselves arrive with the spec-application branch)
+  - `packages/config` validator for the SCR-130 §2 local-only guard over all six keys (`fetch.localStandinOrigins`, `merchants.facilitatorBaseUrl`, `chain.gatewayApiBaseUrl`, `merchants.publicOrigin`, `app.circleClientUrl`, `app.arcRpcUrl`), including the rule that a non-loopback `http://` value fails (the keys themselves arrive with the spec-application branch)
   - `apps/indexer/src/gateway-poller.ts:4` reads `chain.gatewayApiBaseUrl`
   - new `ops/local/circle-standins/`
   - `ops/local/process-compose.yaml`: the stand-in process; the server and merchants depend on it; the server gets `CZAR_INDEXER_URL`
@@ -88,14 +88,14 @@
 - **Acceptance:** tests, lint, typecheck.
 
 ## TA-10 Vault-client `getLimits` reader
-- **Gate:** SCR-132 (planner `allowance` rule in TA-08). **Branch:** `codex/ta10-vault-client-limits`.
+- **Gate:** SCR-132 §3 (planner `allowance` rule). **Branch:** `codex/ta10-vault-client-limits`.
 - **Files:** `packages/vault-client/src/client.ts`, tests.
 - **Build:** typed `getLimits(vault, categoryId) → {userMax, autoLimit, usedInPeriod, periodId, lastRaiseAt}` (`contracts/src/interfaces/ICzarVault.sol:170-176,479`).
 - **Tests:** decoding against the ABI; a revert decodes to a named error (T-026 rule).
 - **Acceptance:** tests, lint, typecheck.
 
 ## TA-11 Signer autonomy raise bound
-- **Gate:** none. It's a code defect; CZ-24 `:64` and CZ-27 `:403` specify the step from `userMax`. **Branch:** `codex/ta11-autonomy-raise-bound`.
+- **Gate:** none. It's a code defect; CZ-24's raise rule (D40) and the CZ-27 `autonomy-raise` row specify the step from `userMax`. **Branch:** `codex/ta11-autonomy-raise-bound`.
 - **File:** `apps/signer/src/postgres-projection.ts:144-151`.
 - **Build:** `maxStepTo = autoLimit + userMax × maxRaiseStepBps / BPS`. The contract bounds the increase by `userMax` (`contracts/src/vault/logic/AutonomyLogic.sol:48`).
 - **Tests first:** with `autoLimit = 0` and with `autoLimit > 0` (only the second tells the two formulas apart). A raise of exactly `userMax × bps / BPS` is allowed; one atomic unit more is denied `above-step`.
@@ -118,7 +118,7 @@
   - exact decimal→`Amount6` conversion, including malformed inputs
   - a stale API figure denies write-off, retire and slow withdraw, and allows `pocket-return`
   - write-off is allowed with dust ≤ fee and denied above it
-  - Closed pockets stay polled until K4 is destroyed
+  - Closed pockets stay polled until every balance reads zero for `indexer.closedPocketQuietHours`
   - `nanoSpent` includes `received`, `batched` and `confirmed`
 - **Acceptance:** tests, lint, typecheck (indexer and signer).
 - **Deferred:** G0-05; the local-chain run.

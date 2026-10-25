@@ -29,8 +29,9 @@
      - Otherwise deny `payment-not-this-vault`.
   3. Settled fact from the indexer:
      - `x402-exact`: an `authorizations` row with `vault`, `nonce = paymentRef.nonce`, `amount = paymentRef.amount`, `settled = true`.
-     - `gateway-batched`: a `gateway_transfers` row with `from = paymentRef.payer`, `nonce = paymentRef.nonce`, `status = completed`.
-     - `erc8183-job`: the `jobs` mirror for `(contract, jobId)` in `Completed`.
+     - `gateway-batched`: a `gateway_transfers` row with `from = paymentRef.payer`, `nonce = paymentRef.nonce`, `to = paymentRef.payTo`, `amount = paymentRef.amount`, `status = completed`.
+     - `erc8183-job`: the `jobs` mirror for `(contract, jobId)` in `Completed` with `provider = paymentRef.provider` and `budget = paymentRef.budget`.
+     - Amount and payee binding on every rail was added during application (2026-10-25) so a receipt can never attest more than the settled fact.
      - Otherwise deny `payment-not-settled`. The denial code is unchanged.
 - The signer no longer reads `evidence_receipts` for this check.
 - **`sl-validation-report`** (`checksCommitExists`, `postgres-projection.ts:329-334`) also reads `evidence_receipts`. It is an evidence-track kind and is **not** changed here. Track B decides it together with the I-F-6/Flow 7 work.

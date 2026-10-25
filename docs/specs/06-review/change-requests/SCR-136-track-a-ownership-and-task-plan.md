@@ -22,6 +22,9 @@
 - D92 is cited across the docs but has no entry in `docs/product/decisions-log.md` (headings stop at D91, `:554`). Its text lives only in `phase-1-tasks.md:13`.
 - Zaryab's instruction of 2026-10-25 defers local Arc Anvil acceptance campaigns, crash/restart matrices, live checks, real devices and testnet until the implementation plan is settled. `CLAUDE.md` says a task is done only when every listed acceptance test passes. Both must hold at once.
 
+## Evidence
+- The verification reports are architect working papers outside the repository; each problem above carries a repository file:line.
+
 ## Proposed change
 
 ### 1. Lane ownership (`docs/builder-coordination.md`)
@@ -60,7 +63,7 @@
 - **T-053 gains (Lane 2):** SCR-127 §3–§5 consumers and SCR-133's persistence and reconciliation.
 - **T-085 split:**
   - UI and intent: Lane 5, implemented.
-  - "Server listener that calls `lowerAutoLimit(categoryId, 0)` per used category after `Frozen`": Lane 2, in the payer runtime under caller `cz-15`.
+  - "Server listener that calls `lowerAutoLimit(categoryId, 0)` per used category after `Frozen`": Lane 2, in the payer runtime under caller `cz-15`, over every category in `planner.categoryByCapability`, skipping those already at 0 (CZ-24 "`0` for every category"; the set equals the categories the app's limits screen writes).
   - Why `cz-15`: CZ-15 `:413` names it "a follow-up agent step"; K3 belongs to CZ-15 (CZ-27 `:371`, `apps/signer/src/runtime-adapters.ts:9`); `lowerAutoLimit` is on the K3 allowlist (`apps/signer/src/abi.ts:97`). CZ-24 §4 still describes the lowering as its output. Running it as a CZ-15 follow-up step is that output, and no key-map change is needed.
 - **T-105 amended:**
   - The K10-lab, payee-swap, K21a and K21b entries are required when T-106 and H7 start, not by T-105 itself.

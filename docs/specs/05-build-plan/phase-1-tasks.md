@@ -64,14 +64,14 @@
 | T-049 | Receipts and evidence store | M3 | M | T-048 |
 | T-050a | Local thin slice (D92 stand-ins, SCR-136) | M3 | M | T-122, T-123, T-043 |
 | T-050b | Thin slice on testnet (former T-050) | M8 | M | T-050a, T-121, G0-04 |
-| T-122 | Execution runtime: composition, opening watcher, dispatcher, completion (SCR-132) | M3 | L | T-045, T-048, T-049 |
+| T-122 | Execution runtime: composition, opening watcher, dispatcher, completion (SCR-132) | M3 | L | T-045, T-048, T-049, T-123 |
 | T-123 | Interim Czar-registered selection (SCR-131) | M3 | M | T-041, T-042 |
 | T-124 | Gateway balance projection (SCR-127) | M4 | M | T-032, T-037 |
 | T-125 | Owner manual return (SCR-133) | M4 | M | T-124, T-053 |
-| T-051 | Merchants complete | M4 | L | T-050 |
-| T-052 | Pocket loop | M4 | L | T-050, T-037 |
-| T-053 | Pullback | M4 | L | T-052, G0-05 |
-| T-054 | Job loop | M4 | L | T-050 |
+| T-051 | Merchants complete | M4 | L | T-050a |
+| T-052 | Pocket loop | M4 | L | T-050a, T-037 |
+| T-053 | Pullback | M4 | L | T-052, G0-05, T-124 (SCR-127 part) |
+| T-054 | Job loop | M4 | L | T-050a |
 | T-055 | ERC-8183 evaluator | M4 | M | T-054, T-056 |
 | T-056 | Acceptance profiles complete | M4 | M | T-047 |
 | T-057 | Evidence publisher | M4 | L | T-049, T-036 |
@@ -787,7 +787,7 @@
 ### T-050a Local thin slice: objective → approval → reserve → x402 → settle → finalize → receipt → result against czar-search (SCR-132, SCR-136)
 - **Milestone / group / who:** M3 / M3-d / agent. **Size:** M. **Deps:** T-122, T-123, T-043. **Owner:** Lane 2.
 - **Dependency rule (SCR-136):** where an M4 task lists T-050 as a dependency or input (T-051, T-052, T-054), it means T-050a; the testnet run is T-050b in M8.
-- **Spec refs:** as T-050; CZ-12 §5 and CZ-15 §3 as amended by SCR-132; `S04/shared/cross-cutting.md` §3.1 local row (SCR-130); D92.
+- **Spec refs:** as T-050b; CZ-12 §5 and CZ-15 §3 as amended by SCR-132; `S04/shared/cross-cutting.md` §3.1 local row (SCR-130); D92.
 - **Outputs:** a process-level test or script under `apps/server/test/` and a run report `reports/m3-local-thin-slice.md` (tx hashes from the local chain, events, no keys).
 - **Steps:**
   - Run the local stack (`ops/local`) with the D92 stand-ins and the local key file (T-105 local mode).
@@ -798,7 +798,7 @@
 
 ### T-050b (former T-050) Thin slice on testnet: one real reserve → x402 → settle → finalize against czar-search, evidence recorded
 - **SCR-136 (2026-10-25):** renamed from T-050; runs in M8 after T-121 and T-050a, and now depends on G0-04 (moved from T-043). Testnet `curl` 402 check from T-043 runs here.
-- **Milestone / group / who:** M3 / M3-d / agent, after Zaryab approves funds. **Size:** M. **Deps:** T-049, T-043.
+- **Milestone / group / who:** M8 / agent, after Zaryab approves funds. **Size:** M. **Deps:** T-050a, T-121, G0-04 (SCR-136; was M3 / M3-d, deps T-049, T-043).
 - **Spec refs:** `S04/shared/phase-1-acceptance-scenario.md` Stage 4; `S01/system-architecture.md` §8.3; A1-17.
 - **Outputs:** run report `reports/m3-thin-slice.md` (tx hashes, events, no keys).
 - **Inputs:** receipts and evidence store from T-049; `czar-search` route from T-043; Zaryab's funds approval.
@@ -813,10 +813,10 @@
 ---
 
 ### T-122 Execution runtime: composition, opening watcher, dispatcher, completion (SCR-132)
-- **Milestone / group / who:** M3 / M3-d / agent. **Size:** L. **Deps:** T-045, T-048, T-049. **Owner:** Lane 2.
+- **Milestone / group / who:** M3 / M3-d / agent. **Size:** L. **Deps:** T-045, T-048, T-049, T-123. **Owner:** Lane 2; the indexer route `GET /envelopes/by-plan-hash/{planHash}` is the Lane 1 part of this task (brief TA-07).
 - **Spec refs:** `S04/server/server-planning-and-payment.md` CZ-12 §4, §5, §6 and CZ-15 §2, §3 as amended by SCR-132; CZ-19 §5.4 `envelopeByPlanHash`; SCR-126 §2; `S04/shared/ai-prompts.md` P-01 (D76).
 - **Outputs:** the started composition root in `apps/server/src/local-main.ts`; planner loop; opening watcher; dispatcher; completion; optional model client.
-- **Acceptance tests:** started-root composition order; planner reclaim without a duplicate outbox row; opening watcher match, late match, timeout and expiry; dispatcher order, lease and resume; completion idempotent, `closeEnvelope` only after every reservation is `Final`, all-quarantined → `failed` with `result-quarantined`. The SCR-126 §2 started-root run on `arc-anvil` is part of T-050a.
+- **Acceptance tests:** started-root composition order; planner reclaim without a duplicate outbox row; opening watcher match, late match, timeout and expiry; dispatcher order, lease and resume; completion idempotent, `closeEnvelope` only after every reservation is `Final`, every pocket `Closed` and every job terminal, all-quarantined → `failed` with `result-quarantined`. The SCR-126 §2 started-root run on `arc-anvil` is part of T-050a.
 
 ### T-123 Interim Czar-registered selection (SCR-131)
 - **Milestone / group / who:** M3 / M3-c / agent. **Size:** M. **Deps:** T-041, T-042. **Owner:** Lane 3.
@@ -830,7 +830,7 @@
 - **Milestone / group / who:** M4 / M4-a / agent. **Size:** L. **Deps:** T-050.
 - **Spec refs:** `S04/server/server-supply-side.md` CZ-20 §5.1–§5.9; `S02/data-and-protocol.md` §11.1, §12.2 (`extensions.czar.rail`, AM-17); D49, D50; p1-G11, A2-17, A2-28.
 - **Outputs:** `apps/merchants/src/{spot,extract,search}/` with vanilla and Gateway routes, sweep job, refund job.
-- **Inputs:** `apps/merchants/src/search/` and the M3 exit report `reports/m3-thin-slice.md` from T-050.
+- **Inputs:** `apps/merchants/src/search/` and the M3 exit report `reports/m3-local-thin-slice.md` from T-050a (SCR-136).
 - **Steps:**
   - Add `czar-spot` and `czar-extract` handlers with vanilla routes.
   - Add Gateway routes for all three services with an explicit testnet facilitator URL.
@@ -1026,7 +1026,7 @@
 - **Milestone / group / who:** M4 / M4-b / agent. **Size:** M. **Deps:** T-032, T-037. **Owner:** Lane 1.
 - **Spec refs:** CZ-19 §5.3, §5.4, §5.6 and CZ-27 §5.2, §5.3 as amended by SCR-127; A2-15, A2-29, A2-30.
 - **Outputs:** indexer `pocket_balances`, the three SCR-127 queries, scope including `Closed`; signer projection `pocketBalances`, `slowWithdrawalOpen`, `slowWithdrawAllowed`, write-off rule and `nanoSpent` per SCR-127.
-- **Acceptance tests:** exact decimal conversion and malformed handling; stale figure denies write-off, retirement and slow withdraw but not `pocket-return`; dust at or below the fee allows write-off; `Closed` pockets polled until K4 is destroyed; `nanoSpent` counts non-failed transfers. Live `/v1/balances` behaviour is G0-05.
+- **Acceptance tests:** exact decimal conversion and malformed handling; stale figure denies write-off, retirement and slow withdraw but not `pocket-return`; dust at or below the fee allows write-off; `Closed` pockets polled until every balance reads zero for `indexer.closedPocketQuietHours`; `nanoSpent` counts non-failed transfers. Live `/v1/balances` behaviour is G0-05.
 
 ### T-125 Owner manual return (SCR-133)
 - **Milestone / group / who:** M4 / M4-b / agent. **Size:** M. **Deps:** T-124, T-053. **Owners:** Lane 1 (`encodeRecordManualReturn`, indexer `manual_returns` and query), Lane 2 (migration, reconciliation, write-off hold), Lane 5 (`listManualReturns`, Envelope section, Home notice).
@@ -1184,6 +1184,7 @@
 - **D84 (2026-10-20):** `ObjectiveSubmission.taskSpec`; `objectiveHash` includes `taskSpecHash`; layer 2 allows `TaskSpec` values; P-05 goal names the subjects (eval 1 and 7).
 
 ### T-070 Shadow mode CZ-08, shadowQuote route, IngestReport.shadowTotals
+- **SCR-136 (2026-10-25):** owner and order decided in the evidence and social-network replan (Track B); app pages keep the labelled sample previews (SCR-125 §4).
 - **Milestone / group / who:** M5 / M5-e / agent. **Size:** M. **Deps:** T-069, T-045.
 - **Spec refs:** `S04/local/local-soul-and-drives.md` CZ-08; `S02/api/openapi.yaml` `shadowQuote`, `ingestReport` (`shadowTotals`, AM-04), `getMe` (`mode`, `shadowEndsAt`, AM-03).
 - **Outputs:** `apps/daemon/src/shadow/`, server `shadowQuote` handler.
@@ -1211,6 +1212,7 @@
 - **Review fixes (2026-10-19):** `createPayRequest` per CZ-12 §6 as amended (D75, RV-019): approved plan step only, call budget, `inputKeys` check; `createQuote` refuses non-index URLs and derives category; `payRequestId` vs `paymentId` (RV-050). Named tests in CZ-12 §14.
 
 ### T-072 MCP server CZ-09: stdio, dual era, get_objectives/quote/pay/report_outcome, URL-mode elicitation
+- **SCR-132, SCR-136 (2026-10-25):** re-sequenced with T-071 into the evidence and social-network replan (Track B).
 - **Milestone / group / who:** M5 / M5-d / agent. **Size:** L. **Deps:** T-071, T-061.
 - **Spec refs:** `S04/local/local-agent-surfaces.md` CZ-09 §5.1–§5.3, §10; `S02/mcp/czar-mcp-tools.md` §1–§6; D3-02 to D3-11.
 - **Outputs:** `apps/mcp/` and `plugins/claude-code/bin/czar-mcp`.
@@ -1430,7 +1432,7 @@
 - **Milestone / group / who:** M6 / M6-c / agent. **Size:** M. **Deps:** T-084, T-048, T-034.
 - **Spec refs:** `S04/app/app-and-notifications.md` CZ-22 §5.4; `S03/czar-vault.md` §5.1, §5.6 (D60 note); `S02/api/openapi.yaml` `createFreezeIntent`; D60, D63.
 - **Outputs:** freeze UI, server listener that calls `lowerAutoLimit(categoryId, 0)` per used category after `Frozen`.
-- **Split (SCR-136):** freeze UI and intent: Lane 5 (implemented). Server listener: Lane 2, in the payer runtime under caller `cz-15` with K3 (CZ-15 follow-up agent step), over every category in `planner.categoryByCapability` whose `autoLimit` is not 0.
+- **Split (SCR-136):** freeze UI and intent: Lane 5 (implemented). Server listener: Lane 2, in the payer runtime under caller `cz-15` with K3 (CZ-15 follow-up agent step), over every category in `planner.categoryByCapability`, skipping those already at 0 (CZ-24 "`0` for every category"; the set equals the categories the app's limits screen writes).
 - **Inputs:** approvals from T-084; paying agent from T-048; indexer query API from T-034.
 - **Steps:**
   - Add the freeze and unfreeze buttons with `createFreezeIntent`.
@@ -1473,6 +1475,7 @@
 ## M7 Selection Layer lite, earned autonomy and ROI ledger
 
 ### T-090 Selection Layer lite: attribution, Czar-registered index, live Circle catalog with TTL cache (D15)
+- **Owner (SCR-136):** Lane 3; order decided in the evidence and social-network replan (Track B).
 - **Milestone / group / who:** M7 / M7-a / agent. **Size:** L. **Deps:** T-041, T-051.
 - **Spec refs:** `S04/server/server-acceptance-evidence-selection.md` CZ-18 §5.1, §5.3, §5.4, §5.5; `S02/data-and-protocol.md` §12.3; D15; p1-D1, p1-D2, p1-D7, p1-D8.
 - **Outputs:** `apps/server/src/selection/intake/`.
@@ -1487,6 +1490,7 @@
 - **D91 (2026-10-20):** loading Czar-registered merchants into the index and the live Circle lead fetch are built earlier in T-115 (M4); T-090 keeps attribution (CZ-18 §5.4) and builds on T-115's tables.
 
 ### T-091 Reputation posteriors, pol_default_v1 ranking, RankingDecision, findService, listIndexResources, searchIndexResources
+- **Owner (SCR-136):** Lane 3; replaces the T-123 interim ranking (SCR-131); order decided in the evidence and social-network replan (Track B).
 - **Milestone / group / who:** M7 / M7-b / agent. **Size:** L. **Deps:** T-090, T-049.
 - **Spec refs:** CZ-18 §5.2, §5.6; `S02/api/openapi.yaml` `findService`, `listIndexResources`, `searchIndexResources` (AM-01, AM-07); `S02/data-and-protocol.md` §4.19, §12.2; SL-C9, SL-C10.
 - **Outputs:** `apps/server/src/selection/ranking/`, the three routes.
@@ -1543,6 +1547,7 @@
   - A `wrong` report lowers the limit (`AutoLimitLowered`).
 
 ### T-095 ROI ledger CZ-25 and getMonthlyStatement
+- **SCR-136 (2026-10-25):** owner and order decided in the evidence and social-network replan (Track B); the statement page keeps its labelled sample preview (SCR-125 §4).
 - **Milestone / group / who:** M7 / M7-a / agent. **Size:** M. **Deps:** T-049, T-071.
 - **Spec refs:** `S04/server/server-autonomy-roi-keys.md` CZ-25 §5.1–§5.4; `S02/api/openapi.yaml` `getMonthlyStatement`, `LedgerReceipt` (`minutesSaved`, `minutesSource`, AM-05); D51.
 - **Inputs:** receipts from T-049; `reportOutcome` route from T-071.
@@ -1717,7 +1722,7 @@
 | 1 Accounts and vault | T-012, T-013, T-027, T-061, T-082 |
 | 2 Observe → soul → objective | T-062, T-063, T-064, T-066, T-068, T-069 |
 | 3 Plan and approve | T-044, T-045, T-084, T-092 |
-| 4 Vault-direct | T-015, T-016, T-043, T-048, T-050 |
+| 4 Vault-direct | T-015, T-016, T-043, T-048, T-050a, T-050b |
 | 5 Pocket wallet | T-017, T-037, T-051, T-052, T-053 |
 | 6 ERC-8183 job | T-018, T-054, T-055 |
 | 7 Accept, deliver, close | T-046, T-047, T-056, T-073, T-014 |
