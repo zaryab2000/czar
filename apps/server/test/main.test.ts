@@ -1,8 +1,13 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import { loadConfig } from "@czar/config";
 import { createLogger } from "@czar/logging";
 import { setupDatabase } from "#test/db";
-import { makeObjectiveSubmission, seedDevice, TEST_DEVICE_ID, TEST_USER_ID } from "#test/fixtures";
+import {
+  makeObjectiveSubmission,
+  seedDevice,
+  testAppConfig,
+  TEST_DEVICE_ID,
+  TEST_USER_ID,
+} from "#test/fixtures";
 import { testSigner } from "#test/payer/test-signer";
 import { createLocalServerMain } from "#src/local-main";
 import { createPlannerPocketKeySource, createPlannerProfileSource } from "#src/main";
@@ -45,12 +50,13 @@ describe("server composition root", () => {
     });
     const root = await createLocalServerMain({
       pool: getPool(),
-      config: loadConfig(),
+      config: testAppConfig(),
       logger: createLogger({
         service: "server",
         component: "CZ-15",
         sink: (line) => logLines.push(line),
       }),
+      modelClient: { complete: vi.fn() },
       publicClient: {
         getBlockNumber: vi.fn(async () => 0n),
         readContract: vi.fn(async () => factory),

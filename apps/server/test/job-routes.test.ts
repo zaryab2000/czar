@@ -10,12 +10,17 @@ import { fileURLToPath } from "node:url";
 import { createLogger } from "@czar/logging";
 import { validateRecordedExchange } from "@czar/api-contract";
 import { apiContracts } from "@czar/api-contract";
-import { loadConfig } from "@czar/config";
 import { briefRequestDigest, deliverableUploadDigest, type Hash32 } from "@czar/hashing";
 import { buildJobBrief, uploadJobDeliverable } from "#src/payer/job";
 import { createApp } from "#src/app";
 import { setupDatabaseConnection } from "#test/db";
-import { makeObjectiveSubmission, seedDevice, TEST_DEVICE_ID, TEST_USER_ID } from "#test/fixtures";
+import {
+  makeObjectiveSubmission,
+  seedDevice,
+  testAppConfig,
+  TEST_DEVICE_ID,
+  TEST_USER_ID,
+} from "#test/fixtures";
 import { generatePrivateKey, privateKeyToAccount, sign } from "viem/accounts";
 import { keccak256 } from "viem";
 
@@ -52,7 +57,7 @@ const brief = buildJobBrief({
   issuedAt: now.toISOString(),
 });
 const objects = new Map<string, Uint8Array>();
-const config = loadConfig();
+const config = testAppConfig();
 const testDatabase = setupDatabaseConnection();
 const getPool = testDatabase.getPool;
 let app: ReturnType<typeof createApp>;
@@ -296,6 +301,9 @@ function startLocalServer(port: number, databaseUrl: string, objectPath: string)
         CZAR_DATABASE_URL: databaseUrl,
         CZAR_LOCAL_OBJECT_STORE_PATH: objectPath,
         CZAR_ARC_RPC_URL: "http://127.0.0.1:1",
+        CZAR_APP_CIRCLE_CLIENT_URL: "https://wallet.example.test",
+        CZAR_APP_CIRCLE_CLIENT_KEY: "e2e-public-client-key",
+        CZAR_APP_ARC_RPC_URL: "https://rpc.example.test",
         CZAR_SERVER_PORT: String(port),
       },
       stdio: "ignore",

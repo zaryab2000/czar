@@ -139,12 +139,6 @@ export async function getMeRoute(
     );
   }
   assertExchange("getMe", response);
-  const bundlerOrder = dependencies.config.get("app.bundlerOrder") as readonly string[];
-  context.header("X-Czar-Bundler-Order", bundlerOrder.join(","));
-  context.header(
-    "X-Czar-Bundler-Endpoints",
-    JSON.stringify(dependencies.config.get("app.bundlerEndpoints")),
-  );
   return context.json(response);
 }
 

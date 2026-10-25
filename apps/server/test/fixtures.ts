@@ -16,6 +16,17 @@ export const TEST_DEVICE_ID = "dev_01K7ZT9P4N5Q6R7S8T9V0W1X2Y";
 export const TEST_TOKEN = Buffer.alloc(32, 7).toString("base64url");
 let contextRandomOffset = 0;
 
+export function testAppConfig(overrides: Record<string, unknown> = {}): Config {
+  return loadConfig({
+    envFile: {
+      "app.circleClientUrl": "http://127.0.0.1:4337",
+      "app.circleClientKey": "e2e-public-client-key",
+      "app.arcRpcUrl": "http://127.0.0.1:8549",
+      ...overrides,
+    },
+  });
+}
+
 export function createTestContext(
   pool: Pool,
   options: {
@@ -55,7 +66,7 @@ export function createTestContext(
   });
   const app = createApp({
     pool,
-    config: options.config ?? loadConfig(),
+    config: options.config ?? testAppConfig(),
     logger,
     clock,
     random,

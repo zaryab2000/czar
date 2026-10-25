@@ -32,7 +32,7 @@ export interface AuthRouteDependencies {
   readonly clock: { now(): Date };
   readonly random: RandomSource;
   readonly origin: string;
-  readonly rpcUrl?: string;
+  readonly rpcUrl: string;
 }
 
 export async function createAuthChallengeRoute(
@@ -319,7 +319,7 @@ async function circleMscaAddress(
   credentialId: string,
   qx: Buffer,
   qy: Buffer,
-  rpcUrl = process.env["CZAR_ARC_RPC_URL"] ?? "http://127.0.0.1:8549",
+  rpcUrl: string,
 ): Promise<string> {
   const chain = defineChain({
     id: 5042002,

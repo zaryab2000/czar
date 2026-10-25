@@ -25,6 +25,7 @@ describe("OpenAPI contracts", () => {
     expect(ids).toContain("completeModelCall");
     expect(ids).toContain("getJobBrief");
     expect(ids).toContain("getLocalSoul");
+    expect(ids).toContain("getAppWalletConfig");
     expect(ids).toContain("createPairingCode");
     expect(ids).toContain("listDevices");
     expect(ids).toContain("revokeDevice");

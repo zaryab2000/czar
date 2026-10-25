@@ -59,9 +59,9 @@ describe("app read routes", () => {
       const { app } = createTestContext(pool, { appReadOptions: readOptions(indexer.url) });
       const response = await app.request("/v1/me", { headers: appHeaders() });
       const body = await response.json();
-      expect(response.status).toBe(200);
-      expect(response.headers.get("X-Czar-Bundler-Order")).toBe("circle,pimlico,alchemy,zerodev");
-      expect(response.headers.get("X-Czar-Bundler-Endpoints")).toBe("{}");
+      expect(response.status, JSON.stringify(body)).toBe(200);
+      expect(response.headers.get("X-Czar-Bundler-Order")).toBeNull();
+      expect(response.headers.get("X-Czar-Bundler-Endpoints")).toBeNull();
       expect(body).toMatchObject({ vaultCreated: false, msca: MSCA, frozen: false, paused: false });
       expect(
         validateRecordedExchange("getMe", { responseStatus: response.status, responseBody: body })

@@ -3,9 +3,9 @@
 import { toCircleSmartAccount } from "@circle-fin/modular-wallets-core";
 import { toWebAuthnAccount } from "viem/account-abstraction";
 import { createPublicClient, defineChain, http } from "viem";
+import { getAppWalletConfig } from "#src/app-api";
 
 const RP_ID = "localhost";
-const ARC_RPC_URL = process.env["NEXT_PUBLIC_ARC_RPC_URL"] ?? "http://127.0.0.1:8549";
 
 export interface BrowserPasskey {
   readonly credentialId: string;
@@ -92,13 +92,14 @@ export async function createPasskeyAssertion(
 }
 
 export async function counterfactualMsca(passkey: BrowserPasskey): Promise<string> {
+  const walletConfig = await getAppWalletConfig();
   const chain = defineChain({
     id: 5042002,
     name: "Arc Testnet",
     nativeCurrency: { name: "USDC", symbol: "USDC", decimals: 6 },
-    rpcUrls: { default: { http: [ARC_RPC_URL] } },
+    rpcUrls: { default: { http: [walletConfig.arcRpcUrl] } },
   });
-  const client = createPublicClient({ chain, transport: http(ARC_RPC_URL) });
+  const client = createPublicClient({ chain, transport: http(walletConfig.arcRpcUrl) });
   const owner = toWebAuthnAccount({
     credential: { id: passkey.credentialId, publicKey: passkey.publicKey },
     rpId: RP_ID,
