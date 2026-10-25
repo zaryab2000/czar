@@ -26,6 +26,7 @@ import {
   getExecutionTrace,
   releaseExecutorLease,
   startExecutorLeaseRenewal,
+  type ExecutorLeaseGuard,
 } from "#src/payer/executions";
 
 const BASIS_POINTS = 10_000n;
@@ -221,6 +222,7 @@ export interface PocketPreparationInput {
   };
   readonly attempt?: number;
   readonly workerId?: string;
+  readonly dispatchLease?: ExecutorLeaseGuard;
 }
 
 export interface PocketPreparationChain {
@@ -267,6 +269,7 @@ export interface PocketNanopaymentInput {
   readonly steps: readonly Step[];
   readonly acceptedDependencies?: readonly PocketDependency[];
   readonly attempt?: number;
+  readonly dispatchLease?: ExecutorLeaseGuard;
 }
 
 export interface PocketDependency {
@@ -286,7 +289,7 @@ export interface PocketNanopaymentDependencies {
     readonly pocket: Address;
     readonly nonce: Hash32;
     readonly transferId?: string;
-  }) => Promise<"pending" | "completed">;
+  }) => Promise<"pending" | "completed" | "failed">;
 }
 
 export async function executePocketPreparation(
@@ -295,6 +298,8 @@ export async function executePocketPreparation(
 ): Promise<{ readonly pocket: Address; readonly funded: string }> {
   const pocket = await readPlanPocketKey(dependencies.pool, input.planId);
   const attempt = input.attempt ?? 0;
+  if (input.dispatchLease)
+    return preparePocket(input, dependencies, pocket, attempt, input.dispatchLease.assertHeld);
   const workerId = input.workerId ?? `pocket-${process.pid}-${randomBytes(16).toString("hex")}`;
   const ttl = Number(dependencies.config.get("payer.leaseSeconds"));
   const leased = await acquireExecutorLease(
@@ -498,8 +503,11 @@ export async function payGatewaySteps(
   input: PocketNanopaymentInput,
   dependencies: PocketNanopaymentDependencies,
 ): Promise<void> {
+  if (input.dispatchLease) {
+    await runGatewaySteps(input, dependencies, input.dispatchLease.assertHeld);
+    return;
+  }
   const workerId = `pocket-pay-${process.pid}-${randomBytes(16).toString("hex")}`;
-  const attempt = input.attempt ?? 0;
   const ttl = Number(dependencies.config.get("payer.leaseSeconds"));
   const leased = await acquireExecutorLease(
     dependencies.pool,
@@ -517,13 +525,21 @@ export async function payGatewaySteps(
     dependencies.now,
   );
   try {
-    for (const step of input.steps.filter((candidate) => candidate.kind === "gateway-nano")) {
-      await payGatewayStep(input, step, dependencies, attempt, renewal.assertHeld);
-    }
+    await runGatewaySteps(input, dependencies, renewal.assertHeld);
   } finally {
     await renewal.stop();
     await releaseExecutorLease(dependencies.pool, input.envelopeRef, workerId);
   }
+}
+
+async function runGatewaySteps(
+  input: PocketNanopaymentInput,
+  dependencies: PocketNanopaymentDependencies,
+  assertLeaseHeld: () => void,
+): Promise<void> {
+  const attempt = input.attempt ?? 0;
+  for (const step of input.steps.filter((candidate) => candidate.kind === "gateway-nano"))
+    await payGatewayStep(input, step, dependencies, attempt, assertLeaseHeld);
 }
 
 async function payGatewayStep(
@@ -794,9 +810,9 @@ function phaseTransaction(
 export async function refreshGatewayStatuses(
   input: PocketNanopaymentInput,
   dependencies: PocketNanopaymentDependencies,
-): Promise<("pending" | "completed")[]> {
+): Promise<("pending" | "completed" | "failed")[]> {
   const attempt = input.attempt ?? 0;
-  const statuses: ("pending" | "completed")[] = [];
+  const statuses: ("pending" | "completed" | "failed")[] = [];
   for (const step of input.steps.filter((candidate) => candidate.kind === "gateway-nano")) {
     const trace = await getExecutionTrace(dependencies.pool, input.planId, step.stepIndex, attempt);
     for (const paid of trace.filter((row) => row.phase.startsWith("pocket.paid["))) {

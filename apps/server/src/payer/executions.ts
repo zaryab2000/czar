@@ -8,6 +8,10 @@ export interface ExecutionPhase {
   readonly payload: Readonly<Record<string, unknown>>;
 }
 
+export interface ExecutorLeaseGuard {
+  assertHeld(): void;
+}
+
 export interface ExecutionPhaseRow {
   readonly phase: string;
   readonly payload: Readonly<Record<string, unknown>>;
