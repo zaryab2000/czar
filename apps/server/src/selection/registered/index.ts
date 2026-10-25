@@ -397,7 +397,8 @@ function snapshotOffer(
   network: string,
 ): PaymentRequirements {
   const relevant = offers.filter((offer) => offer.network === network);
-  const choices = relevant.length > 0 ? relevant : offers;
+  const payable = relevant.filter(isUsableOffer);
+  const choices = payable.length > 0 ? payable : relevant.length > 0 ? relevant : offers;
   return [...choices].toSorted((left, right) => {
     const amountOrder =
       BigInt(left.amount) < BigInt(right.amount)
