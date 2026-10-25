@@ -75,6 +75,7 @@ describe("Postgres signer projection", () => {
     expect(calls[0]?.query).toContain("FROM authorizations");
     expect(calls[0]?.query).toContain("settled=true");
     expect(calls[0]?.query).toContain("reservations");
+    expect(calls[0]?.query).toContain("lower(r.mirror->>'payee')=lower($4)");
     expect(calls[0]?.values).toEqual([vault, paymentRef.nonce, paymentRef.amount, payee]);
     await expect(projection.settledPayment(vault, { ...paymentRef, payTo: factory })).resolves.toBe(
       false,
