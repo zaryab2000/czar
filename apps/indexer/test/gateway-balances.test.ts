@@ -328,4 +328,81 @@ describe("Gateway balance projection rules", () => {
     );
     expect(pendingStore.current()?.closedZeroSince).toBeNull();
   });
+
+  it("resets Closed quiet time when a successful partial read observes funds", async () => {
+    const previous: PocketBalanceRow = {
+      pocket,
+      vault,
+      gatewayAvailableAtomic: "0",
+      gatewayPendingBatchAtomic: "0",
+      gatewayWithdrawingAtomic: "0",
+      withdrawalBlock: 0n,
+      pocketUsdcAtomic: "0",
+      apiObservedAt: "2026-10-24T12:00:00.000Z",
+      chainObservedBlock: 100n,
+      apiConsecutiveFailures: 0,
+      apiLastError: null,
+      closedZeroSince: "2026-10-24T12:00:00.000Z",
+    };
+    const apiFundStore = memoryStore(previous);
+    await pollPocketBalance(
+      {
+        pocket,
+        vault,
+        state: "Closed",
+        domain: 26,
+        gatewayWallet: vault,
+        usdc: vault,
+        apiBase: "http://127.0.0.1:4999",
+        timeoutMs: 1000,
+        quietMs: 48 * 60 * 60 * 1000,
+      },
+      {
+        fetch: vi.fn().mockResolvedValue(
+          new Response(
+            JSON.stringify({
+              token: "USDC",
+              balances: [{ domain: 26, depositor: pocket, balance: "0.000001", pendingBatch: "0" }],
+            }),
+            { status: 200 },
+          ),
+        ),
+        chain: {
+          getBlockNumber: async () => {
+            throw new Error("rpc down");
+          },
+          readContract: async () => 0n,
+        } as never,
+        store: apiFundStore,
+        now: () => Date.parse("2026-10-25T12:00:00.000Z"),
+      },
+    );
+    expect(apiFundStore.current()?.closedZeroSince).toBeNull();
+
+    const chainFundStore = memoryStore(previous);
+    await pollPocketBalance(
+      {
+        pocket,
+        vault,
+        state: "Closed",
+        domain: 26,
+        gatewayWallet: vault,
+        usdc: vault,
+        apiBase: "http://127.0.0.1:4999",
+        timeoutMs: 1000,
+        quietMs: 48 * 60 * 60 * 1000,
+      },
+      {
+        fetch: vi.fn().mockRejectedValue(new Error("api down")),
+        chain: {
+          getBlockNumber: async () => 123n,
+          readContract: async ({ functionName }: { functionName: string }) =>
+            functionName === "balanceOf" ? 1n : 0n,
+        } as never,
+        store: chainFundStore,
+        now: () => Date.parse("2026-10-25T12:00:00.000Z"),
+      },
+    );
+    expect(chainFundStore.current()?.closedZeroSince).toBeNull();
+  });
 });

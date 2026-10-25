@@ -1068,7 +1068,7 @@ describe("K4 pocket kinds", () => {
   it("initiates a long-outage withdrawal from the last good API figure", async () => {
     const t = await harness({
       projection: {
-        slowWithdrawAllowed: async () => true,
+        slowWithdrawTrigger: async () => "api-down",
         pocketSpendAfterObservation: async () => false,
       },
     });
@@ -1094,7 +1094,7 @@ describe("K4 pocket kinds", () => {
   });
 
   it("denies stale slow withdrawal without an observed figure, on mismatch, or after pocket spend", async () => {
-    const missing = await harness({ projection: { slowWithdrawAllowed: async () => true } });
+    const missing = await harness({ projection: { slowWithdrawTrigger: async () => "api-down" } });
     missing.state.balances = {
       ...missing.state.balances,
       gatewayApiFresh: false,
@@ -1113,7 +1113,7 @@ describe("K4 pocket kinds", () => {
 
     const mismatch = await harness({
       projection: {
-        slowWithdrawAllowed: async () => true,
+        slowWithdrawTrigger: async () => "api-down",
         pocketSpendAfterObservation: async () => false,
       },
     });
@@ -1135,7 +1135,7 @@ describe("K4 pocket kinds", () => {
 
     const spent = await harness({
       projection: {
-        slowWithdrawAllowed: async () => true,
+        slowWithdrawTrigger: async () => "api-down",
         pocketSpendAfterObservation: async () => true,
       },
     });
@@ -1156,8 +1156,53 @@ describe("K4 pocket kinds", () => {
     );
   });
 
+  it("applies the API-down spend guard even when the latest observation is fresh", async () => {
+    const t = await harness({
+      projection: {
+        slowWithdrawTrigger: async () => "api-down",
+        pocketSpendAfterObservation: async () => true,
+      },
+    });
+    t.state.balances = {
+      ...t.state.balances,
+      gatewayApiFresh: true,
+      gatewayApiObservedAt: NOW * 1000,
+      gatewayAvailable: 20_000n,
+    };
+
+    await expectDenied(
+      t,
+      t.signer.sign("cz-15", {
+        keyId: "K4",
+        kind: "pocket-slow-withdraw",
+        payload: { pocket: t.pocket, step: "initiate", value: "20000" },
+      }),
+      "pocket-spend-after-observation",
+    );
+  });
+
+  it("requires a positive balance for the API-down trigger with a fresh observation", async () => {
+    const t = await harness({ projection: { slowWithdrawTrigger: async () => "api-down" } });
+    t.state.balances = {
+      ...t.state.balances,
+      gatewayApiFresh: true,
+      gatewayApiObservedAt: NOW * 1000,
+      gatewayAvailable: 0n,
+    };
+
+    await expectDenied(
+      t,
+      t.signer.sign("cz-15", {
+        keyId: "K4",
+        kind: "pocket-slow-withdraw",
+        payload: { pocket: t.pocket, step: "initiate", value: "0" },
+      }),
+      "slow-withdraw-not-allowed",
+    );
+  });
+
   it("withdraws only when the chain withdrawal is open and mature, without fresh API data", async () => {
-    const t = await harness({ projection: { slowWithdrawAllowed: async () => false } });
+    const t = await harness({ projection: { slowWithdrawTrigger: async () => null } });
     t.state.pocket = { ...t.state.pocket!, slowWithdrawalOpen: true };
     t.state.balances = {
       ...t.state.balances,
@@ -1179,7 +1224,7 @@ describe("K4 pocket kinds", () => {
     });
     expect(call.args).toEqual([NETWORK.usdc]);
 
-    const early = await harness({ projection: { slowWithdrawAllowed: async () => false } });
+    const early = await harness({ projection: { slowWithdrawTrigger: async () => null } });
     early.state.pocket = { ...early.state.pocket!, slowWithdrawalOpen: true };
     early.state.balances = {
       ...early.state.balances,
@@ -1224,7 +1269,7 @@ describe("K4 pocket kinds", () => {
       }),
       "slow-withdrawal-not-open",
     );
-    t.state.slowWithdrawAllowed = true;
+    t.state.slowWithdrawTrigger = "api-down";
     t.state.balances = {
       ...t.state.balances,
       gatewayApiFresh: false,

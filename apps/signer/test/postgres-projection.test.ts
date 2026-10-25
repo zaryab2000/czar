@@ -352,11 +352,11 @@ describe("Postgres signer projection", () => {
       factory,
     });
 
-    await expect(projection.slowWithdrawAllowed(payee)).resolves.toBe(true);
+    await expect(projection.slowWithdrawTrigger(payee)).resolves.toBe("api-down");
     outage = false;
-    await expect(projection.slowWithdrawAllowed(payee)).resolves.toBe(true);
+    await expect(projection.slowWithdrawTrigger(payee)).resolves.toBe("closed-dust");
     apiObservedAt = "2020-01-01T00:00:00.000Z";
-    await expect(projection.slowWithdrawAllowed(payee)).resolves.toBe(false);
+    await expect(projection.slowWithdrawTrigger(payee)).resolves.toBeNull();
   });
 
   it("derives slow-withdrawal state from the current on-chain balance", async () => {

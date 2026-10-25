@@ -174,7 +174,7 @@ function indexerProjection(
   | "pocket"
   | "pocketBalances"
   | "nanoSpent"
-  | "slowWithdrawAllowed"
+  | "slowWithdrawTrigger"
   | "pocketSpendAfterObservation"
 > {
   return {
@@ -187,7 +187,7 @@ function indexerProjection(
     },
     pocketBalances: (address) => pocketBalances(input, sql, address),
     nanoSpent: (pocket, payTo) => nanoSpend(sql, pocket, payTo),
-    slowWithdrawAllowed: (address) => isSlowWithdrawAllowed(input, sql, address),
+    slowWithdrawTrigger: (address) => slowWithdrawTrigger(input, sql, address),
     pocketSpendAfterObservation: (pocket, observedAt) =>
       pocketSpendAfterObservation(input, sql, pocket, observedAt),
   };
@@ -314,11 +314,11 @@ async function pocketBalances(
   };
 }
 
-async function isSlowWithdrawAllowed(
+async function slowWithdrawTrigger(
   input: ProjectionInput,
   sql: Sql,
   pocket: Address,
-): Promise<boolean> {
+): Promise<"api-down" | "closed-dust" | null> {
   const downHours = Number(input.config.get("payer.pullbackApiDownHours"));
   const failures = await sql(
     `SELECT 1 FROM payer_pullback_gateway_failures
@@ -326,14 +326,14 @@ async function isSlowWithdrawAllowed(
        AND unavailable_since <= now() - ($2 * interval '1 hour') LIMIT 1`,
     [pocket, downHours],
   );
-  if (failures.rows.length > 0) return true;
+  if (failures.rows.length > 0) return "api-down";
   const balances = await pocketBalances(input, sql, pocket);
-  if (!balances.gatewayApiFresh) return false;
+  if (!balances.gatewayApiFresh) return null;
   const view = await readPocket(sql, pocket);
   const dust =
     BigInt(input.config.get("payer.pullbackMaxFeeAtomic") as number) +
     BigInt(input.config.get("payer.pullbackSafetyAtomic") as number);
-  return view?.state === "Closed" && balances.gatewayAvailable <= dust;
+  return view?.state === "Closed" && balances.gatewayAvailable <= dust ? "closed-dust" : null;
 }
 
 async function pocketSpendAfterObservation(

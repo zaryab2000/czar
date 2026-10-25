@@ -97,6 +97,8 @@ export interface PocketBalances {
   readonly gatewayApiFresh: boolean;
 }
 
+export type SlowWithdrawTrigger = "api-down" | "closed-dust" | null;
+
 export interface Projection {
   freezeState(vault: Address): Promise<FreezeState | undefined>;
   isVault(vault: Address): Promise<boolean>;
@@ -117,7 +119,7 @@ export interface Projection {
   latestEvidenceRoot(publisher: Address, kind: number): Promise<Hash32>;
   evidenceBatchExists(root: Hash32): Promise<boolean>;
   nativeBalance(address: Address): Promise<bigint>;
-  /** `owner asked` or Gateway API down for `payer.pullbackApiDownHours` (CZ-15). */
-  slowWithdrawAllowed(pocket: Address): Promise<boolean>;
+  /** The permitted slow-withdraw trigger, if any, from CZ-15 / SCR-127. */
+  slowWithdrawTrigger(pocket: Address): Promise<SlowWithdrawTrigger>;
   pocketSpendAfterObservation(pocket: Address, observedAt: number): Promise<boolean>;
 }

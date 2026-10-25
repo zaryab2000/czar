@@ -18,6 +18,18 @@ type Validate = (value: unknown) => boolean;
 const ADDRESS = /^0x[0-9a-f]{40}$/;
 const HASH32 = /^0x[0-9a-f]{64}$/;
 const UINT = /^(0|[1-9][0-9]*)$/;
+const PUBLIC_BALANCE_FIELDS = [
+  "pocket",
+  "vault",
+  "gatewayAvailableAtomic",
+  "gatewayPendingBatchAtomic",
+  "gatewayWithdrawingAtomic",
+  "withdrawalBlock",
+  "apiObservedAt",
+  "chainObservedBlock",
+  "apiConsecutiveFailures",
+  "apiLastError",
+] as const;
 
 export function createIndexerApi(
   store: QueryStore,
@@ -121,8 +133,7 @@ export function createIndexerApi(
       chainObservedBlock === null
         ? null
         : (head > chainObservedBlock ? head - chainObservedBlock : 0n).toString();
-    const publicRow = { ...row };
-    delete publicRow["closedZeroSince"];
+    const publicRow = publicBalanceRow(row);
     return context.json({
       ...serializeBalanceRow(publicRow),
       apiAgeSeconds,
@@ -137,9 +148,14 @@ export function createIndexerApi(
     return context.json({ items: jsonSafe(await store.fundedPocketsForVault(vault)) });
   });
 
-  app.get("/pockets/closed-with-balance", async (context) =>
-    context.json({ items: jsonSafe(await store.closedPocketsWithBalance()) }),
-  );
+  app.get("/pockets/closed-with-balance", async (context) => {
+    const rows = await store.closedPocketsWithBalance();
+    const items = rows.map((row) => ({
+      ...row,
+      balance: publicBalanceRow(row["balance"] as Record<string, unknown>),
+    }));
+    return context.json({ items: jsonSafe(items) });
+  });
 
   app.get("/jobs/to-sync", async (context) =>
     idPage(
@@ -309,6 +325,10 @@ function serializeBalanceRow(row: Record<string, unknown>): Record<string, unkno
       typeof value === "bigint" ? value.toString() : value,
     ]),
   );
+}
+
+function publicBalanceRow(row: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(PUBLIC_BALANCE_FIELDS.map((key) => [key, row[key]]));
 }
 
 function jsonSafe(value: unknown): unknown {

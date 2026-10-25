@@ -257,7 +257,8 @@ describe("T-034 query store (SQL)", () => {
 
     const balanceResponse = await app.request(`/pocket-balances/${lower(POCKET)}`);
     expect(balanceResponse.status).toBe(200);
-    expect(await balanceResponse.json()).toMatchObject({
+    const balanceBody = await balanceResponse.json();
+    expect(balanceBody).toMatchObject({
       pocket: lower(POCKET),
       gatewayAvailableAtomic: "750",
       gatewayPendingBatchAtomic: "25",
@@ -265,14 +266,21 @@ describe("T-034 query store (SQL)", () => {
       chainAgeBlocks: "20",
       slowWithdrawalOpen: false,
     });
+    expect(balanceBody).not.toHaveProperty("closedZeroSince");
+    expect(balanceBody).not.toHaveProperty("pocketUsdcAtomic");
     const fundedResponse = await app.request(`/pockets/funded?vault=${lower(VAULT)}`);
     expect(await fundedResponse.json()).toMatchObject({
       items: [{ envelopeRef: fundedRef, outstanding: "500", pendingPullback: "100" }],
     });
     const closedResponse = await app.request("/pockets/closed-with-balance");
-    expect(await closedResponse.json()).toMatchObject({
+    const closedBody = await closedResponse.json();
+    expect(closedBody).toMatchObject({
       items: [{ pocket: lower(closedPocket), pocketRecord: { state: "Closed" } }],
     });
+    const closedItems = (closedBody as { items: Array<{ balance: Record<string, unknown> }> })
+      .items;
+    expect(closedItems[0]?.balance).not.toHaveProperty("closedZeroSince");
+    expect(closedItems[0]?.balance).not.toHaveProperty("pocketUsdcAtomic");
   });
 
   it("finds a vault by its owner and pages envelopes by vault", async () => {

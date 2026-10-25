@@ -126,7 +126,7 @@ export interface State {
   latestRoot: Hash32;
   batches: Set<string>;
   native: Map<string, bigint>;
-  slowWithdrawAllowed: boolean;
+  slowWithdrawTrigger: "api-down" | "closed-dust" | null;
   pocketSpendAfterObservation: boolean;
 }
 
@@ -240,7 +240,7 @@ export function defaultState(pocket: Address): State {
     latestRoot: h("0"),
     batches: new Set([h("7")]),
     native: new Map(),
-    slowWithdrawAllowed: false,
+    slowWithdrawTrigger: null,
     pocketSpendAfterObservation: false,
   };
 }
@@ -277,7 +277,7 @@ export function fakeProjection(state: State): Projection {
     latestEvidenceRoot: async () => state.latestRoot,
     evidenceBatchExists: async (root) => state.batches.has(root),
     nativeBalance: async (address) => state.native.get(address.toLowerCase()) ?? 0n,
-    slowWithdrawAllowed: async () => state.slowWithdrawAllowed,
+    slowWithdrawTrigger: async () => state.slowWithdrawTrigger,
     pocketSpendAfterObservation: async () => state.pocketSpendAfterObservation,
   };
 }

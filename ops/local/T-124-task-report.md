@@ -7,10 +7,12 @@
   observation. Chain reads for withdrawing balance, withdrawal block, and pocket USDC balance use
   the same observed block.
 - Poll scope includes Registered, DelegateReady, Funded, Draining, and Closed pockets. Closed
-  pockets remain polled until API balance, `pendingBatch`, on-chain withdrawing balance, and pocket
-  USDC all read zero for the configured quiet period. Failed or malformed reads preserve the
-  quiet-period start; stopping also requires a fresh API observation and successful current-cycle
-  chain reads.
+  pockets' transfer polling ends after API balance, `pendingBatch`, on-chain withdrawing balance,
+  and pocket USDC read zero for the configured quiet period. Failed or malformed reads preserve the
+  quiet-period start; the terminal check also requires a fresh API observation and successful
+  current-cycle chain reads. Balance/API/RPC polling currently continues while the stop-state gap is
+  unresolved. Any successfully observed non-zero amount from either API or chain resets the start,
+  even if the other source failed that cycle.
 - Added pocket balance, funded pockets for a vault, and Closed pockets with balance queries. The
   balance query returns API age, chain age, and derived `slowWithdrawalOpen`.
 - Added `pocket-stale` and `gateway-poll-failing` alert rows without storing Gateway response
@@ -24,8 +26,11 @@
   Gateway figure is stale. Write-off enforces no pending pullback, no active slow withdrawal, and a
   fresh balance at or below the configured fee plus safety amount. Slow-withdraw initiation uses the
   fresh figure normally and the last good observed figure after the configured API outage, subject
-  to exact amount and K4 audit-spend checks. The `withdraw` step uses only current on-chain state.
-  `nanoSpent` counts received, batched, confirmed, and completed transfers.
+  to exact amount, positive value, and K4 audit-spend checks for the API-down trigger whether its
+  latest figure is fresh or stale. The `withdraw` step uses only current on-chain state. `nanoSpent`
+  counts received, batched, confirmed, and completed transfers.
+- The public pocket-balance routes explicitly return only public balance fields. The internal
+  `closedZeroSince` and pocket EOA USDC balance are excluded from both balance routes.
 
 ## Specification rulings applied
 
@@ -36,13 +41,25 @@ field whose zero check includes `pendingBatch` and preserves its start time afte
 The final stop check requires a fresh API observation and successful current-cycle chain reads.
 SCR-141's objective-volume and routing decisions belong to TA-08, not this task.
 
+### SCR draft (report only): durable Closed-pocket polling stop
+
+SCR-141 requires all polling to stop after a successful terminal cycle, but defines only
+`closedZeroSince`. That timestamp cannot distinguish a completed stop from a still-running quiet
+period after later failed reads or loss of API freshness. Do not add a persisted completion marker
+without architect approval. Proposed state transition: set a private `closedQuietCompleteAt` only
+after a cycle has all four zero readings, an elapsed quiet interval, a fresh API observation, and
+successful current-cycle chain reads; then skip all API, RPC, and transfer polls for that Closed
+pocket. A failed/malformed read never completes the transition and preserves `closedZeroSince`.
+The architect should confirm whether re-credited funds after this stop remain intentionally
+unobserved under the 48-hour quiet-period policy, or whether another recovery signal is required.
+
 ## Verification
 
 - `fnm exec --using=22.22.0 pnpm --filter @czar/indexer typecheck` — passed.
 - `fnm exec --using=22.22.0 pnpm --filter @czar/signer typecheck` — passed.
-- `fnm exec --using=22.22.0 pnpm --filter @czar/signer test` — 115 passed, 1 skipped.
+- `fnm exec --using=22.22.0 pnpm --filter @czar/signer test` — 117 passed, 1 skipped.
 - `fnm exec --using=22.22.0 pnpm --filter @czar/indexer exec vitest run --exclude
-  test/replay-anvil.test.ts` — 79 passed. The excluded local Arc replay is reported below.
+  test/replay-anvil.test.ts` — 80 passed; the excluded local Arc replay is reported below.
 - `fnm exec --using=22.22.0 pnpm exec vitest run test/gateway-balances.test.ts test/query-api.test.ts`
   from `apps/indexer/` — 40 passed.
 - `fnm exec --using=22.22.0 pnpm exec vitest run test/gateway-balances.test.ts` from
@@ -65,4 +82,6 @@ SCR-141's objective-volume and routing decisions belong to TA-08, not this task.
 
 - D94 running-Arc stand-in round trip.
 - G0-05 live `/v1/balances` behaviour and the T-050a running-Arc stand-in round trip.
+- Architect ruling on the report-only SCR draft above; all Closed-pocket balance/API/RPC polling
+  cannot stop until the completion state is specified.
 - No commits were pushed to `build-v1`; no merge performed.

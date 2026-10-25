@@ -167,6 +167,14 @@ function closedZeroSince(
   const withdrawing = row.gatewayWithdrawingAtomic;
   const usdc = row.pocketUsdcAtomic;
   const allObserved = apiSucceeded && chainSucceeded;
+  const apiObservedNonzero =
+    apiSucceeded &&
+    ((available !== null && BigInt(available) > 0n) ||
+      (pendingBatch !== null && BigInt(pendingBatch) > 0n));
+  const chainObservedNonzero =
+    chainSucceeded &&
+    ((withdrawing !== null && BigInt(withdrawing) > 0n) || (usdc !== null && BigInt(usdc) > 0n));
+  if (apiObservedNonzero || chainObservedNonzero) return null;
   if (
     !allObserved ||
     available === null ||

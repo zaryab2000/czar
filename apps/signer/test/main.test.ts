@@ -88,7 +88,7 @@ function emptyProjection(): Projection {
     latestEvidenceRoot: async () => `0x${"00".repeat(32)}` as Hash32,
     evidenceBatchExists: async () => false,
     nativeBalance: async () => 0n,
-    slowWithdrawAllowed: async () => false,
+    slowWithdrawTrigger: async () => null,
     pocketSpendAfterObservation: async () => false,
   };
 }
