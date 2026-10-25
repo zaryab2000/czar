@@ -1,5 +1,6 @@
 import { loadConfig } from "@czar/config";
-import type { Hash32 } from "@czar/hashing";
+import type { Address, Hash32 } from "@czar/hashing";
+import type { PaymentRef } from "@czar/schemas";
 import {
   createSigner,
   memoryAudit,
@@ -37,7 +38,7 @@ export async function testSignerWithDetails(options: TestSignerOptions = {}) {
     },
     destroyKey: async () => undefined,
   };
-  const projection: Projection = {
+  const projectionFixture = {
     freezeState: async () => undefined,
     isVault: async () => true,
     reservation: async () => undefined,
@@ -62,7 +63,7 @@ export async function testSignerWithDetails(options: TestSignerOptions = {}) {
       return balances;
     },
     nanoSpent: async () => ({ step: 0n, pocket: 0n }),
-    settledPayment: async (_vault, _hash) => true,
+    settledPayment: async (_vault: Address, _hash: PaymentRef) => true,
     autonomy: async () => undefined,
     job: async () => undefined,
     reportExists: async () => false,
@@ -70,8 +71,11 @@ export async function testSignerWithDetails(options: TestSignerOptions = {}) {
     latestEvidenceRoot: async () => `0x${"00".repeat(32)}` as Hash32,
     evidenceBatchExists: async () => false,
     nativeBalance: async () => 0n,
+    slowWithdrawTrigger: async () => null,
+    pocketSpendAfterObservation: async () => false,
     slowWithdrawAllowed: async () => false,
   };
+  const projection: Projection = projectionFixture;
   const network: SignerNetwork = {
     chainId: 5042002,
     usdc: "0x3600000000000000000000000000000000000000",
