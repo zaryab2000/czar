@@ -76,18 +76,18 @@ export async function listDevicesRoute(
   const after = cursor ? decodeCursor(cursor) : undefined;
   let condition = "user_id=$1";
   if (after) {
-    values.push(new Date(after.createdAt), after.deviceId);
-    condition += ` AND (created_at,device_id)<($${values.length - 1},$${values.length})`;
+    values.push(after.createdAt, after.deviceId);
+    condition += ` AND (created_at,device_id)<($${values.length - 1}::timestamptz,$${values.length})`;
   }
   values.push(limit + 1);
   const result = await dependencies.pool.query<{
     device_id: string;
     device_name: string;
     platform: Device["platform"];
-    created_at: Date;
+    created_at: string;
     revoked_at: Date | null;
   }>(
-    `SELECT device_id,device_name,platform,created_at,revoked_at FROM devices
+    `SELECT device_id,device_name,platform,created_at::text AS created_at,revoked_at FROM devices
      WHERE ${condition} ORDER BY created_at DESC,device_id DESC LIMIT $${values.length}`,
     values,
   );
@@ -97,7 +97,7 @@ export async function listDevicesRoute(
     deviceId: row.device_id,
     deviceName: row.device_name,
     platform: row.platform,
-    createdAt: row.created_at.toISOString(),
+    createdAt: new Date(row.created_at).toISOString(),
     ...(row.revoked_at ? { revokedAt: row.revoked_at.toISOString() } : {}),
   }));
   const last = rows.at(-1);
@@ -200,9 +200,9 @@ function decodeCursor(value: string): DeviceCursor {
   }
 }
 
-function encodeCursor(row: { created_at: Date; device_id: string }): string {
+function encodeCursor(row: { created_at: string; device_id: string }): string {
   return Buffer.from(
-    JSON.stringify({ createdAt: row.created_at.toISOString(), deviceId: row.device_id }),
+    JSON.stringify({ createdAt: row.created_at, deviceId: row.device_id }),
   ).toString("base64url");
 }
 

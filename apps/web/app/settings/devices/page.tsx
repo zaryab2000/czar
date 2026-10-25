@@ -1,23 +1,39 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Device, PairingCode } from "@czar/schemas";
 import { appApi } from "#src/app-api";
-import { useAppData } from "#src/use-app-data";
 
 export default function DevicesPage() {
-  const [cursor, setCursor] = useState<string>();
   const [devices, setDevices] = useState<readonly Device[]>([]);
   const [pairingCode, setPairingCode] = useState<PairingCode>();
   const [revokeTarget, setRevokeTarget] = useState<Device>();
   const [actionError, setActionError] = useState<string>();
-  const load = useCallback(() => appApi.listDevices(cursor), [cursor]);
-  const { data, error, loading, refresh } = useAppData(load);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string>();
+  const requestInFlight = useRef(false);
+
+  const loadDevices = useCallback(async (pageCursor?: string, append = false) => {
+    if (requestInFlight.current) return;
+    requestInFlight.current = true;
+    setLoading(true);
+    setLoadError(undefined);
+    try {
+      const page = await appApi.listDevices(pageCursor);
+      setDevices((current) => mergeDevices(current, page.items, append));
+      setNextCursor(page.nextCursor);
+    } catch {
+      setLoadError("Czar could not load current devices. Check the connection and retry.");
+    } finally {
+      requestInFlight.current = false;
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    if (!data) return;
-    setDevices((current) => (cursor ? [...current, ...data.items] : data.items));
-  }, [cursor, data]);
+    void loadDevices();
+  }, [loadDevices]);
 
   async function issueCode() {
     setActionError(undefined);
@@ -34,22 +50,19 @@ export default function DevicesPage() {
     try {
       await appApi.revokeDevice(revokeTarget.deviceId);
       setRevokeTarget(undefined);
-      setCursor(undefined);
       setPairingCode(undefined);
-      refresh();
+      void loadDevices();
     } catch {
       setActionError("Czar could not revoke this device. Try again.");
     }
   }
 
   function loadMore() {
-    if (data?.nextCursor) setCursor(data.nextCursor);
+    if (nextCursor) void loadDevices(nextCursor, true);
   }
 
   function reloadDevices() {
-    setDevices([]);
-    setCursor(undefined);
-    refresh();
+    void loadDevices();
   }
 
   return (
@@ -60,11 +73,11 @@ export default function DevicesPage() {
         Pair a computer
       </button>
       {pairingCode && <PairingCodePanel pairingCode={pairingCode} />}
-      {(error || actionError) && (
+      {(loadError || actionError) && (
         <div className="error-panel" role="alert">
-          <p>{actionError ?? error}</p>
-          {error && (
-            <button onClick={refresh} type="button">
+          <p>{actionError ?? loadError}</p>
+          {loadError && (
+            <button onClick={reloadDevices} type="button">
               Try again
             </button>
           )}
@@ -78,8 +91,8 @@ export default function DevicesPage() {
       {devices.map((device) => (
         <DeviceRow device={device} key={device.deviceId} onRevoke={setRevokeTarget} />
       ))}
-      {!loading && devices.length === 0 && data && <p>No paired devices yet.</p>}
-      {data?.nextCursor && (
+      {!loading && devices.length === 0 && !loadError && <p>No paired devices yet.</p>}
+      {nextCursor && (
         <button onClick={loadMore} type="button">
           Load more devices
         </button>
@@ -93,6 +106,17 @@ export default function DevicesPage() {
       )}
     </section>
   );
+}
+
+function mergeDevices(
+  current: readonly Device[],
+  incoming: readonly Device[],
+  append: boolean,
+): readonly Device[] {
+  if (!append) return incoming;
+  const devices = new Map(current.map((device) => [device.deviceId, device]));
+  for (const device of incoming) devices.set(device.deviceId, device);
+  return [...devices.values()];
 }
 
 function PairingCodePanel({ pairingCode }: { readonly pairingCode: PairingCode }) {

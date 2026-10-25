@@ -77,9 +77,9 @@ describe("app device management", () => {
         TEST_USER_ID,
         Buffer.alloc(32, 13),
         ownerDeviceB,
-        new Date("2026-10-20T00:00:00Z"),
+        "2026-10-21T00:00:00.0006Z",
         Buffer.alloc(32, 14),
-        new Date("2026-10-21T00:00:00Z"),
+        "2026-10-21T00:00:00.0007Z",
       ],
     );
     await pool.query(
