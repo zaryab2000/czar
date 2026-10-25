@@ -4,6 +4,7 @@ import type { Config } from "@czar/config";
 import type { RankingDecision } from "@czar/schemas";
 import {
   readPaymentRequired,
+  USDC_ADDRESS,
   type PaymentRequirements,
   type SafeFetch,
   type SafeFetchOptions,
@@ -227,7 +228,7 @@ function sameResourcePath(challengeUrl: string, configuredUrl: string): boolean 
 function responseSchema(schema: Readonly<Record<string, unknown>> | undefined) {
   const output = objectAt(schema, "properties", "output");
   const example = objectAt(output, "properties", "example");
-  if (!example || Object.keys(example).every((key) => key === "type")) return null;
+  if (!example || (Object.keys(example).length === 1 && example["type"] === "object")) return null;
   return example;
 }
 
@@ -293,7 +294,16 @@ async function createDecision(args: {
       excluded.push({ service_id: candidate.serviceId, gate: "network", detail: "wrong-network" });
       continue;
     }
-    const affordable = usable.filter(
+    const payable = usable.filter(isUsableOffer);
+    if (payable.length === 0) {
+      excluded.push({
+        service_id: candidate.serviceId,
+        gate: "offer",
+        detail: "no-payable-live-offer",
+      });
+      continue;
+    }
+    const affordable = payable.filter(
       (offer) => BigInt(offer.amount) <= BigInt(query.max_price_atomic),
     );
     if (affordable.length === 0) {
@@ -454,6 +464,16 @@ function compareServiceId(left: string, right: string): number {
 
 function compareText(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function isUsableOffer(offer: PaymentRequirements): boolean {
+  return (
+    offer.scheme === "exact" &&
+    offer.asset.toLowerCase() === USDC_ADDRESS.toLowerCase() &&
+    offer.extra["siwx"] !== true &&
+    offer.extra["siwxOnly"] !== true &&
+    offer.extra["paymentFlow"] !== "batch-settlement"
+  );
 }
 
 function validBareUrl(value: string): boolean {

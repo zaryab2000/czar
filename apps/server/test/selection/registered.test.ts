@@ -14,7 +14,12 @@ const SERVICE_B = `svc_${"b".repeat(32)}`;
 const NETWORK = "eip155:5042002";
 const RESOURCE = "https://merchant.example/v1/search";
 
-function offer(amount: string, payTo: string, network = NETWORK) {
+function offer(
+  amount: string,
+  payTo: string,
+  network = NETWORK,
+  overrides: Record<string, unknown> = {},
+) {
   return {
     scheme: "exact",
     network,
@@ -23,6 +28,7 @@ function offer(amount: string, payTo: string, network = NETWORK) {
     payTo: `0x${payTo.replace(/^0x/, "").padStart(40, "0")}`,
     maxTimeoutSeconds: 300,
     extra: {},
+    ...overrides,
   };
 }
 
@@ -35,11 +41,12 @@ function response(
     properties: { answer: { type: "string" } },
   },
   resourceUrl = RESOURCE,
+  offerOverrides: Record<string, unknown> = {},
 ) {
   const body = {
     x402Version: 2,
     resource: { url: resourceUrl, description: "private merchant description" },
-    accepts: [offer(amount, payTo, network)],
+    accepts: [offer(amount, payTo, network, offerOverrides)],
     extensions: {
       bazaar: {
         info: { input: {}, output: {} },
@@ -242,6 +249,38 @@ describe("registered selection", () => {
     }));
     const selection = setup(fetchImpl, { [SERVICE_A]: registration() }, () => new Date());
     expect(await selection.outputSchema.forService(SERVICE_A)).toBeNull();
+  });
+
+  it("keeps a meaningful type-only response schema", async () => {
+    const fetchImpl = vi.fn<SafeFetch>(async () =>
+      response("25", "0xaaa", NETWORK, { type: "string" }),
+    );
+    const selection = setup(fetchImpl, { [SERVICE_A]: registration() }, () => new Date());
+    expect(await selection.outputSchema.forService(SERVICE_A)).toEqual({ type: "string" });
+  });
+
+  it("does not assign exploration to an unpayable cheapest offer", async () => {
+    const fetchImpl = vi.fn<SafeFetch>(async (url) =>
+      url.includes("cheap")
+        ? response("1", "0xaaa", NETWORK, undefined, bareUrl(url), { scheme: "permit" })
+        : response("25", "0xbbb", NETWORK, undefined, bareUrl(url)),
+    );
+    const selection = setup(
+      fetchImpl,
+      {
+        [SERVICE_A]: registration("https://cheap.example/v1/search"),
+        [SERVICE_B]: registration("https://payable.example/v1/search"),
+      },
+      () => new Date(),
+    );
+
+    const decision = await selection.rank.rank(query());
+
+    expect(decision.exploration_slot?.service_id).toBe(SERVICE_B);
+    expect(decision.unverified.map((row) => row.service_id)).toEqual([SERVICE_B]);
+    expect(decision.excluded).toEqual([
+      { service_id: SERVICE_A, gate: "offer", detail: "no-payable-live-offer" },
+    ]);
   });
 
   it("rejects invalid IDs and ignores non-402 or malformed challenges", async () => {
