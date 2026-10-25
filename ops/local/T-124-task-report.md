@@ -88,14 +88,21 @@ never returned from a query or route. Reindex loss restarts the quiet period; fu
 - At head `3464983`, focused Gateway/indexer tests (`test/gateway-balances.test.ts`
   `test/query-api.test.ts`) — 42 passed; focused signer tests (`test/postgres-projection.test.ts`,
   `test/policy.test.ts`, `test/service.test.ts`) — 78 passed; root lint and `git diff --check` passed.
-- At head `3464983`, root `pnpm typecheck` still fails in Lane 2's
+- At head `3464983`, before PR #85 merged, root `pnpm typecheck` failed in Lane 2's
   `apps/server/test/payer/test-signer.ts:73`: TS2353, `slowWithdrawAllowed` is not declared in
-  `Projection`. Lane 2 owns a compatibility follow-up PR; no other-lane files were edited.
+  `Projection`. PR #85 added the required compatibility methods and fixture correction.
+- After PR #85 merged at `55da31a`, fresh `origin/build-v1` at `55da31a` merged into the PR branch
+  cleanly at code head `05cd8d9` with no conflicts.
+- At code head `05cd8d9`, `fnm exec --using=22.22.0 pnpm typecheck` — passed.
+- At code head `05cd8d9`, focused indexer tests (`test/gateway-balances.test.ts`
+  `test/query-api.test.ts`) — 42 passed; focused signer tests (`test/postgres-projection.test.ts`,
+  `test/policy.test.ts`, `test/service.test.ts`) — 78 passed.
+- At code head `05cd8d9`, root lint and `git diff --check` — passed.
 
 ## Deferred
 
 - D94 running-Arc stand-in round trip.
 - G0-05 live `/v1/balances` behaviour and the T-050a running-Arc stand-in round trip.
-- Current required merge order: PR #83 (merged), Lane 2's signer-fixture compatibility follow-up,
-  then PR #79 after another fresh base sync and passing root typecheck.
+- PRs #83, #80, #84, and #85 are merged. PR #79 is awaiting final reviewer confirmation; TA-03
+  has not started.
 - No commits were pushed to `build-v1`; no merge performed.
