@@ -44,11 +44,11 @@ field whose zero check includes `pendingBatch` and preserves its start time afte
 The final stop check requires a fresh API observation and successful current-cycle chain reads.
 SCR-141's objective-volume and routing decisions belong to TA-08, not this task.
 
-The architect ruled in SCR-142 §2 (recorded in open spec PR #83) that `pocket_balances.pollEndedAt`
-is the internal nullable RFC3339 marker. It is set to `now` in the same database write as the final
-readings when the SCR-141 stop condition is met, excluded from every later poll, never cleared
-automatically, and never returned from a query or route. Reindex loss restarts the quiet period;
-funds arriving after 48 hours are accepted as a risk. PR #79 must not merge until spec PR #83 merges.
+The architect ruled in SCR-142 §2 that `pocket_balances.pollEndedAt` is the internal nullable
+RFC3339 marker. It is set to `now` in the same database write as the final readings when the
+SCR-141 stop condition is met, excluded from every later poll, never cleared automatically, and
+never returned from a query or route. Reindex loss restarts the quiet period; funds arriving after
+48 hours are accepted as a risk. Spec PR #83 merged at `4385c62`.
 
 ## Verification
 
@@ -82,10 +82,20 @@ funds arriving after 48 hours are accepted as a risk. PR #79 must not merge unti
 - `git diff --check` — passed after the `pollEndedAt` change.
 - The passing indexer suite excludes only the existing local Arc replay. No live Gateway call was
   made.
+- After PRs #80 and #84 merged, fresh `origin/build-v1` at `1625e5a` was merged into the PR branch
+  without conflicts. At head `3464983`, GitHub reports PR #79 mergeable with base `build-v1` at
+  `1625e5a`.
+- At head `3464983`, focused Gateway/indexer tests (`test/gateway-balances.test.ts`
+  `test/query-api.test.ts`) — 42 passed; focused signer tests (`test/postgres-projection.test.ts`,
+  `test/policy.test.ts`, `test/service.test.ts`) — 78 passed; root lint and `git diff --check` passed.
+- At head `3464983`, root `pnpm typecheck` still fails in Lane 2's
+  `apps/server/test/payer/test-signer.ts:73`: TS2353, `slowWithdrawAllowed` is not declared in
+  `Projection`. Lane 2 owns a compatibility follow-up PR; no other-lane files were edited.
 
 ## Deferred
 
 - D94 running-Arc stand-in round trip.
 - G0-05 live `/v1/balances` behaviour and the T-050a running-Arc stand-in round trip.
-- The SCR-142 spec PR #83 must merge before PR #79 can merge.
+- Current required merge order: PR #83 (merged), Lane 2's signer-fixture compatibility follow-up,
+  then PR #79 after another fresh base sync and passing root typecheck.
 - No commits were pushed to `build-v1`; no merge performed.
