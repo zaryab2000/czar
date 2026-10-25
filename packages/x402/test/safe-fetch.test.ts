@@ -265,6 +265,21 @@ describe("own interfaces and the local merchant exception", () => {
     const otherPort = `http://127.0.0.1:${Number(origin.split(":").at(-1)) + 1}/`;
     expect(await blockedRule(() => safeFetch(otherPort))).toBe("scheme");
   });
+
+  it("lets only configured local stand-in origins through", async () => {
+    const safeFetch = createSafeFetch({
+      localMerchantOrigins: [],
+      localStandinOrigins: [origin],
+      interfaceAddresses: () => [],
+      version: "0.0.0",
+      maxRedirects: 3,
+      maxBytes: 1024,
+      timeoutMs: 2000,
+    });
+    const response = await safeFetch(`${origin}/v1/balances`);
+    expect(new TextDecoder().decode(response.body)).toBe("merchant");
+    expect(await blockedRule(() => safeFetch("http://127.0.0.1:4998/v1/balances"))).toBe("scheme");
+  });
 });
 
 describe("isBlockedAddress", () => {

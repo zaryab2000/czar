@@ -4,18 +4,29 @@ import { createServer } from "node:http";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { Readable } from "node:stream";
-import { loadConfigFile, parameterEnvironment } from "@czar/config";
+import {
+  loadConfig,
+  loadConfigFile,
+  parameterEnvironment,
+  validateLocalOnlyConfig,
+} from "@czar/config";
 import { createLogger } from "@czar/logging";
 import { Pool } from "pg";
 import { createLocalApp } from "#src/local-app";
 import { migrate } from "#src/db/migrate";
 
-const config = await loadConfigFile(
-  process.env["CZAR_LOCAL_CONFIG"] ?? new URL("../../../env/local.toml", import.meta.url),
-  {
-    env: parameterEnvironment(process.env),
-  },
-);
+const localConfigPath = process.env["CZAR_LOCAL_CONFIG"];
+const config =
+  localConfigPath === undefined
+    ? loadConfig({ env: parameterEnvironment(process.env) })
+    : await loadConfigFile(localConfigPath, { env: parameterEnvironment(process.env) });
+const rpcUrl =
+  process.env["CZAR_ARC_RPC_URL"] ?? `http://127.0.0.1:${config.get("signer.local.rpcPort")}`;
+await validateLocalOnlyConfig({
+  config,
+  overlayPath: localConfigPath ?? "",
+  arcRpcUrl: rpcUrl,
+});
 const objectStorePath = resolve(
   process.env["CZAR_LOCAL_OBJECT_STORE_PATH"] ??
     join(homedir(), "Library/Application Support/Czar/objects"),
@@ -32,8 +43,7 @@ const app = createLocalApp({
   logger: createLogger({ service: "server", component: "CZ-15" }),
   clock: { now: () => new Date() },
   random: { bytes: (size) => randomBytes(size) },
-  rpcUrl:
-    process.env["CZAR_ARC_RPC_URL"] ?? `http://127.0.0.1:${config.get("signer.local.rpcPort")}`,
+  rpcUrl,
   objectStorePath,
 });
 

@@ -189,6 +189,8 @@ export const nodeTransport: Transport = (target) =>
 export interface SafeFetchDeps {
   /** Exact `http://127.0.0.1:<port>` origins of Czar's own merchants (`fetch.localMerchantOrigins`). */
   readonly localMerchantOrigins: readonly string[];
+  /** Exact local-only Circle stand-in origins (`fetch.localStandinOrigins`). */
+  readonly localStandinOrigins?: readonly string[];
   /** `fetch.maxRedirects`, `fetch.maxBytes`, `fetch.timeoutMs`. */
   readonly maxRedirects: number;
   readonly maxBytes: number;
@@ -247,14 +249,15 @@ export function createSafeFetch(deps: SafeFetchDeps) {
   const resolve = deps.resolve ?? defaultResolve;
   const interfaces = deps.interfaceAddresses ?? defaultInterfaces;
   const transport = deps.transport ?? nodeTransport;
-  const localOrigins = new Set(deps.localMerchantOrigins);
+  const localOrigins = new Set([...deps.localMerchantOrigins, ...(deps.localStandinOrigins ?? [])]);
 
   async function target(
     url: URL,
   ): Promise<{ address: string; family: 4 | 6; port: number; local: boolean }> {
     if (url.username !== "" || url.password !== "") throw blocked("credentials");
     if (url.protocol === "http:" && localOrigins.has(url.origin)) {
-      // The one exception: Czar's own merchants on the Mac (D70), listed in config only.
+      // Loopback HTTP is limited to configured local merchant and D92 stand-in origins.
+      if (url.hostname !== "127.0.0.1" || url.port === "") throw blocked("scheme");
       return { address: url.hostname, family: 4, port: Number(url.port), local: true };
     }
     if (url.protocol !== "https:") throw blocked("scheme");
@@ -379,7 +382,7 @@ export function createSafeFetch(deps: SafeFetchDeps) {
 
 export type SafeFetch = ReturnType<typeof createSafeFetch>;
 
-/** safeFetch with `fetch.*` from `@czar/config`. `fetch.localMerchantOrigins` has no spec default (SCR-103). */
+/** safeFetch with `fetch.*` from `@czar/config`. */
 export function createSafeFetchFromConfig(
   config: import("@czar/config").Config,
   version: string,
@@ -387,6 +390,9 @@ export function createSafeFetchFromConfig(
   return createSafeFetch({
     localMerchantOrigins: config.has("fetch.localMerchantOrigins")
       ? (config.get("fetch.localMerchantOrigins") as readonly string[])
+      : [],
+    localStandinOrigins: config.has("fetch.localStandinOrigins")
+      ? (config.get("fetch.localStandinOrigins") as readonly string[])
       : [],
     maxRedirects: config.get("fetch.maxRedirects") as number,
     maxBytes: config.get("fetch.maxBytes") as number,

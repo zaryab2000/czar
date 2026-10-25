@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { createConfig } from "ponder";
 import { getAbiItem } from "viem";
 import { loadConfig, parameterEnvironment, parseParameterToml } from "@czar/config";
-import { ARC_TESTNET_CHAIN_ID, ARC_TESTNET_PUBLIC_RPC } from "@czar/indexer/chain";
+import { ARC_TESTNET_CHAIN_ID, resolveIndexerRpcUrl } from "@czar/indexer/chain";
 import { arcTransport } from "@czar/indexer/rpc";
 import { czarVaultAbi, czarVaultFactoryAbi } from "@czar/vault-client";
 import {
@@ -51,7 +51,7 @@ export default createConfig({
       id: ARC_TESTNET_CHAIN_ID,
       // The keyed fallback provider (A9-07) is added once its storage is decided (SCR-104).
       rpc: arcTransport({
-        urls: [process.env["CZAR_INDEXER_RPC_URL"] ?? ARC_TESTNET_PUBLIC_RPC],
+        urls: [resolveIndexerRpcUrl(process.env["CZAR_INDEXER_RPC_URL"])],
         getLogsBlockRange: config.get("indexer.getLogsBlockRange") as number,
         retryBaseMs: config.get("indexer.rpcRetryBaseMs") as number,
         retryMax: config.get("indexer.rpcRetryMax") as number,
