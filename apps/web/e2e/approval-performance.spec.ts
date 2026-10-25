@@ -4,26 +4,7 @@ import type { AppPlan, Me } from "@czar/schemas";
 const PLAN_ID = "pln_ta14_performance";
 const INITIAL_JS_BUDGET_BYTES = 300 * 1024;
 const INTERACTIVE_BUDGET_MS = 1_500;
-
-const plan = {
-  schemaVersion: "1.2",
-  planId: PLAN_ID,
-  objectiveId: "obj_ta14_performance",
-  objectiveHash: `0x${"1".repeat(64)}`,
-  planHash: `0x${"2".repeat(64)}`,
-  network: "eip155:5042002",
-  category: "research",
-  cap: "1000000",
-  slackBps: 0,
-  maxStepAmount: "1000000",
-  pocketCapBps: 0,
-  expiresAt: "2026-10-26T00:00:00Z",
-  steps: [],
-  payeeLeaves: [],
-  payeeRoot: `0x${"3".repeat(64)}`,
-  shadow: false,
-  createdAt: "2026-10-25T00:00:00Z",
-} satisfies AppPlan;
+const PLAN_LIFETIME_MS = 60 * 60 * 1000;
 
 const me = {
   userId: "usr_ta14_performance",
@@ -49,8 +30,9 @@ test("approval deep link meets the JavaScript and interactive budgets", async ({
   page,
   browserName,
 }) => {
-  await mockApprovalApi(page);
-  await page.goto(`/approve/${PLAN_ID}`);
+  const plan = createPlan();
+  await mockApprovalApi(page, plan);
+  await page.goto(`/approve/${plan.planId}`);
 
   const approveButton = page.getByRole("button", { name: "Approve $1.00" });
   await expect(approveButton).toBeEnabled();
@@ -69,14 +51,37 @@ test("approval deep link meets the JavaScript and interactive budgets", async ({
     type: "TA-14 performance",
     description:
       `browser=${browserName}; JS=${initialJsBytes} bytes; ` +
-      `interactive=${interactiveMs.toFixed(0)} ms; Apple M4 Mac mini (Mac16,10)`,
+      `interactive=${interactiveMs.toFixed(0)} ms`,
   });
 
   expect(initialJsBytes).toBeLessThanOrEqual(INITIAL_JS_BUDGET_BYTES);
   expect(interactiveMs).toBeLessThanOrEqual(INTERACTIVE_BUDGET_MS);
 });
 
-async function mockApprovalApi(page: Page): Promise<void> {
+function createPlan(): AppPlan {
+  const createdAt = new Date();
+  return {
+    schemaVersion: "1.2",
+    planId: PLAN_ID,
+    objectiveId: "obj_ta14_performance",
+    objectiveHash: `0x${"1".repeat(64)}`,
+    planHash: `0x${"2".repeat(64)}`,
+    network: "eip155:5042002",
+    category: "research",
+    cap: "1000000",
+    slackBps: 0,
+    maxStepAmount: "1000000",
+    pocketCapBps: 0,
+    expiresAt: new Date(createdAt.getTime() + PLAN_LIFETIME_MS).toISOString(),
+    steps: [],
+    payeeLeaves: [],
+    payeeRoot: `0x${"3".repeat(64)}`,
+    shadow: false,
+    createdAt: createdAt.toISOString(),
+  };
+}
+
+async function mockApprovalApi(page: Page, plan: AppPlan): Promise<void> {
   await page.route("**/v1/**", async (route) => {
     const { pathname } = new URL(route.request().url());
     if (pathname === "/v1/me") {
