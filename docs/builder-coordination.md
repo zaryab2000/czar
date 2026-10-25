@@ -31,7 +31,10 @@ another lane.
 
 - **Owns:** `contracts/`, `packages/vault-client/`, `apps/signer/`, `deployments/`, `env/`, `apps/indexer/`, `ops/` (SCR-136)
 - **Task queue:** T-026 → T-022 → T-105 → T-036 → T-037 → T-040
-- **Track A (SCR-136):** TA-01, TA-02, TA-03, TA-04, TA-07, TA-10, TA-11, then T-124 (TA-20) and the T-125 encoder and indexer part (TA-22a). Briefs: `docs/builder-prompts/track-a/`.
+- **Track A (SCR-136):** TA-01, TA-02, TA-03, TA-04, TA-07, TA-10, TA-11,
+  then T-124 (TA-20) and the T-125 encoder and indexer part (TA-22a). Briefs are local
+  and gitignored at `docs-internal/builder-prompts/track-a/`; Zaryab supplies the relevant
+  lane prompt to each builder.
 - **Local arc-anvil port:** 8545
 
 ### Lane 2 — Server payments and runtime
