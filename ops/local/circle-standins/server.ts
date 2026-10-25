@@ -12,6 +12,8 @@ const TRANSFER_SELECTOR = "cf092995";
 const BALANCE_FIXTURE_PATH = new URL("./fixtures/balances.json", import.meta.url);
 const FIXTURE_PATH = new URL("./fixtures/transfers.json", import.meta.url);
 const MAX_BODY_BYTES = 1_048_576;
+const RECEIPT_ATTEMPTS = 20;
+const RECEIPT_RETRY_MS = 250;
 
 export type StandinOptions = {
   readonly config: Config;
@@ -136,7 +138,7 @@ async function settle(request: Request, rpc: RpcCall, usdcAddress: string): Prom
     if (typeof transaction !== "string" || !/^0x[\da-fA-F]{64}$/.test(transaction)) {
       return json({ success: false, errorReason: "invalid_rpc_response" }, 502);
     }
-    const receipt = await rpc("eth_getTransactionReceipt", [transaction]);
+    const receipt = await waitForReceipt(rpc, transaction);
     if (receipt === null) {
       return json({ success: false, errorReason: "settlement_pending", transaction }, 202);
     }
@@ -212,6 +214,17 @@ function createRpcCall(url: string, fetchFn: typeof fetch): RpcCall {
     }
     return result["result"];
   };
+}
+
+async function waitForReceipt(rpc: RpcCall, transaction: string): Promise<unknown> {
+  for (let attempt = 0; attempt < RECEIPT_ATTEMPTS; attempt += 1) {
+    const receipt = await rpc("eth_getTransactionReceipt", [transaction]);
+    if (receipt !== null) return receipt;
+    if (attempt + 1 < RECEIPT_ATTEMPTS) {
+      await new Promise((resolve) => setTimeout(resolve, RECEIPT_RETRY_MS));
+    }
+  }
+  return null;
 }
 
 function paymentAuthorization(body: unknown, usdcAddress: string) {
