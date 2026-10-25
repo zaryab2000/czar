@@ -46,6 +46,9 @@ export default defineConfig({
       env: {
         CZAR_ARC_RPC_URL: "http://127.0.0.1:8549",
         CZAR_INDEXER_URL: "http://127.0.0.1:42070",
+        CZAR_APP_CIRCLE_CLIENT_URL: "http://127.0.0.1:4337",
+        CZAR_APP_CIRCLE_CLIENT_KEY: "e2e-public-client-key",
+        CZAR_APP_ARC_RPC_URL: "http://127.0.0.1:8549",
       },
     },
     {

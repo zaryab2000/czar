@@ -87,10 +87,6 @@ async function mockApprovalApi(page: Page, plan: AppPlan): Promise<void> {
     if (pathname === "/v1/me") {
       await route.fulfill({
         contentType: "application/json",
-        headers: {
-          "X-Czar-Bundler-Order": "circle,pimlico,alchemy,zerodev",
-          "X-Czar-Bundler-Endpoints": "{}",
-        },
         body: JSON.stringify(me),
       });
       return;

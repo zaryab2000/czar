@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { appApi } from "#src/app-api";
+import { appApi, getAppWalletConfig } from "#src/app-api";
 import {
   counterfactualMsca,
   createPasskey,
@@ -49,6 +49,7 @@ export default function PasskeyOnboardingPage() {
     setError(undefined);
     try {
       if (!supportsPasskeys()) throw new Error(UNSUPPORTED);
+      await getAppWalletConfig();
       const challenge = await appApi.createAuthChallenge("register");
       const passkey = await createPasskey(fromBase64Url(challenge.challenge));
       const msca = await counterfactualMsca(passkey);

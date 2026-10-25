@@ -3275,7 +3275,8 @@ export const PARAMETERS = [
     type: "object",
     default: {},
     unit: "bundler-endpoint-map",
-    reason: "test bundler URLs are supplied by the local wallet test setup (SCR-125)",
+    reason:
+      "Public wallet endpoint URLs; credentials must be publish-safe and origin-restricted (SCR-140)",
     source:
       "docs/specs/06-review/change-requests/SCR-125-app-passkey-enrolment-reads-and-wallet-tests.md:104",
   },
@@ -3408,7 +3409,8 @@ export const PARAMETERS = [
     type: "string",
     default: null,
     unit: "url",
-    reason: "Circle Modular Wallets client URL (A6-19); per environment (SCR-135)",
+    reason:
+      "Public wallet URL; embedded credentials must be publish-safe and origin-restricted (SCR-140)",
     source: "docs/specs/04-components/app/app-and-notifications.md:40",
     noDefault: true,
   },
@@ -3418,7 +3420,7 @@ export const PARAMETERS = [
     default: null,
     unit: "",
     reason:
-      "K2 public-facing Circle client key (spec 01 K2 row); per environment, not a secret (SCR-135)",
+      "K2 public-facing key published in wallet config; use only an origin-restricted provider credential, never a server-side secret (SCR-140)",
     source: "docs/specs/04-components/app/app-and-notifications.md:40",
     noDefault: true,
   },
@@ -3428,7 +3430,7 @@ export const PARAMETERS = [
     default: null,
     unit: "url",
     reason:
-      "app-side Arc RPC for chain reads; https on testnet, loopback only in the local overlay (SCR-135)",
+      "Public RPC URL; credentials publish-safe and restricted; loopback only in local overlay (SCR-140)",
     source: "docs/specs/04-components/app/app-and-notifications.md:40",
     noDefault: true,
   },

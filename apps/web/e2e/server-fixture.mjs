@@ -12,6 +12,11 @@ const databaseRoot =
   process.env["CZAR_TEST_DATABASE_URL"] ?? "postgres://postgres@127.0.0.1:15432/postgres";
 const rpcUrl = process.env["CZAR_ARC_RPC_URL"] ?? "http://127.0.0.1:8549";
 const indexerUrl = process.env["CZAR_INDEXER_URL"] ?? "http://127.0.0.1:42069";
+const appConfig = {
+  CZAR_APP_CIRCLE_CLIENT_URL: process.env["CZAR_APP_CIRCLE_CLIENT_URL"],
+  CZAR_APP_CIRCLE_CLIENT_KEY: process.env["CZAR_APP_CIRCLE_CLIENT_KEY"],
+  CZAR_APP_ARC_RPC_URL: process.env["CZAR_APP_ARC_RPC_URL"],
+};
 const port = Number(process.env["CZAR_TEST_SERVER_PORT"] ?? 4310);
 for (const name of Object.keys(process.env)) {
   if (name.startsWith("CZAR_")) delete process.env[name];
@@ -26,7 +31,7 @@ await migrate(pool);
 
 const app = createApp({
   pool,
-  config: loadConfig({ env: {} }),
+  config: loadConfig({ env: appConfig }),
   appOrigin: "http://localhost:3100",
   logger: { info() {}, warn() {}, error() {}, debug() {} },
   clock: { now: () => new Date() },

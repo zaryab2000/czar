@@ -65,6 +65,7 @@ describe("CZ-12 migrations", () => {
       "evidence_receipts",
       "executor_leases",
       "idempotency",
+      "merchant_payment_identifiers",
       "model_reservations",
       "model_usage",
       "objective_cursors",

@@ -28,6 +28,7 @@ const SEED: RoutingParams = {
     pocketSweep: 21_000n,
   },
   gatewayFeeAtomic: 3_500n,
+  gatewayEnabled: true,
   maxFeeRatioBps: 1_000n,
   jobThresholdAtomic: 5_000_000n,
   maxGasPriceWei: 200_000_000_000n,
@@ -107,6 +108,28 @@ describe("CZ-14 payment router cost model", () => {
     expect(pocketThreshold(10, FLOOR_GAS_PRICE, params)).toBe(9_955n);
     expect(pocketThreshold(100, FLOOR_GAS_PRICE, params)).toBe(3_056n);
     expect(cPocket(FLOOR_GAS_PRICE, params)).toBe(22_433n);
+  });
+
+  it("keeps Gateway routes off by default and enables them only by config", () => {
+    const disabled = routingParamsFromConfig(loadConfig());
+    expect(disabled.gatewayEnabled).toBe(false);
+    expect(
+      route(
+        input({
+          offers: [gateway],
+          unitAmount: 1n,
+          params: disabled,
+        }),
+      ),
+    ).toMatchObject({ error: "unsupported-offer", reason: "no-usable-offer" });
+
+    const enabled = routingParamsFromConfig(
+      loadConfig({ envFile: { "routing.gatewayEnabled": true } }),
+    );
+    expect(enabled.gatewayEnabled).toBe(true);
+    expect(route(input({ offers: [gateway], unitAmount: 1n, params: enabled }))).toMatchObject({
+      kind: "gateway-nano",
+    });
   });
 });
 

@@ -1,9 +1,9 @@
 import { createLogger } from "@czar/logging";
 import { validateRecordedExchange } from "@czar/api-contract";
-import { loadConfig } from "@czar/config";
 import { Pool } from "pg";
 import { afterAll, describe, expect, it } from "vitest";
 import { createApp } from "#src/app";
+import { testAppConfig } from "#test/fixtures";
 
 const pool = new Pool({
   connectionString: "postgres://postgres@127.0.0.1:1/postgres",
@@ -11,7 +11,7 @@ const pool = new Pool({
 });
 const app = createApp({
   pool,
-  config: loadConfig(),
+  config: testAppConfig(),
   logger: createLogger({ service: "server", component: "CZ-12", sink: () => undefined }),
   clock: { now: () => new Date("2026-10-21T00:00:00.000Z") },
   random: { bytes: (length) => Buffer.alloc(length, 1) },

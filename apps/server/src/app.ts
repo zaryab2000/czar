@@ -44,6 +44,7 @@ import {
   listReceiptsRoute,
   type AppReadOptions,
 } from "#src/app/reads";
+import { getAppWalletConfigRoute, resolveAppWalletConfig } from "#src/app/wallet-config";
 
 export interface AppDependencies extends PairDependencies {
   logger: Logger;
@@ -67,6 +68,7 @@ interface RequestState {
 type ServerContext = Context<any, any, any>;
 
 export function createApp(dependencies: AppDependencies): Hono {
+  const walletConfig = resolveAppWalletConfig(dependencies.config);
   const app = new Hono();
   app.onError((error, context) => {
     const code = error instanceof RequestValidationError ? "validation" : "upstream-unavailable";
@@ -163,6 +165,7 @@ export function createApp(dependencies: AppDependencies): Hono {
   app.get("/v1/objectives/:objectiveId", (context) => getRoute(context, dependencies));
   app.get("/v1/jobs/:jobKey/brief", (context) => jobBriefRoute(context, dependencies));
   app.post("/v1/jobs/:jobKey/deliverable", (context) => jobDeliverableRoute(context, dependencies));
+  app.get("/v1/app/wallet-config", (context) => getAppWalletConfigRoute(context, walletConfig));
   app.get(
     "/v1/me",
     appSessionVerifier(dependencies.pool, dependencies.config),
@@ -382,7 +385,7 @@ function appReadDependencies(dependencies: AppDependencies) {
 function appAuthDependencies(dependencies: AppDependencies) {
   return {
     ...dependencies,
-    rpcUrl: dependencies.appReadOptions?.rpcUrl ?? process.env["CZAR_ARC_RPC_URL"],
+    rpcUrl: dependencies.config.get("app.arcRpcUrl") as string,
     origin: dependencies.appOrigin ?? "http://localhost",
   };
 }
@@ -402,10 +405,10 @@ async function appRateLimit(
 
 async function publicAuthRoute(
   context: ServerContext,
-  dependencies: AppDependencies & { origin: string },
+  dependencies: AppDependencies & { origin: string; rpcUrl: string },
   route: (
     context: ServerContext,
-    dependencies: AppDependencies & { origin: string },
+    dependencies: AppDependencies & { origin: string; rpcUrl: string },
   ) => Promise<Response>,
 ): Promise<Response> {
   const ip =
@@ -772,6 +775,7 @@ async function safeCzarCode(response: Response): Promise<CzarCode | undefined> {
 }
 
 function operationFor(path: string, method: string): string {
+  if (method === "GET" && path === "/v1/app/wallet-config") return "getAppWalletConfig";
   if (method === "GET" && path === "/v1/me") return "getMe";
   if (method === "GET" && path === "/v1/envelopes") return "listEnvelopes";
   if (method === "GET" && /^\/v1\/envelopes\/[^/]+$/.test(path)) return "getEnvelope";

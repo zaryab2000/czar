@@ -1,7 +1,40 @@
-import { describe, expect, it } from "vitest";
-import { normalizeP256LowS } from "#src/wallet";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+const walletMocks = vi.hoisted(() => ({
+  getAppWalletConfig: vi.fn(),
+  toCircleSmartAccount: vi.fn(),
+  toModularTransport: vi.fn(),
+}));
+
+vi.mock("#src/app-api", () => ({ getAppWalletConfig: walletMocks.getAppWalletConfig }));
+vi.mock("@circle-fin/modular-wallets-core", () => ({
+  toCircleSmartAccount: walletMocks.toCircleSmartAccount,
+  toModularTransport: walletMocks.toModularTransport,
+}));
+
+import { sendOwnerUserOperation, normalizeP256LowS } from "#src/wallet";
 
 const P256_ORDER = BigInt("0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551");
+
+afterEach(() => {
+  walletMocks.getAppWalletConfig.mockReset();
+  walletMocks.toCircleSmartAccount.mockReset();
+  walletMocks.toModularTransport.mockReset();
+});
+
+it("does not create or submit a wallet action when config loading fails", async () => {
+  walletMocks.getAppWalletConfig.mockRejectedValue(new Error("wallet config unavailable"));
+
+  await expect(
+    sendOwnerUserOperation(
+      { credentialId: "credential-id", publicKey: `0x${"00".repeat(65)}` },
+      "0x0000000000000000000000000000000000000001",
+      "0x",
+    ),
+  ).rejects.toThrow("wallet config unavailable");
+  expect(walletMocks.toCircleSmartAccount).not.toHaveBeenCalled();
+  expect(walletMocks.toModularTransport).not.toHaveBeenCalled();
+});
 
 describe("normalizeP256LowS", () => {
   it("maps high-s signatures to the equivalent low-s form", () => {

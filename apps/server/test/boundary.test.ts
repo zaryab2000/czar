@@ -46,9 +46,6 @@ describe("payment boundary", () => {
         pool: getPool(),
         config,
         logger,
-        modelClient: {
-          complete: vi.fn(async () => ({ output: {}, usage: { inputTokens: 1, outputTokens: 1 } })),
-        },
         promptHashes,
         objectStore: { put: vi.fn(async () => "obj_body_1") },
         acceptance: checker,

@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { keccak256, type Address, type PublicClient, type WalletClient } from "viem";
+import { getLimits } from "@czar/vault-client";
+import { keccak256, type Address, type Hex, type PublicClient, type WalletClient } from "viem";
 import type { Config } from "@czar/config";
 import { paymentRefHash } from "@czar/hashing";
 import type { Logger } from "@czar/logging";
@@ -16,6 +17,19 @@ import type { AppReadOptions } from "#src/app/reads";
 import type { Plan, SubjectsRevision } from "@czar/schemas";
 import type { PairDependencies } from "#src/devices/pair";
 import { migrate } from "#src/db/migrate";
+import {
+  createRegisteredSelection,
+  type RegisteredSelection,
+} from "#src/selection/registered/index";
+import { createPlanner } from "#src/planner/index";
+import type { PlannerPorts } from "#src/planner/ports";
+import { createSafeProber } from "#src/planner/probe";
+import { createPlannerOperations } from "#src/planner/service";
+import { startPlannerLoop } from "#src/planner/loop";
+import {
+  startOpeningWatcher,
+  type OpeningWatcherDependencies,
+} from "#src/objectives/opening-watcher";
 import {
   createPaymentReceipt,
   type PaymentReceiptInput,
@@ -62,9 +76,9 @@ export interface ServerMainOptions extends PairDependencies {
   readonly pool: Pool;
   readonly config: Config;
   readonly logger: Logger;
-  readonly modelClient: ModelClient;
-  readonly createSigner: () => Promise<Pick<Signer, "sign" | "retirePocketKey">>;
-  readonly acceptancePorts: AcceptancePorts;
+  readonly modelClient?: ModelClient;
+  readonly createSigner: () => Promise<ServerSigner>;
+  readonly acceptancePorts?: AcceptancePorts;
   readonly objects?: ObjectStore;
   readonly vaultEvents?: VaultHaltEventSource;
   readonly pocketHalt?: PocketHaltDependencies;
@@ -72,10 +86,11 @@ export interface ServerMainOptions extends PairDependencies {
   readonly pullbackFallbackChain?: PullbackFallbackSchedulerDependencies["chain"];
   readonly publicClient: PublicClient;
   readonly walletClient: WalletClient;
-  readonly chain: VaultDirectChain;
+  readonly chain?: VaultDirectChain;
+  readonly chainForVault?: (vault: Address) => VaultDirectChain;
   readonly safeFetch: SafeFetch;
-  readonly settlement: PaymentReceiptDependencies["settlement"];
-  readonly receiptInput: (
+  readonly settlement?: PaymentReceiptDependencies["settlement"];
+  readonly receiptInput?: (
     context: SettledReceiptContext,
     stepResult: unknown,
     reportHashes: readonly string[],
@@ -88,12 +103,18 @@ export interface ServerMainOptions extends PairDependencies {
       readonly escrowState: "Submitted" | "Completed";
     }): Promise<void>;
   };
-  readonly revisePlanSubjects: (
+  readonly revisePlanSubjects?: (
     userId: string,
     planId: string,
     revision: SubjectsRevision,
   ) => Promise<Plan | null>;
+  readonly planner?: {
+    readonly openingLookup: OpeningWatcherDependencies["lookup"];
+  };
 }
+
+export type ServerSigner = Pick<Signer, "sign" | "createPocketKey" | "keyAddress"> &
+  Partial<Pick<Signer, "retirePocketKey">>;
 
 export interface ServerMain {
   readonly app: ReturnType<typeof createApp>;
@@ -112,100 +133,165 @@ export interface ServerMain {
   executePullback(input: PullbackInput): ReturnType<typeof executePullback>;
   cancelExpiredPullback(input: CancelPullbackInput): ReturnType<typeof cancelExpiredPullback>;
   executeJobStep(input: JobExecutionInput): ReturnType<typeof executeJobStep>;
-  close(): void;
+  close(): Promise<void>;
 }
 
 export async function createServerMain(options: ServerMainOptions): Promise<ServerMain> {
+  await migrate(options.pool);
   const objects =
     options.objects ??
     createFileObjectStore(String(options.config.get("payer.job.deliverableStorePath")));
-  await migrate(options.pool);
+  const state: CompositionState = {};
+  const acceptancePorts = productionAcceptancePorts(options, state);
   const acceptance = await createAcceptanceChecker({
     pool: options.pool,
     config: options.config,
-    ports: options.acceptancePorts,
+    ports: acceptancePorts,
     logger: options.logger,
   });
-  const promptHashes = {
-    "P-01": await computePromptHash("P-01"),
-    "P-02": await computePromptHash("P-02"),
-  } as const;
-  const boundary = createPayerBoundary(options, acceptance, promptHashes, objects);
-  const signer = await options.createSigner();
-  const vaultEvents =
-    options.vaultEvents ??
-    (options.pocketHalt ? createDatabaseVaultEventSource(options) : undefined);
-  if (!options.vaultEvents && !options.pocketHalt)
-    options.logger.error("payer_halt_monitor_disabled", {
-      rule: "missing_pocket_halt_dependencies",
-      state: "disabled",
-    });
-  const pullbackFallbackChain =
-    options.pullbackFallbackChain ??
-    createPullbackChainAdapter(
-      options.publicClient,
-      options.walletClient,
-      options.config.get("chain.gatewayWalletAddress") as Address,
-      {
-        config: options.config,
-        logger: options.logger,
-      },
-    );
-  const payerRuntime = startPayerRuntime({
-    ...(vaultEvents ? { events: vaultEvents } : {}),
-    ...(options.pocketHalt ? { pocketHalt: options.pocketHalt } : {}),
-    fallbackPollSeconds: Number(options.config.get("payer.pullbackFallbackPollSeconds")),
-    runFallbacks: () =>
-      runPendingPullbackFallbacks({
-        pool: options.pool,
-        config: options.config,
-        signer,
-        cancelPendingPullback: async (input) => {
-          const chain = createPullbackExecutionChain({
-            client: options.publicClient,
-            pool: options.pool,
-            vault: input.vault,
-            gatewayMinter: input.gatewayMinter,
-          });
-          const record = await chain.readPullback(input.pullbackId);
-          if (!record || record.state === "Confirmed")
-            throw new Error("Gateway pullback is not cancellable before slow withdrawal.");
-          if (record.state === "Cancelled") return;
-          return cancelExpiredPullback(input, {
-            pool: options.pool,
-            config: options.config,
-            signer,
-            chain,
-            safeFetch: options.safeFetch,
-            gatewayTransferUrl: options.gatewayTransferUrl ?? "",
-            now: options.clock.now,
-          });
-        },
-        chain: pullbackFallbackChain,
-        now: options.clock.now,
-      }),
-    onError: (operation) =>
-      options.logger.error("payer_runtime_failure", { rule: operation, state: "error" }),
-  });
-  const recordReceipt = createReceiptBuilder(options, signer);
-  const payerDependencies = {
-    pool: options.pool,
-    config: options.config,
-    signer,
-    chain: options.chain,
-    safeFetch: options.safeFetch,
-    now: options.clock.now,
+  const boundary = createPayerBoundary(
+    options,
+    acceptancePorts,
+    acceptance,
+    await computePromptHashes(),
+    objects,
+  );
+  const signerClient = await options.createSigner();
+  state.signer = signerClient;
+  const recordReceipt = createReceiptBuilder(options, signerClient);
+  const selection = createSelection(options);
+  state.selection = selection;
+  const plannerOperations = createPlannerOperationsIfConfigured(
+    options,
+    acceptance,
+    selection,
+    signerClient,
+  );
+  const payerRuntime = startProductionPayerRuntime(options, signerClient);
+  const payerDependencies = createPayerDependencies(
+    options,
+    signerClient,
     objects,
     boundary,
     recordReceipt,
+  );
+  const workers = startPlannerWorkers(options, plannerOperations);
+  const app = createServerApp(options, objects, plannerOperations);
+  return {
+    app,
+    acceptance,
+    ...createVaultDirectOperations(options, payerDependencies),
+    ...createPocketOperations(options, signerClient),
+    ...createPullbackOperations(options, signerClient),
+    executeJobStep: (input) => executeJobStepForMain(options, signerClient, input),
+    async close() {
+      await workers.stop();
+      payerRuntime.stop();
+    },
   };
-  const app = createApp({
+}
+
+interface CompositionState {
+  signer?: ServerSigner;
+  selection?: RegisteredSelection;
+}
+
+type PlannerOperations = ReturnType<typeof createPlannerOperations>;
+
+function productionAcceptancePorts(
+  options: ServerMainOptions,
+  state: CompositionState,
+): AcceptancePorts {
+  return (
+    options.acceptancePorts ?? {
+      outputSchema: {
+        forService: async (serviceId) =>
+          requireSelection(state.selection).outputSchema.forService(serviceId),
+      },
+      shapeHistory: { forService: async () => null },
+      validatorIdentity: {
+        address: async () => requireSigner(state.signer).keyAddress("cz-16", "K7"),
+      },
+      clock: { now: options.clock.now },
+    }
+  );
+}
+
+async function computePromptHashes() {
+  return {
+    "P-01": await computePromptHash("P-01"),
+    "P-02": await computePromptHash("P-02"),
+  } as const;
+}
+
+function createSelection(options: ServerMainOptions): RegisteredSelection {
+  return createRegisteredSelection({
+    config: options.config,
+    safeFetch: options.safeFetch,
+    pool: options.pool,
+    now: options.clock.now,
+  });
+}
+
+function createPlannerOperationsIfConfigured(
+  options: ServerMainOptions,
+  acceptance: Awaited<ReturnType<typeof createAcceptanceChecker>>,
+  selection: RegisteredSelection,
+  signer: ServerSigner,
+): PlannerOperations | undefined {
+  if (!options.planner) return undefined;
+  const planner = createPlanner({
+    config: options.config,
+    ports: createPlannerPorts(options, acceptance, selection, signer),
+  });
+  return createPlannerOperations({
+    pool: options.pool,
+    planner,
+    ethGasPriceWei: () => options.publicClient.getGasPrice(),
+    now: options.clock.now,
+    random: options.random,
+  });
+}
+
+function startPlannerWorkers(options: ServerMainOptions, operations?: PlannerOperations) {
+  const plannerLoop = operations
+    ? startPlannerLoop({
+        pool: options.pool,
+        config: options.config,
+        processNextReceived: operations.processNextReceived,
+        now: options.clock.now,
+        onError: () =>
+          options.logger.error("planner_loop_failure", { rule: "planner-loop", state: "error" }),
+      })
+    : undefined;
+  const openingWatcher = options.planner
+    ? startOpeningWatcher({
+        pool: options.pool,
+        config: options.config,
+        lookup: options.planner.openingLookup,
+        now: options.clock.now,
+        onError: () =>
+          options.logger.error("opening_watcher_failure", {
+            rule: "opening-watcher",
+            state: "error",
+          }),
+      })
+    : undefined;
+  return { stop: async () => Promise.all([plannerLoop?.stop(), openingWatcher?.stop()]) };
+}
+
+function createServerApp(
+  options: ServerMainOptions,
+  objects: ObjectStore,
+  plannerOperations?: PlannerOperations,
+) {
+  return createApp({
     pool: options.pool,
     config: options.config,
     logger: options.logger,
     clock: options.clock,
     random: options.random,
-    modelClient: options.modelClient,
+    ...(options.modelClient ? { modelClient: options.modelClient } : {}),
     jobDelivery: {
       pool: options.pool,
       config: options.config,
@@ -214,14 +300,118 @@ export async function createServerMain(options: ServerMainOptions): Promise<Serv
       objectStore: objects,
     },
     ...(options.appReadOptions ? { appReadOptions: options.appReadOptions } : {}),
-    ...(options.revisePlanSubjects ? { revisePlanSubjects: options.revisePlanSubjects } : {}),
+    ...(options.revisePlanSubjects
+      ? { revisePlanSubjects: options.revisePlanSubjects }
+      : plannerOperations
+        ? { revisePlanSubjects: plannerOperations.reviseSubjects }
+        : {}),
   });
+}
+
+function createPayerDependencies(
+  options: ServerMainOptions,
+  signer: ServerSigner,
+  objects: ObjectStore,
+  boundary: ReturnType<typeof createPayerBoundary>,
+  recordReceipt: ReturnType<typeof createReceiptBuilder>,
+) {
   return {
-    app,
-    acceptance,
-    executePayerStep: (input) => executeVaultDirectStep(input, payerDependencies),
-    executePocketPreparation: (input) =>
-      executePocketPreparation(input, {
+    pool: options.pool,
+    config: options.config,
+    signer,
+    safeFetch: options.safeFetch,
+    now: options.clock.now,
+    objects,
+    boundary,
+    recordReceipt,
+  };
+}
+
+function startProductionPayerRuntime(options: ServerMainOptions, signer: ServerSigner) {
+  const vaultEvents =
+    options.vaultEvents ??
+    (options.pocketHalt ? createDatabaseVaultEventSource(options) : undefined);
+  if (!options.vaultEvents && !options.pocketHalt)
+    options.logger.error("payer_halt_monitor_disabled", {
+      rule: "missing_pocket_halt_dependencies",
+      state: "disabled",
+    });
+  const fallbackChain =
+    options.pullbackFallbackChain ??
+    createPullbackChainAdapter(
+      options.publicClient,
+      options.walletClient,
+      options.config.get("chain.gatewayWalletAddress") as Address,
+      { config: options.config, logger: options.logger },
+    );
+  return startPayerRuntime({
+    ...(vaultEvents ? { events: vaultEvents } : {}),
+    ...(options.pocketHalt ? { pocketHalt: options.pocketHalt } : {}),
+    fallbackPollSeconds: Number(options.config.get("payer.pullbackFallbackPollSeconds")),
+    runFallbacks: () => runPullbackFallbacks(options, signer, fallbackChain),
+    onError: (operation) =>
+      options.logger.error("payer_runtime_failure", { rule: operation, state: "error" }),
+  });
+}
+
+async function runPullbackFallbacks(
+  options: ServerMainOptions,
+  signer: ServerSigner,
+  fallbackChain: PullbackFallbackSchedulerDependencies["chain"],
+) {
+  return runPendingPullbackFallbacks({
+    pool: options.pool,
+    config: options.config,
+    signer,
+    cancelPendingPullback: (input) => cancelFallbackPullback(options, signer, input),
+    chain: fallbackChain,
+    now: options.clock.now,
+  });
+}
+
+async function cancelFallbackPullback(
+  options: ServerMainOptions,
+  signer: ServerSigner,
+  input: CancelPullbackInput,
+) {
+  const chain = createPullbackExecutionChain({
+    client: options.publicClient,
+    pool: options.pool,
+    vault: input.vault,
+    gatewayMinter: input.gatewayMinter,
+  });
+  const record = await chain.readPullback(input.pullbackId);
+  if (!record || record.state === "Confirmed")
+    throw new Error("Gateway pullback is not cancellable before slow withdrawal.");
+  if (record.state === "Cancelled") return;
+  return cancelExpiredPullback(input, {
+    pool: options.pool,
+    config: options.config,
+    signer,
+    chain,
+    safeFetch: options.safeFetch,
+    gatewayTransferUrl: options.gatewayTransferUrl ?? "",
+    now: options.clock.now,
+  });
+}
+
+function createVaultDirectOperations(
+  options: ServerMainOptions,
+  payerDependencies: ReturnType<typeof createPayerDependencies>,
+) {
+  return {
+    executePayerStep(input: VaultDirectInput) {
+      const chain = options.chainForVault?.(input.vault) ?? options.chain;
+      if (!chain) throw new Error("Vault-direct chain adapter is not configured.");
+      return executeVaultDirectStep(input, { ...payerDependencies, chain });
+    },
+  };
+}
+
+function createPocketOperations(options: ServerMainOptions, signer: ServerSigner) {
+  return {
+    executePocketPreparation(input: PocketPreparationInput) {
+      return executePocketPreparation(input, {
         pool: options.pool,
         config: options.config,
         signer,
@@ -232,8 +422,9 @@ export async function createServerMain(options: ServerMainOptions): Promise<Serv
           gatewayWallet: options.config.get("chain.gatewayWalletAddress") as Address,
         }),
         now: options.clock.now,
-      }),
-    executePocketNanopayments: async (input) => {
+      });
+    },
+    async executePocketNanopayments(input: PocketNanopaymentInput) {
       if (!options.gatewayStatus)
         throw new Error("Gateway status lookup is required to execute pocket payments.");
       const dependencies: PocketNanopaymentDependencies = {
@@ -247,9 +438,27 @@ export async function createServerMain(options: ServerMainOptions): Promise<Serv
       await payGatewaySteps(input, dependencies);
       return refreshGatewayStatuses(input, dependencies);
     },
-    closePocket: (input, chain) =>
-      sweepAndRetirePocketKey(input, { pool: options.pool, signer, chain }),
-    executePullback: (input) => {
+    closePocket(
+      input: PocketCloseInput,
+      chain: Parameters<typeof sweepAndRetirePocketKey>[1]["chain"],
+    ) {
+      if (!signer.retirePocketKey)
+        throw new Error("The configured signer client does not expose pocket-key retirement.");
+      return sweepAndRetirePocketKey(input, {
+        pool: options.pool,
+        signer: {
+          sign: signer.sign.bind(signer),
+          retirePocketKey: signer.retirePocketKey.bind(signer),
+        },
+        chain,
+      });
+    },
+  };
+}
+
+function createPullbackOperations(options: ServerMainOptions, signer: ServerSigner) {
+  return {
+    executePullback(input: PullbackInput) {
       if (!options.gatewayTransferUrl)
         throw new Error("Gateway transfer URL is required for pullback execution.");
       return executePullback(input, {
@@ -267,8 +476,8 @@ export async function createServerMain(options: ServerMainOptions): Promise<Serv
         now: options.clock.now,
       });
     },
-    cancelExpiredPullback: (input) => {
-      const dependencies = {
+    cancelExpiredPullback(input: CancelPullbackInput) {
+      return cancelExpiredPullback(input, {
         pool: options.pool,
         config: options.config,
         signer,
@@ -281,34 +490,39 @@ export async function createServerMain(options: ServerMainOptions): Promise<Serv
         safeFetch: options.safeFetch,
         gatewayTransferUrl: options.gatewayTransferUrl ?? "",
         now: options.clock.now,
-      };
-      return cancelExpiredPullback(input, dependencies);
+      });
     },
-    executeJobStep: (input) =>
-      executeJobStep(input, {
-        pool: options.pool,
-        config: options.config,
-        signer,
-        chain: createJobChainAdapter({
-          client: options.publicClient,
-          pool: options.pool,
-          config: options.config,
-          vault: input.vault,
-          jobEscrow: input.jobEscrow,
-          usdc: options.config.get("chain.usdcAddress") as Address,
-          now: options.clock.now,
-        }),
-        vault: input.vault,
-        now: options.clock.now,
-        randomSalt: () => `0x${randomBytes(32).toString("hex")}` as `0x${string}`,
-        ...(options.jobEvaluator ? { evaluator: options.jobEvaluator } : {}),
-      }),
-    close: () => payerRuntime.stop(),
   };
+}
+
+function executeJobStepForMain(
+  options: ServerMainOptions,
+  signer: ServerSigner,
+  input: JobExecutionInput,
+) {
+  return executeJobStep(input, {
+    pool: options.pool,
+    config: options.config,
+    signer,
+    chain: createJobChainAdapter({
+      client: options.publicClient,
+      pool: options.pool,
+      config: options.config,
+      vault: input.vault,
+      jobEscrow: input.jobEscrow,
+      usdc: options.config.get("chain.usdcAddress") as Address,
+      now: options.clock.now,
+    }),
+    vault: input.vault,
+    now: options.clock.now,
+    randomSalt: () => `0x${randomBytes(32).toString("hex")}` as `0x${string}`,
+    ...(options.jobEvaluator ? { evaluator: options.jobEvaluator } : {}),
+  });
 }
 
 function createPayerBoundary(
   options: ServerMainOptions,
+  acceptancePorts: AcceptancePorts,
   acceptance: Awaited<ReturnType<typeof createAcceptanceChecker>>,
   promptHashes: Readonly<Record<"P-01" | "P-02", string>>,
   objects: ObjectStore,
@@ -329,7 +543,7 @@ function createPayerBoundary(
       paymentRefHash: paymentRefHash(paymentRef),
     };
     const profileId = input.step.acceptanceProfileId;
-    const outputSchema = await options.acceptancePorts.outputSchema.forService(serviceId);
+    const outputSchema = await acceptancePorts.outputSchema.forService(serviceId);
     const result = await runBoundary(
       {
         body: bodyText,
@@ -362,7 +576,7 @@ function createPayerBoundary(
         pool: options.pool,
         config: options.config,
         logger: options.logger,
-        modelClient: options.modelClient,
+        ...(options.modelClient ? { modelClient: options.modelClient } : {}),
         promptHashes,
         objectStore: objects,
         acceptance,
@@ -375,28 +589,105 @@ function createPayerBoundary(
 }
 
 function createReceiptBuilder(options: ServerMainOptions, signer: Pick<Signer, "sign">) {
-  const dependencies: PaymentReceiptDependencies = {
-    pool: options.pool,
-    config: options.config,
-    signer,
-    settlement: options.settlement,
-    now: options.clock.now,
-  };
   return async (context: SettledReceiptContext): Promise<void> => {
+    if (!options.settlement || !options.receiptInput)
+      throw new Error("Receipt settlement and trace adapters are not configured (TA-09).");
     const reports = await options.pool.query<{ report_hash: string }>(
       `SELECT report_hash FROM acceptance_reports
        WHERE envelope_ref=$1 AND step_index=$2 AND body_ref=$3
        ORDER BY created_at DESC LIMIT 1`,
       [context.input.envelopeRef, context.input.step.stepIndex, context.bodyRef],
     );
-    const stepResult = context.stepResult;
     const input = options.receiptInput(
       context,
-      stepResult,
+      context.stepResult,
       reports.rows.map((row) => row.report_hash),
     );
-    await createPaymentReceipt(input, dependencies);
+    await createPaymentReceipt(input, {
+      pool: options.pool,
+      config: options.config,
+      signer,
+      settlement: options.settlement,
+      now: options.clock.now,
+    });
   };
+}
+
+function createPlannerPorts(
+  options: ServerMainOptions,
+  acceptance: Awaited<ReturnType<typeof createAcceptanceChecker>>,
+  selection: RegisteredSelection,
+  signer: ServerSigner,
+): PlannerPorts {
+  const periodLengthSeconds = BigInt(
+    Number(options.config.get("signer.projection.periodLengthSeconds")),
+  );
+  return {
+    ranking: selection.rank,
+    directory: selection.directory,
+    profiles: createPlannerProfileSource(acceptance),
+    pocketKeys: createPlannerPocketKeySource(signer),
+    agentHosts: { hasAgentHost: async () => false },
+    allowance: {
+      async remaining(userId, categoryId) {
+        try {
+          const result = await options.pool.query<{ vault: string | null }>(
+            "SELECT vault FROM users WHERE user_id=$1",
+            [userId],
+          );
+          const vault = result.rows[0]?.vault;
+          if (!vault) return "0";
+          const limits = await getLimits({
+            client: options.publicClient,
+            vault: vault as Address,
+            categoryId: categoryId as Hex,
+          });
+          const periodId = BigInt(options.clock.now().getTime()) / 1000n / periodLengthSeconds;
+          const used = limits.periodId === periodId ? limits.usedInPeriod : 0n;
+          return (limits.autoLimit > used ? limits.autoLimit - used : 0n).toString();
+        } catch {
+          return "0";
+        }
+      },
+    },
+    prober: createSafeProber(options.config),
+  };
+}
+
+export function createPlannerProfileSource(
+  acceptance: Pick<Awaited<ReturnType<typeof createAcceptanceChecker>>, "profileIdFor">,
+): PlannerPorts["profiles"] {
+  return {
+    profileIdFor(taskClass) {
+      if (taskClass === "data-json.search" || taskClass === "data-json.extract")
+        return acceptance.profileIdFor("data-json");
+      if (taskClass === "local") throw new LocalTemplateProfileUnavailableError();
+      return acceptance.profileIdFor(taskClass);
+    },
+  };
+}
+
+export class LocalTemplateProfileUnavailableError extends Error {
+  constructor() {
+    super("The local-template-v1 profile ID must be supplied by Lane 3 acceptance/profile.ts.");
+    this.name = "LocalTemplateProfileUnavailableError";
+  }
+}
+
+export function createPlannerPocketKeySource(
+  signer: Pick<ServerSigner, "createPocketKey">,
+): PlannerPorts["pocketKeys"] {
+  return { createPocketKey: (_planId) => signer.createPocketKey("cz-15") };
+}
+
+function requireSelection(selection: RegisteredSelection | undefined): RegisteredSelection {
+  if (!selection) throw new Error("Registered selection is not initialized.");
+  return selection;
+}
+
+function requireSigner(signer: ServerSigner | undefined): ServerSigner {
+  if (!signer) throw new Error("Signer client is not initialized.");
+  return signer;
 }
 
 function quarantinedStepResult(

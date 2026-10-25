@@ -4,7 +4,11 @@ import type { ObjectiveSubmission, Plan } from "@czar/schemas";
 import { recomputePlanHash, type PlannerRequest } from "#src/planner/index";
 import { makeObjectiveSubmission, seedDevice, TEST_USER_ID } from "#test/fixtures";
 import { setupDatabase } from "#test/db";
-import { createPlannerOperations, type ReplanFailure } from "#src/planner/service";
+import {
+  createPlannerOperations,
+  reclaimStalePlanningClaims,
+  type ReplanFailure,
+} from "#src/planner/service";
 
 const pool = setupDatabase();
 const OBJECTIVE = "obj_01K7ZT9P4N5Q6R7S8T9V0W1X2Y";
@@ -57,7 +61,6 @@ function operations(
     now: () => new Date("2026-10-21T00:00:00.000Z"),
     random: { bytes: randomBytes },
     ethGasPriceWei: async () => 20_000_000_000n,
-    gatewayVolumeAtomic: async () => 0n,
   });
 }
 
@@ -201,6 +204,30 @@ describe("planner persistence", () => {
         )
       ).rows[0]?.n,
     ).toBe(2);
+  });
+
+  it("reclaims a stale planning claim without adding another received event", async () => {
+    await seedObjective();
+    await pool().query(
+      "UPDATE objectives SET state='planning',updated_at=$2 WHERE objective_id=$1",
+      [OBJECTIVE, new Date("2026-10-21T00:00:00Z")],
+    );
+
+    const reclaimed = await reclaimStalePlanningClaims(
+      pool(),
+      300,
+      new Date("2026-10-21T00:05:01Z"),
+    );
+    const objective = await pool().query("SELECT state FROM objectives WHERE objective_id=$1", [
+      OBJECTIVE,
+    ]);
+    const events = await pool().query(
+      "SELECT count(*)::int AS count FROM outbox_events WHERE name='objective.received'",
+    );
+
+    expect(reclaimed).toBe(1);
+    expect(objective.rows[0]?.state).toBe("received");
+    expect(events.rows[0]?.count).toBe(1);
   });
 
   it("rejects merchant text in the re-plan input", async () => {

@@ -3,6 +3,8 @@ import type {
   ApprovalIntentRequest,
   ApprovalSummary,
   AuthChallenge,
+  AppBundler,
+  AppWalletConfig,
   AppPage,
   AppPlan,
   Device,
@@ -22,19 +24,44 @@ import type {
 const SESSION_KEY = "czar.appSession";
 const SESSION_EXPIRY_KEY = "czar.appSessionExpiresAt";
 const BUNDLERS = ["circle", "pimlico", "alchemy", "zerodev"] as const;
+let appWalletConfigRequest: Promise<AppWalletConfig> | undefined;
 
-export type AppBundler = (typeof BUNDLERS)[number];
-
-export interface AppWalletConfig {
-  readonly bundlerOrder: readonly AppBundler[];
-  readonly bundlerEndpoints: Partial<Record<AppBundler, string>>;
+export async function getAppWalletConfig(): Promise<AppWalletConfig> {
+  if (!appWalletConfigRequest) appWalletConfigRequest = fetchAppWalletConfig();
+  const pendingConfigRequest = appWalletConfigRequest;
+  try {
+    return await pendingConfigRequest;
+  } catch (error) {
+    if (appWalletConfigRequest === pendingConfigRequest) appWalletConfigRequest = undefined;
+    throw error;
+  }
 }
 
-let appWalletConfig: AppWalletConfig | undefined;
-
-export function getAppWalletConfig(): AppWalletConfig {
-  if (!appWalletConfig) throw new Error("Load account settings before sending a wallet action.");
-  return appWalletConfig;
+async function fetchAppWalletConfig(): Promise<AppWalletConfig> {
+  let response: Response;
+  try {
+    response = await fetch("/v1/app/wallet-config", {
+      cache: "no-store",
+      credentials: "omit",
+      headers: { Accept: "application/json" },
+      mode: "same-origin",
+      redirect: "error",
+    });
+  } catch {
+    throw new Error("Czar could not load wallet configuration. Check the connection and retry.");
+  }
+  if (!response.ok || !hasNoStore(response.headers)) {
+    throw new Error("Czar could not load wallet configuration. Check the connection and retry.");
+  }
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    throw new Error("Czar received invalid wallet configuration. Reload and try again.");
+  }
+  const parsed = parseAppWalletConfig(body);
+  if (!parsed) throw new Error("Czar received invalid wallet configuration. Reload and try again.");
+  return parsed;
 }
 
 export class AppApiError extends Error {
@@ -143,11 +170,7 @@ export const appApi = {
     storeSession(response);
     return response;
   },
-  getMe: async () => {
-    const result = await requestWithHeaders<Me>("/v1/me");
-    appWalletConfig = parseAppWalletConfig(result.headers);
-    return result.data;
-  },
+  getMe: () => request<Me>("/v1/me"),
   listApprovals: (status = "pending", cursor?: string) => {
     const query = new URLSearchParams({ status });
     if (cursor) query.set("cursor", cursor);
@@ -232,46 +255,57 @@ export const appApi = {
     }),
 };
 
-function parseAppWalletConfig(headers: Headers): AppWalletConfig {
-  const bundlerOrder = headers
-    .get("X-Czar-Bundler-Order")
-    ?.split(",")
-    .map((name) => name.trim());
-  const rawEndpoints = headers.get("X-Czar-Bundler-Endpoints");
-  if (!bundlerOrder || !rawEndpoints) {
-    throw new Error("The server did not provide wallet transport settings.");
-  }
-  let parsedEndpoints: unknown;
-  try {
-    parsedEndpoints = JSON.parse(rawEndpoints) as unknown;
-  } catch {
-    throw new Error("The server provided invalid wallet transport settings.");
-  }
+function parseAppWalletConfig(value: unknown): AppWalletConfig | undefined {
+  if (!isRecord(value)) return undefined;
+  const expected = [
+    "arcRpcUrl",
+    "bundlerEndpoints",
+    "bundlerOrder",
+    "circleClientKey",
+    "circleClientUrl",
+  ];
+  if (Object.keys(value).toSorted().join(",") !== expected.join(",")) return undefined;
   if (
-    bundlerOrder.length === 0 ||
-    bundlerOrder.some((name) => !isBundler(name)) ||
-    typeof parsedEndpoints !== "object" ||
-    parsedEndpoints === null ||
-    Array.isArray(parsedEndpoints)
+    !isHttpUrl(value["circleClientUrl"]) ||
+    typeof value["circleClientKey"] !== "string" ||
+    value["circleClientKey"].trim().length === 0 ||
+    !isHttpUrl(value["arcRpcUrl"]) ||
+    !Array.isArray(value["bundlerOrder"]) ||
+    value["bundlerOrder"].length === 0 ||
+    value["bundlerOrder"].some((name) => typeof name !== "string" || !isBundler(name)) ||
+    new Set(value["bundlerOrder"]).size !== value["bundlerOrder"].length ||
+    !isRecord(value["bundlerEndpoints"])
   ) {
-    throw new Error("The server provided invalid wallet transport settings.");
+    return undefined;
   }
-  const endpoints = parsedEndpoints as Record<string, unknown>;
-  const bundlerEndpoints: Partial<Record<AppBundler, string>> = {};
-  for (const name of BUNDLERS) {
-    const endpoint = endpoints[name];
-    if (endpoint === undefined) continue;
-    if (
-      typeof endpoint !== "string" ||
-      (new URL(endpoint).protocol !== "http:" && new URL(endpoint).protocol !== "https:")
-    ) {
-      throw new Error(`The server provided an invalid endpoint for ${name}.`);
-    }
-    bundlerEndpoints[name] = endpoint;
+  for (const [name, endpoint] of Object.entries(value["bundlerEndpoints"])) {
+    if (!isBundler(name) || !isHttpUrl(endpoint)) return undefined;
   }
-  return { bundlerOrder: bundlerOrder as AppBundler[], bundlerEndpoints };
+  return value as unknown as AppWalletConfig;
 }
 
 function isBundler(value: string): value is AppBundler {
   return BUNDLERS.some((name) => name === value);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isHttpUrl(value: unknown): value is string {
+  if (typeof value !== "string" || value.trim().length === 0) return false;
+  try {
+    const url = new URL(value);
+    return (
+      (url.protocol === "http:" || url.protocol === "https:") &&
+      url.username === "" &&
+      url.password === ""
+    );
+  } catch {
+    return false;
+  }
+}
+
+function hasNoStore(headers: Headers): boolean {
+  return headers.get("Cache-Control")?.toLowerCase().includes("no-store") === true;
 }
