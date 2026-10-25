@@ -10,9 +10,12 @@ The actual merchant entry point does not compose this route yet:
   current health-only HTTP server (`GET /health`, 404 otherwise). It does not
   expose czar-search.
 - `fnm exec --using=22.22.0 pnpm --filter @czar/server start:local` starts the
-  local app with job-delivery DB/RPC/object-store dependencies. It does not call
-  `createServerMain` and therefore does not connect the running entry point to
-  boundary, payer, settlement, receipt persistence, and acceptance handoff.
+  local app through `createLocalServerMain` and `createServerMain`. The started
+  composition includes the boundary, payer, settlement lookup, receipt builder,
+  planner/opening workers, dispatcher, and completion service. The dispatcher
+  reaches approved plan steps and resumes them under the executor lease. This
+  code wiring has focused local tests; the Arc process-level payment/receipt run
+  remains deferred under D94.
 
 Relevant existing configuration/service names are `CZAR_LOCAL_CONFIG`,
 `CZAR_DATABASE_URL`, `CZAR_ARC_RPC_URL`, `CZAR_LOCAL_OBJECT_STORE_PATH`,
@@ -26,11 +29,10 @@ and the local object store. No secret values are recorded here.
 - `apps/merchants/src/facilitator.ts`: Circle Facilitator client and seller-proof
   signing port.
 - `apps/merchants/src/payment-id-store.ts`: bounded payment-id replay store.
-- `apps/server/src/main.ts`: injectable composition of boundary, acceptance,
-  payer, settlement and receipt creation; exports execution functions but does
-  not schedule/dispatch approved plan steps from the local server entry point.
-- `apps/server/src/local-main.ts` / `local-app.ts`: current runnable P1 job
-  delivery composition; not the full payment server composition.
+- `apps/server/src/main.ts`: composition of boundary, acceptance, payer,
+  settlement, receipt creation, dispatcher, and completion.
+- `apps/server/src/local-main.ts` / `local-app.ts`: runnable local composition;
+  `local-main.ts` starts the payment runtime through `createServerMain`.
 
 ## Handoffs and blockers
 
@@ -40,11 +42,12 @@ and the local object store. No secret values are recorded here.
    manifest field was found to supply it. Add/approve that producer before
    composing the production seller route; private key material is not needed by
    the merchant process.
-2. **Lane 5 / server startup:** connect the actual server entry point to the
-   existing planner and execution lifecycle. It must route approved steps into
-   `createServerMain`'s payer/boundary path, persist settled receipts and
-   acceptance reports, and resume outstanding work. `local-main.ts` currently
-   stops at `createLocalApp`.
+2. **Lane 4 / Lane 5 result acknowledgement:** Lane 2 stores local and
+   agent-assist steps as `handed_off` and the dispatcher now waits without
+   repeating the handoff. The existing OpenAPI `ackResult` route must consume
+   `ackResult.assembly[]` and move the corresponding step to `done`; that route
+   is not present in the server app implementation. Lane 5 owns route
+   registration and Lane 4 owns the daemon caller.
 3. **Lane 3 / evaluator:** job deliverable cleanup requires a durable decision
    with the matched on-chain content hash and decision timestamp. The Lane 2
    cleanup helper is present, but there is no authoritative producer to trigger
@@ -59,10 +62,11 @@ and the local object store. No secret values are recorded here.
   settle → response via the intended process. Required command once startup
   composition is implemented: `fnm exec --using=22.22.0 pnpm --filter
   @czar/merchants test` plus a child-process HTTP integration test.
-- **NOT RUN:** server local process from approved plan inputs through payer,
-  acceptance boundary, receipt persistence and report association. Required
-  command once Lane 5 startup wiring exists: `fnm exec --using=22.22.0 pnpm
-  --filter @czar/server test` with a process-level integration scenario.
+- **NOT RUN:** Arc process-level execution from approved paid plan through
+  settlement proof, acceptance report association, signed receipt persistence,
+  envelope close, and objective completion. Run the Arc acceptance fixture
+  after the local Arc services and deployment artifacts are prepared; this
+  development task only ran the focused DB-backed local-step composition test.
 - **NOT RUN:** crash/restart and Arc Anvil acceptance matrices for T-052/T-053/
   T-054. These remain deferred to the later validation phase.
 - **NOT RUN:** hosted model, live Facilitator/Gateway, testnet, funding or
@@ -74,12 +78,6 @@ acceptance passed.
 
 ## PR and review status
 
-- PR [#61](https://github.com/zaryab2000/czar/pull/61) targets `build-v1` and
-  remains draft; current reviewed head before this report correction is
-  `e01fa1e0a85d0bad34a63519d66e1019da9beba5`.
-- The designated reviewer completed a local code review at `e01fa1e` and found
-  no blocking code defect. Hosted Codex code and security reviews remain
-  running on that SHA; no duplicate hosted review request was made.
-- The full workspace typecheck passed for 14 of 15 projects with typecheck
-  scripts. This is typecheck evidence only; the full server tests and T-050
-  process/acceptance scenarios remain unrun or deferred as listed above.
+- PR [#61](https://github.com/zaryab2000/czar/pull/61) is merged at
+  `ce17dadce27fc25c9e424c1b656da416af370f46`. Its review loop is closed.
+- TA-09 is delivered separately; see `apps/server/T-122-TA-09-task-report.md`.
