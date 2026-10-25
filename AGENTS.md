@@ -24,6 +24,10 @@ interfaces or silently change canonical specifications.
 - Start feature branches from freshly fetched `origin/build-v1` in a separate worktree.
 - Every builder PR targets `build-v1`, even while GitHub's default branch is `main`.
 - Follow `docs/pr-review-workflow.md` for the builder's review and fix loop.
+- V0 alpha PRs get at most three Codex GitHub review runs, including the automatic PR-open
+  run; aim to finish in two. Batch confirmed fixes. After the cap, hand the latest head and
+  local evidence to the designated reviewer without requesting another bot review. Known
+  blocking money, security, or specification issues still hold the merge.
 - The designated reviewer in Zaryab's Codex session performs final review; Zaryab merges.
 - Builders may push fixes to their PR branches within the assigned scope. Do not merge,
   push directly to `build-v1` or `main`, or rewrite commits already pushed to shared branches.
@@ -73,7 +77,8 @@ Read `SECURITY.md` for security checks.
 - Check behavior, errors, boundaries, and regressions against relevant acceptance evidence.
   Identify missing evidence; review comments do not replace executable checks.
 - Tie findings and readiness to the current head SHA. New commits require another review
-  of changed code and affected checks before carrying forward a readiness recommendation.
+  of changed code and affected checks before carrying forward a readiness recommendation;
+  after the bot budget, the designated reviewer performs this check without another bot run.
 - No bot comments does not prove a completed review. Check associated review/task status
   and reporting thresholds. GitHub code review may report only P0/P1.
 - Report blockers, unresolved gates, and skipped checks before recommending readiness.

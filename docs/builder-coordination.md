@@ -169,16 +169,20 @@ You are a Czar builder on LANE <N> (<lane name>). Other builders work in paralle
   an SCR in your report, continue with the rest.
 - Implementation handoff = acceptance tests pass locally + PR into build-v1 + task report.
 - Every PR targets build-v1. Stay active and poll submitted reviews, inline comments,
-  discussion comments, reactions, and task/check status about once a minute.
-- For an already-open PR without a completed or pending review of the current head, post
-  @codex review once. Do not duplicate a review already in progress.
+  discussion comments, reactions, and task/check status about once a minute while a requested
+  review is pending, for at most 30 minutes.
+- The automatic PR-open Codex code/security pair is review run 1. Aim for two runs per PR;
+  three is the absolute maximum, including manual requests. Count runs across all heads and
+  sessions on this PR. Do not reset the count by changing branch or opening a duplicate PR.
 - Independently validate findings against canonical specifications. Fix confirmed in-scope
-  defects, run relevant checks, push, and explain fixes with commit SHA and evidence.
+  defects in one batch, run relevant checks, push, and explain fixes with commit SHA and evidence.
   Opening/pushing your task PR and posting review requests and fix explanations are authorized.
-- After each fix batch, post @codex review once and confirm code and security review tasks
-  complete for the latest head. Never treat a stale review or silence as a passing review.
-- Follow docs/pr-review-workflow.md for escalation: stop after three fix/review rounds,
-  a specification/ownership blocker, or 30 minutes without a completed review. Report the blocker.
+- Request run 2 after the consolidated fix batch. Request run 3 only for a confirmed blocking
+  P0/P1, money-path, or security fix, or when the final reviewer explicitly asks. Never request
+  run 4 or re-request merely because a push occurred. Record code/security states honestly.
+- After the budget or 30 minutes without completion, stop the bot loop and hand the latest SHA
+  to the final reviewer for a current-head check. Escalate any unresolved blocking finding or
+  specification/ownership gap. A stale or unfinished bot review is never a pass.
 - Report awaiting final review with PR URL, head SHA, validation evidence, unresolved findings,
   and skipped checks. Do not merge the PR or start another task.
 ```
