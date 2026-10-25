@@ -21,7 +21,6 @@ export interface PlannerOperationsDependencies {
   readonly pool: Pool;
   readonly planner: { build(input: PlannerRequest): Promise<PlannerBuild | null> };
   readonly ethGasPriceWei: () => Promise<bigint>;
-  readonly gatewayVolumeAtomic: (objectiveId: string) => Promise<bigint>;
   readonly now?: () => Date;
   readonly random?: RandomSource;
 }
@@ -329,10 +328,7 @@ async function build(
   deps: PlannerOperationsDependencies,
   options: PlanBuildOptions,
 ): Promise<PlannerBuild | null> {
-  const [ethGasPriceWei, gatewayVolumeAtomic] = await Promise.all([
-    deps.ethGasPriceWei(),
-    deps.gatewayVolumeAtomic(row.objective_id),
-  ]);
+  const ethGasPriceWei = await deps.ethGasPriceWei();
   return deps.planner.build({
     objectiveId: row.objective_id,
     objectiveHash: row.objective_hash,
@@ -347,7 +343,6 @@ async function build(
     now: options.now(),
     random: options.random,
     ethGasPriceWei,
-    gatewayVolumeAtomic,
     ...(options.shadow ? { shadow: true } : {}),
     ...(options.excludedServices ? { excludedServices: options.excludedServices } : {}),
   });

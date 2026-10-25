@@ -21,6 +21,7 @@ export interface RoutingParams {
     readonly pocketSweep: bigint;
   };
   readonly gatewayFeeAtomic: bigint;
+  readonly gatewayEnabled: boolean;
   readonly maxFeeRatioBps: bigint;
   readonly jobThresholdAtomic: bigint;
   readonly maxGasPriceWei: bigint;
@@ -80,6 +81,7 @@ export function routingParamsFromConfig(config: Config = loadConfig()): RoutingP
       pocketSweep: configBigInt(config.get("routing.gas.pocketSweep")),
     },
     gatewayFeeAtomic: configBigInt(config.get("routing.gatewayFeeAtomic")),
+    gatewayEnabled: config.get("routing.gatewayEnabled") as boolean,
     maxFeeRatioBps: configBigInt(config.get("routing.maxFeeRatioBps")),
     jobThresholdAtomic: configBigInt(config.get("routing.jobThresholdAtomic")),
     maxGasPriceWei: configBigInt(config.get("routing.maxGasPriceWei")),
@@ -157,7 +159,8 @@ export function route(input: RouterInput): RouteResult {
   const offers = usableOffers(input.offers, input.planNetwork);
   if (calls === 0) return skipped("fee-exceeds-payment");
   const gasPrice = floorGasPrice(input.eth_gasPrice);
-  const gatewayUsable = offers.hasGateway && gasPrice <= input.params.maxGasPriceWei;
+  const gatewayUsable =
+    input.params.gatewayEnabled && offers.hasGateway && gasPrice <= input.params.maxGasPriceWei;
   const cost = cVd(calls, gasPrice, input.params);
   const threshold = pocketThreshold(calls, gasPrice, input.params);
   const worthIt = pocketWorthIt(input.V, gasPrice, input.params);

@@ -110,7 +110,6 @@ export interface ServerMainOptions extends PairDependencies {
   ) => Promise<Plan | null>;
   readonly planner?: {
     readonly openingLookup: OpeningWatcherDependencies["lookup"];
-    readonly gatewayVolumeAtomic?: (objectiveId: string) => Promise<bigint>;
   };
 }
 
@@ -241,13 +240,6 @@ function createPlannerOperationsIfConfigured(
   signer: ServerSigner,
 ): PlannerOperations | undefined {
   if (!options.planner) return undefined;
-  if (!options.planner.gatewayVolumeAtomic) {
-    options.logger.error("planner_volume_source_missing", {
-      rule: "gateway-volume-source-missing",
-      state: "planner-disabled",
-    });
-    return undefined;
-  }
   const planner = createPlanner({
     config: options.config,
     ports: createPlannerPorts(options, acceptance, selection, signer),
@@ -256,7 +248,6 @@ function createPlannerOperationsIfConfigured(
     pool: options.pool,
     planner,
     ethGasPriceWei: () => options.publicClient.getGasPrice(),
-    gatewayVolumeAtomic: options.planner.gatewayVolumeAtomic,
     now: options.clock.now,
     random: options.random,
   });

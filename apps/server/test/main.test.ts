@@ -84,7 +84,7 @@ describe("server composition root", () => {
 
     order.push("http");
     expect(order).toEqual(["signer", "http"]);
-    expect(logLines.some((line) => line.includes("planner_volume_source_missing"))).toBe(true);
+    expect(logLines.some((line) => line.includes("planner_volume_source_missing"))).toBe(false);
     expect((await root.app.request("/not-found")).status).toBe(404);
     expect(root.executePayerStep).toBeTypeOf("function");
     await new Promise((resolve) => setTimeout(resolve, 0));

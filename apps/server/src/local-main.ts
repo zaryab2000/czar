@@ -36,7 +36,6 @@ export type LocalServerMainOptions = Omit<
   readonly rpcUrl: string;
   readonly factoryAddress: Address;
   readonly indexerUrl: string;
-  readonly gatewayVolumeAtomic?: (objectiveId: string) => Promise<bigint>;
   readonly openingLookup?: OpeningWatcherDependencies["lookup"];
 };
 
@@ -63,14 +62,7 @@ export function readLocalLauncherPointers(environment: NodeJS.ProcessEnv): Local
 }
 
 export async function createLocalServerMain(options: LocalServerMainOptions): Promise<ServerMain> {
-  const {
-    rpcUrl,
-    factoryAddress,
-    indexerUrl,
-    gatewayVolumeAtomic,
-    openingLookup,
-    ...serverOptions
-  } = options;
+  const { rpcUrl, factoryAddress, indexerUrl, openingLookup, ...serverOptions } = options;
   return createServerMain({
     ...serverOptions,
     appReadOptions: {
@@ -88,7 +80,6 @@ export async function createLocalServerMain(options: LocalServerMainOptions): Pr
       openingLookup:
         openingLookup ??
         createIndexerOpeningLookup(indexerUrl, Number(options.config.get("fetch.timeoutMs"))),
-      ...(gatewayVolumeAtomic ? { gatewayVolumeAtomic } : {}),
     },
   });
 }

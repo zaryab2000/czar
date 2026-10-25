@@ -48,6 +48,7 @@ function makePlanner(
   options: {
     readonly capabilities?: readonly string[];
     readonly subjects?: number;
+    readonly gatewayEnabled?: boolean;
     readonly proberOffers?: readonly PaymentRequirements[];
     readonly hasAgent?: boolean;
     readonly service?: PlannerService;
@@ -65,8 +66,11 @@ function makePlanner(
     ...taskSpec,
     subjects: Array.from({ length: options.subjects ?? 1 }, (_, i) => ({ label: `Subject ${i}` })),
   };
+  const config = loadConfig({
+    envFile: options.gatewayEnabled ? { "routing.gatewayEnabled": true } : {},
+  });
   const planner = createPlanner({
-    config: loadConfig(),
+    config,
     ports: {
       ranking: {
         rank: async (query) => {
@@ -141,11 +145,31 @@ function makePlanner(
     now: new Date("2026-10-21T00:00:00.000Z"),
     random: { bytes: (length) => Buffer.alloc(length, 1) },
     ethGasPriceWei: 20_000_000_000n,
-    gatewayVolumeAtomic: 10_000_000_000n,
   });
 }
 
 describe("planner fallback", () => {
+  it("computes V from every selected paid step's live Gateway offer", async () => {
+    const gatewayOffers = [
+      { ...offer, amount: "8000" },
+      { ...offer, amount: "8000", extra: { name: "GatewayWalletBatched" } },
+    ];
+    const built = await makePlanner({
+      capabilities: ["web-search", "page-extract", "web-search", "page-extract"],
+      subjects: 5,
+      gatewayEnabled: true,
+      proberOffers: gatewayOffers,
+    });
+
+    expect(built?.plan.steps.map((step) => step.expectedCalls)).toEqual([5, 5, 5, 5]);
+    expect(built?.plan.steps.map((step) => step.kind)).toEqual([
+      "gateway-nano",
+      "gateway-nano",
+      "gateway-nano",
+      "gateway-nano",
+    ]);
+  });
+
   it("plans a paid step with a payee leaf and verified root", async () => {
     const built = await makePlanner();
     expect(built).not.toBeNull();
@@ -219,12 +243,17 @@ describe("planner fallback", () => {
 
   it("adds a kind-4 pocket leaf and enables pocket cap for gateway steps", async () => {
     const gateway = { ...offer, extra: { name: "GatewayWalletBatched" } };
-    const built = await makePlanner({ proberOffers: [gateway] });
+    const built = await makePlanner({ proberOffers: [gateway], gatewayEnabled: true });
     expect(built?.plan.steps[0]?.kind).toBe("gateway-nano");
     expect(built?.plan.pocketCapBps).toBe(2500);
     expect(
       built?.plan.payeeLeaves.some((leaf) => leaf.kind === 4 && leaf.stepIndex === 4294967295),
     ).toBe(true);
+  });
+
+  it("does not plan a Gateway-only offer while routing.gatewayEnabled is false", async () => {
+    const gateway = { ...offer, extra: { name: "GatewayWalletBatched" } };
+    await expect(makePlanner({ proberOffers: [gateway] })).resolves.toBeNull();
   });
 
   it("marks exploration-slot suppliers as approval-required", async () => {
@@ -378,7 +407,7 @@ describe("planner fallback", () => {
   });
 
   it("preserves the router D37 hard rule over seeded random amounts", () => {
-    const config = loadConfig();
+    const config = loadConfig({ envFile: { "routing.gatewayEnabled": true } });
     const params = routingParamsFromConfig(config);
     let state = 0x6d2b79f5;
     for (let index = 0; index < 10_000; index += 1) {

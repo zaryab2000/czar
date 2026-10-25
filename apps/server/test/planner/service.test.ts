@@ -61,7 +61,6 @@ function operations(
     now: () => new Date("2026-10-21T00:00:00.000Z"),
     random: { bytes: randomBytes },
     ethGasPriceWei: async () => 20_000_000_000n,
-    gatewayVolumeAtomic: async () => 0n,
   });
 }
 
