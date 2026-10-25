@@ -30,7 +30,6 @@ export interface PlannerRequest {
   readonly now: Date;
   readonly random: RandomSource;
   readonly ethGasPriceWei: bigint;
-  readonly gatewayVolumeAtomic: bigint;
   readonly excludedServices?: ReadonlySet<string>;
   readonly shadow?: boolean;
 }
@@ -54,6 +53,37 @@ interface Candidate {
   readonly fromExploration: boolean;
   readonly unprobed?: boolean;
   readonly jobProvider?: boolean;
+}
+
+interface PaidStepDraft {
+  readonly kind: "paid";
+  readonly candidate: Candidate;
+  readonly alternates: readonly Candidate[];
+  readonly capability: string;
+  readonly callInputs: NonNullable<Step["callInputs"]>;
+  readonly template?: string;
+  readonly oneStringKey?: string;
+}
+
+type CollectedEntry = { readonly kind: "unpaid"; readonly step: Step } | PaidStepDraft;
+
+export interface GatewayVolumeEntry {
+  readonly kind: "paid" | "job" | "unpaid";
+  readonly expectedCalls: number;
+  readonly gatewayUnitAmount?: bigint;
+}
+
+export function computeObjectiveGatewayVolume(entries: readonly GatewayVolumeEntry[]): bigint {
+  let volume = 0n;
+  for (const entry of entries) {
+    if (!Number.isSafeInteger(entry.expectedCalls) || entry.expectedCalls < 0)
+      throw new RangeError("Gateway volume expectedCalls must be a non-negative safe integer.");
+    if (entry.gatewayUnitAmount !== undefined && entry.gatewayUnitAmount < 0n)
+      throw new RangeError("Gateway offer amount must be non-negative.");
+    if (entry.kind !== "paid" || entry.gatewayUnitAmount === undefined) continue;
+    volume += BigInt(entry.expectedCalls) * entry.gatewayUnitAmount;
+  }
+  return volume;
 }
 
 export function createPlanner(dependencies: PlannerDependencies) {
@@ -153,24 +183,21 @@ async function collectSteps(args: {
   readonly hasAgent: boolean;
 }): Promise<StepCollection> {
   const { input, config, ports, network, hasAgent } = args;
-  const steps: Step[] = [];
-  const leaves: Plan["payeeLeaves"] = [];
+  const entries: CollectedEntry[] = [];
   const droppedSteps: NonNullable<Plan["droppedSteps"]> = [];
   const rankingIds: string[] = [];
-  let hasExploration = false;
-  let jobExpiresMs = input.now.getTime();
   const maximum = Number(config.get("planner.maxSteps"));
   for (const capability of input.capabilities.slice(0, maximum)) {
     const unpaid = await unpaidStep({
       capability,
-      index: steps.length,
+      index: entries.length,
       input,
       config,
       ports,
       hasAgent,
     });
     if (unpaid.step) {
-      steps.push(unpaid.step);
+      entries.push({ kind: "unpaid", step: unpaid.step });
       continue;
     }
     if (unpaid.drop) {
@@ -192,30 +219,127 @@ async function collectSteps(args: {
       droppedSteps.push({ capability, reason: "no-template" });
       continue;
     }
-    const planStep = await makePaidStep({
+    const prepared = preparePaidStep(result.selected, capability, input.taskSpec);
+    if (!prepared) continue;
+    entries.push({
+      kind: "paid",
       candidate: result.selected,
       alternates: result.alternates,
       capability,
+      ...prepared,
+    });
+  }
+  const gatewayVolumeAtomic = computeGatewayVolume(entries, config);
+  const completed = await completeCollectedSteps({
+    entries,
+    input,
+    config,
+    ports,
+    network,
+    gatewayVolumeAtomic,
+  });
+  return {
+    ...completed,
+    droppedSteps,
+    rankingIds,
+  };
+}
+
+async function completeCollectedSteps(args: {
+  readonly entries: readonly CollectedEntry[];
+  readonly input: PlannerRequest;
+  readonly config: Config;
+  readonly ports: PlannerPorts;
+  readonly network: string;
+  readonly gatewayVolumeAtomic: bigint;
+}): Promise<Pick<StepCollection, "steps" | "leaves" | "hasExploration" | "jobExpiresMs">> {
+  const { entries, input, config, ports, network, gatewayVolumeAtomic } = args;
+  const steps: Step[] = [];
+  const leaves: Plan["payeeLeaves"] = [];
+  let hasExploration = false;
+  let jobExpiresMs = input.now.getTime();
+  for (const entry of entries) {
+    if (entry.kind === "unpaid") {
+      const index = steps.length;
+      steps.push({ ...entry.step, stepIndex: index, stepId: stepIdentifier(input, index) });
+      continue;
+    }
+    const planStep = await makePaidStep({
+      ...entry,
       index: steps.length,
       input,
       config,
       ports,
       network,
+      gatewayVolumeAtomic,
     });
     if (!planStep) continue;
     steps.push(planStep.step);
     leaves.push(...planStep.leaves);
-    hasExploration ||= result.selected.fromExploration;
+    hasExploration ||= entry.candidate.fromExploration;
     if (planStep.jobExpiresMs) jobExpiresMs = Math.max(jobExpiresMs, planStep.jobExpiresMs);
   }
+  return { steps, leaves, hasExploration, jobExpiresMs };
+}
+
+function preparePaidStep(
+  candidate: Candidate,
+  capability: string,
+  taskSpec: TaskSpec,
+): Omit<PaidStepDraft, "kind" | "candidate" | "alternates" | "capability"> | null {
+  const fields = candidate.service.extensions.czar.card["inputFields"];
+  const oneStringKey = getSingleStringInput(fields);
+  const template =
+    capability === "web-search"
+      ? "{{subject}} {{topic}} {{field}}"
+      : capability === "page-extract"
+        ? "{{dep.0.url}}"
+        : null;
+  const jobCandidate = candidate.jobProvider === true;
+  if ((!template || !oneStringKey) && !jobCandidate) return null;
+  const callInputs =
+    template && oneStringKey
+      ? renderCalls(template, oneStringKey, taskSpec)
+      : renderJobCalls(taskSpec);
   return {
-    steps,
-    leaves,
-    droppedSteps,
-    rankingIds,
-    hasExploration,
-    jobExpiresMs,
+    callInputs,
+    ...(template && oneStringKey ? { template, oneStringKey } : {}),
   };
+}
+
+function computeGatewayVolume(entries: readonly CollectedEntry[], config: Config): bigint {
+  const jobThreshold = routingParamsFromConfig(config).jobThresholdAtomic;
+  const volumeEntries: GatewayVolumeEntry[] = entries.map((entry) => {
+    if (entry.kind === "unpaid") return { kind: "unpaid", expectedCalls: entry.step.expectedCalls };
+    const job = entry.candidate.jobProvider === true || entry.candidate.amount >= jobThreshold;
+    const gatewayOffer =
+      !job && !entry.candidate.unprobed
+        ? entry.candidate.offers.find(
+            (offer) => offer.extra["name"] === GATEWAY_EXTRA_NAME && isUsablePlannerOffer(offer),
+          )
+        : undefined;
+    return {
+      kind: job ? "job" : "paid",
+      expectedCalls: entry.callInputs.length,
+      ...(gatewayOffer ? { gatewayUnitAmount: BigInt(gatewayOffer.amount) } : {}),
+    };
+  });
+  return computeObjectiveGatewayVolume(volumeEntries);
+}
+
+function getSingleStringInput(fields: unknown): string | null {
+  if (!Array.isArray(fields) || fields.length !== 1) return null;
+  const field = fields[0];
+  if (
+    typeof field !== "object" ||
+    field === null ||
+    !("name" in field) ||
+    !("type" in field) ||
+    field.type !== "string" ||
+    typeof field.name !== "string"
+  )
+    return null;
+  return field.name;
 }
 
 async function unpaidStep(args: {
@@ -353,7 +477,7 @@ async function probeRanked(args: {
       }
       continue;
     }
-    const probe = await ports.prober.probe(service.resource);
+    const probe = await ports.prober.probe(service.resource, service.probeInput);
     if (!probe.ok) {
       failures.push(probe.reason);
       continue;
@@ -419,35 +543,28 @@ async function makePaidStep(args: {
   readonly config: Config;
   readonly ports: PlannerPorts;
   readonly network: string;
+  readonly gatewayVolumeAtomic: bigint;
+  readonly callInputs: NonNullable<Step["callInputs"]>;
+  readonly template?: string;
+  readonly oneStringKey?: string;
 }): Promise<{ step: Step; leaves: Plan["payeeLeaves"]; jobExpiresMs?: number } | null> {
-  const { candidate, alternates, capability, index, input, config, ports, network } = args;
+  const {
+    candidate,
+    alternates,
+    capability,
+    index,
+    input,
+    config,
+    ports,
+    network,
+    gatewayVolumeAtomic,
+    callInputs,
+    template,
+    oneStringKey,
+  } = args;
   const taskClass = taskClassFor(capability, config);
   const profile = ports.profiles.profileIdFor(taskClass);
-  const fields = candidate.service.extensions.czar.card["inputFields"];
-  const oneStringKey =
-    Array.isArray(fields) &&
-    fields.length === 1 &&
-    typeof fields[0] === "object" &&
-    fields[0] !== null &&
-    "name" in fields[0] &&
-    "type" in fields[0] &&
-    fields[0].type === "string" &&
-    typeof fields[0].name === "string"
-      ? fields[0].name
-      : null;
-  const template =
-    capability === "web-search"
-      ? "{{subject}} {{topic}} {{field}}"
-      : capability === "page-extract"
-        ? "{{dep.0.url}}"
-        : null;
-  const jobCandidate = candidate.jobProvider === true;
-  if ((!template || !oneStringKey) && !jobCandidate) return null;
   const subjects = input.taskSpec.subjects;
-  const callInputs =
-    template && oneStringKey
-      ? renderCalls(template, oneStringKey, input.taskSpec)
-      : renderJobCalls(input.taskSpec);
   const expectedCalls = callInputs.length;
   const decision = routeCandidate({
     candidate,
@@ -458,6 +575,7 @@ async function makePaidStep(args: {
     network,
     profile,
     expectedCalls,
+    gatewayVolumeAtomic,
   });
   if (!decision) return null;
   const details = paymentDetails({ decision, candidate, alternates, expectedCalls, index, config });
@@ -512,8 +630,19 @@ function routeCandidate(args: {
   readonly network: string;
   readonly profile: string;
   readonly expectedCalls: number;
+  readonly gatewayVolumeAtomic: bigint;
 }): RouteDecision | null {
-  const { candidate, capability, index, input, config, network, profile, expectedCalls } = args;
+  const {
+    candidate,
+    capability,
+    index,
+    input,
+    config,
+    network,
+    profile,
+    expectedCalls,
+    gatewayVolumeAtomic,
+  } = args;
   const result = route({
     step: {
       stepIndex: index,
@@ -530,7 +659,7 @@ function routeCandidate(args: {
     planNetwork: network,
     unitAmount: candidate.amount,
     expectedCalls,
-    V: input.gatewayVolumeAtomic,
+    V: gatewayVolumeAtomic,
     supplierIsAgent: candidate.jobProvider === true,
     needsAcceptanceBeforePayment: false,
     eth_gasPrice: input.ethGasPriceWei,

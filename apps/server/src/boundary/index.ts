@@ -46,7 +46,7 @@ export interface BoundaryDependencies {
   readonly pool: Pool;
   readonly config: Config;
   readonly logger: Logger;
-  readonly modelClient: ModelClient;
+  readonly modelClient?: ModelClient;
   readonly promptHashes: Readonly<Record<"P-01" | "P-02", string>>;
   readonly objectStore: { put(bytes: Uint8Array): Promise<string> };
   readonly acceptance: { check(input: AcceptanceCheckInput): Promise<AcceptanceResult> };
@@ -205,21 +205,23 @@ export async function runBoundary(
     },
     schema: READER_SCHEMA,
   };
-  const reply = await completeBoundaryModelCall(
-    dependencies.pool,
-    dependencies.config,
-    dependencies.logger,
-    dependencies.modelClient,
-    {
-      body: request,
-      rawBody: Buffer.from(JSON.stringify(request)),
-      key: input.idempotencyKey,
-      deviceId: input.deviceId,
-      userId: input.userId,
-      now: input.now,
-    },
-  );
-  const extracted = reply.status === 200 ? reply.body["output"] : codeExtract(truncated, fields);
+  const reply = dependencies.modelClient
+    ? await completeBoundaryModelCall(
+        dependencies.pool,
+        dependencies.config,
+        dependencies.logger,
+        dependencies.modelClient,
+        {
+          body: request,
+          rawBody: Buffer.from(JSON.stringify(request)),
+          key: input.idempotencyKey,
+          deviceId: input.deviceId,
+          userId: input.userId,
+          now: input.now,
+        },
+      )
+    : undefined;
+  const extracted = reply?.status === 200 ? reply.body["output"] : codeExtract(truncated, fields);
   const result = makeStepResult(
     input,
     bodyRef,
@@ -227,7 +229,7 @@ export async function runBoundary(
     screen,
     acceptance.stepResultFlags,
     truncated,
-    reply.status !== 200,
+    reply?.status !== 200,
     truncated.length !== input.body.length,
     !input.expectsPersonalData,
   );
@@ -254,6 +256,8 @@ export async function screenBody(
   const regexFlags = regexScreen(input.body);
   const flags = new Set<ScreenLabel>(regexFlags);
   const spans: ScreenResult["spans"][number][] = findPiiSpans(input.body);
+  if (!dependencies.modelClient)
+    return { available: false, flags: normalizeFlags(flags), spans: [], chunks };
   try {
     for (const [index, chunk] of chunks.entries()) {
       const request = {

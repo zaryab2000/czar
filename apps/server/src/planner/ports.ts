@@ -14,6 +14,10 @@ export interface RankingQuery {
 export interface PlannerService {
   readonly serviceId: string;
   readonly resource: { readonly url: string; readonly method: "GET" | "POST" | "PUT" | "DELETE" };
+  readonly probeInput?: {
+    readonly query?: Readonly<Record<string, string>>;
+    readonly body?: Readonly<Record<string, unknown>>;
+  };
   readonly accepts: readonly PaymentRequirements[];
   readonly providerAddress?: string;
   readonly listedPrice?: string;
@@ -44,5 +48,10 @@ export interface PlannerPorts {
   readonly pocketKeys: { createPocketKey(planId: string): Promise<string> };
   readonly agentHosts: { hasAgentHost(deviceId: string): Promise<boolean> };
   readonly allowance: { remaining(userId: string, categoryId: string): Promise<string> };
-  readonly prober: { probe(resource: PlannerService["resource"]): Promise<ProbeResult> };
+  readonly prober: {
+    probe(
+      resource: PlannerService["resource"],
+      probeInput?: PlannerService["probeInput"],
+    ): Promise<ProbeResult>;
+  };
 }

@@ -3,9 +3,15 @@ import { loadConfig } from "@czar/config";
 import { buildTree, payeeLeaf, verifyProof } from "@czar/hashing";
 import { USDC_ADDRESS, type PaymentRequirements } from "@czar/x402";
 import { describe, expect, it } from "vitest";
-import { createPlanner, recomputePlanHash } from "#src/planner/index";
+import {
+  computeObjectiveGatewayVolume,
+  createPlanner,
+  recomputePlanHash,
+} from "#src/planner/index";
 import { createSafeProber } from "#src/planner/probe";
+import { LocalTemplateProfileUnavailableError, createPlannerProfileSource } from "#src/main";
 import { route, routingParamsFromConfig, cVd, pocketWorthIt } from "#src/router/index";
+import type { PlannerPorts } from "#src/planner/ports";
 import type { PlannerService } from "#src/planner/ports";
 import type { RankingQuery } from "#src/planner/ports";
 
@@ -48,20 +54,30 @@ function makePlanner(
   options: {
     readonly capabilities?: readonly string[];
     readonly subjects?: number;
+    readonly gatewayEnabled?: boolean;
     readonly proberOffers?: readonly PaymentRequirements[];
     readonly hasAgent?: boolean;
     readonly service?: PlannerService;
     readonly candidateCount?: number;
     readonly amount?: string;
     readonly rankingQueries?: RankingQuery[];
+    readonly probeInput?: PlannerService["probeInput"];
+    readonly probeCalls?: Array<{
+      resource: PlannerService["resource"];
+      probeInput?: PlannerService["probeInput"];
+    }>;
+    readonly profileSource?: PlannerPorts["profiles"];
   } = {},
 ) {
   const spec = {
     ...taskSpec,
     subjects: Array.from({ length: options.subjects ?? 1 }, (_, i) => ({ label: `Subject ${i}` })),
   };
+  const config = loadConfig({
+    envFile: options.gatewayEnabled ? { "routing.gatewayEnabled": true } : {},
+  });
   const planner = createPlanner({
-    config: loadConfig(),
+    config,
     ports: {
       ranking: {
         rank: async (query) => {
@@ -95,20 +111,24 @@ function makePlanner(
         },
       },
       directory: {
-        get: async (id) =>
-          options.service ??
-          fakeService(id, {
-            ...offer,
-            amount: options.amount ?? offer.amount,
-            payTo: `0x${id.slice(4, 5).repeat(40)}`,
-          }),
+        get: async (id) => {
+          const service =
+            options.service ??
+            fakeService(id, {
+              ...offer,
+              amount: options.amount ?? offer.amount,
+              payTo: `0x${id.slice(4, 5).repeat(40)}`,
+            });
+          return options.probeInput ? { ...service, probeInput: options.probeInput } : service;
+        },
       },
-      profiles: { profileIdFor: () => `prof_${"b".repeat(32)}` },
+      profiles: options.profileSource ?? { profileIdFor: () => `prof_${"b".repeat(32)}` },
       pocketKeys: { createPocketKey: async () => `0x${"3".repeat(40)}` },
       agentHosts: { hasAgentHost: async () => options.hasAgent ?? true },
       allowance: { remaining: async () => "0" },
       prober: {
-        probe: async (resource) => {
+        probe: async (resource, probeInput) => {
+          options.probeCalls?.push({ resource, ...(probeInput ? { probeInput } : {}) });
           const id = resource.url.split("/").at(-1) ?? serviceId;
           const live = {
             ...offer,
@@ -132,11 +152,68 @@ function makePlanner(
     now: new Date("2026-10-21T00:00:00.000Z"),
     random: { bytes: (length) => Buffer.alloc(length, 1) },
     ethGasPriceWei: 20_000_000_000n,
-    gatewayVolumeAtomic: 10_000_000_000n,
   });
 }
 
 describe("planner fallback", () => {
+  it("fails closed with a named error when a local-step profile is unavailable", async () => {
+    const profileSource = createPlannerProfileSource({
+      profileIdFor(taskClass: string) {
+        if (taskClass !== "data-json") throw new RangeError(`Unsupported ${taskClass}`);
+        return `prof_${"a".repeat(32)}`;
+      },
+    } as never);
+
+    await expect(
+      makePlanner({ capabilities: ["table-build"], profileSource }),
+    ).rejects.toMatchObject({
+      name: LocalTemplateProfileUnavailableError.name,
+      message: expect.stringContaining("Lane 3 acceptance/profile.ts"),
+    });
+  });
+
+  it("keeps the paid web-search path on the seeded data-json profile", async () => {
+    const profileSource = createPlannerProfileSource({
+      profileIdFor: () => `prof_${"a".repeat(32)}`,
+    } as never);
+
+    await expect(makePlanner({ profileSource })).resolves.toMatchObject({
+      plan: { steps: [{ acceptanceProfileId: `prof_${"a".repeat(32)}` }] },
+    });
+  });
+
+  it("sums only paid Gateway volume and excludes job and unpaid steps", () => {
+    expect(
+      computeObjectiveGatewayVolume([
+        { kind: "paid", expectedCalls: 5, gatewayUnitAmount: 8_000n },
+        { kind: "paid", expectedCalls: 9 },
+        { kind: "job", expectedCalls: 5, gatewayUnitAmount: 5_000_000n },
+        { kind: "unpaid", expectedCalls: 5, gatewayUnitAmount: 5_000_000n },
+      ]),
+    ).toBe(40_000n);
+  });
+
+  it("computes V from every selected paid step's live Gateway offer", async () => {
+    const gatewayOffers = [
+      { ...offer, amount: "8000" },
+      { ...offer, amount: "8000", extra: { name: "GatewayWalletBatched" } },
+    ];
+    const built = await makePlanner({
+      capabilities: ["web-search", "page-extract", "web-search", "page-extract"],
+      subjects: 5,
+      gatewayEnabled: true,
+      proberOffers: gatewayOffers,
+    });
+
+    expect(built?.plan.steps.map((step) => step.expectedCalls)).toEqual([5, 5, 5, 5]);
+    expect(built?.plan.steps.map((step) => step.kind)).toEqual([
+      "gateway-nano",
+      "gateway-nano",
+      "gateway-nano",
+      "gateway-nano",
+    ]);
+  });
+
   it("plans a paid step with a payee leaf and verified root", async () => {
     const built = await makePlanner();
     expect(built).not.toBeNull();
@@ -210,12 +287,17 @@ describe("planner fallback", () => {
 
   it("adds a kind-4 pocket leaf and enables pocket cap for gateway steps", async () => {
     const gateway = { ...offer, extra: { name: "GatewayWalletBatched" } };
-    const built = await makePlanner({ proberOffers: [gateway] });
+    const built = await makePlanner({ proberOffers: [gateway], gatewayEnabled: true });
     expect(built?.plan.steps[0]?.kind).toBe("gateway-nano");
     expect(built?.plan.pocketCapBps).toBe(2500);
     expect(
       built?.plan.payeeLeaves.some((leaf) => leaf.kind === 4 && leaf.stepIndex === 4294967295),
     ).toBe(true);
+  });
+
+  it("does not plan a Gateway-only offer while routing.gatewayEnabled is false", async () => {
+    const gateway = { ...offer, extra: { name: "GatewayWalletBatched" } };
+    await expect(makePlanner({ proberOffers: [gateway] })).resolves.toBeNull();
   });
 
   it("marks exploration-slot suppliers as approval-required", async () => {
@@ -297,16 +379,26 @@ describe("planner fallback", () => {
     ).toBe(false);
   });
 
-  it("probes a local HTTP 402 through the configured safe fetch", async () => {
-    const server = createServer((_request, response) => {
-      response.statusCode = 402;
-      response.setHeader("content-type", "application/json");
-      response.end(
-        JSON.stringify({
-          x402Version: 1,
-          accepts: [{ ...offer, maxAmountRequired: "1000000", resource: "http://127.0.0.1" }],
-        }),
-      );
+  it("sends registered GET and POST probeInput through safeFetch", async () => {
+    const received: Array<{ url: string; method: string; body: string }> = [];
+    const server = createServer((request, response) => {
+      const chunks: Buffer[] = [];
+      request.on("data", (chunk: Buffer) => chunks.push(chunk));
+      request.on("end", () => {
+        received.push({
+          url: request.url ?? "",
+          method: request.method ?? "",
+          body: Buffer.concat(chunks).toString("utf8"),
+        });
+        response.statusCode = 402;
+        response.setHeader("content-type", "application/json");
+        response.end(
+          JSON.stringify({
+            x402Version: 1,
+            accepts: [{ ...offer, maxAmountRequired: "1000000", resource: "http://127.0.0.1" }],
+          }),
+        );
+      });
     });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const address = server.address();
@@ -314,8 +406,17 @@ describe("planner fallback", () => {
     const origin = `http://127.0.0.1:${address.port}`;
     try {
       const config = loadConfig({ envFile: { "fetch.localMerchantOrigins": [origin] } });
-      const probe = await createSafeProber(config).probe({ url: origin, method: "GET" });
-      expect(probe).toMatchObject({ ok: true });
+      const prober = createSafeProber(config);
+      await expect(
+        prober.probe({ url: `${origin}/search`, method: "GET" }, { query: { q: "fixed" } }),
+      ).resolves.toMatchObject({ ok: true });
+      await expect(
+        prober.probe({ url: `${origin}/search`, method: "POST" }, { body: { q: "fixed" } }),
+      ).resolves.toMatchObject({ ok: true });
+      expect(received).toEqual([
+        { url: "/search?q=fixed", method: "GET", body: "" },
+        { url: "/search", method: "POST", body: '{"q":"fixed"}' },
+      ]);
     } finally {
       await new Promise<void>((resolve, reject) =>
         server.close((error) => (error ? reject(error) : resolve())),
@@ -332,8 +433,25 @@ describe("planner fallback", () => {
     expect(rankingQueries[0]).not.toHaveProperty("description");
   });
 
+  it("passes registered probeInput only to the unpaid probe", async () => {
+    const probeCalls: Array<{
+      resource: PlannerService["resource"];
+      probeInput?: PlannerService["probeInput"];
+    }> = [];
+    const built = await makePlanner({
+      probeInput: { query: { q: "fixed registration query" } },
+      probeCalls,
+    });
+
+    expect(probeCalls[0]?.probeInput).toEqual({ query: { q: "fixed registration query" } });
+    expect(JSON.stringify(built?.plan)).not.toContain("probeInput");
+    expect(JSON.stringify(built?.plan.steps[0]?.callInputs)).not.toContain(
+      "fixed registration query",
+    );
+  });
+
   it("preserves the router D37 hard rule over seeded random amounts", () => {
-    const config = loadConfig();
+    const config = loadConfig({ envFile: { "routing.gatewayEnabled": true } });
     const params = routingParamsFromConfig(config);
     let state = 0x6d2b79f5;
     for (let index = 0; index < 10_000; index += 1) {

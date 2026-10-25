@@ -5,11 +5,26 @@ import type { PlannerService, ProbeResult } from "#src/planner/ports";
 export function createSafeProber(config: Config) {
   const safeFetch = createSafeFetchFromConfig(config, "czar-server/planner");
   return {
-    async probe(resource: PlannerService["resource"]): Promise<ProbeResult> {
+    async probe(
+      resource: PlannerService["resource"],
+      probeInput?: PlannerService["probeInput"],
+    ): Promise<ProbeResult> {
       try {
-        const response = await safeFetch(resource.url, {
+        const url = new URL(resource.url);
+        if (resource.method === "GET") {
+          for (const [key, value] of Object.entries(probeInput?.query ?? {}))
+            url.searchParams.set(key, value);
+        }
+        const body = resource.method === "POST" ? probeInput?.body : undefined;
+        const response = await safeFetch(url.toString(), {
           method: resource.method,
           timeoutMs: config.get("planner.probeTimeoutMs") as number,
+          ...(body === undefined
+            ? {}
+            : {
+                headers: { "content-type": "application/json" },
+                body: Buffer.from(JSON.stringify(body)),
+              }),
         });
         const parsed = readPaymentRequired({
           status: response.status,

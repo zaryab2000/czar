@@ -21,7 +21,6 @@ export interface PlannerOperationsDependencies {
   readonly pool: Pool;
   readonly planner: { build(input: PlannerRequest): Promise<PlannerBuild | null> };
   readonly ethGasPriceWei: () => Promise<bigint>;
-  readonly gatewayVolumeAtomic: (objectiveId: string) => Promise<bigint>;
   readonly now?: () => Date;
   readonly random?: RandomSource;
 }
@@ -67,6 +66,29 @@ export function createPlannerOperations(deps: PlannerOperationsDependencies) {
       reviseSubjects(userId, planId, revision, deps, now, random),
     processNextReceived: () => processNextReceived(deps),
   };
+}
+
+export async function reclaimStalePlanningClaims(
+  pool: Pool,
+  claimTimeoutSeconds: number,
+  now: Date,
+): Promise<number> {
+  if (!Number.isSafeInteger(claimTimeoutSeconds) || claimTimeoutSeconds <= 0)
+    throw new RangeError("planner.claimTimeoutSeconds must be a positive integer.");
+  if (!canTransition("planning", "received"))
+    throw new Error("Invalid objective transition: planning -> received");
+  const cutoff = new Date(now.getTime() - claimTimeoutSeconds * 1000);
+  const result = await pool.query(
+    `UPDATE objectives AS o SET state='received',updated_at=$2
+     WHERE o.state='planning' AND o.updated_at <= $1
+       AND NOT EXISTS (SELECT 1 FROM plans p WHERE p.objective_id=o.objective_id)
+       AND EXISTS (
+         SELECT 1 FROM outbox_events e WHERE e.objective_id=o.objective_id
+           AND e.name='objective.received' AND e.delivered_at IS NULL
+       )`,
+    [cutoff, now],
+  );
+  return result.rowCount ?? 0;
 }
 
 async function reviseSubjects(
@@ -306,10 +328,7 @@ async function build(
   deps: PlannerOperationsDependencies,
   options: PlanBuildOptions,
 ): Promise<PlannerBuild | null> {
-  const [ethGasPriceWei, gatewayVolumeAtomic] = await Promise.all([
-    deps.ethGasPriceWei(),
-    deps.gatewayVolumeAtomic(row.objective_id),
-  ]);
+  const ethGasPriceWei = await deps.ethGasPriceWei();
   return deps.planner.build({
     objectiveId: row.objective_id,
     objectiveHash: row.objective_hash,
@@ -324,7 +343,6 @@ async function build(
     now: options.now(),
     random: options.random,
     ethGasPriceWei,
-    gatewayVolumeAtomic,
     ...(options.shadow ? { shadow: true } : {}),
     ...(options.excludedServices ? { excludedServices: options.excludedServices } : {}),
   });

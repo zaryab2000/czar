@@ -7,10 +7,10 @@ export const OBJECTIVE_STATES: readonly string[] = statusSchema.enum;
 
 const TRANSITIONS: Readonly<Record<string, readonly string[]>> = {
   received: ["planning"],
-  planning: ["no-supplier", "awaiting-approval", "opening"],
+  planning: ["received", "no-supplier", "awaiting-approval", "opening"],
   "no-supplier": [],
-  "awaiting-approval": ["opening", "expired", "dismissed"],
-  opening: ["executing", "awaiting-approval"],
+  "awaiting-approval": ["opening", "executing", "expired", "dismissed"],
+  opening: ["executing", "awaiting-approval", "expired"],
   executing: ["delivered", "replanning", "failed"],
   replanning: ["awaiting-approval", "executing"],
   delivered: [],
