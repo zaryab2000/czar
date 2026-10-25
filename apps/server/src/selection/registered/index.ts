@@ -1,10 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { H, jcsString } from "@czar/hashing";
+import { H } from "@czar/hashing";
 import type { Config } from "@czar/config";
 import type { RankingDecision } from "@czar/schemas";
 import {
   readPaymentRequired,
-  USDC_ADDRESS,
   type PaymentRequirements,
   type SafeFetch,
   type SafeFetchOptions,
@@ -30,12 +29,47 @@ interface RegisteredRecord {
   readonly registration: Registration;
   readonly accepts: readonly PaymentRequirements[];
   readonly outputSchema: Readonly<Record<string, unknown>> | null;
+}
+
+interface ProbeOutcome {
+  readonly record: RegisteredRecord | null;
   readonly probedAt: string;
 }
 
 interface CachedProbe {
-  readonly record: RegisteredRecord | null;
+  readonly outcome: ProbeOutcome;
   readonly fetchedAt: number;
+}
+
+interface SnapshotOffer {
+  readonly network: string | null;
+  readonly scheme: string | null;
+  readonly asset: string | null;
+  readonly amount: string;
+  readonly payTo: string;
+  readonly siwx: boolean;
+  readonly siwxOnly: boolean;
+  readonly batchSettlement: boolean;
+}
+
+type SnapshotProbe =
+  | { readonly state: "failed"; readonly probedAt: string }
+  | { readonly state: "ok"; readonly probedAt: string; readonly offers: readonly SnapshotOffer[] };
+
+interface SnapshotService {
+  readonly serviceId: string;
+  readonly serviceName: string;
+  readonly capabilities: readonly string[];
+  readonly resourceUrl: string;
+  readonly method: "GET" | "POST";
+  readonly probe: SnapshotProbe;
+}
+
+interface InterimSnapshot {
+  readonly kind: "czar-registered-interim-snapshot";
+  readonly policy_version: string;
+  readonly network: string;
+  readonly services: readonly SnapshotService[];
 }
 
 interface RegisteredSelectionOptions {
@@ -59,29 +93,28 @@ export interface RegisteredSelection {
 export function createRegisteredSelection(
   options: RegisteredSelectionOptions,
 ): RegisteredSelection {
-  const records = new Map<string, CachedProbe>();
-  const pending = new Map<string, Promise<RegisteredRecord | null>>();
+  const probes = new Map<string, CachedProbe>();
+  const pending = new Map<string, Promise<ProbeOutcome>>();
   const now = options.now ?? (() => new Date());
   const registrations = readRegistrations(options.config);
   const recrawlMs = Number(options.config.get("selection.registeredRecrawlHours")) * 3600000;
   const timeoutMs = Number(options.config.get("selection.probeTimeoutMs"));
   const network = String(options.config.get("selection.paymentNetwork"));
-  const policy = policyVersion(
-    network,
-    Boolean(options.config.get("selection.unverifiedWithApproval")),
-  );
+  const usdcAsset = String(options.config.get("chain.usdcAddress")).toLowerCase();
+  const unverifiedWithApproval = Boolean(options.config.get("selection.unverifiedWithApproval"));
+  const policy = policyVersion(network, usdcAsset, unverifiedWithApproval);
 
-  async function getRecord(serviceId: string): Promise<RegisteredRecord | null> {
+  async function getProbe(serviceId: string): Promise<ProbeOutcome | null> {
     const registration = registrations.get(serviceId);
     if (!registration) return null;
-    const cached = records.get(serviceId);
-    if (cached && now().getTime() - cached.fetchedAt < recrawlMs) return cached.record;
+    const cached = probes.get(serviceId);
+    if (cached && now().getTime() - cached.fetchedAt < recrawlMs) return cached.outcome;
     const active = pending.get(serviceId);
     if (active) return active;
     const request = probe(serviceId, registration, options.safeFetch, timeoutMs, now)
-      .then((record) => {
-        records.set(serviceId, { record, fetchedAt: now().getTime() });
-        return record;
+      .then((outcome) => {
+        probes.set(serviceId, { outcome, fetchedAt: now().getTime() });
+        return outcome;
       })
       .finally(() => pending.delete(serviceId));
     pending.set(serviceId, request);
@@ -91,13 +124,13 @@ export function createRegisteredSelection(
   return {
     directory: {
       async get(serviceId) {
-        const record = await getRecord(serviceId);
-        return record ? toPlannerService(record) : null;
+        const outcome = await getProbe(serviceId);
+        return outcome?.record ? toPlannerService(outcome.record) : null;
       },
     },
     outputSchema: {
       async forService(serviceId) {
-        return (await getRecord(serviceId))?.outputSchema ?? null;
+        return (await getProbe(serviceId))?.record?.outputSchema ?? null;
       },
     },
     rank: {
@@ -106,7 +139,7 @@ export function createRegisteredSelection(
           [...registrations].map(async ([serviceId, registration]) => ({
             serviceId,
             registration,
-            record: await getRecord(serviceId),
+            outcome: (await getProbe(serviceId))!,
           })),
         );
         return createDecision({
@@ -114,7 +147,8 @@ export function createRegisteredSelection(
           services,
           network,
           policy,
-          explorationEnabled: Boolean(options.config.get("selection.unverifiedWithApproval")),
+          usdcAsset,
+          explorationEnabled: unverifiedWithApproval,
           riskQuantile: Number(options.config.get("selection.riskQuantile")),
           weights: {
             cost: Number(options.config.get("selection.wCost")),
@@ -170,30 +204,33 @@ async function probe(
   safeFetch: SafeFetch,
   timeoutMs: number,
   now: () => Date,
-): Promise<RegisteredRecord | null> {
+): Promise<ProbeOutcome> {
+  const probedAt = now().toISOString();
   try {
     const response = await safeFetch(probeUrl(registration), probeOptions(registration, timeoutMs));
     if (
       response.status !== 402 ||
       new URL(response.url).origin !== new URL(registration.resource.url).origin
     )
-      return null;
+      return { record: null, probedAt };
     const result = readPaymentRequired({
       status: response.status,
       headers: response.headers,
       body: Buffer.from(response.body).toString("utf8"),
     });
     if (!result.ok || !sameResourcePath(result.resource.url, registration.resource.url))
-      return null;
+      return { record: null, probedAt };
     return {
-      serviceId,
-      registration,
-      accepts: result.paymentRequired.accepts,
-      outputSchema: responseSchema(result.extensions.bazaar?.schema),
-      probedAt: now().toISOString(),
+      probedAt,
+      record: {
+        serviceId,
+        registration,
+        accepts: result.paymentRequired.accepts,
+        outputSchema: responseSchema(result.extensions.bazaar?.schema),
+      },
     };
   } catch {
-    return null;
+    return { record: null, probedAt };
   }
 }
 
@@ -258,15 +295,22 @@ function toPlannerService(record: RegisteredRecord): PlannerService & { probeInp
   };
 }
 
+interface EligibilityResult {
+  readonly excluded: RankingDecision["excluded"];
+  readonly eligible: readonly { serviceId: string; amount: bigint }[];
+  readonly candidatesConsidered: number;
+}
+
 async function createDecision(args: {
   readonly query: RankingQuery;
   readonly services: readonly {
     serviceId: string;
     registration: Registration;
-    record: RegisteredRecord | null;
+    outcome: ProbeOutcome;
   }[];
   readonly network: string;
   readonly policy: string;
+  readonly usdcAsset: string;
   readonly explorationEnabled: boolean;
   readonly riskQuantile: number;
   readonly weights: Readonly<Record<string, number>>;
@@ -275,54 +319,10 @@ async function createDecision(args: {
   readonly now: () => Date;
 }): Promise<RankingDecision> {
   const { query, services, network, policy, explorationEnabled, riskQuantile, weights, now } = args;
-  const candidates = services
-    .filter(({ registration }) => registration.capabilities.includes(query.capability))
-    .toSorted((left, right) => compareServiceId(left.serviceId, right.serviceId));
-  const excluded: RankingDecision["excluded"] = [];
-  const eligible: Array<{ serviceId: string; amount: bigint }> = [];
-  for (const candidate of candidates) {
-    if (!candidate.record) {
-      excluded.push({
-        service_id: candidate.serviceId,
-        gate: "probe-failed",
-        detail: "live-402-unavailable-or-malformed",
-      });
-      continue;
-    }
-    const usable = candidate.record.accepts.filter((offer) => offer.network === network);
-    if (usable.length === 0) {
-      excluded.push({ service_id: candidate.serviceId, gate: "network", detail: "wrong-network" });
-      continue;
-    }
-    const payable = usable.filter(isUsableOffer);
-    if (payable.length === 0) {
-      excluded.push({
-        service_id: candidate.serviceId,
-        gate: "offer",
-        detail: "no-payable-live-offer",
-      });
-      continue;
-    }
-    const affordable = payable.filter(
-      (offer) => BigInt(offer.amount) <= BigInt(query.max_price_atomic),
-    );
-    if (affordable.length === 0) {
-      excluded.push({
-        service_id: candidate.serviceId,
-        gate: "price-over-budget",
-        detail: "live-price-exceeds-max",
-      });
-      continue;
-    }
-    const cheapest = affordable.reduce((left, right) =>
-      BigInt(left.amount) <= BigInt(right.amount) ? left : right,
-    );
-    eligible.push({ serviceId: candidate.serviceId, amount: BigInt(cheapest.amount) });
-  }
-  eligible.sort(comparePriceThenId);
   const snapshot = makeSnapshot(services, network, policy);
+  const eligibility = evaluateSnapshot(snapshot.services, query, network, args.usdcAsset);
   const snapshotId = await persistSnapshot(args.pool, snapshot, now(), args.retentionDays);
-  const decision: RankingDecision = {
+  return {
     schemaVersion: "1.1",
     query_id: randomUUID(),
     received_at: now().toISOString(),
@@ -336,90 +336,168 @@ async function createDecision(args: {
       risk_quantile: riskQuantile,
       weights,
     },
-    candidates_considered: candidates.length,
-    excluded,
+    candidates_considered: eligibility.candidatesConsidered,
+    excluded: eligibility.excluded,
     ranked: [],
-    unverified: eligible.map(({ serviceId }) => ({
+    unverified: eligibility.eligible.map(({ serviceId }) => ({
       service_id: serviceId,
       reason: "n_eff_below_min",
       n_eff: 0,
     })),
     missing_dimensions_for_class: [],
     insufficient_evidence: true,
-    ...(explorationEnabled && eligible[0]
+    ...(explorationEnabled && eligibility.eligible[0]
       ? {
           exploration_slot: {
-            service_id: eligible[0].serviceId,
+            service_id: eligibility.eligible[0].serviceId,
             reason: "no-ranked-candidate" as const,
           },
         }
       : {}),
   };
-  return decision;
 }
 
 function makeSnapshot(
   services: readonly {
     serviceId: string;
     registration: Registration;
-    record: RegisteredRecord | null;
+    outcome: ProbeOutcome;
   }[],
   network: string,
   policy: string,
-): Record<string, unknown> {
+): InterimSnapshot {
   return {
     kind: "czar-registered-interim-snapshot",
     policy_version: policy,
     network,
     services: services
-      .filter((service) => service.record !== null)
       .toSorted((left, right) => compareServiceId(left.serviceId, right.serviceId))
-      .map(({ serviceId, registration, record }) => {
-        const offer = snapshotOffer(record!.accepts, network);
+      .map(({ serviceId, registration, outcome }) => {
         return {
           serviceId,
           serviceName: registration.serviceName,
           capabilities: [...registration.capabilities].toSorted(),
           resourceUrl: registration.resource.url,
           method: registration.resource.method,
-          payTo: offer.payTo,
-          amount: offer.amount,
-          scheme: offer.scheme,
-          network: offer.network,
-          probedAt: record!.probedAt,
+          probe: outcome.record
+            ? {
+                state: "ok" as const,
+                probedAt: outcome.probedAt,
+                offers: outcome.record.accepts.map(reduceOffer).toSorted(compareSnapshotOffer),
+              }
+            : { state: "failed" as const, probedAt: outcome.probedAt },
         };
       }),
   };
 }
 
-function snapshotOffer(
-  offers: readonly PaymentRequirements[],
+function evaluateSnapshot(
+  services: readonly SnapshotService[],
+  query: RankingQuery,
   network: string,
-): PaymentRequirements {
-  const relevant = offers.filter((offer) => offer.network === network);
-  const payable = relevant.filter(isUsableOffer);
-  const choices = payable.length > 0 ? payable : relevant.length > 0 ? relevant : offers;
-  return [...choices].toSorted((left, right) => {
-    const amountOrder =
-      BigInt(left.amount) < BigInt(right.amount)
-        ? -1
-        : BigInt(left.amount) > BigInt(right.amount)
-          ? 1
-          : 0;
-    if (amountOrder !== 0) return amountOrder;
-    return compareText(left.payTo, right.payTo) || compareText(left.scheme, right.scheme);
-  })[0]!;
+  usdcAsset: string,
+): EligibilityResult {
+  const candidates = services.filter((service) => service.capabilities.includes(query.capability));
+  const excluded: RankingDecision["excluded"] = [];
+  const eligible: Array<{ serviceId: string; amount: bigint }> = [];
+  for (const service of candidates) {
+    const result = evaluateService(service, network, usdcAsset, query.max_price_atomic);
+    if (result.excluded) excluded.push(result.excluded);
+    if (result.eligible) eligible.push(result.eligible);
+  }
+  eligible.sort(comparePriceThenId);
+  return { excluded, eligible, candidatesConsidered: candidates.length };
+}
+
+function evaluateService(
+  service: SnapshotService,
+  network: string,
+  usdcAsset: string,
+  maxPrice: string,
+): {
+  excluded?: RankingDecision["excluded"][number];
+  eligible?: { serviceId: string; amount: bigint };
+} {
+  if (service.probe.state === "failed")
+    return {
+      excluded: {
+        service_id: service.serviceId,
+        gate: "probe-failed",
+        detail: "live-402-unavailable-or-malformed",
+      },
+    };
+  const onNetwork = service.probe.offers.filter((offer) => offer.network === network);
+  if (onNetwork.length === 0)
+    return {
+      excluded: { service_id: service.serviceId, gate: "network", detail: "wrong-network" },
+    };
+  const usable = onNetwork.filter((offer) => isUsableOffer(offer, usdcAsset));
+  if (usable.length === 0)
+    return {
+      excluded: {
+        service_id: service.serviceId,
+        gate: "offer",
+        detail: "no-payable-live-offer",
+      },
+    };
+  const affordable = usable.filter((offer) => BigInt(offer.amount) <= BigInt(maxPrice));
+  if (affordable.length === 0)
+    return {
+      excluded: {
+        service_id: service.serviceId,
+        gate: "price-over-budget",
+        detail: "live-price-exceeds-max",
+      },
+    };
+  const cheapest = affordable.reduce((left, right) =>
+    BigInt(left.amount) <= BigInt(right.amount) ? left : right,
+  );
+  return { eligible: { serviceId: service.serviceId, amount: BigInt(cheapest.amount) } };
+}
+
+function reduceOffer(offer: PaymentRequirements): SnapshotOffer {
+  return {
+    network: /^eip155:[1-9][0-9]{0,19}$/.test(offer.network) ? offer.network : null,
+    scheme: /^[a-z0-9-]{1,32}$/.test(offer.scheme) ? offer.scheme : null,
+    asset: /^0x[0-9a-fA-F]{40}$/.test(offer.asset) ? offer.asset.toLowerCase() : null,
+    amount: offer.amount,
+    payTo: offer.payTo.toLowerCase(),
+    siwx: offer.extra["siwx"] === true,
+    siwxOnly: offer.extra["siwxOnly"] === true,
+    batchSettlement: offer.extra["paymentFlow"] === "batch-settlement",
+  };
+}
+
+function compareSnapshotOffer(left: SnapshotOffer, right: SnapshotOffer): number {
+  for (const [leftValue, rightValue] of [
+    [left.network, right.network],
+    [left.scheme, right.scheme],
+    [left.asset, right.asset],
+  ] as const) {
+    const order = compareNullableText(leftValue, rightValue);
+    if (order !== 0) return order;
+  }
+  const leftAmount = BigInt(left.amount);
+  const rightAmount = BigInt(right.amount);
+  if (leftAmount < rightAmount) return -1;
+  if (leftAmount > rightAmount) return 1;
+  return compareText(left.payTo, right.payTo);
+}
+
+function compareNullableText(left: string | null, right: string | null): number {
+  if (left === null) return right === null ? 0 : -1;
+  if (right === null) return 1;
+  return compareText(left, right);
 }
 
 async function persistSnapshot(
   pool: Pool,
-  snapshot: Record<string, unknown>,
+  snapshot: InterimSnapshot,
   usedAt: Date,
   retentionDays: number,
 ) {
-  const bodyJcs = jcsString(snapshot);
+  const bodyJcs = snapshotJcsString(snapshot);
   const snapshotId = keccak256(toBytes(bodyJcs));
-  if (H(snapshot) !== snapshotId) throw new Error("snapshot canonical hash mismatch");
   const saved = await pool.query<{ body_jcs: string }>(
     `INSERT INTO selection_interim_snapshots (snapshot_id, body_jcs, created_at, last_used_at)
      VALUES ($1, $2, $3, $3)
@@ -439,16 +517,35 @@ async function persistSnapshot(
   return snapshotId;
 }
 
-function policyVersion(network: string, unverifiedWithApproval: boolean): string {
+function policyVersion(
+  network: string,
+  usdcAsset: string,
+  unverifiedWithApproval: boolean,
+): string {
   const descriptor = {
     policy: "czar-registered-interim",
-    scr: "SCR-137",
+    scr: "SCR-138",
     network,
+    usdcAsset,
+    offerRule: "scheme-exact,asset-usdc,no-siwx,no-siwx-only,no-batch-settlement",
     unverifiedWithApproval,
-    exploration: "lowest-live-price-then-serviceId",
+    exploration: "lowest-eligible-live-price-then-serviceId",
     ranked: "none",
   };
   return `pol_${H(descriptor).slice(2, 18)}`;
+}
+
+function snapshotJcsString(value: unknown): string {
+  if (value === null) return "null";
+  if (typeof value === "string" || typeof value === "boolean") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(snapshotJcsString).join(",")}]`;
+  if (isObject(value)) {
+    const entries = Object.entries(value).toSorted(([left], [right]) => compareText(left, right));
+    return `{${entries
+      .map(([key, item]) => `${JSON.stringify(key)}:${snapshotJcsString(item)}`)
+      .join(",")}}`;
+  }
+  throw new TypeError(`unsupported snapshot JCS value: ${typeof value}`);
 }
 
 function comparePriceThenId(
@@ -468,13 +565,13 @@ function compareText(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
-function isUsableOffer(offer: PaymentRequirements): boolean {
+function isUsableOffer(offer: SnapshotOffer, usdcAsset: string): boolean {
   return (
     offer.scheme === "exact" &&
-    offer.asset.toLowerCase() === USDC_ADDRESS.toLowerCase() &&
-    offer.extra["siwx"] !== true &&
-    offer.extra["siwxOnly"] !== true &&
-    offer.extra["paymentFlow"] !== "batch-settlement"
+    offer.asset === usdcAsset &&
+    !offer.siwx &&
+    !offer.siwxOnly &&
+    !offer.batchSettlement
   );
 }
 

@@ -1,7 +1,8 @@
 import { loadConfig } from "@czar/config";
-import { H } from "@czar/hashing";
+import { H, jcsString } from "@czar/hashing";
 import { encodeBase64Json, type SafeFetch } from "@czar/x402";
 import { validateSchema } from "@czar/schemas";
+import { keccak256, toBytes } from "viem";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createAcceptancePorts } from "#src/acceptance/ports";
 import type { RankingQuery } from "#src/planner/ports";
@@ -12,7 +13,85 @@ const getPool = setupDatabase();
 const SERVICE_A = `svc_${"a".repeat(32)}`;
 const SERVICE_B = `svc_${"b".repeat(32)}`;
 const NETWORK = "eip155:5042002";
+const USDC_ASSET = "0x3600000000000000000000000000000000000000";
 const RESOURCE = "https://merchant.example/v1/search";
+
+interface SnapshotForReconstruction {
+  readonly network: string;
+  readonly services: Array<{
+    serviceId: string;
+    capabilities: string[];
+    probe: { state: "failed" } | { state: "ok"; offers: Array<Record<string, unknown>> };
+  }>;
+}
+
+function reconstructEligibility(
+  snapshot: SnapshotForReconstruction,
+  capability: string,
+  maxPrice: bigint,
+) {
+  const candidates = snapshot.services.filter((service) =>
+    service.capabilities.includes(capability),
+  );
+  const excluded: Array<{ service_id: string; gate: string; detail: string }> = [];
+  const eligible: Array<{ service_id: string; amount: bigint }> = [];
+  for (const service of candidates) {
+    if (service.probe.state === "failed") {
+      excluded.push({
+        service_id: service.serviceId,
+        gate: "probe-failed",
+        detail: "live-402-unavailable-or-malformed",
+      });
+      continue;
+    }
+    const offers = service.probe.offers.filter(
+      (reducedOffer) => reducedOffer["network"] === snapshot.network,
+    );
+    if (offers.length === 0) {
+      excluded.push({ service_id: service.serviceId, gate: "network", detail: "wrong-network" });
+      continue;
+    }
+    const payable = offers.filter(
+      (reducedOffer) =>
+        reducedOffer["scheme"] === "exact" &&
+        reducedOffer["asset"] === USDC_ASSET &&
+        reducedOffer["siwx"] === false &&
+        reducedOffer["siwxOnly"] === false &&
+        reducedOffer["batchSettlement"] === false,
+    );
+    if (payable.length === 0) {
+      excluded.push({
+        service_id: service.serviceId,
+        gate: "offer",
+        detail: "no-payable-live-offer",
+      });
+      continue;
+    }
+    const affordable = payable
+      .map((reducedOffer) => BigInt(String(reducedOffer["amount"])))
+      .filter((amount) => amount <= maxPrice);
+    if (affordable.length === 0) {
+      excluded.push({
+        service_id: service.serviceId,
+        gate: "price-over-budget",
+        detail: "live-price-exceeds-max",
+      });
+      continue;
+    }
+    eligible.push({
+      service_id: service.serviceId,
+      amount: affordable.reduce((minimum, amount) => (amount < minimum ? amount : minimum)),
+    });
+  }
+  eligible.sort((left, right) =>
+    left.amount < right.amount
+      ? -1
+      : left.amount > right.amount
+        ? 1
+        : left.service_id.localeCompare(right.service_id),
+  );
+  return { candidates, excluded, eligible };
+}
 
 function offer(
   amount: string,
@@ -42,11 +121,12 @@ function response(
   },
   resourceUrl = RESOURCE,
   offerOverrides: Record<string, unknown> = {},
+  extraOffers: ReturnType<typeof offer>[] = [],
 ) {
   const body = {
     x402Version: 2,
     resource: { url: resourceUrl, description: "private merchant description" },
-    accepts: [offer(amount, payTo, network, offerOverrides)],
+    accepts: [offer(amount, payTo, network, offerOverrides), ...extraOffers],
     extensions: {
       bazaar: {
         info: { input: {}, output: {} },
@@ -140,10 +220,12 @@ describe("registered selection", () => {
     expect(decision.policy_version).toBe(
       `pol_${H({
         policy: "czar-registered-interim",
-        scr: "SCR-137",
+        scr: "SCR-138",
         network: NETWORK,
+        usdcAsset: USDC_ASSET,
+        offerRule: "scheme-exact,asset-usdc,no-siwx,no-siwx-only,no-batch-settlement",
         unverifiedWithApproval: true,
-        exploration: "lowest-live-price-then-serviceId",
+        exploration: "lowest-eligible-live-price-then-serviceId",
         ranked: "none",
       }).slice(2, 18)}`,
     );
@@ -151,14 +233,107 @@ describe("registered selection", () => {
     expect(decision.ranked).toEqual([]);
     expect(decision.unverified.map((row) => row.service_id)).toEqual([SERVICE_A, SERVICE_B]);
     expect(decision.exploration_slot?.service_id).toBe(SERVICE_A);
-    expect(H(body)).toBe(decision.snapshot_id);
+    expect(keccak256(toBytes(saved.rows[0]!.body_jcs))).toBe(decision.snapshot_id);
+    expect(saved.rows[0]!.body_jcs).toBe(jcsString(body));
     expect(saved.rows[0]!.body_jcs).not.toContain("private merchant description");
     expect((body["services"] as Array<Record<string, unknown>>)[0]).toMatchObject({
       serviceId: SERVICE_A,
       serviceName: "a",
       resourceUrl: "https://a.example/v1/search",
       capabilities: ["web-search"],
+      probe: {
+        state: "ok",
+        probedAt: "2026-10-25T00:00:00.000Z",
+        offers: [
+          {
+            network: NETWORK,
+            scheme: "exact",
+            asset: USDC_ASSET,
+            amount: "25",
+            payTo: `0x${"aaa".padStart(40, "0")}`,
+            siwx: false,
+            siwxOnly: false,
+            batchSettlement: false,
+          },
+        ],
+      },
     });
+  });
+
+  it("reconstructs gate order and exploration from the stored snapshot and decision query", async () => {
+    const ids = Array.from({ length: 7 }, (_, index) => `svc_${String(index + 1).repeat(32)}`);
+    const failed = ids[0]!;
+    const mixed = ids[6]!;
+    const fetchImpl = vi.fn<SafeFetch>(async (url) => {
+      if (url.includes("failed")) throw new Error("probe unavailable");
+      if (url.includes("wrong-network"))
+        return response("5", "0x1", "eip155:1", undefined, bareUrl(url));
+      if (url.includes("siwx"))
+        return response("5", "0x2", NETWORK, undefined, bareUrl(url), { extra: { siwx: true } });
+      if (url.includes("siwx-only"))
+        return response("5", "0x3", NETWORK, undefined, bareUrl(url), {
+          extra: { siwxOnly: true },
+        });
+      if (url.includes("batch"))
+        return response("5", "0x4", NETWORK, undefined, bareUrl(url), {
+          extra: { paymentFlow: "batch-settlement" },
+        });
+      if (url.includes("over-budget"))
+        return response("101", "0x5", NETWORK, undefined, bareUrl(url));
+      return response("50", "0x6", NETWORK, undefined, bareUrl(url), {}, [
+        offer("25", "0x7"),
+        offer("5", "0x8", "unrecognized"),
+      ]);
+    });
+    const services = Object.fromEntries(
+      ids.map((id, index) => [
+        id,
+        registration(
+          `https://${["failed", "wrong-network", "siwx", "siwx-only", "batch", "over-budget", "mixed"][index]}.example/v1/search`,
+        ),
+      ]),
+    );
+    const decision = await setup(
+      fetchImpl,
+      services,
+      () => new Date("2026-10-25T00:00:00Z"),
+    ).rank.rank(query("100"));
+    const saved = await getPool().query<{ body_jcs: string }>(
+      "SELECT body_jcs FROM selection_interim_snapshots WHERE snapshot_id = $1",
+      [decision.snapshot_id],
+    );
+    const snapshot = JSON.parse(saved.rows[0]!.body_jcs) as SnapshotForReconstruction;
+    const maxPrice = BigInt(String(decision.query.constraints["max_price_atomic"]));
+    const reconstructed = reconstructEligibility(snapshot, decision.query.task, maxPrice);
+
+    expect(snapshot.services).toHaveLength(ids.length);
+    expect(keccak256(toBytes(saved.rows[0]!.body_jcs))).toBe(decision.snapshot_id);
+    expect(snapshot.services[0]).toMatchObject({
+      serviceId: failed,
+      probe: { state: "failed", probedAt: "2026-10-25T00:00:00.000Z" },
+    });
+    const mixedSnapshot = snapshot.services.find((service) => service.serviceId === mixed);
+    expect(mixedSnapshot?.probe).toMatchObject({
+      state: "ok",
+      offers: [
+        { network: null, scheme: "exact", asset: USDC_ASSET, amount: "5" },
+        { network: NETWORK, scheme: "exact", asset: USDC_ASSET, amount: "25" },
+        { network: NETWORK, scheme: "exact", asset: USDC_ASSET, amount: "50" },
+      ],
+    });
+    expect(reconstructed.excluded).toEqual(decision.excluded);
+    const reconstructedUnverified = reconstructed.eligible.map(({ service_id }) => ({
+      service_id,
+      reason: "n_eff_below_min",
+      n_eff: 0,
+    }));
+    expect(reconstructedUnverified).toEqual(decision.unverified);
+    expect(reconstructed.eligible[0]?.service_id).toBe(mixed);
+    expect(decision.exploration_slot).toEqual({
+      service_id: reconstructedUnverified[0]?.service_id,
+      reason: "no-ranked-candidate",
+    });
+    expect(reconstructed.candidates).toHaveLength(decision.candidates_considered);
   });
 
   it("adds GET probe input only to the unpaid request and preserves the bare resource", async () => {
@@ -375,9 +550,10 @@ describe("registered selection", () => {
 describe("acceptance ports", () => {
   it("supplies the directory schema, no history, K7 address, and injected clock", async () => {
     const now = new Date("2026-10-25T12:00:00Z");
-    const keyAddress = vi.fn(async (keyRef: "K7") => {
+    const keyAddress = vi.fn(async (caller: "cz-16", keyRef: "K7") => {
+      expect(caller).toBe("cz-16");
       expect(keyRef).toBe("K7");
-      return "0xvalidator";
+      return `0x${"7".repeat(40)}` as const;
     });
     const ports = createAcceptancePorts({
       selection: { outputSchema: { forService: async () => ({ type: "object" }) } },
@@ -387,7 +563,7 @@ describe("acceptance ports", () => {
 
     expect(await ports.outputSchema.forService(SERVICE_A)).toEqual({ type: "object" });
     expect(await ports.shapeHistory.forService(SERVICE_A)).toBeNull();
-    expect(await ports.validatorIdentity.address()).toBe("0xvalidator");
+    expect(await ports.validatorIdentity.address()).toBe(`0x${"7".repeat(40)}`);
     expect(ports.clock.now()).toBe(now);
     expect(keyAddress).toHaveBeenCalledOnce();
   });

@@ -1,9 +1,10 @@
 import type { AcceptancePorts } from "#src/acceptance/types";
 import type { RegisteredSelection } from "#src/selection/registered/index";
+import type { Address } from "viem";
 
 export interface AcceptancePortOptions {
   readonly selection: Pick<RegisteredSelection, "outputSchema">;
-  readonly keyAddress: (keyRef: "K7") => Promise<string>;
+  readonly keyAddress: (caller: "cz-16", keyRef: "K7") => Promise<Address>;
   readonly now?: () => Date;
 }
 
@@ -12,7 +13,7 @@ export function createAcceptancePorts(options: AcceptancePortOptions): Acceptanc
   return {
     outputSchema: options.selection.outputSchema,
     shapeHistory: { forService: async () => null },
-    validatorIdentity: { address: () => options.keyAddress("K7") },
+    validatorIdentity: { address: () => options.keyAddress("cz-16", "K7") },
     clock: { now: options.now ?? (() => new Date()) },
   };
 }
