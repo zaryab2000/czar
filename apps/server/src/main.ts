@@ -83,7 +83,7 @@ import {
 } from "#src/payer/pullback-scheduler";
 import { startPayerDispatcher, type DispatchStepRequest } from "#src/payer/dispatcher";
 import { completeObjective } from "#src/objectives/completion";
-import { getExecutionTrace } from "#src/payer/executions";
+import { appendExecutionPhase, getExecutionTrace } from "#src/payer/executions";
 import {
   createIndexerGatewayStatus,
   createIndexerSettlement,
@@ -1016,6 +1016,17 @@ function createPayerBoundary(
         acceptance,
       },
     );
+    await appendExecutionPhase(options.pool, {
+      planId: input.planId,
+      stepIndex: input.step.stepIndex,
+      attempt: context.attempt,
+      phase: "acceptance.result",
+      payload: {
+        index: context.index,
+        reportHash: result.acceptance.report.reportHash,
+        obsId: result.acceptance.report.obs_id,
+      },
+    });
     return (
       result.result ?? quarantinedStepResult(context, source, bodyCommit, result.acceptance.report)
     );
@@ -1024,15 +1035,31 @@ function createPayerBoundary(
 
 function createReceiptBuilder(options: ServerMainOptions, signer: Pick<Signer, "sign">) {
   return async (context: SettledReceiptContext): Promise<boolean> => {
+    const acceptance = await options.pool.query<{ report_hash: string; obs_id: string }>(
+      `SELECT payload->>'reportHash' AS report_hash,payload->>'obsId' AS obs_id
+       FROM step_executions
+       WHERE plan_id=$1 AND step_index=$2 AND attempt=$3 AND phase='acceptance.result'
+         AND payload->>'index'=$4
+       ORDER BY execution_id DESC LIMIT 1`,
+      [context.input.planId, context.input.step.stepIndex, context.attempt, String(context.index)],
+    );
+    const acceptanceRef = acceptance.rows[0];
+    if (!acceptanceRef)
+      throw new Error("Acceptance report identity is missing for the settled call.");
     const reports = await options.pool.query<{
       report_hash: string;
       obs_id: string;
       checks: AcceptanceReport["checks"];
     }>(
       `SELECT report_hash,obs_id,checks FROM acceptance_reports
-       WHERE envelope_ref=$1 AND step_index=$2 AND body_ref=$3
-       ORDER BY created_at DESC LIMIT 1`,
-      [context.input.envelopeRef, context.input.step.stepIndex, context.bodyRef],
+       WHERE report_hash=$1 AND obs_id=$2 AND envelope_ref=$3 AND step_index=$4 AND body_ref=$5`,
+      [
+        acceptanceRef.report_hash,
+        acceptanceRef.obs_id,
+        context.input.envelopeRef,
+        context.input.step.stepIndex,
+        context.bodyRef,
+      ],
     );
     const reportHashes = reports.rows.map((row) => row.report_hash);
     const input = options.receiptInput

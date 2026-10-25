@@ -55,13 +55,13 @@ rewriting commits. The current implementation is on `codex/t122-dispatcher-compl
 
 ## Validation
 
-- `fnm exec --using=22.22.0 pnpm --filter @czar/server exec vitest run test/evidence/indexer-settlement.test.ts test/evidence/receipt-input.test.ts test/evidence/receipts.test.ts test/payer/vault-direct.test.ts test/payer/pocket.test.ts test/payer/dispatcher.test.ts test/objectives/completion.test.ts test/main.test.ts test/main-dispatch.test.ts test/planner/planner.test.ts` — **10 files passed, 60 tests passed**.
+- `fnm exec --using=22.22.0 pnpm --filter @czar/server exec vitest run test/evidence/indexer-settlement.test.ts test/evidence/receipt-input.test.ts test/evidence/receipts.test.ts test/payer/vault-direct.test.ts test/payer/pocket.test.ts test/payer/dispatcher.test.ts test/objectives/completion.test.ts test/main.test.ts test/main-dispatch.test.ts test/planner/planner.test.ts` — **10 files passed, 61 tests passed**.
 - `fnm exec --using=22.22.0 pnpm --filter @czar/hashing test` — **5 files passed, 43 tests passed**.
 - `fnm exec --using=22.22.0 pnpm -r typecheck` — **passed for all 14 projects with typecheck scripts** (workspace scope: 14 of 15).
 - `fnm exec --using=22.22.0 pnpm lint` — **passed**, oxlint had no warnings and oxfmt found all 430 files formatted.
 - `git diff --check` — **passed**.
 - GitHub Actions — **not run**: jobs were not started because GitHub reported an account billing/spending-limit issue; no hosted result is counted as passing.
-- Regression-first evidence: dispatcher repeated-handoff test failed because the step ran twice, then passed after the persisted `handed_off` guard; local-profile test failed with the stale unavailable error, then passed using the merged profile producer; receipt-input tests cover JSONB key reordering and the checks-only commitment; settlement tests cover payee binding and distinguish the facilitator's transfer transaction from the vault's `Settled` transaction, with the USDC `Transfer` independently decoded from the payment transaction receipt. Review fixes reproduce the stale dispatch lease expiry and the receipt-indexer-lag completion bug; they now pass with per-acquisition clocks and retryable receipt recording that reuses the journaled StepResult.
+- Regression-first evidence: dispatcher repeated-handoff test failed because the step ran twice, then passed after the persisted `handed_off` guard; local-profile test failed with the stale unavailable error, then passed using the merged profile producer; receipt-input tests cover JSONB key reordering and the checks-only commitment; settlement tests cover payee binding and distinguish the facilitator's transfer transaction from the vault's `Settled` transaction, with the USDC `Transfer` independently decoded from the payment transaction receipt. Review fixes reproduce the stale dispatch lease expiry and the receipt-indexer-lag completion bug; they now pass with per-acquisition clocks and retryable receipt recording that reuses the journaled StepResult. The identical-body receipt test failed when call 2 selected call 1's report, then passed after each call's report hash and observation id were recorded and matched by index.
 
 ## Cross-lane dependencies and decision proposals
 
@@ -95,6 +95,12 @@ rewriting commits. The current implementation is on `codex/t122-dispatcher-compl
    the dispatcher marks the job step done. Do not add a parallel evaluator or infer
    a match from an upload. This is an unresolved P1 cross-lane handoff, not completed
    job-result integration.
+   **Decision requested:** should Lane 3 T-055 persist a validated `StepResult` using
+   the existing schema and `step.result` journal phase after matching a job
+   deliverable, or should Lane 2 consume T-055's durable AcceptanceReport and matched
+   upload identity to produce that result? The requirements define the evaluator
+   report and matched deliverable but do not assign this result-production handoff.
+   Until decided and implemented, completed jobs cannot safely mark their steps done.
 4. **Receipt canonicalization decision.** The 02/SL schemas say
    `requirements_hash_seen` is the hash of the received 402 but do not bind whether
    the hash input is raw header/body bytes or the normalized parsed
@@ -127,6 +133,16 @@ security review for `f71bf5b` was still running when this report was updated;
 the fix batch itself has not yet received hosted review. The T-055 completed-job
 result finding remains unresolved for the Lane 3 producer and approved Lane 2
 consumer mapping described above.
+
+## Review round 3
+
+At head `6c09f30`, review confirmed a P1 receipt-selection issue when different
+calls share identical content-addressed response bytes. The current fix journals
+each call's AcceptanceReport hash and observation id, then retrieves that exact
+report on receipt recovery. The regression failed before the fix and passes after
+it. The automated review cap is exhausted, so this newest fix batch has not received
+hosted review. The round 3 security review was still running on `6c09f30` at report
+update time. The completed-job result P1 remains open as a cross-lane dependency.
 
 ## Deferred validation — D94
 

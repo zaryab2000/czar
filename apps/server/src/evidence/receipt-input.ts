@@ -31,7 +31,14 @@ export function createReceiptInputFromTrace(
     typeof responseSize !== "number"
   )
     throw new Error("Settled call receipt trace is incomplete or mismatched.");
-  const report = reports[0];
+  const acceptance = trace.findLast(
+    (row) => row.phase === "acceptance.result" && row.payload["index"] === context.index,
+  );
+  const reportHash = acceptance?.payload["reportHash"];
+  const obsId = acceptance?.payload["obsId"];
+  if (typeof reportHash !== "string" || typeof obsId !== "string")
+    throw new Error("Acceptance report identity is missing for the settled call.");
+  const report = reports.find((item) => item.report_hash === reportHash && item.obs_id === obsId);
   if (!report) throw new Error("Acceptance report is missing for the settled call.");
   const result = context.stepResult as StepResult;
   const statusCode = call.payload["status"];
