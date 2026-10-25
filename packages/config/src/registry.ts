@@ -3441,4 +3441,13 @@ export const PARAMETERS = [
       "a Closed pocket stays polled until every balance reads zero this long; covers an attestation re-credit (A2-18) and a late nanopayment status (A2-26) (SCR-127)",
     source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:147",
   },
+  {
+    key: "routing.gatewayEnabled",
+    type: "boolean",
+    default: false,
+    unit: "",
+    reason:
+      "Gateway pocket route stays off until the SCR-127 pocket safety chain (TA-20, TA-21) merges; enabled only by a later SCR (SCR-141)",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:243",
+  },
 ] as const satisfies readonly ParameterSpec[];

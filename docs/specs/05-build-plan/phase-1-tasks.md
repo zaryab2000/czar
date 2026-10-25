@@ -817,6 +817,7 @@
 - **Spec refs:** `S04/server/server-planning-and-payment.md` CZ-12 §4, §5, §6 and CZ-15 §2, §3 as amended by SCR-132; CZ-19 §5.4 `envelopeByPlanHash`; SCR-126 §2; `S04/shared/ai-prompts.md` P-01 (D76).
 - **Outputs:** the started composition root in `apps/server/src/local-main.ts`; planner loop; opening watcher; dispatcher; completion; optional model client.
 - **Acceptance tests:** started-root composition order; planner reclaim without a duplicate outbox row; opening watcher match, late match, timeout and expiry; dispatcher order, lease and resume; completion idempotent, `closeEnvelope` only after every reservation is `Final`, every pocket `Closed` and every job terminal, all-quarantined → `failed` with `result-quarantined`. The SCR-126 §2 started-root run on `arc-anvil` is part of T-050a.
+- **SCR-141 (2026-10-25, Lane 2):** CZ-14 `V` is computed inside planning from the plan's own Gateway-offer paid steps; remove the external `gatewayVolumeAtomic(objectiveId)` dependency; respect `routing.gatewayEnabled` (default `false`: no `gateway-nano` route in Track A; a Gateway-only offer is `unsupported-offer`). Tests: `V` sums only Gateway-offer paid steps; Gateway-only offer with the key `false`; existing CZ-14 table tests pass with the key `true`.
 
 ### T-123 Interim Czar-registered selection (SCR-131)
 - **Milestone / group / who:** M3 / M3-c / agent. **Size:** M. **Deps:** T-041, T-042. **Owner:** Lane 3.
@@ -860,6 +861,7 @@
 
 ### T-053 Pullback: burn intent, /v1/transfer, relayer gatewayMint, confirm, cancel and re-request, API-down fallback
 - **SCR-127, SCR-133 (2026-10-25, Lane 2):** halt drain inputs from CZ-19 `fundedPocketsForVault`; `availableBalance` from `pocketBalance` with the freshness rule; write-off at or below the fee; slow withdrawal once per pocket for the whole balance; late-funds recovery pass every `payer.gatewayRecoveryPollSeconds`, never `writeOffPocket` on a `Closed` pocket (test `payer_pocketClose_sweepsGasAndRecoversLateBalance`); manual-return persistence, reconciliation and the write-off hold (`payer.manualReturnHoldHours`).
+- **SCR-141 (2026-10-25, Lane 2):** under the API-down trigger, `initiate` sends the stored `pocketBalance` figure (fresh or last good); reread and retry on `slow-withdraw-value-mismatch`; record and wait on `gateway-figure-missing` and `pocket-spend-after-observation`.
 - **Milestone / group / who:** M4 / M4-b / agent. **Size:** L. **Deps:** T-052, G0-05.
 - **Spec refs:** CZ-15 §5.3 steps 7–8 and crash table; `S03/czar-vault.md` §5.4, §6.2; `S02/data-and-protocol.md` §6.3.2; D41, D62; A2-16 to A2-19, A2-31.
 - **Outputs:** `apps/server/src/payer/pullback.ts` (hand-built burn intents, never `GatewayClient.withdraw()`).
@@ -1027,6 +1029,7 @@
 - **Spec refs:** CZ-19 §5.3, §5.4, §5.6 and CZ-27 §5.2, §5.3 as amended by SCR-127; A2-15, A2-29, A2-30.
 - **Outputs:** indexer `pocket_balances`, the three SCR-127 queries, scope including `Closed`; signer projection `pocketBalances`, `slowWithdrawalOpen`, `slowWithdrawAllowed`, write-off rule and `nanoSpent` per SCR-127.
 - **Acceptance tests:** exact decimal conversion and malformed handling; stale figure denies write-off, retirement and slow withdraw but not `pocket-return`; dust at or below the fee allows write-off; `Closed` pockets polled until every balance reads zero for `indexer.closedPocketQuietHours`; `nanoSpent` counts non-failed transfers. Live `/v1/balances` behaviour is G0-05.
+- **SCR-141 (2026-10-25):** internal `closedZeroSince` and the quiet-period rule (`pendingBatch` included; failed reads neither set nor reset); signer `pocket-slow-withdraw` `initiate` under trigger (a) with the last good figure and denials `gateway-figure-missing`, `slow-withdraw-value-mismatch`, `pocket-spend-after-observation`; `withdraw` without an API figure. Tests for each denial, fresh vs. last-good amount, and a `gateway-nano` signature inside the window.
 
 ### T-125 Owner manual return (SCR-133)
 - **Milestone / group / who:** M4 / M4-b / agent. **Size:** M. **Deps:** T-124, T-053. **Owners:** Lane 1 (`encodeRecordManualReturn`, indexer `manual_returns` and query), Lane 2 (migration, reconciliation, write-off hold), Lane 5 (`listManualReturns`, Envelope section, Home notice).
