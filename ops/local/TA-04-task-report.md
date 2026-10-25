@@ -10,6 +10,9 @@
   composed the stand-in with the local server and merchant processes.
 - Added the `fetch.localStandinOrigins` safeFetch exception, restricted to configured loopback
   origins.
+- Applied the first current-head review fixes: corrected the dynamic ABI offset, accepted the
+  signer’s 416-byte USDC envelope, confirmed settlement receipts before reporting success, and
+  enforced the indexer endpoint guard even without a local overlay.
 
 ## Checks
 
@@ -17,7 +20,7 @@ Commands use the repository-pinned Node runtime, 22.22.0.
 
 | Command | Result |
 |---|---|
-| `fnm exec --using=22.22.0 pnpm --filter @czar/config test` | Passed: 40 tests in 5 files. |
+| `fnm exec --using=22.22.0 pnpm --filter @czar/config test` | Passed: 43 tests in 5 files after review fixes. |
 | `fnm exec --using=22.22.0 pnpm --filter @czar/x402 test` | Passed: 86 tests in 4 files. |
 | `fnm exec --using=22.22.0 pnpm --filter @czar/indexer test` | Passed: 54 tests in 10 files, including T-021 replay on arc-anvil. |
 | `fnm exec --using=22.22.0 pnpm typecheck` | Passed: all 14 typechecked workspace projects. |
@@ -29,6 +32,10 @@ The first server test attempt had no PostgreSQL at `127.0.0.1:15432`; the server
 with its ephemeral test Postgres. The remaining failure is the test's unavailable RPC dependency.
 Pinned `arc-anvil` answered `anvil_nodeInfo` locally. The contract submodules were initialized at
 their pinned revisions in this worktree to run the indexer replay test.
+
+GitHub Actions jobs did not start: GitHub reported that recent account payments failed or the
+spending limit needs to be increased. This is an infrastructure gate, not a failed test result;
+the listed local checks are the executed validation.
 
 ## SCR needed
 

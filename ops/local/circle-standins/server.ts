@@ -136,6 +136,13 @@ async function settle(request: Request, rpc: RpcCall, usdcAddress: string): Prom
     if (typeof transaction !== "string" || !/^0x[\da-fA-F]{64}$/.test(transaction)) {
       return json({ success: false, errorReason: "invalid_rpc_response" }, 502);
     }
+    const receipt = await rpc("eth_getTransactionReceipt", [transaction]);
+    if (receipt === null) {
+      return json({ success: false, errorReason: "settlement_pending", transaction }, 202);
+    }
+    if (!isRecord(receipt) || receipt["status"] !== "0x1") {
+      return json({ success: false, errorReason: "transaction_reverted", transaction }, 502);
+    }
     return json({
       success: true,
       transaction,
@@ -244,7 +251,7 @@ function paymentAuthorization(body: unknown, usdcAddress: string) {
     !isAddress(usdc) ||
     usdc.toLowerCase() !== usdcAddress.toLowerCase() ||
     !/^0x[\da-fA-F]{64}$/.test(nonce) ||
-    !/^0x[\da-fA-F]{130}$/.test(signature) ||
+    !isSupportedSignature(signature) ||
     ![value, validAfter, validBefore].every((part) => /^(0|[1-9]\d*)$/.test(part))
   )
     return null;
@@ -278,7 +285,7 @@ function encodeTransferWithAuthorization(
     wordNumber(authorization.validAfter),
     wordNumber(authorization.validBefore),
     authorization.nonce.slice(2),
-    wordNumber(192),
+    wordNumber(224),
     wordNumber(signature.length / 2),
   ];
   return `0x${TRANSFER_SELECTOR}${words.join("")}${paddedSignature}`;
@@ -286,6 +293,10 @@ function encodeTransferWithAuthorization(
 
 function wordAddress(value: string): string {
   return value.slice(2).toLowerCase().padStart(64, "0");
+}
+
+function isSupportedSignature(value: string): boolean {
+  return /^0x(?:[\da-fA-F]{130}|[\da-fA-F]{832})$/.test(value);
 }
 
 function wordNumber(value: string | number): string {

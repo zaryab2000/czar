@@ -58,16 +58,14 @@ const config = loadConfig({
     : { envFile: parseParameterToml(readFileSync(localConfigPath, "utf8")) }),
   env: configuredEnvironment(),
 });
-if (localConfigPath !== undefined) {
-  await validateLocalOnlyConfig({
-    config,
-    overlayPath: localConfigPath,
-    arcRpcUrl:
-      process.env["CZAR_ARC_RPC_URL"] ??
-      process.env["CZAR_INDEXER_RPC_URL"] ??
-      (config.has("app.arcRpcUrl") ? (config.get("app.arcRpcUrl") as string) : ""),
-  });
-}
+await validateLocalOnlyConfig({
+  config,
+  overlayPath: localConfigPath ?? "",
+  arcRpcUrl:
+    process.env["CZAR_ARC_RPC_URL"] ??
+    process.env["CZAR_INDEXER_RPC_URL"] ??
+    (config.has("app.arcRpcUrl") ? (config.get("app.arcRpcUrl") as string) : ""),
+});
 const payoutAddresses = config.get("indexer.merchantPayoutAddresses") as string[];
 for (const address of payoutAddresses) {
   if (!/^0x[\da-f]{40}$/.test(address)) {
