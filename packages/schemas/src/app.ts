@@ -5,6 +5,16 @@ export interface AppPage<T> {
   readonly nextCursor: string | null;
 }
 
+export type AppBundler = "circle" | "pimlico" | "alchemy" | "zerodev";
+
+export interface AppWalletConfig {
+  readonly circleClientUrl: string;
+  readonly circleClientKey: string;
+  readonly arcRpcUrl: string;
+  readonly bundlerOrder: readonly AppBundler[];
+  readonly bundlerEndpoints: Partial<Record<AppBundler, string>>;
+}
+
 export interface SessionRequest {
   readonly challengeId: string;
   readonly credentialId: string;
