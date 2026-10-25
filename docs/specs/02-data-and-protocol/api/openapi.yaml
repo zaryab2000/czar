@@ -493,6 +493,43 @@ components:
         attestationObject: { type: string, maxLength: 8192, description: base64url }
         msca: { $ref: "#/components/schemas/Address" }
 
+    AppWalletConfig:
+      type: object
+      description: Public, same-origin wallet bootstrap values from validated server config (SCR-140). K2 is a public-facing client key, not a private key.
+      x-privacyClass: public
+      additionalProperties: false
+      required: [circleClientUrl, circleClientKey, arcRpcUrl, bundlerOrder, bundlerEndpoints]
+      properties:
+        circleClientUrl:
+          type: string
+          format: uri
+          minLength: 1
+          description: Circle Modular Wallets client base URL from app.circleClientUrl.
+        circleClientKey:
+          type: string
+          minLength: 1
+          description: Public-facing K2 client key from app.circleClientKey.
+        arcRpcUrl:
+          type: string
+          format: uri
+          minLength: 1
+          description: Browser Arc RPC URL from app.arcRpcUrl.
+        bundlerOrder:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          description: Existing app.bundlerOrder, tried in order.
+          items: { type: string, enum: [circle, pimlico, alchemy, zerodev] }
+        bundlerEndpoints:
+          type: object
+          additionalProperties: false
+          description: Existing app.bundlerEndpoints, keyed by bundler name.
+          properties:
+            circle: { type: string, format: uri }
+            pimlico: { type: string, format: uri }
+            alchemy: { type: string, format: uri }
+            zerodev: { type: string, format: uri }
+
     Me:
       type: object
       description: The signed-in user's accounts and limits (mirror of chain state).
@@ -1386,6 +1423,21 @@ paths:
         "409": { $ref: "#/components/responses/Problem" }
         "422": { $ref: "#/components/responses/Problem" }
         "429": { $ref: "#/components/responses/RateLimited" }
+
+  /v1/app/wallet-config:
+    get:
+      tags: [app]
+      summary: Public wallet bootstrap before passkey registration (SCR-140).
+      operationId: getAppWalletConfig
+      responses:
+        "200":
+          description: Public wallet configuration; Cache-Control no-store.
+          headers:
+            Cache-Control:
+              description: Always no-store; browser obtains current server configuration.
+              schema: { type: string, enum: [no-store] }
+          content: { application/json: { schema: { $ref: "#/components/schemas/AppWalletConfig" } } }
+        "503": { $ref: "#/components/responses/Problem" }
 
   /v1/me:
     get:

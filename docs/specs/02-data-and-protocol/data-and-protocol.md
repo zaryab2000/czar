@@ -992,12 +992,13 @@ Full definition: `api/openapi.yaml` (OpenAPI 3.1; operation ids are checked by t
 | POST | `/v1/outcomes` (`reportOutcome`) | key required | `OutcomeReport` → `OutcomeRecorded` | backs MCP `report_outcome` (AM-01) |
 | POST | `/v1/models/complete` (`completeModelCall`) | key required, **never replayed** | `ModelCallRequest` → `ModelCallResponse` | model proxy for P-01, P-04, P-05, P-06; stores only token counts (D31, AM-02); a repeated key gets `409 replay-not-stored` (RV-043) |
 
-**App surface (`AppSession`)**
+**App surface (`AppSession`, except public wallet bootstrap)**
 
 | Method | Path | Idempotent? | Request → Response | Notes |
 |---|---|---|---|---|
+| GET | `/v1/app/wallet-config` (`getAppWalletConfig`) | yes | → `AppWalletConfig` | no auth; same-origin public K2 and RPC/bundler settings before passkey registration; `Cache-Control: no-store` (SCR-140) |
 | POST | `/v1/auth/session` | key required | `SessionRequest` (WebAuthn assertion) → `SessionResponse` | no auth |
-| GET | `/v1/me` | yes | → `Me` (MSCA, vault, balance mirror, per-category limits, frozen/paused) | |
+| GET | `/v1/me` | yes | → `Me` (MSCA, vault, balance mirror, per-category limits, frozen/paused) | no wallet-configuration headers (SCR-140) |
 | GET | `/v1/approvals?status=pending` | yes | → page of `ApprovalSummary` | the source of truth for approvals (FD-32) |
 | GET | `/v1/approvals/{planId}` | yes | → `Plan` (§4.5) | payees, amounts, alternates shown in USD (D51) |
 | POST | `/v1/approvals/{planId}/intent` | key required | → `ApprovalIntent` (`openEnvelope` calldata, `payeeRoot`, decoded args) | the app builds and submits the UserOp through Circle's bundler itself (D30, A6-19); Czar never submits owner UserOps |

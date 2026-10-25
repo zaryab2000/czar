@@ -36,11 +36,18 @@
 
 | Direction | Interface | Notes |
 |---|---|---|
-| App → server | `createSession` (`SessionRequest` WebAuthn assertion → `SessionResponse`), `getMe` (`Me`), `listApprovals` (`ApprovalSummary` page), `getApproval` (`Plan`), `createApprovalIntent` (`ApprovalIntent`), `notifySubmitted` (`SubmittedNotice`), `listEnvelopes`, `getEnvelope` (`EnvelopeDetail`), `createFreezeIntent` (`FreezeIntent`), `listReceipts` (`LedgerReceipt`), `listManualReturns` (`ManualReturn` page, SCR-133), `createPairingCode` (`PairingCode`), `listDevices` (`Device` page), `revokeDevice` (SCR-134), `getMonthlyStatement` (`MonthlyStatement`), `getSoulPointer` (`SoulPointer`); `createPushSubscription` / `deletePushSubscription` stay defined in 02 but are **stage 2** (D69) and not called in Phase 1. Route: `getSoulPointer` (`SoulPointer`) | 02 §9.2 app surface; bearer `AppSession` |
+| App → server | `getAppWalletConfig` (`AppWalletConfig`, public before sign-in, SCR-140), `createSession` (`SessionRequest` WebAuthn assertion → `SessionResponse`), `getMe` (`Me`), `listApprovals` (`ApprovalSummary` page), `getApproval` (`Plan`), `createApprovalIntent` (`ApprovalIntent`), `notifySubmitted` (`SubmittedNotice`), `listEnvelopes`, `getEnvelope` (`EnvelopeDetail`), `createFreezeIntent` (`FreezeIntent`), `listReceipts` (`LedgerReceipt`), `listManualReturns` (`ManualReturn` page, SCR-133), `createPairingCode` (`PairingCode`), `listDevices` (`Device` page), `revokeDevice` (SCR-134), `getMonthlyStatement` (`MonthlyStatement`), `getSoulPointer` (`SoulPointer`); `createPushSubscription` / `deletePushSubscription` stay defined in 02 but are **stage 2** (D69) and not called in Phase 1. Route: `getSoulPointer` (`SoulPointer`) | 02 §9.2 app surface; bearer `AppSession` except public `getAppWalletConfig` |
 | App → Circle | `@circle-fin/modular-wallets-core` 1.0.16. The passkey is created and used with browser WebAuthn against Czar's own relying party (SCR-125); the owner account is viem `toWebAuthnAccount` wrapped by Circle `toCircleSmartAccount`; the bundler transport is `toModularTransport(clientUrl + "/arcTestnet", clientKey)` (A6-19). `toPasskeyTransport` is not used: Circle's RP service would hold the credential registration, which SCR-125 keeps in Czar's `passkey_credentials` (SCR-135). `clientUrl`, the `K2` client key (a public-facing credential) and the app's RPC URL come from `app.circleClientUrl`, `app.circleClientKey` and `app.arcRpcUrl` | A6-05, A6-06 |
 | App → Arc (through the bundler) | UserOps that call `CzarVaultFactory.createVault(ownerAccount, salt)` (03 `czar-vault-factory.md` §5), `ICzarVault.openEnvelope(p)`, `freeze()`, `unfreeze()`, `setCategoryLimits(categoryId, userMax, autoLimit)`, `withdraw(to, amount)`, `recordManualReturn(pocket, amount)` (SCR-133, calldata from `@czar/vault-client`), USDC `transfer` into the vault | calldata comes from the server intents for approvals and freeze; the app re-encodes `ApprovalIntent.decoded` with `@czar/vault-client` and refuses if it differs from `calldata` |
 | App → secondary bundlers | Pimlico, Alchemy, ZeroDev (all support Arc testnet and mainnet, A6-15 to A6-17) when Circle's transport fails | `SubmittedNotice.bundler` records which one |
 | Events consumed | none directly; the server mirrors chain state from CZ-19 (`EnvelopeOpened`, `Frozen`, …) into `Me`, `Envelope`, `LedgerReceipt` |
+
+The browser obtains all wallet configuration from same-origin public
+`GET /v1/app/wallet-config` before passkey registration's counterfactual
+address read or any owner UserOp (SCR-140). Its body carries the three
+SCR-135 values plus `app.bundlerOrder` and `app.bundlerEndpoints`. The
+browser rejects absent or invalid values; there are no build-time or local
+test defaults. `/v1/me` does not carry wallet configuration headers.
 
 ### 5. Internal design
 
@@ -405,4 +412,5 @@ K17 VAPID private key in the secret store; a leak lets an attacker spam notifica
 | 2026-10-20 | D91 | Approval screen shows each step's reason, each losing alternative, and the result format. |
 | 2026-10-21 | SCR-125 | Passkey enrolment and challenge routes (§5.2), `Me.vaultCreated`, `app.challengeTtlSeconds`, `app.bundlerEndpoints`, local fork + mock bundler test setup. |
 | 2026-10-25 | SCR-135 | §4 passkey transport aligned with SCR-125; `app.circleClientUrl`, `app.circleClientKey`, `app.arcRpcUrl`. |
+| 2026-10-25 | SCR-140 | §4 public wallet configuration before sign-in, replacing `/v1/me` bundler headers. |
 | 2026-10-25 | SCR-132, SCR-133, SCR-134 | "Approval sent" state; `recordManualReturn` UserOp and the Envelope "Money to record" section; device routes on Settings; wording. |
