@@ -127,6 +127,7 @@ export interface State {
   batches: Set<string>;
   native: Map<string, bigint>;
   slowWithdrawAllowed: boolean;
+  pocketSpendAfterObservation: boolean;
 }
 
 export function defaultState(pocket: Address): State {
@@ -214,8 +215,10 @@ export function defaultState(pocket: Address): State {
     balances: {
       gatewayApi: 0n,
       gatewayAvailable: 0n,
+      gatewayApiObservedAt: NOW * 1000,
       gatewayWithdrawing: 0n,
       withdrawalBlock: 0n,
+      currentBlock: 67_000_000n,
       usdc: 0n,
       native: 0n,
       pendingPullback: false,
@@ -238,6 +241,7 @@ export function defaultState(pocket: Address): State {
     batches: new Set([h("7")]),
     native: new Map(),
     slowWithdrawAllowed: false,
+    pocketSpendAfterObservation: false,
   };
 }
 
@@ -274,6 +278,7 @@ export function fakeProjection(state: State): Projection {
     evidenceBatchExists: async (root) => state.batches.has(root),
     nativeBalance: async (address) => state.native.get(address.toLowerCase()) ?? 0n,
     slowWithdrawAllowed: async () => state.slowWithdrawAllowed,
+    pocketSpendAfterObservation: async () => state.pocketSpendAfterObservation,
   };
 }
 

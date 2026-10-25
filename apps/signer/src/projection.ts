@@ -87,8 +87,10 @@ export interface JobView {
 export interface PocketBalances {
   readonly gatewayApi: bigint;
   readonly gatewayAvailable: bigint;
+  readonly gatewayApiObservedAt: number | null;
   readonly gatewayWithdrawing: bigint;
   readonly withdrawalBlock: bigint;
+  readonly currentBlock: bigint;
   readonly usdc: bigint;
   readonly native: bigint;
   readonly pendingPullback: boolean;
@@ -117,4 +119,5 @@ export interface Projection {
   nativeBalance(address: Address): Promise<bigint>;
   /** `owner asked` or Gateway API down for `payer.pullbackApiDownHours` (CZ-15). */
   slowWithdrawAllowed(pocket: Address): Promise<boolean>;
+  pocketSpendAfterObservation(pocket: Address, observedAt: number): Promise<boolean>;
 }

@@ -1,7 +1,14 @@
 // CZ-27 §14 policy tests: for every kind one accepted request and one denial per rule, plus the named
 // RV tests. Every denial must leave the backend untouched.
 import { describe, expect, it } from "vitest";
-import { decodeFunctionData, parseTransaction, recoverAddress, slice, type Hex } from "viem";
+import {
+  decodeFunctionData,
+  parseAbi,
+  parseTransaction,
+  recoverAddress,
+  slice,
+  type Hex,
+} from "viem";
 import {
   derivedNonce,
   KIND_TAGS,
@@ -1058,6 +1065,140 @@ describe("K4 pocket kinds", () => {
     expect(call.args?.[0]?.toLowerCase()).toBe(VAULT);
   });
 
+  it("initiates a long-outage withdrawal from the last good API figure", async () => {
+    const t = await harness({
+      projection: {
+        slowWithdrawAllowed: async () => true,
+        pocketSpendAfterObservation: async () => false,
+      },
+    });
+    t.state.balances = {
+      ...t.state.balances,
+      gatewayApi: 20_000n,
+      gatewayAvailable: 20_000n,
+      gatewayApiFresh: false,
+      gatewayApiObservedAt: NOW * 1000 - 600_000,
+    };
+
+    await t.signer.sign("cz-15", {
+      keyId: "K4",
+      kind: "pocket-slow-withdraw",
+      payload: { pocket: t.pocket, step: "initiate", value: "20000" },
+    });
+
+    const call = decodeFunctionData({
+      abi: parseAbi(["function initiateWithdrawal(address token,uint256 amount)"]),
+      data: t.prepared[0]?.data as Hex,
+    });
+    expect(call.args).toEqual([NETWORK.usdc, 20_000n]);
+  });
+
+  it("denies stale slow withdrawal without an observed figure, on mismatch, or after pocket spend", async () => {
+    const missing = await harness({ projection: { slowWithdrawAllowed: async () => true } });
+    missing.state.balances = {
+      ...missing.state.balances,
+      gatewayApiFresh: false,
+      gatewayApiObservedAt: null,
+      gatewayAvailable: 20_000n,
+    };
+    await expectDenied(
+      missing,
+      missing.signer.sign("cz-15", {
+        keyId: "K4",
+        kind: "pocket-slow-withdraw",
+        payload: { pocket: missing.pocket, step: "initiate", value: "20000" },
+      }),
+      "gateway-figure-missing",
+    );
+
+    const mismatch = await harness({
+      projection: {
+        slowWithdrawAllowed: async () => true,
+        pocketSpendAfterObservation: async () => false,
+      },
+    });
+    mismatch.state.balances = {
+      ...mismatch.state.balances,
+      gatewayApiFresh: false,
+      gatewayApiObservedAt: NOW * 1000 - 600_000,
+      gatewayAvailable: 20_000n,
+    };
+    await expectDenied(
+      mismatch,
+      mismatch.signer.sign("cz-15", {
+        keyId: "K4",
+        kind: "pocket-slow-withdraw",
+        payload: { pocket: mismatch.pocket, step: "initiate", value: "19999" },
+      }),
+      "slow-withdraw-value-mismatch",
+    );
+
+    const spent = await harness({
+      projection: {
+        slowWithdrawAllowed: async () => true,
+        pocketSpendAfterObservation: async () => true,
+      },
+    });
+    spent.state.balances = {
+      ...spent.state.balances,
+      gatewayApiFresh: false,
+      gatewayApiObservedAt: NOW * 1000 - 600_000,
+      gatewayAvailable: 20_000n,
+    };
+    await expectDenied(
+      spent,
+      spent.signer.sign("cz-15", {
+        keyId: "K4",
+        kind: "pocket-slow-withdraw",
+        payload: { pocket: spent.pocket, step: "initiate", value: "20000" },
+      }),
+      "pocket-spend-after-observation",
+    );
+  });
+
+  it("withdraws only when the chain withdrawal is open and mature, without fresh API data", async () => {
+    const t = await harness({ projection: { slowWithdrawAllowed: async () => false } });
+    t.state.pocket = { ...t.state.pocket!, slowWithdrawalOpen: true };
+    t.state.balances = {
+      ...t.state.balances,
+      gatewayApiFresh: false,
+      gatewayWithdrawing: 20_000n,
+      withdrawalBlock: 100n,
+      currentBlock: 100n,
+    };
+
+    await t.signer.sign("cz-15", {
+      keyId: "K4",
+      kind: "pocket-slow-withdraw",
+      payload: { pocket: t.pocket, step: "withdraw" },
+    });
+
+    const call = decodeFunctionData({
+      abi: parseAbi(["function withdraw(address token)"]),
+      data: t.prepared[0]?.data as Hex,
+    });
+    expect(call.args).toEqual([NETWORK.usdc]);
+
+    const early = await harness({ projection: { slowWithdrawAllowed: async () => false } });
+    early.state.pocket = { ...early.state.pocket!, slowWithdrawalOpen: true };
+    early.state.balances = {
+      ...early.state.balances,
+      gatewayApiFresh: false,
+      gatewayWithdrawing: 20_000n,
+      withdrawalBlock: 101n,
+      currentBlock: 100n,
+    };
+    await expectDenied(
+      early,
+      early.signer.sign("cz-15", {
+        keyId: "K4",
+        kind: "pocket-slow-withdraw",
+        payload: { pocket: early.pocket, step: "withdraw" },
+      }),
+      "slow-withdraw-not-allowed",
+    );
+  });
+
   it("pocket-delegate names only the owning vault; slow withdraw needs the API-down or owner condition", async () => {
     const t = await harness();
     await t.signer.sign("cz-15", {
@@ -1081,10 +1222,14 @@ describe("K4 pocket kinds", () => {
         kind: "pocket-slow-withdraw",
         payload: { pocket: t.pocket, step: "withdraw" },
       }),
-      "slow-withdraw-not-allowed",
+      "slow-withdrawal-not-open",
     );
     t.state.slowWithdrawAllowed = true;
-    t.state.balances = { ...t.state.balances, gatewayApiFresh: false };
+    t.state.balances = {
+      ...t.state.balances,
+      gatewayApiFresh: false,
+      gatewayApiObservedAt: null,
+    };
     await expectDenied(
       t,
       t.signer.sign("cz-15", {
@@ -1092,11 +1237,12 @@ describe("K4 pocket kinds", () => {
         kind: "pocket-slow-withdraw",
         payload: { pocket: t.pocket, step: "initiate", value: "10" },
       }),
-      "gateway-balance-stale",
+      "gateway-figure-missing",
     );
     t.state.balances = {
       ...t.state.balances,
       gatewayApiFresh: true,
+      gatewayApiObservedAt: NOW * 1000,
       gatewayApi: 10n,
       gatewayAvailable: 10n,
     };

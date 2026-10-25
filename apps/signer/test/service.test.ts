@@ -226,8 +226,10 @@ describe("pocket keys (K4, RV-004)", () => {
       t.state.balances = {
         gatewayApi: 0n,
         gatewayAvailable: 0n,
+        gatewayApiObservedAt: null,
         gatewayWithdrawing: 0n,
         withdrawalBlock: 0n,
+        currentBlock: 0n,
         usdc: 0n,
         native: 0n,
         pendingPullback: false,
@@ -241,8 +243,10 @@ describe("pocket keys (K4, RV-004)", () => {
     t.state.balances = {
       gatewayApi: 0n,
       gatewayAvailable: 0n,
+      gatewayApiObservedAt: null,
       gatewayWithdrawing: 0n,
       withdrawalBlock: 0n,
+      currentBlock: 0n,
       usdc: 0n,
       native: 499n,
       pendingPullback: false,

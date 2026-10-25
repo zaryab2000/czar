@@ -170,7 +170,12 @@ function indexerProjection(
   sql: Sql,
 ): Pick<
   Projection,
-  "envelope" | "pocket" | "pocketBalances" | "nanoSpent" | "slowWithdrawAllowed"
+  | "envelope"
+  | "pocket"
+  | "pocketBalances"
+  | "nanoSpent"
+  | "slowWithdrawAllowed"
+  | "pocketSpendAfterObservation"
 > {
   return {
     envelope: (vault, id) => readEnvelope(sql, vault, id),
@@ -183,6 +188,8 @@ function indexerProjection(
     pocketBalances: (address) => pocketBalances(input, sql, address),
     nanoSpent: (pocket, payTo) => nanoSpend(sql, pocket, payTo),
     slowWithdrawAllowed: (address) => isSlowWithdrawAllowed(input, sql, address),
+    pocketSpendAfterObservation: (pocket, observedAt) =>
+      pocketSpendAfterObservation(input, sql, pocket, observedAt),
   };
 }
 
@@ -296,8 +303,10 @@ async function pocketBalances(
   return {
     gatewayApi: gatewayAvailable,
     gatewayAvailable,
+    gatewayApiObservedAt: Number.isFinite(observedAt) ? observedAt : null,
     gatewayWithdrawing: withdrawing,
     withdrawalBlock,
+    currentBlock: block,
     usdc: usdcBalance,
     native,
     pendingPullback: pullbacksResult.rows.length > 0,
@@ -310,8 +319,6 @@ async function isSlowWithdrawAllowed(
   sql: Sql,
   pocket: Address,
 ): Promise<boolean> {
-  const balances = await pocketBalances(input, sql, pocket);
-  if (!balances.gatewayApiFresh) return false;
   const downHours = Number(input.config.get("payer.pullbackApiDownHours"));
   const failures = await sql(
     `SELECT 1 FROM payer_pullback_gateway_failures
@@ -320,11 +327,32 @@ async function isSlowWithdrawAllowed(
     [pocket, downHours],
   );
   if (failures.rows.length > 0) return true;
+  const balances = await pocketBalances(input, sql, pocket);
+  if (!balances.gatewayApiFresh) return false;
   const view = await readPocket(sql, pocket);
   const dust =
     BigInt(input.config.get("payer.pullbackMaxFeeAtomic") as number) +
     BigInt(input.config.get("payer.pullbackSafetyAtomic") as number);
   return view?.state === "Closed" && balances.gatewayAvailable <= dust;
+}
+
+async function pocketSpendAfterObservation(
+  input: ProjectionInput,
+  sql: Sql,
+  pocket: Address,
+  observedAt: number,
+): Promise<boolean> {
+  const maxAgeMs = Number(input.config.get("indexer.gatewayBalanceMaxAgeSeconds")) * 1000;
+  const keyRef = `K4:${pocket.toLowerCase()}`;
+  const result = await sql(
+    `SELECT 1 FROM audit
+     WHERE action='signer:gateway-nano' AND outcome='signed'
+       AND at >= $2::timestamptz
+       AND object_ids @> $1::jsonb
+     LIMIT 1`,
+    [JSON.stringify([{ keyRef }]), new Date(observedAt - maxAgeMs).toISOString()],
+  );
+  return result.rows.length > 0;
 }
 
 async function nanoSpend(sql: Sql, pocket: Address, payTo: Address) {

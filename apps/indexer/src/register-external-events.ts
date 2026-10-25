@@ -470,23 +470,6 @@ ponder.on("GatewayPoll:block", async ({ context }) => {
     const pollAddresses = new Set<string>();
     for (const row of pocketRows) {
       const mirror = row.mirror as PocketRecord;
-      const balanceRow = await context.db.find(pocketBalances, {
-        pocket: mirror.pocket.toLowerCase(),
-      });
-      if (
-        mirror.state === "Closed" &&
-        balanceRow &&
-        isClosedPocketQuiet({
-          now: currentTime,
-          quietMs: (config.get("indexer.closedPocketQuietHours") as number) * 3_600_000,
-          zeroSince: balanceRow.closedZeroSince,
-          gatewayAvailable: BigInt(balanceRow.gatewayAvailableAtomic ?? "0"),
-          gatewayWithdrawing: BigInt(balanceRow.gatewayWithdrawingAtomic ?? "0"),
-          usdc: BigInt(balanceRow.pocketUsdcAtomic ?? "0"),
-        })
-      )
-        continue;
-      pollAddresses.add(mirror.pocket.toLowerCase());
       const observed = await pollPocketBalance(
         {
           pocket: mirror.pocket as Address,
@@ -518,6 +501,23 @@ ponder.on("GatewayPoll:block", async ({ context }) => {
         },
       );
       apiOutcomes.push({ apiError: observed.apiError, chainError: observed.chainError });
+      const quietHours = config.get("indexer.closedPocketQuietHours") as number;
+      const apiMaxAgeMs = (config.get("indexer.gatewayBalanceMaxAgeSeconds") as number) * 1000;
+      const quietPeriodComplete =
+        mirror.state === "Closed" &&
+        isClosedPocketQuiet({
+          now: currentTime,
+          quietMs: quietHours * 3_600_000,
+          zeroSince: observed.row.closedZeroSince,
+          gatewayAvailable: BigInt(observed.row.gatewayAvailableAtomic ?? "0"),
+          gatewayPendingBatch: BigInt(observed.row.gatewayPendingBatchAtomic ?? "0"),
+          gatewayWithdrawing: BigInt(observed.row.gatewayWithdrawingAtomic ?? "0"),
+          usdc: BigInt(observed.row.pocketUsdcAtomic ?? "0"),
+          apiObservedAt: observed.row.apiObservedAt,
+          apiMaxAgeMs,
+          chainReadSucceeded: !observed.chainError,
+        });
+      if (!quietPeriodComplete) pollAddresses.add(mirror.pocket.toLowerCase());
       const envelope =
         mirror.state === "Funded" || mirror.state === "Draining"
           ? await context.db.find(envelopes, {

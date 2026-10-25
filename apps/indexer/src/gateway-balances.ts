@@ -163,11 +163,25 @@ function closedZeroSince(
 ): string | null {
   if (input.state !== "Closed") return null;
   const available = row.gatewayAvailableAtomic;
+  const pendingBatch = row.gatewayPendingBatchAtomic;
   const withdrawing = row.gatewayWithdrawingAtomic;
   const usdc = row.pocketUsdcAtomic;
   const allObserved = apiSucceeded && chainSucceeded;
-  if (!allObserved || available === null || withdrawing === null || usdc === null) return null;
-  if (BigInt(available) > 0n || BigInt(withdrawing) > 0n || BigInt(usdc) > 0n) return null;
+  if (
+    !allObserved ||
+    available === null ||
+    pendingBatch === null ||
+    withdrawing === null ||
+    usdc === null
+  )
+    return previous?.closedZeroSince ?? null;
+  if (
+    BigInt(available) > 0n ||
+    BigInt(pendingBatch) > 0n ||
+    BigInt(withdrawing) > 0n ||
+    BigInt(usdc) > 0n
+  )
+    return null;
   return previous?.closedZeroSince ?? new Date(now).toISOString();
 }
 
@@ -195,14 +209,25 @@ export function isClosedPocketQuiet(input: {
   quietMs: number;
   zeroSince: string | null;
   gatewayAvailable: bigint;
+  gatewayPendingBatch: bigint;
   gatewayWithdrawing: bigint;
   usdc: bigint;
+  apiObservedAt: string | null;
+  apiMaxAgeMs: number;
+  chainReadSucceeded: boolean;
 }): boolean {
+  const apiObservedAt = input.apiObservedAt === null ? Number.NaN : Date.parse(input.apiObservedAt);
+  const apiAge = input.now - apiObservedAt;
   if (
     input.zeroSince === null ||
     input.gatewayAvailable !== 0n ||
+    input.gatewayPendingBatch !== 0n ||
     input.gatewayWithdrawing !== 0n ||
-    input.usdc !== 0n
+    input.usdc !== 0n ||
+    !input.chainReadSucceeded ||
+    !Number.isFinite(apiObservedAt) ||
+    apiAge < 0 ||
+    apiAge > input.apiMaxAgeMs
   ) {
     return false;
   }

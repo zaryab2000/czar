@@ -663,18 +663,30 @@ async function pocketReturn(ctx: PolicyContext, req: Req): Promise<Decision> {
 async function pocketSlowWithdraw(ctx: PolicyContext, req: Req): Promise<Decision> {
   const pocket = req.pocket as Address;
   const view = await activePocket(ctx, pocket);
-  if (!(await ctx.projection.slowWithdrawAllowed(pocket))) deny("slow-withdraw-not-allowed");
-  const balances = await ctx.projection.pocketBalances(pocket);
-  if (!balances.gatewayApiFresh) deny("gateway-balance-stale");
-  if (req.step === "initiate") {
+  if (req.step === "withdraw") {
+    const balances = await ctx.projection.pocketBalances(pocket);
+    if (balances.gatewayWithdrawing === 0n) deny("slow-withdrawal-not-open");
+    if (balances.currentBlock < balances.withdrawalBlock) deny("slow-withdraw-not-allowed");
+  } else {
+    if (!(await ctx.projection.slowWithdrawAllowed(pocket))) deny("slow-withdraw-not-allowed");
+    const balances = await ctx.projection.pocketBalances(pocket);
     if (view.slowWithdrawalOpen) deny("slow-withdrawal-open");
     const value = req.value as bigint | undefined;
     if (value === undefined) deny("shape");
-    if (value !== balances.gatewayAvailable) {
+    if (balances.gatewayApiObservedAt === null) deny("gateway-figure-missing");
+    if (!balances.gatewayApiFresh) {
+      if (balances.gatewayAvailable <= 0n) deny("slow-withdraw-not-allowed");
+      if (value !== balances.gatewayAvailable) deny("slow-withdraw-value-mismatch");
+      if (
+        await ctx.projection.pocketSpendAfterObservation(
+          pocket,
+          balances.gatewayApiObservedAt as number,
+        )
+      )
+        deny("pocket-spend-after-observation");
+    } else if (value !== balances.gatewayAvailable) {
       deny("slow-withdraw-value-mismatch");
     }
-  } else if (!view.slowWithdrawalOpen) {
-    deny("slow-withdrawal-not-open");
   }
   const data =
     req.step === "initiate"

@@ -100,8 +100,12 @@ describe("Gateway balance projection rules", () => {
         quietMs,
         zeroSince: new Date(now - quietMs + 1).toISOString(),
         gatewayAvailable: 0n,
+        gatewayPendingBatch: 0n,
         gatewayWithdrawing: 0n,
         usdc: 0n,
+        apiObservedAt: new Date(now - 30_000).toISOString(),
+        apiMaxAgeMs: 120_000,
+        chainReadSucceeded: true,
       }),
     ).toBe(false);
     expect(
@@ -110,8 +114,12 @@ describe("Gateway balance projection rules", () => {
         quietMs,
         zeroSince: new Date(now - quietMs).toISOString(),
         gatewayAvailable: 0n,
+        gatewayPendingBatch: 0n,
         gatewayWithdrawing: 0n,
         usdc: 0n,
+        apiObservedAt: new Date(now - 30_000).toISOString(),
+        apiMaxAgeMs: 120_000,
+        chainReadSucceeded: true,
       }),
     ).toBe(true);
     expect(
@@ -120,10 +128,35 @@ describe("Gateway balance projection rules", () => {
         quietMs,
         zeroSince: new Date(now - quietMs).toISOString(),
         gatewayAvailable: 0n,
+        gatewayPendingBatch: 0n,
         gatewayWithdrawing: 1n,
         usdc: 0n,
+        apiObservedAt: new Date(now - 30_000).toISOString(),
+        apiMaxAgeMs: 120_000,
+        chainReadSucceeded: true,
       }),
     ).toBe(false);
+    const completedQuietPeriod = {
+      now,
+      quietMs,
+      zeroSince: new Date(now - quietMs).toISOString(),
+      gatewayAvailable: 0n,
+      gatewayPendingBatch: 0n,
+      gatewayWithdrawing: 0n,
+      usdc: 0n,
+      apiObservedAt: new Date(now - 30_000).toISOString(),
+      apiMaxAgeMs: 120_000,
+      chainReadSucceeded: true,
+    };
+    expect(isClosedPocketQuiet({ ...completedQuietPeriod, gatewayPendingBatch: 1n })).toBe(false);
+    expect(isClosedPocketQuiet({ ...completedQuietPeriod, apiObservedAt: null })).toBe(false);
+    expect(
+      isClosedPocketQuiet({
+        ...completedQuietPeriod,
+        apiObservedAt: new Date(now - 121_000).toISOString(),
+      }),
+    ).toBe(false);
+    expect(isClosedPocketQuiet({ ...completedQuietPeriod, chainReadSucceeded: false })).toBe(false);
   });
 
   it("polls an exact pocket balance and reads withdrawal state at one chain block", async () => {
@@ -182,7 +215,7 @@ describe("Gateway balance projection rules", () => {
     expect(readContract.mock.calls.every((call) => call[0].blockNumber === 123n)).toBe(true);
   });
 
-  it("retains last good API figures and restarts Closed quiet time after a malformed poll", async () => {
+  it("retains Closed quiet time after malformed or failed reads and resets for pending batches", async () => {
     const previous: PocketBalanceRow = {
       pocket,
       vault,
@@ -226,7 +259,73 @@ describe("Gateway balance projection rules", () => {
       apiObservedAt: "2026-10-24T12:00:00.000Z",
       apiConsecutiveFailures: 1,
       apiLastError: "malformed",
-      closedZeroSince: null,
+      closedZeroSince: "2026-10-24T12:00:00.000Z",
     });
+
+    const failedChainStore = memoryStore(previous);
+    const failedChain = await pollPocketBalance(
+      {
+        pocket,
+        vault,
+        state: "Closed",
+        domain: 26,
+        gatewayWallet: vault,
+        usdc: vault,
+        apiBase: "http://127.0.0.1:4999",
+        timeoutMs: 1000,
+        quietMs: 48 * 60 * 60 * 1000,
+      },
+      {
+        fetch: vi.fn().mockResolvedValue(
+          new Response(
+            JSON.stringify({
+              token: "USDC",
+              balances: [{ domain: 26, depositor: pocket, balance: "0", pendingBatch: "0" }],
+            }),
+            { status: 200 },
+          ),
+        ),
+        chain: {
+          getBlockNumber: async () => {
+            throw new Error("rpc down");
+          },
+          readContract: async () => 0n,
+        } as never,
+        store: failedChainStore,
+        now: () => Date.parse("2026-10-25T12:00:00.000Z"),
+      },
+    );
+    expect(failedChain.chainError).toBe(true);
+    expect(failedChainStore.current()?.closedZeroSince).toBe("2026-10-24T12:00:00.000Z");
+
+    const pendingStore = memoryStore(previous);
+    await pollPocketBalance(
+      {
+        pocket,
+        vault,
+        state: "Closed",
+        domain: 26,
+        gatewayWallet: vault,
+        usdc: vault,
+        apiBase: "http://127.0.0.1:4999",
+        timeoutMs: 1000,
+        quietMs: 48 * 60 * 60 * 1000,
+      },
+      {
+        fetch: vi.fn().mockResolvedValue(
+          new Response(
+            JSON.stringify({
+              token: "USDC",
+              balances: [{ domain: 26, depositor: pocket, balance: "0", pendingBatch: "0.000001" }],
+            }),
+            { status: 200 },
+          ),
+        ),
+        chain: { getBlockNumber: async () => 123n, readContract: async () => 0n } as never,
+        store: pendingStore,
+        now: () => Date.parse("2026-10-25T12:00:00.000Z"),
+      },
+    );
+    expect(pendingStore.current()?.closedZeroSince).toBeNull();
   });
 });

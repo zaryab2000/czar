@@ -267,12 +267,39 @@ describe("Postgres signer projection", () => {
       gatewayApi: 5000n,
       gatewayAvailable: 5000n,
       gatewayApiFresh: false,
+      gatewayApiObservedAt: Date.parse("2026-10-24T00:00:00.000Z"),
       gatewayWithdrawing: 9n,
       withdrawalBlock: 777n,
+      currentBlock: 12n,
       usdc: 11n,
       native: 100n,
     });
     expect(readFunctions).toEqual(["withdrawingBalance", "withdrawalBlock", "balanceOf"]);
+  });
+
+  it("checks K4 gateway-nano audit rows since the observation safety boundary", async () => {
+    const queries: { query: string; values: unknown[] | undefined }[] = [];
+    const projection = createPostgresProjection({
+      config: loadConfig(),
+      database: {
+        async query(query, values) {
+          queries.push({ query, values });
+          return { rows: [{}] };
+        },
+      },
+      chain: fakeChain(),
+      factory,
+    });
+    const observedAt = Date.parse("2026-10-25T12:00:00.000Z");
+
+    await expect(projection.pocketSpendAfterObservation(payee, observedAt)).resolves.toBe(true);
+
+    expect(queries).toHaveLength(1);
+    expect(queries[0]?.query).toContain("action='signer:gateway-nano'");
+    expect(queries[0]?.query).toContain("outcome='signed'");
+    expect(queries[0]?.query).toContain("object_ids @>");
+    expect(JSON.parse(String(queries[0]?.values?.[0]))).toEqual([{ keyRef: `K4:${payee}` }]);
+    expect(queries[0]?.values?.[1]).toEqual(new Date(observedAt - 120_000).toISOString());
   });
 
   it("counts received, batched, confirmed and completed nanopayments only", async () => {
