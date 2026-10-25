@@ -14,7 +14,7 @@
 - The opening watcher polls `opening` objectives and approved plans waiting in
   `awaiting-approval`; it matches only an `Open` envelope for the user's vault and plan
   hash, leaves timed-out plans approved for late matching, and expires both records at
-  the plan expiry.
+  the plan expiry. Its initial poll now runs, and shutdown awaits an in-flight match.
 - Model clients are optional. With no model, P-01 reports `screen-unavailable` and the
   boundary quarantines the result without delivering it.
 - Registered GET query and POST JSON `probeInput` is sent only to the unpaid safe probe.
@@ -59,11 +59,11 @@ SCR-136/D94.
 ## Validation
 
 - `docker compose -f apps/server/test/compose.yaml up -d` — test Postgres started.
-- `fnm exec --using=22.22.0 pnpm --filter @czar/server exec vitest run test/main.test.ts test/local-main.test.ts test/planner/planner.test.ts test/planner/service.test.ts test/planner/loop.test.ts test/objectives/opening-watcher.test.ts test/boundary.test.ts` — 7 files passed, 39 tests passed after the missing-volume regression was added.
+- `fnm exec --using=22.22.0 pnpm --filter @czar/server exec vitest run test/main.test.ts test/local-main.test.ts test/planner/planner.test.ts test/planner/service.test.ts test/planner/loop.test.ts test/objectives/opening-watcher.test.ts test/boundary.test.ts` — 7 files passed, 40 tests passed after the missing-volume and watcher-start regressions were added. The watcher test failed before the sentinel fix because the indexer lookup was never called; after the fix it verifies the lookup and that `stop()` waits for the opening match to commit.
 - `fnm exec --using=22.22.0 pnpm --filter @czar/server typecheck` — passed.
 - `fnm exec --using=22.22.0 pnpm lint` — passed; oxlint reported no warnings and oxfmt found all 417 files formatted.
 - `git diff --check` — passed.
-- `fnm exec --using=22.22.0 pnpm --filter @czar/server test` — **failed**: 45 files passed; 4 files failed; 264 tests passed and 2 were skipped. Failures: `test/app-reads.test.ts` needs a responding Arc RPC at `127.0.0.1:8549`; `test/job-routes.test.ts` starts the local entry, which refuses startup without pinned `arc-anvil` (`anvil_nodeInfo`); `test/migrate.test.ts` expects 29 tables while the current base creates 30, including `merchant_payment_identifiers`; `test/evidence/receipt-arc.test.ts` fails in its deployment setup (`script/deploy.sh`). These are recorded as current-suite failures, not passes.
+- `fnm exec --using=22.22.0 pnpm --filter @czar/server test` — **failed**: 45 files passed; 4 files failed; 265 tests passed and 2 were skipped. Failures: `test/app-reads.test.ts` needs a responding Arc RPC at `127.0.0.1:8549`; `test/job-routes.test.ts` starts the local entry, which refuses startup without pinned `arc-anvil` (`anvil_nodeInfo`); `test/migrate.test.ts` expects 29 tables while the current base creates 30, including `merchant_payment_identifiers`; `test/evidence/receipt-arc.test.ts` fails in its deployment setup (`script/deploy.sh`). These are recorded as current-suite failures, not passes.
 - Local Arc process-level startup / T-050a, crash/restart matrix, testnet, live model calls, and deployment — **NOT RUN / DEFERRED** under TA-08 scope and D94. The package-suite attempts above did not constitute Arc acceptance evidence.
 
 ## Coordination

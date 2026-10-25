@@ -248,16 +248,15 @@ export function startOpeningWatcher(dependencies: OpeningWatcherDependencies): {
   stop(): Promise<void>;
 } {
   let stopped = false;
-  let running: Promise<void> = Promise.resolve();
+  let running: Promise<void> | undefined;
   const poll = () => {
-    if (stopped || running !== resolved) return;
+    if (stopped || running) return;
     running = pollOpeningObjectives(dependencies)
       .catch((error: unknown) => dependencies.onError?.(error))
       .finally(() => {
-        running = resolved;
+        running = undefined;
       });
   };
-  const resolved = Promise.resolve();
   const timer = setInterval(poll, Number(dependencies.config.get("api.openingPollMs")));
   poll();
   return {

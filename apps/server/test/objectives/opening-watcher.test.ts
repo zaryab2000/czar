@@ -5,6 +5,7 @@ import { makeObjectiveSubmission, seedDevice, TEST_USER_ID } from "#test/fixture
 import {
   createIndexerOpeningLookup,
   pollOpeningObjectives,
+  startOpeningWatcher,
   type OpeningEnvelope,
 } from "#src/objectives/opening-watcher";
 
@@ -174,5 +175,46 @@ describe("opening watcher", () => {
       rows: [{ state: "expired" }],
     });
     expect(lookup).not.toHaveBeenCalled();
+  });
+
+  it("runs its initial poll and stop waits for the opening match to finish", async () => {
+    await seedOpeningObjective("2026-10-23T00:00:00.000Z");
+    let resolveLookup: ((value: OpeningEnvelope | null) => void) | undefined;
+    const lookup = vi.fn(
+      () =>
+        new Promise<OpeningEnvelope | null>((resolve) => {
+          resolveLookup = resolve;
+        }),
+    );
+    const watcher = startOpeningWatcher(dependencies(lookup, new Date("2026-10-21T00:01:00Z")));
+    await vi.waitFor(() => expect(lookup).toHaveBeenCalledOnce());
+
+    let stopped = false;
+    const stopping = watcher.stop().then(() => {
+      stopped = true;
+    });
+    await Promise.resolve();
+    expect(stopped).toBe(false);
+    if (!resolveLookup) throw new Error("Opening lookup did not start.");
+    resolveLookup({
+      envelope: {
+        envelopeRef: "eip155:5042002:0x0000000000000000000000000000000000000001:7",
+        vault: VAULT,
+        planHash: PLAN_HASH,
+        status: "Open",
+      },
+    });
+    await stopping;
+
+    await expect(
+      pool().query("SELECT state,envelope_ref FROM objectives WHERE objective_id=$1", [OBJECTIVE]),
+    ).resolves.toMatchObject({
+      rows: [
+        {
+          state: "executing",
+          envelope_ref: "eip155:5042002:0x0000000000000000000000000000000000000001:7",
+        },
+      ],
+    });
   });
 });
