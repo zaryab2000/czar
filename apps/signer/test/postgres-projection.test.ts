@@ -63,7 +63,7 @@ describe("Postgres signer projection", () => {
       database: {
         async query(query, values) {
           calls.push({ query, values });
-          return { rows: [{}] };
+          return { rows: values?.[3] === payee ? [{}] : [] };
         },
       },
       chain: fakeChain(),
@@ -74,7 +74,11 @@ describe("Postgres signer projection", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]?.query).toContain("FROM authorizations");
     expect(calls[0]?.query).toContain("settled=true");
-    expect(calls[0]?.values).toEqual([vault, paymentRef.nonce, paymentRef.amount]);
+    expect(calls[0]?.query).toContain("reservations");
+    expect(calls[0]?.values).toEqual([vault, paymentRef.nonce, paymentRef.amount, payee]);
+    await expect(projection.settledPayment(vault, { ...paymentRef, payTo: factory })).resolves.toBe(
+      false,
+    );
     expect(calls[0]?.query).not.toContain("evidence_receipts");
   });
 
@@ -123,12 +127,15 @@ describe("Postgres signer projection", () => {
       budget: "250000",
     };
     const calls: { query: string; values: unknown[] | undefined }[] = [];
+    let indexedJobVault = vault;
     const projection = createPostgresProjection({
       config: loadConfig(),
       database: {
         async query(query, values) {
           calls.push({ query, values });
-          return { rows: values?.[1] === "9" ? [{}] : [] };
+          return {
+            rows: values?.[1] === "9" && values?.[4] === indexedJobVault ? [{}] : [],
+          };
         },
       },
       chain: fakeChain(),
@@ -140,6 +147,7 @@ describe("Postgres signer projection", () => {
       false,
     );
     expect(calls[0]?.query).toContain("state='Completed'");
+    expect(calls[0]?.query).toContain("lower(vault)=lower($5)");
     expect(calls[0]?.query).toContain("mirror->>'provider'");
     expect(calls[0]?.query).toContain("mirror->>'budget'");
     expect(calls[0]?.values).toEqual([
@@ -147,7 +155,10 @@ describe("Postgres signer projection", () => {
       paymentRef.jobId,
       paymentRef.provider,
       paymentRef.budget,
+      vault,
     ]);
+    indexedJobVault = factory;
+    await expect(projection.settledPayment(vault, paymentRef)).resolves.toBe(false);
   });
 
   it("rebuilds stored plan leaves and used calls from server and indexer rows", async () => {

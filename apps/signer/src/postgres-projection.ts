@@ -314,10 +314,13 @@ async function settledPaymentQuery(
   switch (paymentRef.rail) {
     case "x402-exact":
       return sql(
-        `SELECT 1 FROM authorizations
-         WHERE lower(vault)=lower($1) AND lower(nonce)=lower($2)
-           AND amount::numeric=$3::numeric AND settled=true LIMIT 1`,
-        [vault, paymentRef.nonce, paymentRef.amount],
+        `SELECT 1 FROM authorizations AS a
+         JOIN reservations AS r
+           ON lower(r.vault)=lower(a.vault) AND r.reservation_id=a.reservation_id
+         WHERE lower(a.vault)=lower($1) AND lower(a.nonce)=lower($2)
+           AND a.amount::numeric=$3::numeric AND a.settled=true
+           AND lower(r.mirror->>'payee')=lower($4) LIMIT 1`,
+        [vault, paymentRef.nonce, paymentRef.amount, paymentRef.payTo],
       );
     case "gateway-batched":
       return sql(
@@ -332,8 +335,9 @@ async function settledPaymentQuery(
         `SELECT 1 FROM jobs
          WHERE lower(job_escrow)=lower($1) AND job_id=$2 AND state='Completed'
            AND lower(mirror->>'provider')=lower($3)
-           AND (mirror->>'budget')::numeric=$4::numeric LIMIT 1`,
-        [paymentRef.contract, paymentRef.jobId, paymentRef.provider, paymentRef.budget],
+           AND (mirror->>'budget')::numeric=$4::numeric
+           AND lower(vault)=lower($5) LIMIT 1`,
+        [paymentRef.contract, paymentRef.jobId, paymentRef.provider, paymentRef.budget, vault],
       );
     case "mpp":
       return { rows: [] };
