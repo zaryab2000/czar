@@ -18,6 +18,11 @@ const RESOURCE = "https://merchant.example/v1/search";
 
 interface SnapshotForReconstruction {
   readonly network: string;
+  readonly policy_version: string;
+  readonly descriptor: {
+    readonly usdcAsset: string;
+    readonly unverifiedWithApproval: boolean;
+  };
   readonly services: Array<{
     serviceId: string;
     capabilities: string[];
@@ -54,7 +59,7 @@ function reconstructEligibility(
     const payable = offers.filter(
       (reducedOffer) =>
         reducedOffer["scheme"] === "exact" &&
-        reducedOffer["asset"] === USDC_ASSET &&
+        reducedOffer["asset"] === snapshot.descriptor.usdcAsset &&
         reducedOffer["siwx"] === false &&
         reducedOffer["siwxOnly"] === false &&
         reducedOffer["batchSettlement"] === false,
@@ -90,7 +95,11 @@ function reconstructEligibility(
         ? 1
         : left.service_id.localeCompare(right.service_id),
   );
-  return { candidates, excluded, eligible };
+  const exploration =
+    snapshot.descriptor.unverifiedWithApproval && eligible[0]
+      ? { service_id: eligible[0].service_id, reason: "no-ranked-candidate" }
+      : undefined;
+  return { candidates, excluded, eligible, exploration };
 }
 
 function offer(
@@ -185,8 +194,11 @@ function setup(
   fetchImpl: SafeFetch,
   services: Record<string, ReturnType<typeof registration>>,
   now: () => Date,
+  configOverrides: Record<string, unknown> = {},
 ) {
-  const config = loadConfig({ envFile: { "selection.czarRegisteredServices": services } });
+  const config = loadConfig({
+    envFile: { "selection.czarRegisteredServices": services, ...configOverrides },
+  });
   return createRegisteredSelection({ config, safeFetch: fetchImpl, pool: getPool(), now });
 }
 
@@ -230,6 +242,12 @@ describe("registered selection", () => {
       }).slice(2, 18)}`,
     );
     expect(decision.snapshot_anchor_tx).toBeNull();
+    expect(body["descriptor"]).toMatchObject({
+      network: NETWORK,
+      usdcAsset: USDC_ASSET,
+      unverifiedWithApproval: true,
+    });
+    expect(`pol_${H(body["descriptor"]).slice(2, 18)}`).toBe(decision.policy_version);
     expect(decision.ranked).toEqual([]);
     expect(decision.unverified.map((row) => row.service_id)).toEqual([SERVICE_A, SERVICE_B]);
     expect(decision.exploration_slot?.service_id).toBe(SERVICE_A);
@@ -308,6 +326,8 @@ describe("registered selection", () => {
     const reconstructed = reconstructEligibility(snapshot, decision.query.task, maxPrice);
 
     expect(snapshot.services).toHaveLength(ids.length);
+    expect(`pol_${H(snapshot.descriptor).slice(2, 18)}`).toBe(snapshot.policy_version);
+    expect(snapshot.policy_version).toBe(decision.policy_version);
     expect(keccak256(toBytes(saved.rows[0]!.body_jcs))).toBe(decision.snapshot_id);
     expect(snapshot.services[0]).toMatchObject({
       serviceId: failed,
@@ -351,11 +371,38 @@ describe("registered selection", () => {
     }));
     expect(reconstructedUnverified).toEqual(decision.unverified);
     expect(reconstructed.eligible[0]?.service_id).toBe(mixed);
-    expect(decision.exploration_slot).toEqual({
-      service_id: reconstructedUnverified[0]?.service_id,
-      reason: "no-ranked-candidate",
-    });
+    expect(reconstructed.exploration).toEqual(decision.exploration_slot);
     expect(reconstructed.candidates).toHaveLength(decision.candidates_considered);
+  });
+
+  it("replays exploration-disabled policy from the stored descriptor", async () => {
+    const fetchImpl = vi.fn<SafeFetch>(async () => response("25", "0xaaa"));
+    const selection = setup(
+      fetchImpl,
+      { [SERVICE_A]: registration() },
+      () => new Date("2026-10-25T00:00:00Z"),
+      { "selection.unverifiedWithApproval": false },
+    );
+    const decision = await selection.rank.rank(query());
+    const saved = await getPool().query<{ body_jcs: string }>(
+      "SELECT body_jcs FROM selection_interim_snapshots WHERE snapshot_id = $1",
+      [decision.snapshot_id],
+    );
+    const snapshot = JSON.parse(saved.rows[0]!.body_jcs) as SnapshotForReconstruction;
+    const reconstructed = reconstructEligibility(
+      snapshot,
+      decision.query.task,
+      BigInt(String(decision.query.constraints["max_price_atomic"])),
+    );
+
+    expect(snapshot.descriptor).toMatchObject({
+      usdcAsset: USDC_ASSET,
+      unverifiedWithApproval: false,
+    });
+    expect(`pol_${H(snapshot.descriptor).slice(2, 18)}`).toBe(snapshot.policy_version);
+    expect(reconstructed.eligible.map(({ service_id }) => service_id)).toEqual([SERVICE_A]);
+    expect(reconstructed.exploration).toBeUndefined();
+    expect(decision.exploration_slot).toBeUndefined();
   });
 
   it("adds GET probe input only to the unpaid request and preserves the bare resource", async () => {

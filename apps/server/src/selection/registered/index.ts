@@ -65,9 +65,21 @@ interface SnapshotService {
   readonly probe: SnapshotProbe;
 }
 
+interface InterimPolicyDescriptor {
+  readonly policy: "czar-registered-interim";
+  readonly scr: "SCR-138";
+  readonly network: string;
+  readonly usdcAsset: string;
+  readonly offerRule: "scheme-exact,asset-usdc,no-siwx,no-siwx-only,no-batch-settlement";
+  readonly unverifiedWithApproval: boolean;
+  readonly exploration: "lowest-eligible-live-price-then-serviceId";
+  readonly ranked: "none";
+}
+
 interface InterimSnapshot {
   readonly kind: "czar-registered-interim-snapshot";
   readonly policy_version: string;
+  readonly descriptor: InterimPolicyDescriptor;
   readonly network: string;
   readonly services: readonly SnapshotService[];
 }
@@ -102,7 +114,7 @@ export function createRegisteredSelection(
   const network = String(options.config.get("selection.paymentNetwork"));
   const usdcAsset = String(options.config.get("chain.usdcAddress")).toLowerCase();
   const unverifiedWithApproval = Boolean(options.config.get("selection.unverifiedWithApproval"));
-  const policy = policyVersion(network, usdcAsset, unverifiedWithApproval);
+  const descriptor = policyDescriptor(network, usdcAsset, unverifiedWithApproval);
 
   async function getProbe(serviceId: string): Promise<ProbeOutcome | null> {
     const registration = registrations.get(serviceId);
@@ -145,10 +157,7 @@ export function createRegisteredSelection(
         return createDecision({
           query,
           services,
-          network,
-          policy,
-          usdcAsset,
-          explorationEnabled: unverifiedWithApproval,
+          descriptor,
           riskQuantile: Number(options.config.get("selection.riskQuantile")),
           weights: {
             cost: Number(options.config.get("selection.wCost")),
@@ -308,19 +317,22 @@ async function createDecision(args: {
     registration: Registration;
     outcome: ProbeOutcome;
   }[];
-  readonly network: string;
-  readonly policy: string;
-  readonly usdcAsset: string;
-  readonly explorationEnabled: boolean;
+  readonly descriptor: InterimPolicyDescriptor;
   readonly riskQuantile: number;
   readonly weights: Readonly<Record<string, number>>;
   readonly retentionDays: number;
   readonly pool: Pool;
   readonly now: () => Date;
 }): Promise<RankingDecision> {
-  const { query, services, network, policy, explorationEnabled, riskQuantile, weights, now } = args;
-  const snapshot = makeSnapshot(services, network, policy);
-  const eligibility = evaluateSnapshot(snapshot.services, query, network, args.usdcAsset);
+  const { query, services, descriptor, riskQuantile, weights, now } = args;
+  const policy = policyVersion(descriptor);
+  const snapshot = makeSnapshot(services, descriptor);
+  const eligibility = evaluateSnapshot(
+    snapshot.services,
+    query,
+    descriptor.network,
+    descriptor.usdcAsset,
+  );
   const snapshotId = await persistSnapshot(args.pool, snapshot, now(), args.retentionDays);
   return {
     schemaVersion: "1.1",
@@ -346,7 +358,7 @@ async function createDecision(args: {
     })),
     missing_dimensions_for_class: [],
     insufficient_evidence: true,
-    ...(explorationEnabled && eligibility.eligible[0]
+    ...(descriptor.unverifiedWithApproval && eligibility.eligible[0]
       ? {
           exploration_slot: {
             service_id: eligibility.eligible[0].serviceId,
@@ -363,13 +375,13 @@ function makeSnapshot(
     registration: Registration;
     outcome: ProbeOutcome;
   }[],
-  network: string,
-  policy: string,
+  descriptor: InterimPolicyDescriptor,
 ): InterimSnapshot {
   return {
     kind: "czar-registered-interim-snapshot",
-    policy_version: policy,
-    network,
+    policy_version: policyVersion(descriptor),
+    descriptor,
+    network: descriptor.network,
     services: services
       .toSorted((left, right) => compareServiceId(left.serviceId, right.serviceId))
       .map(({ serviceId, registration, outcome }) => {
@@ -496,6 +508,8 @@ async function persistSnapshot(
   usedAt: Date,
   retentionDays: number,
 ) {
+  if (policyVersion(snapshot.descriptor) !== snapshot.policy_version)
+    throw new Error("selection snapshot policy descriptor hash mismatch");
   const bodyJcs = snapshotJcsString(snapshot);
   const snapshotId = keccak256(toBytes(bodyJcs));
   const saved = await pool.query<{ body_jcs: string }>(
@@ -517,12 +531,12 @@ async function persistSnapshot(
   return snapshotId;
 }
 
-function policyVersion(
+function policyDescriptor(
   network: string,
   usdcAsset: string,
   unverifiedWithApproval: boolean,
-): string {
-  const descriptor = {
+): InterimPolicyDescriptor {
+  return {
     policy: "czar-registered-interim",
     scr: "SCR-138",
     network,
@@ -532,6 +546,9 @@ function policyVersion(
     exploration: "lowest-eligible-live-price-then-serviceId",
     ranked: "none",
   };
+}
+
+function policyVersion(descriptor: InterimPolicyDescriptor): string {
   return `pol_${H(descriptor).slice(2, 18)}`;
 }
 

@@ -53,7 +53,6 @@
 | [`SCR-031`](change-requests/SCR-031-chat-export-formats.md) | D90 | Open (research) | stage 2 | Ground truth for ChatGPT and Claude export formats before any archive import. |
 | [`SCR-032`](change-requests/SCR-032-embedding-model-and-gate.md) | D91 | Open, held (embeddings off until accepted) | M7 | Embedding model, its privacy impact, and the gate for turning embeddings on. |
 | [`SCR-033`](change-requests/SCR-033-bazaar-coverage.md) | D91 | Open (research) | M4, M7 | How many real 402s declare `extensions.bazaar`. |
-| [`SCR-139`](change-requests/SCR-139-interim-policy-input-reproducibility.md) | PR #66 final review | Draft, awaiting architect ruling | TA-06 | Persisted policy inputs needed to reproduce interim eligibility and exploration. |
 
 ## How to use
 
