@@ -9,7 +9,9 @@ import {
   recomputePlanHash,
 } from "#src/planner/index";
 import { createSafeProber } from "#src/planner/probe";
+import { LocalTemplateProfileUnavailableError, createPlannerProfileSource } from "#src/main";
 import { route, routingParamsFromConfig, cVd, pocketWorthIt } from "#src/router/index";
+import type { PlannerPorts } from "#src/planner/ports";
 import type { PlannerService } from "#src/planner/ports";
 import type { RankingQuery } from "#src/planner/ports";
 
@@ -64,6 +66,7 @@ function makePlanner(
       resource: PlannerService["resource"];
       probeInput?: PlannerService["probeInput"];
     }>;
+    readonly profileSource?: PlannerPorts["profiles"];
   } = {},
 ) {
   const spec = {
@@ -119,7 +122,7 @@ function makePlanner(
           return options.probeInput ? { ...service, probeInput: options.probeInput } : service;
         },
       },
-      profiles: { profileIdFor: () => `prof_${"b".repeat(32)}` },
+      profiles: options.profileSource ?? { profileIdFor: () => `prof_${"b".repeat(32)}` },
       pocketKeys: { createPocketKey: async () => `0x${"3".repeat(40)}` },
       agentHosts: { hasAgentHost: async () => options.hasAgent ?? true },
       allowance: { remaining: async () => "0" },
@@ -153,6 +156,29 @@ function makePlanner(
 }
 
 describe("planner fallback", () => {
+  it("fails closed with a named error when a local-step profile is unavailable", async () => {
+    const profileSource = createPlannerProfileSource({
+      profileIdFor(taskClass: string) {
+        if (taskClass !== "data-json") throw new RangeError(`Unsupported ${taskClass}`);
+        return `prof_${"a".repeat(32)}`;
+      },
+    } as never);
+
+    await expect(
+      makePlanner({ capabilities: ["table-build"], profileSource }),
+    ).rejects.toMatchObject({ name: LocalTemplateProfileUnavailableError.name });
+  });
+
+  it("keeps the paid web-search path on the seeded data-json profile", async () => {
+    const profileSource = createPlannerProfileSource({
+      profileIdFor: () => `prof_${"a".repeat(32)}`,
+    } as never);
+
+    await expect(makePlanner({ profileSource })).resolves.toMatchObject({
+      plan: { steps: [{ acceptanceProfileId: `prof_${"a".repeat(32)}` }] },
+    });
+  });
+
   it("sums only paid Gateway volume and excludes job and unpaid steps", () => {
     expect(
       computeObjectiveGatewayVolume([

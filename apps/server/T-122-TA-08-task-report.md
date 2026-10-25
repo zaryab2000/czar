@@ -75,10 +75,14 @@ confirmation was posted on PR #75.
   `cz-15`, which owns K4 under the existing signer policy.
 - **Open cross-lane dependency:** local steps require the `local-template-v1` profile ID
   (02 §4.6 and D82), but no local-profile identity producer exists in the current server,
-  daemon, or package code. The profile adapter fails explicitly for `local`; CZ-11/Lane 4
-  must supply the canonical profile ID before production local-step planning can work.
-- Regression evidence: the profile/pocket adapter test failed before the adapters existed,
-  then `test/main.test.ts` passed (1 file, 2 tests); migration test passed (1 file, 3 tests).
+  daemon, or package code. A `table-build` planner test now confirms that planning fails
+  with the named `LocalTemplateProfileUnavailableError`; no placeholder ID is generated.
+  Lane 3 will add `localTemplateProfile()` in `acceptance/profile.ts`; Lane 2 must wire it
+  after that PR merges.
+- Regression evidence: adapter and planner tests were red before the helpers/named error
+  were implemented. `test/planner/planner.test.ts` and `test/main.test.ts` passed together
+  (2 files, 23 tests), including the paid web-search profile mapping; migration test passed
+  (1 file, 3 tests).
 - `fnm exec --using=22.22.0 pnpm --filter @czar/server typecheck` and
   `fnm exec --using=22.22.0 pnpm lint` passed after the follow-up changes. Full server suite
   was not rerun; Arc-backed failures remain as listed above.

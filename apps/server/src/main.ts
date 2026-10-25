@@ -661,13 +661,17 @@ export function createPlannerProfileSource(
     profileIdFor(taskClass) {
       if (taskClass === "data-json.search" || taskClass === "data-json.extract")
         return acceptance.profileIdFor("data-json");
-      if (taskClass === "local")
-        throw new Error(
-          "The local-template-v1 profile ID must be supplied by the CZ-11 assembler.",
-        );
+      if (taskClass === "local") throw new LocalTemplateProfileUnavailableError();
       return acceptance.profileIdFor(taskClass);
     },
   };
+}
+
+export class LocalTemplateProfileUnavailableError extends Error {
+  constructor() {
+    super("The local-template-v1 profile ID must be supplied by the CZ-11 assembler.");
+    this.name = "LocalTemplateProfileUnavailableError";
+  }
 }
 
 export function createPlannerPocketKeySource(
