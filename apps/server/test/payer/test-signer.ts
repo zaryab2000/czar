@@ -46,14 +46,21 @@ export async function testSignerWithDetails(options: TestSignerOptions = {}) {
     storedPlan: async () => undefined,
     envelope: async () => undefined,
     pocket: async () => undefined,
-    pocketBalances: async () => ({
-      gatewayApi: 0n,
-      gatewayAvailable: 0n,
-      gatewayWithdrawing: 0n,
-      usdc: 0n,
-      native: 0n,
-      pendingPullback: false,
-    }),
+    pocketBalances: async () => {
+      const balances = {
+        gatewayApi: 0n,
+        gatewayAvailable: 0n,
+        gatewayApiObservedAt: null,
+        gatewayWithdrawing: 0n,
+        withdrawalBlock: 0n,
+        currentBlock: 0n,
+        usdc: 0n,
+        native: 0n,
+        pendingPullback: false,
+        gatewayApiFresh: false,
+      };
+      return balances;
+    },
     nanoSpent: async () => ({ step: 0n, pocket: 0n }),
     settledPayment: async (_vault, _hash) => true,
     autonomy: async () => undefined,
