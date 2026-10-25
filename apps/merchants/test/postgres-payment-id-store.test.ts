@@ -130,14 +130,21 @@ describe("Postgres payment identifier store", () => {
     });
   });
 
-  it("expires claims, keeps oversized completed responses non-replayable, and surfaces database errors", async () => {
+  it("sweeps expired rows, rejects oversized replay, and surfaces database errors", async () => {
     const store = postgresPaymentIdStore({ pool, ttlMs: 1, maxBytes: 4 });
-    await store.claim("/v1/search", "pay_ttl_0000000001", fp);
+    await store.claim("/v1/search", "pay_ttl_old_00000001", fp);
     await new Promise((resolve) => setTimeout(resolve, 5));
-    expect(await store.claim("/v1/search", "pay_ttl_0000000001", fp)).toEqual({ kind: "new" });
+    expect(await store.claim("/v1/search", "pay_ttl_new_00000001", fp)).toEqual({ kind: "new" });
+    const expired = await pool.query(
+      "SELECT 1 FROM merchant_payment_identifiers WHERE payment_identifier = $1",
+      ["pay_ttl_old_00000001"],
+    );
+    expect(expired.rowCount).toBe(0);
 
-    await store.complete("/v1/search", "pay_ttl_0000000001", response);
-    expect(await store.claim("/v1/search", "pay_ttl_0000000001", fp)).toEqual({
+    const boundedStore = postgresPaymentIdStore({ pool, ttlMs: 60_000, maxBytes: 4 });
+    await boundedStore.claim("/v1/search", "pay_cache_oversize_0001", fp);
+    await boundedStore.complete("/v1/search", "pay_cache_oversize_0001", response);
+    expect(await boundedStore.claim("/v1/search", "pay_cache_oversize_0001", fp)).toEqual({
       kind: "in-flight",
     });
 

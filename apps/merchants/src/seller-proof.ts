@@ -23,7 +23,7 @@ export function createSellerProofSigner(options: {
         bodyHash,
         network: options.network,
         nonce,
-        expiry,
+        expiry: String(expiry),
       },
     });
     if (!("signature" in result)) throw new Error("merchant seller proof returned no signature");

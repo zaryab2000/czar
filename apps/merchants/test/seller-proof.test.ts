@@ -1,13 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
-import type { SignRequest } from "@czar/signer";
+import { parseRequest, type SignRequest } from "@czar/signer";
 import { createSellerProofSigner } from "../src/seller-proof.ts";
 
 describe("merchant seller proof adapter", () => {
   it("signs the canonical K10 request with a fresh nonce and bounded expiry", async () => {
-    const sign = vi.fn(async (_caller: string, _request: SignRequest) => ({
-      signature: `0x${"ab".repeat(65)}` as const,
-      digest: `0x${"cd".repeat(32)}` as const,
-    }));
+    const sign = vi.fn(async (_caller: string, request: SignRequest) => {
+      const parsed = parseRequest("merchant-seller-proof", request.payload);
+      expect(parsed["expiry"]).toBe(1_760_800_300n);
+      return {
+        signature: `0x${"ab".repeat(65)}` as const,
+        digest: `0x${"cd".repeat(32)}` as const,
+      };
+    });
     const sellerProof = createSellerProofSigner({
       signer: { sign },
       network: "eip155:5042002",
@@ -44,7 +48,7 @@ describe("merchant seller proof adapter", () => {
         method: "POST",
         bodyHash: `0x${"12".repeat(32)}`,
         network: "eip155:5042002",
-        expiry: 1_760_800_300,
+        expiry: "1760800300",
       },
     });
     expect(first["nonce"]).toMatch(/^0x[0-9a-f]{64}$/);

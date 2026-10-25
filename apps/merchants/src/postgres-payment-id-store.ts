@@ -2,6 +2,8 @@ import type { Pool } from "pg";
 import type { Hash32 } from "@czar/hashing";
 import type { Claim, PaymentIdStore } from "./payment-id-store.ts";
 
+const SWEEP_BATCH_SIZE = 100;
+
 interface StoreOptions {
   readonly pool: Pool;
   readonly ttlMs: number;
@@ -24,6 +26,17 @@ export function postgresPaymentIdStore(options: StoreOptions): PaymentIdStore {
       const client = await options.pool.connect();
       try {
         await client.query("BEGIN");
+        await client.query(
+          `DELETE FROM merchant_payment_identifiers
+           WHERE ctid IN (
+             SELECT ctid FROM merchant_payment_identifiers
+             WHERE expires_at <= now()
+             ORDER BY expires_at
+             LIMIT $1
+             FOR UPDATE SKIP LOCKED
+           )`,
+          [SWEEP_BATCH_SIZE],
+        );
         const inserted = await client.query(
           `INSERT INTO merchant_payment_identifiers
             (route, payment_identifier, fingerprint, state, expires_at)
