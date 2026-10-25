@@ -104,6 +104,14 @@ describe("D92 stand-in startup guards", () => {
     ).rejects.toThrow("did not answer anvil_nodeInfo");
   });
 
+  it("requires anvil_nodeInfo even when the configured service endpoints are HTTPS", async () => {
+    const fetchFn = vi.fn(async () => new Response(JSON.stringify({ error: { code: -32601 } })));
+    await expect(
+      validateStandinStartup(startup({ config: loadConfig(), fetchFn })),
+    ).rejects.toThrow("did not answer anvil_nodeInfo");
+    expect(fetchFn).toHaveBeenCalledOnce();
+  });
+
   it("refuses a non-loopback bind address", async () => {
     await expect(validateStandinStartup(startup({ bindAddress: "0.0.0.0" }))).rejects.toThrow(
       "bind address",
@@ -260,9 +268,28 @@ describe("D92 Gateway fixture routes", () => {
       new Request(`http://127.0.0.1:4999/v1/x402/transfers?from=${pocket}`),
       vi.fn(),
     );
-    expect(await transferResponse.json()).toMatchObject({
-      transfers: [{ status: "completed", fromAddress: pocket }],
+    const firstTransferBody = (await transferResponse.json()) as {
+      transfers: { id: string; status: string; fromAddress: string }[];
+    };
+    expect(firstTransferBody.transfers[0]).toMatchObject({
+      status: "completed",
+      fromAddress: pocket,
     });
+    const otherPocket = "0x00000000000000000000000000000000000000e2";
+    const otherTransferResponse = await handleStandinRequest(
+      new Request(`http://127.0.0.1:4999/v1/x402/transfers?from=${otherPocket}`),
+      vi.fn(),
+    );
+    const otherTransferBody = (await otherTransferResponse.json()) as {
+      transfers: { id: string }[];
+    };
+    expect(otherTransferBody.transfers[0]?.id).not.toBe(firstTransferBody.transfers[0]?.id);
+    const repeatedResponse = await handleStandinRequest(
+      new Request(`http://127.0.0.1:4999/v1/x402/transfers?from=${otherPocket}`),
+      vi.fn(),
+    );
+    const repeatedBody = (await repeatedResponse.json()) as { transfers: { id: string }[] };
+    expect(repeatedBody.transfers[0]?.id).toBe(otherTransferBody.transfers[0]?.id);
     const submitResponse = await handleStandinRequest(
       new Request("http://127.0.0.1:4999/v1/transfer", {
         method: "POST",

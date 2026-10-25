@@ -17,6 +17,7 @@ export type LocalOnlyGuardOptions = {
   readonly config: Config;
   readonly overlayPath: string | URL;
   readonly arcRpcUrl: string;
+  readonly requireAnvilNodeInfo?: boolean;
   readonly fetchFn?: typeof fetch;
 };
 
@@ -45,7 +46,7 @@ export async function validateLocalOnlyConfig(options: LocalOnlyGuardOptions): P
       }
     }
   }
-  if (!hasLoopback) return;
+  if (!hasLoopback && options.requireAnvilNodeInfo !== true) return;
 
   const overlayPath =
     typeof options.overlayPath === "string"
