@@ -732,6 +732,7 @@ The vault's `isValidSignature(bytes32 digest, bytes signature)` reads the first 
 - The vault recomputes `structHash = hashStruct(Receipt, receipt)` (the SL §5.8 encoding, `originAsserted` hashed as `keccak256(bytes)`), requires `digest == toTypedDataHash(SELECTION_LAYER_DOMAIN_SEPARATOR(chainId), structHash)`, then requires `agentSig` to recover to `agentSigner` over `toTypedDataHash(CZAR_VAULT_DOMAIN_SEPARATOR(chainId, vault), hashStruct(ReceiptAttestation{receiptStructHash: structHash}))`.
 - Why both steps: recomputing from fields pins the type to `Receipt`, so the vault can never attest a `Correction`, `ServiceClaim` or other SL type; the `ReceiptAttestation` wrapper carries the vault address in its domain, so one agent signature validates for exactly one vault (all vaults share `agentSigner`, spec 03 factory defaults). This is the ERC-7739 nesting idea applied to one type.
 - What a verifier does: call `vault.isValidSignature(receiptDigest, signature)` with the SL `Receipt` digest it already computes; nothing else changes for SL readers.
+- The signer request carries the full `PaymentRef` (§4.12) so the signer can match it to indexer settlement facts; only `paymentRefHash` enters the signed `Receipt` (SCR-128).
 - Not blocked by freeze (it moves no money). Used for vault-direct receipts and for `erc8183-job` receipts (the vault is the job client, AM-10). The signer signs a `ReceiptAttestation` only after rebuilding the `Receipt` struct hash from fields and matching `paymentRefHash` to a payment of this vault that the indexer has seen settled (spec 04 CZ-27 `sl-receipt`).
 
 #### 6.3.4 Fallback encoding (AR-3 false: Facilitator rejects long signatures)
@@ -1003,6 +1004,10 @@ Full definition: `api/openapi.yaml` (OpenAPI 3.1; 28 paths, 29 operations; parse
 | GET | `/v1/envelopes?state=` | yes | → page of `Envelope` (§4.8) | |
 | GET | `/v1/envelopes/{envelopeRef}` | yes | → `EnvelopeDetail` (envelope, reservations, pockets, jobs) | |
 | POST | `/v1/freeze/intent` | key required | `{action}` → `FreezeIntent` calldata | one-tap freeze; app submits the UserOp |
+| GET | `/v1/pockets/manual-returns?cursor=` | yes | → page of `ManualReturn` | pocket returns the owner records with a `recordManualReturn` UserOp (SCR-133); scoped to the session user |
+| POST | `/v1/devices/pairing-codes` | key required | → `PairingCode` `{code, expiresAt}` | 8-digit code for `pairDevice`, valid `app.pairingCodeTtlMinutes`; never logged (SCR-134) |
+| GET | `/v1/devices?cursor=` | yes | → page of `Device` | the session user's devices (SCR-134) |
+| POST | `/v1/devices/{deviceId}/revoke` | key required | → `204` | sets `revokedAt`; that device's token is refused from then on; `404` for another user's device (SCR-134) |
 | GET | `/v1/ledger/receipts?cursor=` | yes | → page of `LedgerReceipt` | Gateway payments show `pending` until `completed` (A2-26) |
 | GET | `/v1/ledger/monthly/{yyyy-mm}` | yes | → `MonthlyStatement` | ROI ledger (CZ-25) |
 | POST | `/v1/push/subscriptions` (stage 2, D69) | key required | `PushSubscription` (`declarative: true`) → `PushSubscriptionCreated` | created only after a user tap (D2-02) |
@@ -1408,3 +1413,5 @@ Agent-directed text met this session (not followed): the Circle and Arc doc head
 | 2026-10-20 | D90 | §4.2 `Belief` source fields and typed receipts (schema 1.2); new §4.23 `SourceReceipt`, §4.24 `ProposedBelief`, §4.25 `InterviewSubmission`, §4.26 `SourceScan`; §5.2 interim soul-hash note (v2 rules held in SCR-030); §7.1 `src_`, `prop_`, `scan_`, `cns_`; §9.2 local soul-input routes; §9.7; §10 `propose_soul_context`; §13.1 confirmed lines; §15.3 gaps. |
 | 2026-10-20 | D91 | §4.3.1 `TaskSpec.output` (schema 1.1); §4.3 `dismissReason` (objective schema 1.1); §4.5 `steps[].why`, `untestedOptions` (schema 1.2); §4.14 conflict flag `czar-test-buyer`; §4.25 `taste.outputFormat` (schema 1.1); new §4.27 `CapabilityCard`; §12.2 `extensions.czar.card`; §15.3 gaps. |
 | 2026-10-21 | SCR-125 | §9.1 app credential row: challenge and passkey-registration routes; `Me.vaultCreated` and the two auth routes in `api/openapi.yaml`. |
+| 2026-10-25 | SCR-128 | §6.3.3: the `sl-receipt` signer request carries the full `PaymentRef`. |
+| 2026-10-25 | SCR-133, SCR-134 | §9.2 app routes `listManualReturns`, `createPairingCode`, `listDevices`, `revokeDevice`; shapes in `api/openapi.yaml`. |

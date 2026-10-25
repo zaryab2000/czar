@@ -55,14 +55,19 @@
 | T-040 | Local hosting on the local chain (D92) | M3 | M | T-034, T-036 |
 | T-041 | Server skeleton | M3 | L | T-006, T-009, T-004, T-005 |
 | T-042 | `@czar/x402` | M3 | L | T-006 |
-| T-043 | `czar-search` vanilla route | M3 | M | T-042, T-040, G0-04 |
+| T-043 | `czar-search` vanilla route (composed merchant, SCR-136) | M3 | M | T-042, T-040 |
 | T-044 | Payment router | M3 | M | T-024, T-004 |
 | T-045 | Planner core | M3 | L | T-041, T-042, T-044, T-007 |
 | T-046 | Injection boundary | M3 | L | T-006, T-005 |
 | T-047 | Acceptance checker minimal | M3 | M | T-006, T-007 |
 | T-048 | Paying agent vault-direct | M3 | L | T-045, T-046, T-047, T-034, T-036 |
 | T-049 | Receipts and evidence store | M3 | M | T-048 |
-| T-050 | Thin slice on testnet | M3 | M | T-049, T-043 |
+| T-050a | Local thin slice (D92 stand-ins, SCR-136) | M3 | M | T-122, T-123, T-043 |
+| T-050b | Thin slice on testnet (former T-050) | M8 | M | T-050a, T-121, G0-04 |
+| T-122 | Execution runtime: composition, opening watcher, dispatcher, completion (SCR-132) | M3 | L | T-045, T-048, T-049 |
+| T-123 | Interim Czar-registered selection (SCR-131) | M3 | M | T-041, T-042 |
+| T-124 | Gateway balance projection (SCR-127) | M4 | M | T-032, T-037 |
+| T-125 | Owner manual return (SCR-133) | M4 | M | T-124, T-053 |
 | T-051 | Merchants complete | M4 | L | T-050 |
 | T-052 | Pocket loop | M4 | L | T-050, T-037 |
 | T-053 | Pullback | M4 | L | T-052, G0-05 |
@@ -478,6 +483,7 @@
   - `arc-cast call <factory> "defaults()((address,address,address))"` returns the K3, K5, K7 addresses from `deployments/arc-testnet-keys.json`.
 
 ### T-105 Create Phase 1 server keys in the local keystore and record their addresses (RV-016)
+- **SCR-136 (2026-10-25):** the K10-lab, payee-swap, K21a and K21b entries become required when T-106 and H7 start, not by T-105. `create-keys` gains a local mode that writes `deployments/local-keys.json` in the same `{K3: {address, ref}, …}` shape `Deploy.s.sol` reads, and `ops/local/deploy.sh` reads vault roles from it instead of `eth_accounts[0]`. Running key creation stays an operator step (Zaryab, G0-13).
 - **Milestone / group / who:** M1 / M1-f / agent, after Zaryab approves key creation. **Size:** S. **Deps:** T-004.
 - **Spec refs:** `S04/server/server-autonomy-roi-keys.md` CZ-27 §2, §3 (keystore location, passphrase rule, key table); `S03/security-and-testing.md` §4 step 2; D70, D78, D80.
 - **Outputs:** the signer service's encrypted keystore at the path CZ-27 fixes (`~/Library/Application Support/Czar/signer/keystore/`, outside the repository); `deployments/arc-testnet-keys.json` holding **addresses and key references only** (K3 agent, K5 autonomy, K6 guardian, K7 evaluator, K8 evidence publisher, the relayer gas key, K20 factory admin; K9 is the Phase 2 claim relayer and is not created).
@@ -662,7 +668,8 @@
 - **D83 (2026-10-20):** the buyer refuses any `accepts[]` entry whose network is not in `x402.allowedPaymentNetworks` (`[eip155:5042002]`). Test: a mainnet-only 402 yields no payable offer and a typed error.
 
 ### T-043 Merchant czar-search vanilla x402 route with Facilitator keyless trial and payment-identifier store
-- **Milestone / group / who:** M3 / M3-b / agent. **Size:** M. **Deps:** T-042, T-040, G0-04.
+- **Owner (SCR-136):** Lane 3. **Reopened (SCR-136):** outputs add the composed merchant entry point (signer `keyAddress`, SCR-129; seller-proof adapter; Postgres payment-identifier store; config from SCR-130). Acceptance (a) and (b) run locally against the D92 stand-in; acceptance (c) and the G0-04 dependency move to T-050b.
+- **Milestone / group / who:** M3 / M3-b / agent. **Size:** M. **Deps:** T-042, T-040 (G0-04 moved to T-050b, SCR-136).
 - **Spec refs:** `S04/server/server-supply-side.md` CZ-20 §5.1, §5.2, §5.4, §5.5; `S02/data-and-protocol.md` §11.1; D14, D49; A1-15, p1-F4.
 - **Outputs:** `apps/merchants/src/search/` (vanilla route only), payout key K10 via the signer.
 - **Inputs:** `packages/x402` from T-042; testnet hosting from T-040; Facilitator record `docs/specs/05-build-plan/gate-0-results/G0-04.md`.
@@ -691,6 +698,7 @@
 - **Review fixes (2026-10-19):** Cost model per CZ-14 as amended (RV-039): `⌈n/32⌉` settle calls, one `finalize`, the pocket sweep; worked defaults 39,600 / 5,040 / 1,764 and `V ≥ 156,600`.
 
 ### T-045 Planner core CZ-13: rule-based plan, live probe, caps, alternates, payee leaves, payeeRoot, planHash (Czar-registered candidates only)
+- **Owner (SCR-136):** Lane 2. The Czar-registered candidates come from the SCR-131 interim producer (T-123); the loop that runs the planner is T-122.
 - **Milestone / group / who:** M3 / M3-b / agent. **Size:** L. **Deps:** T-041, T-042, T-044, T-007.
 - **Spec refs:** `S04/server/server-planning-and-payment.md` CZ-13 §5 (steps 1–3, 5–11), §6 (rule-based fallback); `S02/data-and-protocol.md` §4.5–§4.7, §5.2, §5.3; D36, D43.
 - **Outputs:** `apps/server/src/planner/` (no P-03 yet; T-092 adds it), `shadowQuote` reuses it later.
@@ -776,7 +784,20 @@
   - A receipt signed by K3 under the `SL_RECEIPT` envelope makes the vault's `isValidSignature` return `0x1626ba7e` on `arc-anvil`.
   - `paymentRefHash` excludes `reservationId` and `index` and matches the SL definition.
 
-### T-050 Thin slice on testnet: one real reserve → x402 → settle → finalize against czar-search, evidence recorded
+### T-050a Local thin slice: objective → approval → reserve → x402 → settle → finalize → receipt → result against czar-search (SCR-132, SCR-136)
+- **Milestone / group / who:** M3 / M3-d / agent. **Size:** M. **Deps:** T-122, T-123, T-043. **Owner:** Lane 2.
+- **Dependency rule (SCR-136):** where an M4 task lists T-050 as a dependency or input (T-051, T-052, T-054), it means T-050a; the testnet run is T-050b in M8.
+- **Spec refs:** as T-050; CZ-12 §5 and CZ-15 §3 as amended by SCR-132; `S04/shared/cross-cutting.md` §3.1 local row (SCR-130); D92.
+- **Outputs:** a process-level test or script under `apps/server/test/` and a run report `reports/m3-local-thin-slice.md` (tx hashes from the local chain, events, no keys).
+- **Steps:**
+  - Run the local stack (`ops/local`) with the D92 stand-ins and the local key file (T-105 local mode).
+  - Submit one objective, approve it with the test owner fixture, and let the server run it.
+- **Acceptance tests:**
+  - On local `arc-anvil`: `Reserved`, `AuthorizationUsed(vault, nonce_0)`, `Settled`, `ReservationFinal(1, 0)`, `EnvelopeClosed` all present.
+  - One `evidence_receipts` row whose receipt verifies under `SL_RECEIPT` against the local vault; one `results` row; the objective ends `delivered`, or `failed` with `result-quarantined` while no model provider is approved (D76, SCR-132).
+
+### T-050b (former T-050) Thin slice on testnet: one real reserve → x402 → settle → finalize against czar-search, evidence recorded
+- **SCR-136 (2026-10-25):** renamed from T-050; runs in M8 after T-121 and T-050a, and now depends on G0-04 (moved from T-043). Testnet `curl` 402 check from T-043 runs here.
 - **Milestone / group / who:** M3 / M3-d / agent, after Zaryab approves funds. **Size:** M. **Deps:** T-049, T-043.
 - **Spec refs:** `S04/shared/phase-1-acceptance-scenario.md` Stage 4; `S01/system-architecture.md` §8.3; A1-17.
 - **Outputs:** run report `reports/m3-thin-slice.md` (tx hashes, events, no keys).
@@ -790,6 +811,18 @@
   - The stored receipt verifies under `SL_RECEIPT` against the live vault (`arc-cast call <vault> "isValidSignature(bytes32,bytes)(bytes4)"` returns `0x1626ba7e`).
 
 ---
+
+### T-122 Execution runtime: composition, opening watcher, dispatcher, completion (SCR-132)
+- **Milestone / group / who:** M3 / M3-d / agent. **Size:** L. **Deps:** T-045, T-048, T-049. **Owner:** Lane 2.
+- **Spec refs:** `S04/server/server-planning-and-payment.md` CZ-12 §4, §5, §6 and CZ-15 §2, §3 as amended by SCR-132; CZ-19 §5.4 `envelopeByPlanHash`; SCR-126 §2; `S04/shared/ai-prompts.md` P-01 (D76).
+- **Outputs:** the started composition root in `apps/server/src/local-main.ts`; planner loop; opening watcher; dispatcher; completion; optional model client.
+- **Acceptance tests:** started-root composition order; planner reclaim without a duplicate outbox row; opening watcher match, late match, timeout and expiry; dispatcher order, lease and resume; completion idempotent, `closeEnvelope` only after every reservation is `Final`, all-quarantined → `failed` with `result-quarantined`. The SCR-126 §2 started-root run on `arc-anvil` is part of T-050a.
+
+### T-123 Interim Czar-registered selection (SCR-131)
+- **Milestone / group / who:** M3 / M3-c / agent. **Size:** M. **Deps:** T-041, T-042. **Owner:** Lane 3.
+- **Spec refs:** `S04/server/server-acceptance-evidence-selection.md` CZ-18 §5.2 (interim producer, N1), §5.3; `S02/data-and-protocol.md` §4.19, §11.3; SCR-122 (acceptance ports).
+- **Outputs:** `apps/server/src/selection/registered/`; production `AcceptancePorts`.
+- **Acceptance tests:** a schema-valid `RankingDecision` with `ranked = []` and the top unverified service in `exploration_slot`; network and price exclusions; deterministic tie-break; live 402 wins; no description text stored; port values (`shapeHistory` returns none until T-090).
 
 ## M4 All money paths
 
@@ -826,6 +859,7 @@
 - **SCR-126 (2026-10-21):** the pocket address for a plan comes from the server table `plan_pocket_keys`, which CZ-13 writes with the plan; this task adds the table if T-045's plan store has not.
 
 ### T-053 Pullback: burn intent, /v1/transfer, relayer gatewayMint, confirm, cancel and re-request, API-down fallback
+- **SCR-127, SCR-133 (2026-10-25, Lane 2):** halt drain inputs from CZ-19 `fundedPocketsForVault`; `availableBalance` from `pocketBalance` with the freshness rule; write-off at or below the fee; slow withdrawal once per pocket for the whole balance; late-funds recovery pass every `payer.gatewayRecoveryPollSeconds`, never `writeOffPocket` on a `Closed` pocket (test `payer_pocketClose_sweepsGasAndRecoversLateBalance`); manual-return persistence, reconciliation and the write-off hold (`payer.manualReturnHoldHours`).
 - **Milestone / group / who:** M4 / M4-b / agent. **Size:** L. **Deps:** T-052, G0-05.
 - **Spec refs:** CZ-15 §5.3 steps 7–8 and crash table; `S03/czar-vault.md` §5.4, §6.2; `S02/data-and-protocol.md` §6.3.2; D41, D62; A2-16 to A2-19, A2-31.
 - **Outputs:** `apps/server/src/payer/pullback.ts` (hand-built burn intents, never `GatewayClient.withdraw()`).
@@ -963,6 +997,7 @@
   - Lab services never vary behaviour by buyer (test with two buyer vaults).
 
 ### T-115 Capability cards, Czar index and tags+BM25 retrieval (D91)
+- **Owner (SCR-136):** Lane 3 (also T-090 and T-091). **SCR-131:** replaces the T-123 interim producer and keeps `selection.czarRegisteredServices` as the registered source.
 - **Milestone / group / who:** M4 / M4-a / agent. **Size:** L. **Deps:** T-041, T-042, T-051, T-106.
 - **Spec refs:** `S04/server-acceptance-evidence-selection.md` CZ-18 §5.1 (C2, C3, C4), §5.3, §5.3b, §5.3c, §5.5, §5.6, §14; `S02/data-and-protocol.md` §4.27, §11.3, §12.2, §12.3; A3-35, A3-36, p1-D8; D91 items 1–3.
 - **Outputs:** `apps/server/src/selection/cards/`, `apps/server/src/selection/retrieval/` (BM25 in code), `capability_cards` and `card_terms` tables, `extensions.czar.card` on index items.
@@ -986,6 +1021,17 @@
 - **Acceptance tests:** every CZ-18 §14 "Test-buyer (D91)" test, on `arc-anvil --network arc` first and then on testnet after funding approval; the signer refuses a `test-buyer-owner` request on any chain id other than 5042002.
 
 ---
+
+### T-124 Gateway balance projection (SCR-127)
+- **Milestone / group / who:** M4 / M4-b / agent. **Size:** M. **Deps:** T-032, T-037. **Owner:** Lane 1.
+- **Spec refs:** CZ-19 §5.3, §5.4, §5.6 and CZ-27 §5.2, §5.3 as amended by SCR-127; A2-15, A2-29, A2-30.
+- **Outputs:** indexer `pocket_balances`, the three SCR-127 queries, scope including `Closed`; signer projection `pocketBalances`, `slowWithdrawalOpen`, `slowWithdrawAllowed`, write-off rule and `nanoSpent` per SCR-127.
+- **Acceptance tests:** exact decimal conversion and malformed handling; stale figure denies write-off, retirement and slow withdraw but not `pocket-return`; dust at or below the fee allows write-off; `Closed` pockets polled until K4 is destroyed; `nanoSpent` counts non-failed transfers. Live `/v1/balances` behaviour is G0-05.
+
+### T-125 Owner manual return (SCR-133)
+- **Milestone / group / who:** M4 / M4-b / agent. **Size:** M. **Deps:** T-124, T-053. **Owners:** Lane 1 (`encodeRecordManualReturn`, indexer `manual_returns` and query), Lane 2 (migration, reconciliation, write-off hold), Lane 5 (`listManualReturns`, Envelope section, Home notice).
+- **Spec refs:** CZ-15 §5.3 as amended by SCR-133; CZ-19 §5.4 `manualReturnsForVault`; CZ-22 §4, §5.1, §12; `S02/api/openapi.yaml` `listManualReturns`; `S03/czar-vault.md` `recordManualReturn`.
+- **Acceptance tests:** `recorded` after a matching event; `expired` when the pocket closed first; the hold ends after `payer.manualReturnHoldHours`; user scoping; the app uses the vault-client encoder. A passkey UserOp on testnet is M8.
 
 ## M5 Local side
 
@@ -1151,6 +1197,7 @@
   - The report text matches the CZ-08 wording; `ingestReport` carries only `shadowTotals` counts.
 
 ### T-071 Server routes createQuote, reportOutcome, createPayRequest
+- **SCR-132 (2026-10-25):** re-sequenced into the evidence/social replan (Track B); its shared-budget rules with server-driven plans are specified there. Owner decided in that replan.
 - **Milestone / group / who:** M5 / M5-c / agent. **Size:** M. **Deps:** T-048, T-045.
 - **Spec refs:** `S02/api/openapi.yaml` `createQuote`, `reportOutcome` (AM-01), `createPayRequest`; `S02/data-and-protocol.md` §7.4; CZ-12 §6.
 - **Outputs:** handlers in `apps/server/src/routes/`.
@@ -1383,6 +1430,7 @@
 - **Milestone / group / who:** M6 / M6-c / agent. **Size:** M. **Deps:** T-084, T-048, T-034.
 - **Spec refs:** `S04/app/app-and-notifications.md` CZ-22 §5.4; `S03/czar-vault.md` §5.1, §5.6 (D60 note); `S02/api/openapi.yaml` `createFreezeIntent`; D60, D63.
 - **Outputs:** freeze UI, server listener that calls `lowerAutoLimit(categoryId, 0)` per used category after `Frozen`.
+- **Split (SCR-136):** freeze UI and intent: Lane 5 (implemented). Server listener: Lane 2, in the payer runtime under caller `cz-15` with K3 (CZ-15 follow-up agent step), over every category in `planner.categoryByCapability` whose `autoLimit` is not 0.
 - **Inputs:** approvals from T-084; paying agent from T-048; indexer query API from T-034.
 - **Steps:**
   - Add the freeze and unfreeze buttons with `createFreezeIntent`.
@@ -1716,3 +1764,5 @@
 | 2026-10-21 | D92 (Zaryab) | Arc testnet moves to the end of Phase 1: T-027 to M8 (deps add T-101); T-036 and T-040 run on a local `arc-anvil` deployment (`deployments/arc-local.json`, `env/local.toml`); new T-121 does the testnet deploy, signer evidence and `env/testnet.toml`; T-102 depends on T-121; every earlier "on testnet" step runs on the local chain with Circle mocks and fixtures. |
 | 2026-10-21 | SCR-119 | CZ-19 §5.4 response contracts for `receiptsForLedger` (settlement facts; server joins the rest of `LedgerReceipt`), `latestAnchor`, `anchorByBatch`; `dependencyState` moves to T-033; queries page in SQL. |
 | 2026-10-21 | SCR-122, SCR-123 | T-047 sandbox, ids and profile seed; T-046 eval modes, `expectedFields`, code-only extractor, re-plan input, budget path. |
+| 2026-10-25 | SCR-132, SCR-136 | T-050 split into T-050a (local, D92 stand-ins) and T-050b (testnet, M8, with G0-04); new T-122 (execution runtime) and T-123 (interim selection, SCR-131); T-043 reopened without G0-04; T-071 to the evidence/social replan; owners for T-043, T-045, T-090, T-091, T-115. |
+| 2026-10-25 | SCR-127, SCR-133, SCR-136 | New T-124 (Gateway balance projection) and T-125 (owner manual return); T-053 notes; T-085 split; T-105 local key file and later lab entries. |

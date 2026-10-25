@@ -135,6 +135,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 24,
   },
   {
+    "key": "api.openingPollMs",
+    "source": "default",
+    "unit": "ms",
+    "value": 5000,
+  },
+  {
     "key": "api.pageDefaultLimit",
     "source": "default",
     "unit": "items",
@@ -183,6 +189,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 120,
   },
   {
+    "key": "app.arcRpcUrl",
+    "source": "default",
+    "unit": "url",
+    "value": null,
+  },
+  {
     "key": "app.bundlerEndpoints",
     "source": "default",
     "unit": "bundler-endpoint-map",
@@ -204,6 +216,18 @@ exports[`registry > matches the dump snapshot 1`] = `
     "source": "default",
     "unit": "s",
     "value": 300,
+  },
+  {
+    "key": "app.circleClientKey",
+    "source": "default",
+    "unit": "",
+    "value": null,
+  },
+  {
+    "key": "app.circleClientUrl",
+    "source": "default",
+    "unit": "url",
+    "value": null,
   },
   {
     "key": "app.largeCapWarnBps",
@@ -294,6 +318,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "source": "default",
     "unit": "days",
     "value": 28,
+  },
+  {
+    "key": "chain.gatewayApiBaseUrl",
+    "source": "default",
+    "unit": "url",
+    "value": "https://gateway-api-testnet.circle.com",
   },
   {
     "key": "chain.gatewayWalletAddress",
@@ -644,6 +674,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": null,
   },
   {
+    "key": "fetch.localStandinOrigins",
+    "source": "default",
+    "unit": "",
+    "value": null,
+  },
+  {
     "key": "fetch.maxBytes",
     "source": "default",
     "unit": "bytes",
@@ -678,6 +714,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "source": "default",
     "unit": "s",
     "value": 300,
+  },
+  {
+    "key": "indexer.gatewayBalanceMaxAgeSeconds",
+    "source": "default",
+    "unit": "s",
+    "value": 120,
   },
   {
     "key": "indexer.gatewayPageSize",
@@ -965,6 +1007,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 8000,
   },
   {
+    "key": "merchants.facilitatorBaseUrl",
+    "source": "default",
+    "unit": "url",
+    "value": "https://api.circle.com/v1/facilitator/x402",
+  },
+  {
     "key": "merchants.facilitatorTimeoutMs",
     "source": "default",
     "unit": "ms",
@@ -1047,6 +1095,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "source": "default",
     "unit": "",
     "value": true,
+  },
+  {
+    "key": "merchants.publicOrigin",
+    "source": "default",
+    "unit": "origin",
+    "value": null,
   },
   {
     "key": "merchants.refundDailyAtomic",
@@ -1301,6 +1355,18 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 30000,
   },
   {
+    "key": "payer.dispatchPollMs",
+    "source": "default",
+    "unit": "ms",
+    "value": 1000,
+  },
+  {
+    "key": "payer.gatewayRecoveryPollSeconds",
+    "source": "default",
+    "unit": "s",
+    "value": 60,
+  },
+  {
     "key": "payer.job.deliverableStorePath",
     "source": "default",
     "unit": "path",
@@ -1335,6 +1401,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "source": "default",
     "unit": "s",
     "value": 60,
+  },
+  {
+    "key": "payer.manualReturnHoldHours",
+    "source": "default",
+    "unit": "h",
+    "value": 72,
   },
   {
     "key": "payer.maxConcurrentStepsPerEnvelope",
@@ -1473,6 +1545,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     },
   },
   {
+    "key": "planner.claimTimeoutSeconds",
+    "source": "default",
+    "unit": "s",
+    "value": 300,
+  },
+  {
     "key": "planner.defaultMaxUnitAtomic",
     "source": "default",
     "unit": "atomic",
@@ -1529,6 +1607,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "source": "default",
     "unit": "",
     "value": true,
+  },
+  {
+    "key": "planner.pollMs",
+    "source": "default",
+    "unit": "ms",
+    "value": 1000,
   },
   {
     "key": "planner.probeTimeoutMs",
@@ -1765,6 +1849,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 3600,
   },
   {
+    "key": "selection.czarRegisteredServices",
+    "source": "default",
+    "unit": "service-map",
+    "value": {},
+  },
+  {
     "key": "selection.decisionRetentionDays",
     "source": "default",
     "unit": "days",
@@ -1877,6 +1967,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "source": "default",
     "unit": "ms",
     "value": 2000,
+  },
+  {
+    "key": "selection.registeredRecrawlHours",
+    "source": "default",
+    "unit": "h",
+    "value": 24,
   },
   {
     "key": "selection.retrievalMode",
@@ -2070,6 +2166,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "source": "default",
     "unit": "atomic",
     "value": 500000,
+  },
+  {
+    "key": "signer.keyAddressPerMin",
+    "source": "default",
+    "unit": "calls/min",
+    "value": 60,
   },
   {
     "key": "signer.keychainService",

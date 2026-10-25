@@ -37,8 +37,8 @@
 | Direction | Interface | Notes |
 |---|---|---|
 | App → server | `createSession` (`SessionRequest` WebAuthn assertion → `SessionResponse`), `getMe` (`Me`), `listApprovals` (`ApprovalSummary` page), `getApproval` (`Plan`), `createApprovalIntent` (`ApprovalIntent`), `notifySubmitted` (`SubmittedNotice`), `listEnvelopes`, `getEnvelope` (`EnvelopeDetail`), `createFreezeIntent` (`FreezeIntent`), `listReceipts` (`LedgerReceipt`), `getMonthlyStatement` (`MonthlyStatement`), `getSoulPointer` (`SoulPointer`); `createPushSubscription` / `deletePushSubscription` stay defined in 02 but are **stage 2** (D69) and not called in Phase 1. Route: `getSoulPointer` (`SoulPointer`) | 02 §9.2 app surface; bearer `AppSession` |
-| App → Circle | `@circle-fin/modular-wallets-core` 1.0.16: `toPasskeyTransport` for the passkey, `toModularTransport(clientUrl + "/arcTestnet", clientKey)` as bundler transport (A6-06, A6-19); `K2` client key is a public-facing credential | A6-05, A6-06 |
-| App → Arc (through the bundler) | UserOps that call `CzarVaultFactory.createVault(ownerAccount, salt)` (03 `czar-vault-factory.md` §5), `ICzarVault.openEnvelope(p)`, `freeze()`, `unfreeze()`, `setCategoryLimits(categoryId, userMax, autoLimit)`, `withdraw(to, amount)`, USDC `transfer` into the vault | calldata comes from the server intents for approvals and freeze; the app re-encodes `ApprovalIntent.decoded` with `@czar/vault-client` and refuses if it differs from `calldata` |
+| App → Circle | `@circle-fin/modular-wallets-core` 1.0.16. The passkey is created and used with browser WebAuthn against Czar's own relying party (SCR-125); the owner account is viem `toWebAuthnAccount` wrapped by Circle `toCircleSmartAccount`; the bundler transport is `toModularTransport(clientUrl + "/arcTestnet", clientKey)` (A6-19). `toPasskeyTransport` is not used: Circle's RP service would hold the credential registration, which SCR-125 keeps in Czar's `passkey_credentials` (SCR-135). `clientUrl`, the `K2` client key (a public-facing credential) and the app's RPC URL come from `app.circleClientUrl`, `app.circleClientKey` and `app.arcRpcUrl` | A6-05, A6-06 |
+| App → Arc (through the bundler) | UserOps that call `CzarVaultFactory.createVault(ownerAccount, salt)` (03 `czar-vault-factory.md` §5), `ICzarVault.openEnvelope(p)`, `freeze()`, `unfreeze()`, `setCategoryLimits(categoryId, userMax, autoLimit)`, `withdraw(to, amount)`, `recordManualReturn(pocket, amount)` (SCR-133, calldata from `@czar/vault-client`), USDC `transfer` into the vault | calldata comes from the server intents for approvals and freeze; the app re-encodes `ApprovalIntent.decoded` with `@czar/vault-client` and refuses if it differs from `calldata` |
 | App → secondary bundlers | Pimlico, Alchemy, ZeroDev (all support Arc testnet and mainnet, A6-15 to A6-17) when Circle's transport fails | `SubmittedNotice.bundler` records which one |
 | Events consumed | none directly; the server mirrors chain state from CZ-19 (`EnvelopeOpened`, `Frozen`, …) into `Me`, `Envelope`, `LedgerReceipt` |
 
@@ -54,13 +54,13 @@
 | Add money | `/onboarding/fund` | `Me.balances`, faucet or onramp outline | copy address, open onramp |
 | Set limits | `/onboarding/limits` | categories, amounts in USD (D51) | `setCategoryLimits` UserOp per category |
 | Home | `/home` | `Me`, pending count, last receipts | approve, freeze |
-| Pending approvals | `/approvals` | `listApprovals?status=pending` | open one |
+| Pending approvals | `/approvals` | `listApprovals?status=pending` | open one; a plan whose approval was sent but not yet seen on-chain shows "Approval sent" with no approve action (SCR-132) |
 | Approval | `/approve/{planId}` | `getApproval` (`Plan`), `createApprovalIntent` | approve, decline |
-| Envelopes | `/envelopes`, `/envelopes/{envelopeRef}` | `listEnvelopes`, `getEnvelope` | close (owner, after expiry) later phase |
+| Envelopes | `/envelopes`, `/envelopes/{envelopeRef}` | `listEnvelopes`, `getEnvelope`, `listManualReturns` | record a manual return (SCR-133); close (owner, after expiry) later phase |
 | Receipts | `/receipts` | `listReceipts` | — |
 | Monthly statement | `/statement/{yyyy-mm}` | `getMonthlyStatement` | — |
 | Settings: privacy | `/settings/privacy` | — | read-only text (§12) |
-| Settings: devices | `/settings/devices` | device list (pairing code) | show 8-digit pairing code (02 §9.1), revoke |
+| Settings: devices | `/settings/devices` | `listDevices`, `createPairingCode` (SCR-134) | show 8-digit pairing code (02 §9.1), revoke (`revokeDevice`) |
 | Settings: Work Soul | `/settings/soul` | `getSoulPointer` | pointer text only (D34) |
 | Frozen | banner on every screen | `Me.frozen`, `Me.paused` | unfreeze |
 
@@ -278,6 +278,21 @@ Idempotency: every creating call sends `Idempotency-Key`; `notifySubmitted` with
 | Work Soul | "Your Work Soul is viewable on your computer. Open the Czar viewer there to read, edit or delete any line." (D34) Before the first soul version, the pointer message is: "Open the Czar viewer on your computer to tell Czar about your work (about five minutes, optional)." (D90; text only, ≤ 200 characters, no soul content in the app) |
 | Devices | "Pair your computer: enter this code in the Czar daemon within 5 minutes: {code}" |
 
+**Track A additions (SCR-132, SCR-133, SCR-134)**
+
+| State / source | Exact text |
+|---|---|
+| plan `approved`, objective `awaiting-approval` (SCR-132) | "Approval sent. Waiting for the network to confirm it." |
+| manual returns section title (SCR-133) | "Money to record" |
+| manual return row, `manual-return-required` | "{returnedAmount} came back from a pocket wallet by the slow 7-day route. Record it so your vault's books match." |
+| manual return button | "Record {returnedAmount}" |
+| manual return `recorded` | "Recorded {recordedCredit}" |
+| manual return `expired` | "This pocket closed before the return was recorded. The money is already in your vault." |
+| Home notice, manual returns waiting | "{count} pocket returns to record" |
+| devices button (SCR-134) | "Pair a computer" |
+| pairing code panel | "Enter this code in Czar on your computer: {code}. It expires in {minutes} minutes." |
+| revoke confirmation | "Stop {deviceName} from sending work to Czar?" |
+
 ### 13. Performance and cost budgets
 
 - Approval screen: ≤ 2 API calls before render; UserOp build ≤ 200 ms on-device.
@@ -389,3 +404,5 @@ K17 VAPID private key in the secret store; a leak lets an attacker spam notifica
 | 2026-10-20 | D90 | `getSoulPointer` message before the first soul version points to the optional desktop interview; no soul data in the app. Approval display for confirmed objectives is held in SCR-030. |
 | 2026-10-20 | D91 | Approval screen shows each step's reason, each losing alternative, and the result format. |
 | 2026-10-21 | SCR-125 | Passkey enrolment and challenge routes (§5.2), `Me.vaultCreated`, `app.challengeTtlSeconds`, `app.bundlerEndpoints`, local fork + mock bundler test setup. |
+| 2026-10-25 | SCR-135 | §4 passkey transport aligned with SCR-125; `app.circleClientUrl`, `app.circleClientKey`, `app.arcRpcUrl`. |
+| 2026-10-25 | SCR-132, SCR-133, SCR-134 | "Approval sent" state; `recordManualReturn` UserOp and the Envelope "Money to record" section; device routes on Settings; wording. |

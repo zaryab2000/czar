@@ -26,3 +26,6 @@
 
 ## Decision
 - 
+
+## Note (2026-10-25)
+- The `merchant-seller-proof` part is resolved by SCR-129 (the signer sets `SellerRequest.payTo` to the service's K10 address; the merchant gets the same address from `keyAddress`). The `gateway-nano` part stays open.
