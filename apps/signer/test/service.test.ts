@@ -153,6 +153,42 @@ describe("signer service", () => {
   });
 });
 
+describe("public key address lookup (SCR-129)", () => {
+  it("allows only the caller-to-key pairs and excludes pocket keys", async () => {
+    const t = await harness();
+    expect(await t.signer.keyAddress("cz-15", "K3")).toBe(t.address("K3"));
+    expect(await t.signer.keyAddress("cz-16", "K7")).toBe(t.address("K7"));
+    expect(await t.signer.keyAddress("cz-17", "K8")).toBe(t.address("K8"));
+    expect(await t.signer.keyAddress("cz-24", "K5")).toBe(t.address("K5"));
+    expect(await t.signer.keyAddress("cz-20", "K10:czar-search")).toBe(
+      t.address("K10:czar-search"),
+    );
+    const refused: [string, string][] = [
+      ["cz-20", "K3"],
+      ["cz-15", `K4:${t.pocket}`],
+      ["cz-15", "K10:czar-search"],
+      ["cz-20", "K10:unknown-service"],
+      ["cz-16", "K7:extra"],
+    ];
+    for (const [caller, keyRef] of refused) {
+      await expect(t.signer.keyAddress(caller, keyRef)).rejects.toMatchObject({
+        rule: "key-not-allowed",
+      });
+    }
+    expect(t.audit.rows).toEqual([]);
+  });
+
+  it("rate-limits address reads per caller without signing audit rows", async () => {
+    const t = await harness({ config: { "signer.keyAddressPerMin": 1 } });
+    const address = t.address("K10:czar-search");
+    expect(await t.signer.keyAddress("cz-20", "K10:czar-search")).toBe(address);
+    await expect(t.signer.keyAddress("cz-20", "K10:czar-search")).rejects.toMatchObject({
+      rule: "rate-limit",
+    });
+    expect(t.audit.rows).toEqual([]);
+  });
+});
+
 describe("pocket keys (K4, RV-004)", () => {
   it("creates a pocket key for CZ-15 only", async () => {
     const t = await harness();

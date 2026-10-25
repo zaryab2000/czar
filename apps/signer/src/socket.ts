@@ -46,7 +46,7 @@ export function keychainSignerIdentity(
 
 export interface SignerSocketOptions {
   readonly socketPath: string;
-  readonly signer: Pick<Signer, "sign" | "createPocketKey">;
+  readonly signer: Pick<Signer, "sign" | "createPocketKey" | "keyAddress">;
   readonly audit: AuditSink;
   readonly identity: SignerSocketIdentity;
   readonly allowedCallers: Readonly<Record<string, readonly string[]>>;
@@ -92,6 +92,7 @@ export interface SignerClientOptions {
 export interface SignerClient {
   sign(caller: string, request: SignRequest): Promise<SignResult>;
   createPocketKey(caller: string): Promise<Address>;
+  keyAddress(caller: string, keyRef: string): Promise<Address>;
 }
 
 export async function createSignerClient(options: SignerClientOptions): Promise<SignerClient> {
@@ -120,6 +121,14 @@ export async function createSignerClient(options: SignerClientOptions): Promise<
         caller,
         method: "createPocketKey",
       }),
+    keyAddress: (caller, keyRef) =>
+      callSocket(socketPath, {
+        service: options.service,
+        token,
+        caller,
+        method: "keyAddress",
+        keyRef,
+      }),
   };
 }
 
@@ -127,8 +136,9 @@ type SocketRequest = {
   readonly service: string;
   readonly token: string;
   readonly caller: string;
-  readonly method: "sign" | "createPocketKey";
+  readonly method: "sign" | "createPocketKey" | "keyAddress";
   readonly request?: SignRequest;
+  readonly keyRef?: string;
 };
 
 type SocketResponse =
@@ -165,10 +175,14 @@ async function dispatch(line: string, options: SignerSocketOptions): Promise<Soc
     return { ok: false, rule: "service-caller" };
   }
   try {
-    const result =
-      parsed.method === "sign"
-        ? await options.signer.sign(parsed.caller, parsed.request as SignRequest)
-        : await options.signer.createPocketKey(parsed.caller);
+    let result: SignResult | Address;
+    if (parsed.method === "sign") {
+      result = await options.signer.sign(parsed.caller, parsed.request as SignRequest);
+    } else if (parsed.method === "createPocketKey") {
+      result = await options.signer.createPocketKey(parsed.caller);
+    } else {
+      result = await options.signer.keyAddress(parsed.caller, parsed.keyRef as string);
+    }
     return { ok: true, result };
   } catch (error) {
     return { ok: false, rule: error instanceof Denied ? error.rule : "signer-error" };
@@ -184,8 +198,11 @@ function parseSocketRequest(line: string): SocketRequest | undefined {
       typeof request.service !== "string" ||
       typeof request.token !== "string" ||
       typeof request.caller !== "string" ||
-      (request.method !== "sign" && request.method !== "createPocketKey") ||
-      (request.method === "sign" && typeof request.request !== "object")
+      (request.method !== "sign" &&
+        request.method !== "createPocketKey" &&
+        request.method !== "keyAddress") ||
+      (request.method === "sign" && typeof request.request !== "object") ||
+      (request.method === "keyAddress" && typeof request.keyRef !== "string")
     )
       return undefined;
     return request as SocketRequest;
@@ -195,6 +212,7 @@ function parseSocketRequest(line: string): SocketRequest | undefined {
 }
 
 async function writeDenied(audit: AuditSink, request: SocketRequest, rule: string): Promise<void> {
+  if (request.method === "keyAddress") return;
   await audit.write({
     at: Date.now(),
     caller: request.service,

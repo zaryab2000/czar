@@ -6,7 +6,6 @@ import type { AppPlan, Me, SubjectsRevision } from "@czar/schemas";
 import { AppApiError, appApi } from "#src/app-api";
 import { assertApprovalIntent, PLAN_MISMATCH_MESSAGE } from "#src/approval-integrity";
 import { useAppData } from "#src/use-app-data";
-import { getStoredPasskey, readEnvelopeCount, sendOwnerUserOperation } from "#src/wallet";
 import { formatUsd } from "@czar/web/money-format";
 
 export default function ApprovalPage() {
@@ -348,6 +347,8 @@ function ApproveButton({
     try {
       const intent = await appApi.createApprovalIntent(plan.planId, { fillInPlace });
       assertApprovalIntent(plan, intent);
+      const { getStoredPasskey, readEnvelopeCount, sendOwnerUserOperation } =
+        await import("#src/wallet");
       const previousEnvelopeCount = await readEnvelopeCount(intent.vault);
       const { userOpHash, bundler } = await sendOwnerUserOperation(
         getStoredPasskey(),
@@ -406,6 +407,8 @@ function ApproveButton({
     setBusy(true);
     setNotice(undefined);
     try {
+      const { getStoredPasskey, readEnvelopeCount, sendOwnerUserOperation } =
+        await import("#src/wallet");
       const currentCount = await readEnvelopeCount(pending.vault);
       if (currentCount >= pending.expectedEnvelopeId) {
         setNotice("The vault already opened this envelope. Waiting for the indexer to sync.");

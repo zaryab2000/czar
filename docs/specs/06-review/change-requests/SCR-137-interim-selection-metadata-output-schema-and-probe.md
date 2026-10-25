@@ -24,6 +24,8 @@
 ## Proposed change
 
 ### 1. Ranking metadata for the interim producer
+> **Superseded in part by SCR-138 (2026-10-25):** the `policy_version` descriptor and the snapshot `services` entry shape below are replaced by SCR-138 §1–§2. Storage, `snapshot_anchor_tx` and the schema change stand.
+
 - **`policy_version`**: `"pol_" + hex(keccak256(utf8(JCS(descriptor))))[0:16]` via `@czar/hashing`, where `descriptor` is exactly:
   `{"policy":"czar-registered-interim","scr":"SCR-137","network":<selection.paymentNetwork>,"unverifiedWithApproval":<selection.unverifiedWithApproval>,"exploration":"lowest-live-price-then-serviceId","ranked":"none"}`.
   - This is the hash of the complete rule the producer applies, so it changes whenever that rule or its configuration changes.
