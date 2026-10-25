@@ -503,7 +503,7 @@ type PaymentRef =
 
 - **Payment network only (D83):** every service in `ranked[]`, `unverified[]` and `exploration_slot` is on `selection.paymentNetwork`; market-network services appear only in a `MarketView` (§4.22).
 - Adopted from SL §5.6 verbatim. Schema `schemas/ranking-decision.schema.json` mirrors the TypeScript shape.
-- **Interim producer (SCR-137, schema 1.1):** until T-091/T-057 anchor snapshots, CZ-18's interim producer (SCR-131) sets `policy_version` to the hash of its JCS policy descriptor, `snapshot_id` to the hash of its stored JCS snapshot, and `snapshot_anchor_tx` to `null`. A `null` anchor means not anchored, and no consumer presents such a decision as anchored. This is a recorded Phase 1 deviation from SL invariant 8 ("anchored `snapshot_id`"); reproducibility from `(policy_version, snapshot_id)` still holds. Privacy `SO` (the SL's own publication rules apply when the full Selection Layer ships).
+- **Interim producer (SCR-137, schema 1.1):** until T-091/T-057 anchor snapshots, CZ-18's interim producer (SCR-131) sets `policy_version` to the hash of its JCS policy descriptor, `snapshot_id` to the hash of its stored JCS snapshot, and `snapshot_anchor_tx` to `null`. A `null` anchor means not anchored, and no consumer presents such a decision as anchored. This is a recorded Phase 1 deviation from SL invariant 8 ("anchored `snapshot_id`"); reproducibility from `(policy_version, snapshot_id)` and the decision's `query` still holds; the snapshot keeps every registered service with its probe state and every reduced offer, so every gate outcome can be recomputed (CZ-18 §5.2, SCR-138). Privacy `SO` (the SL's own publication rules apply when the full Selection Layer ships).
 
 ### 4.22 `MarketView` (D83)
 
@@ -1418,3 +1418,4 @@ Agent-directed text met this session (not followed): the Circle and Arc doc head
 | 2026-10-25 | SCR-128 | §6.3.3: the `sl-receipt` signer request carries the full `PaymentRef`. |
 | 2026-10-25 | SCR-133, SCR-134 | §9.2 app routes `listManualReturns`, `createPairingCode`, `listDevices`, `revokeDevice`; shapes in `api/openapi.yaml`. |
 | 2026-10-25 | SCR-137 | §11.3 sanitized result keeps the validated Bazaar `schema`; §4.19 interim producer metadata; `ranking-decision.schema.json` 1.1 (`snapshot_anchor_tx` may be `null`, meaning not anchored). |
+| 2026-10-25 | SCR-138 | §4.19: the interim snapshot holds every registered service, its probe state and every reduced offer, so decisions reproduce from `(policy_version, snapshot_id, query)`. |
