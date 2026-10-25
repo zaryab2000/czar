@@ -73,7 +73,7 @@ export interface VaultDirectDependencies {
   readonly safeFetch: SafeFetch;
   readonly now: () => Date;
   readonly boundary: (input: BoundaryInput) => Promise<unknown>;
-  readonly recordReceipt: (input: SettledReceiptContext) => Promise<void>;
+  readonly recordReceipt: (input: SettledReceiptContext) => Promise<boolean>;
   readonly objects: {
     put(bytes: Uint8Array): Promise<string>;
     get(ref: string): Promise<Uint8Array>;
@@ -153,6 +153,7 @@ export interface SettledReceiptContext extends BoundaryInput {
 export type VaultDirectResult =
   | { readonly state: "handed_off"; readonly assembly: readonly AssemblyEntry[] }
   | { readonly state: "done"; readonly stepResults: readonly unknown[] }
+  | { readonly state: "pending"; readonly stepResults: readonly unknown[] }
   | { readonly state: "failed"; readonly errorCode: string };
 
 export interface AssemblyEntry {
@@ -569,6 +570,7 @@ async function settleAndFinalize(
   }
   const results: unknown[] = [];
   const authorized: number[] = [];
+  let receiptPending = false;
   for (const entry of completed) {
     const authorizationUsed = await waitForAuthorization(
       dependencies,
@@ -627,22 +629,33 @@ async function settleAndFinalize(
         mimeType: entry.mimeType,
       },
     };
-    const stepResult = await dependencies.boundary(context);
+    const priorResult = trace.findLast(
+      (row) => row.phase === "step.result" && row.payload["index"] === entry.index,
+    );
+    if (priorResult && !Object.hasOwn(priorResult.payload, "stepResult"))
+      throw new Error("Stored step result cannot be recovered safely.");
+    const stepResult = priorResult
+      ? priorResult.payload["stepResult"]
+      : await dependencies.boundary(context);
     results.push(stepResult);
-    const call = input.step.callInputs?.find((candidate) => candidate.callIndex === entry.index);
-    await appendExecutionPhase(dependencies.pool, {
-      planId: input.planId,
-      stepIndex: input.step.stepIndex,
-      attempt,
-      phase: "step.result",
-      payload: {
-        index: entry.index,
-        ...(call?.subjectIndex === undefined ? {} : { subjectIndex: call.subjectIndex }),
-        stepResult,
-      },
-    });
-    if (await dependencies.chain.isSettled({ reservationId, index: entry.index }))
-      await dependencies.recordReceipt({ ...context, stepResult });
+    if (!priorResult) {
+      const call = input.step.callInputs?.find((candidate) => candidate.callIndex === entry.index);
+      await appendExecutionPhase(dependencies.pool, {
+        planId: input.planId,
+        stepIndex: input.step.stepIndex,
+        attempt,
+        phase: "step.result",
+        payload: {
+          index: entry.index,
+          ...(call?.subjectIndex === undefined ? {} : { subjectIndex: call.subjectIndex }),
+          stepResult,
+        },
+      });
+    }
+    if (await dependencies.chain.isSettled({ reservationId, index: entry.index })) {
+      const receiptStored = await dependencies.recordReceipt({ ...context, stepResult });
+      if (!receiptStored) receiptPending = true;
+    }
   }
   let start = 0;
   let final = false;
@@ -689,6 +702,7 @@ async function settleAndFinalize(
     });
     return { state: "failed", errorCode: "unpaid-index" };
   }
+  if (receiptPending) return { state: "pending", stepResults: results };
   await markStepDone(dependencies.pool, {
     planId: input.planId,
     stepIndex: input.step.stepIndex,

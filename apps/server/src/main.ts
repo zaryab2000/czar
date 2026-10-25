@@ -1023,7 +1023,7 @@ function createPayerBoundary(
 }
 
 function createReceiptBuilder(options: ServerMainOptions, signer: Pick<Signer, "sign">) {
-  return async (context: SettledReceiptContext): Promise<void> => {
+  return async (context: SettledReceiptContext): Promise<boolean> => {
     const reports = await options.pool.query<{
       report_hash: string;
       obs_id: string;
@@ -1055,13 +1055,14 @@ function createReceiptBuilder(options: ServerMainOptions, signer: Pick<Signer, "
         Number(options.config.get("fetch.timeoutMs")),
         (payment) => verifyX402Transfer(options.publicClient, payment),
       );
-    await createPaymentReceipt(input, {
+    const receipt = await createPaymentReceipt(input, {
       pool: options.pool,
       config: options.config,
       signer,
       settlement,
       now: options.clock.now,
     });
+    return receipt !== null;
   };
 }
 

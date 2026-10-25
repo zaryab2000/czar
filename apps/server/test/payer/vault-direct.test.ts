@@ -148,7 +148,7 @@ describe("vault-direct executor", () => {
           safeFetch: vi.fn(),
           now: () => new Date("2026-10-21T00:00:00Z"),
           boundary: vi.fn(),
-          recordReceipt: vi.fn(),
+          recordReceipt: vi.fn(async () => true),
           objects: { put: vi.fn(), get: vi.fn() },
         },
       ),
@@ -340,7 +340,8 @@ describe("vault-direct executor", () => {
     };
     let current = new Date("2026-10-21T00:00:00Z");
     const boundary = vi.fn(async () => ({ accepted: true }));
-    const recordReceipt = vi.fn(async (_input: SettledReceiptContext) => undefined);
+    let receiptAvailable = false;
+    const recordReceipt = vi.fn(async (_input: SettledReceiptContext) => receiptAvailable);
     const dependencies = {
       pool: getPool(),
       config: loadConfig(),
@@ -393,7 +394,10 @@ describe("vault-direct executor", () => {
     );
     const result = await executeVaultDirectStep(input, dependencies);
 
-    expect(result).toMatchObject({ state: "done", stepResults: [{ accepted: true }] });
+    expect(result).toMatchObject({ state: "pending", stepResults: [{ accepted: true }] });
+    await expect(
+      getPool().query("SELECT state FROM steps WHERE plan_id=$1 AND step_index=0", [PLAN_ID]),
+    ).resolves.toMatchObject({ rows: [{ state: "queued" }] });
     expect(chain.reserve).toHaveBeenCalledTimes(2);
     expect(
       sign.mock.calls.filter(
@@ -409,7 +413,7 @@ describe("vault-direct executor", () => {
       signedTransaction: "0x1234",
     });
     expect(chain.finalize).toHaveBeenCalledTimes(2);
-    expect(boundary).toHaveBeenCalledTimes(2);
+    expect(boundary).toHaveBeenCalledOnce();
     expect(recordReceipt).toHaveBeenCalledTimes(2);
     expect(recordReceipt.mock.calls[0]?.[0].paymentRef).toMatchObject({
       rail: "x402-exact",
@@ -430,7 +434,11 @@ describe("vault-direct executor", () => {
     await getPool().query("UPDATE steps SET calls_used=0 WHERE plan_id=$1 AND step_index=0", [
       PLAN_ID,
     ]);
-    await executeVaultDirectStep(input, dependencies);
+    receiptAvailable = true;
+    await expect(executeVaultDirectStep(input, dependencies)).resolves.toMatchObject({
+      state: "done",
+      stepResults: [{ accepted: true }],
+    });
     expect(chain.settle).toHaveBeenCalledTimes(1);
     expect(successfulAuthorizationSignatures).toBe(1);
     expect(chain.finalize).toHaveBeenCalledTimes(3);

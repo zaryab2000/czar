@@ -196,6 +196,41 @@ describe("payer dispatcher", () => {
     expect(runStep).not.toHaveBeenCalled();
   });
 
+  it("acquires each dispatch lease using the current clock, not the batch start", async () => {
+    const initial = new Date("2026-10-25T12:00:00Z");
+    let clockReads = 0;
+    const observedExpiry: Date[] = [];
+    const now = vi.fn(() => {
+      const value = new Date(initial.getTime() + clockReads * 120_000);
+      clockReads += 1;
+      return value;
+    });
+    await dispatchExecutingObjectives({
+      pool: getPool(),
+      config: { get: () => 60 } as never,
+      now,
+      isFrozen: async () => false,
+      isGuardianPaused: async () => false,
+      runStep: async () => {
+        const lease = await getPool().query<{ expires_at: Date }>(
+          "SELECT expires_at FROM executor_leases WHERE envelope_ref=$1",
+          [ENVELOPE],
+        );
+        observedExpiry.push(lease.rows[0]!.expires_at);
+        return "done";
+      },
+      complete: vi.fn(),
+      onError: (error) => {
+        throw error;
+      },
+    });
+
+    expect(observedExpiry).toEqual([
+      new Date(initial.getTime() + 180_000),
+      new Date(initial.getTime() + 180_000),
+    ]);
+  });
+
   it("passes journal phases to resumed steps after a lease expires", async () => {
     await getPool().query(
       `INSERT INTO step_executions (plan_id,step_index,attempt,phase,payload)

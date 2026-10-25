@@ -48,11 +48,13 @@ interface DispatchRow extends DispatchEnvelope {
 export async function dispatchExecutingObjectives(
   dependencies: DispatcherDependencies,
 ): Promise<void> {
-  const now = (dependencies.now ?? (() => new Date()))();
-  const candidates = await findDispatchCandidates(dependencies.pool, now);
+  const candidates = await findDispatchCandidates(
+    dependencies.pool,
+    (dependencies.now ?? (() => new Date()))(),
+  );
   for (const candidate of candidates) {
     try {
-      await dispatchEnvelope(candidate, dependencies, now);
+      await dispatchEnvelope(candidate, dependencies);
     } catch (error) {
       dependencies.onError(error);
     }
@@ -128,7 +130,6 @@ async function findDispatchCandidates(pool: Pool, now: Date): Promise<DispatchRo
 async function dispatchEnvelope(
   envelope: DispatchRow,
   dependencies: DispatcherDependencies,
-  now: Date,
 ): Promise<void> {
   const workerId = dependencies.workerId?.() ?? `dispatch-${process.pid}-${randomUUID()}`;
   const leaseSeconds = Number(dependencies.config.get("payer.leaseSeconds"));
@@ -137,7 +138,7 @@ async function dispatchEnvelope(
     envelope.envelopeRef,
     workerId,
     leaseSeconds,
-    () => now,
+    dependencies.now ?? (() => new Date()),
   );
   if (!acquired) return;
   const renewal = startExecutorLeaseRenewal(

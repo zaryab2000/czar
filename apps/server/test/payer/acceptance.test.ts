@@ -105,7 +105,7 @@ describe("payer acceptance boundaries", () => {
       now: () => fakeNow,
       objects: { put: async () => "body-ref", get: async () => new Uint8Array() },
       boundary: async () => ({ accepted: true }),
-      recordReceipt: async () => undefined,
+      recordReceipt: async () => true,
     } as never);
 
     expect(result).toMatchObject({ state: "done" });
@@ -158,7 +158,7 @@ describe("payer acceptance boundaries", () => {
       now: () => new Date("2026-10-21T00:00:00Z"),
       objects: { put: async () => "body-ref", get: async () => new Uint8Array() },
       boundary: async () => ({ accepted: true }),
-      recordReceipt: async () => undefined,
+      recordReceipt: async () => true,
     } as never);
 
     expect(result).toMatchObject({ state: "done" });
@@ -233,7 +233,7 @@ describe("payer acceptance boundaries", () => {
       },
       objects: { put: async () => "body-ref", get: async () => new Uint8Array() },
       boundary: async ({ response }) => ({ body: new TextDecoder().decode(response.body) }),
-      recordReceipt: async () => undefined,
+      recordReceipt: async () => true,
     });
 
     expect(result).toMatchObject({ state: "done" });

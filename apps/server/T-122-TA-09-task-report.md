@@ -55,13 +55,13 @@ rewriting commits. The current implementation is on `codex/t122-dispatcher-compl
 
 ## Validation
 
-- `fnm exec --using=22.22.0 pnpm --filter @czar/server exec vitest run test/evidence/indexer-settlement.test.ts test/evidence/receipt-input.test.ts test/evidence/receipts.test.ts test/payer/vault-direct.test.ts test/payer/pocket.test.ts test/payer/dispatcher.test.ts test/objectives/completion.test.ts test/main.test.ts test/main-dispatch.test.ts test/planner/planner.test.ts` — **10 files passed, 59 tests passed**.
+- `fnm exec --using=22.22.0 pnpm --filter @czar/server exec vitest run test/evidence/indexer-settlement.test.ts test/evidence/receipt-input.test.ts test/evidence/receipts.test.ts test/payer/vault-direct.test.ts test/payer/pocket.test.ts test/payer/dispatcher.test.ts test/objectives/completion.test.ts test/main.test.ts test/main-dispatch.test.ts test/planner/planner.test.ts` — **10 files passed, 60 tests passed**.
 - `fnm exec --using=22.22.0 pnpm --filter @czar/hashing test` — **5 files passed, 43 tests passed**.
 - `fnm exec --using=22.22.0 pnpm -r typecheck` — **passed for all 14 projects with typecheck scripts** (workspace scope: 14 of 15).
 - `fnm exec --using=22.22.0 pnpm lint` — **passed**, oxlint had no warnings and oxfmt found all 430 files formatted.
 - `git diff --check` — **passed**.
 - GitHub Actions — **not run**: jobs were not started because GitHub reported an account billing/spending-limit issue; no hosted result is counted as passing.
-- Regression-first evidence: dispatcher repeated-handoff test failed because the step ran twice, then passed after the persisted `handed_off` guard; local-profile test failed with the stale unavailable error, then passed using the merged profile producer; receipt-input tests cover JSONB key reordering and the checks-only commitment; settlement tests cover payee binding and distinguish the facilitator's transfer transaction from the vault's `Settled` transaction, with the USDC `Transfer` independently decoded from the payment transaction receipt.
+- Regression-first evidence: dispatcher repeated-handoff test failed because the step ran twice, then passed after the persisted `handed_off` guard; local-profile test failed with the stale unavailable error, then passed using the merged profile producer; receipt-input tests cover JSONB key reordering and the checks-only commitment; settlement tests cover payee binding and distinguish the facilitator's transfer transaction from the vault's `Settled` transaction, with the USDC `Transfer` independently decoded from the payment transaction receipt. Review fixes reproduce the stale dispatch lease expiry and the receipt-indexer-lag completion bug; they now pass with per-acquisition clocks and retryable receipt recording that reuses the journaled StepResult.
 
 ## Cross-lane dependencies and decision proposals
 
@@ -116,6 +116,17 @@ checks match the authorization identity while verifying the facilitator transact
 USDC `Transfer` separately from the vault settlement transaction. The completed-job
 result issue remains open for the Lane 3 T-055 producer and an approved Lane 2
 consumer contract.
+
+## Review round 2
+
+At head `f71bf5b`, the code review confirmed two additional issues: leases for
+later work could be based on the dispatch batch's stale timestamp, and a null
+receipt caused by indexer lag was treated as successful recording. Both fixes
+are implemented with regression tests in the current local fix batch. The
+security review for `f71bf5b` was still running when this report was updated;
+the fix batch itself has not yet received hosted review. The T-055 completed-job
+result finding remains unresolved for the Lane 3 producer and approved Lane 2
+consumer mapping described above.
 
 ## Deferred validation — D94
 
