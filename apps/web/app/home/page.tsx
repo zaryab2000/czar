@@ -60,8 +60,15 @@ export default function HomePage() {
           <ul className="rows">
             {data.approvals.items.map((item) => (
               <li key={item.planId}>
-                <a href={`/approve/${encodeURIComponent(item.planId)}`}>{item.goal}</a>
+                {item.status === "submitted" ? (
+                  <span>{item.goal}</span>
+                ) : (
+                  <a href={`/approve/${encodeURIComponent(item.planId)}`}>{item.goal}</a>
+                )}
                 <span>{item.capDisplay}</span>
+                {item.status === "submitted" && (
+                  <span>Approval sent. Waiting for the network to confirm it.</span>
+                )}
               </li>
             ))}
           </ul>

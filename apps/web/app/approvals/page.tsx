@@ -24,7 +24,7 @@ export default function ApprovalsPage() {
 
   useEffect(() => {
     if (!data) return;
-    setPendingCount(approvals.length);
+    setPendingCount(approvals.filter((approval) => approval.status !== "submitted").length);
     const timer = window.setInterval(refresh, data.pollSeconds * 1000);
     return () => {
       window.clearInterval(timer);
@@ -48,9 +48,16 @@ export default function ApprovalsPage() {
         <ul className="rows">
           {approvals.map((approval) => (
             <li key={approval.planId}>
-              <a href={`/approve/${encodeURIComponent(approval.planId)}`}>{approval.goal}</a>
+              {approval.status === "submitted" ? (
+                <span>{approval.goal}</span>
+              ) : (
+                <a href={`/approve/${encodeURIComponent(approval.planId)}`}>{approval.goal}</a>
+              )}
               <span>{approval.capDisplay}</span>
               <span>{approval.category}</span>
+              {approval.status === "submitted" && (
+                <span>Approval sent. Waiting for the network to confirm it.</span>
+              )}
             </li>
           ))}
         </ul>

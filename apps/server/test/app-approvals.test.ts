@@ -76,6 +76,33 @@ async function seedPlan(): Promise<void> {
   );
 }
 
+async function seedOtherUsersPlan(): Promise<void> {
+  const pool = getPool();
+  const userId = "usr_01K7ZT9P4N5Q6R7S8T9V0W1A2Z";
+  const deviceId = "dev_01K7ZT9P4N5Q6R7S8T9V0W1A2Z";
+  const objectiveId = "obj_01K7ZT9P4N5Q6R7S8T9V0W1A2Z";
+  const planId = "pln_01K7ZT9P4N5Q6R7S8T9V0W1A2Z";
+  const submission = makeObjectiveSubmission(objectiveId, { deviceId, goal: "Private goal" });
+  const plan = { ...planFixture(), planId, objectiveId };
+  await pool.query("INSERT INTO users (user_id) VALUES ($1)", [userId]);
+  await pool.query(
+    `INSERT INTO devices (device_id,user_id,device_name,platform,token_hash,created_at)
+     VALUES ($1,$2,'Other device','macos',$3,$4)`,
+    [deviceId, userId, Buffer.alloc(32, 99), TEST_NOW],
+  );
+  await pool.query(
+    `INSERT INTO objectives (objective_id,user_id,device_id,submission,objective_hash,state,
+      plan_id,created_at,updated_at)
+     VALUES ($1,$2,$3,$4::jsonb,$5,'awaiting-approval',$6,$7,$7)`,
+    [objectiveId, userId, deviceId, JSON.stringify(submission), HASH, planId, TEST_NOW],
+  );
+  await pool.query(
+    `INSERT INTO plans (plan_id,objective_id,plan,plan_hash,payee_root,state,created_at,updated_at)
+     VALUES ($1,$2,$3::jsonb,$4,$5,'approved',$6,$6)`,
+    [planId, objectiveId, JSON.stringify(plan), plan.planHash, plan.payeeRoot, TEST_NOW],
+  );
+}
+
 describe("approval app routes", () => {
   beforeAll(async () => seedDevice(getPool()));
 
@@ -88,11 +115,12 @@ describe("approval app routes", () => {
 
   it("lists only owned pending plans and returns the full plan", async () => {
     await seedPlan();
+    await seedOtherUsersPlan();
     const { app } = createTestContext(getPool());
     const headers = { Authorization: `Bearer ${APP_TOKEN}` };
     const list = await app.request("/v1/approvals?status=pending", { headers });
     const page = (await list.json()) as {
-      items: { planId: string; objectiveId: string; status: string }[];
+      items: { planId: string; objectiveId: string; goal: string; status: string }[];
     };
     expect(list.status).toBe(200);
     expect(
@@ -104,11 +132,33 @@ describe("approval app routes", () => {
       objectiveId: OBJECTIVE_ID,
       status: "pending",
     });
+    expect(page.items).toHaveLength(1);
+    expect(page.items.map((item) => item.goal)).not.toContain("Private goal");
 
     const detail = await app.request(`/v1/approvals/${PLAN_ID}`, { headers });
     expect(detail.status).toBe(200);
     expect(detail.headers.get("X-Czar-Large-Cap-Warn-Bps")).toBe("5000");
     expect(await detail.json()).toMatchObject({ planId: PLAN_ID });
+  });
+
+  it("lists submitted plans awaiting confirmation without changing offered plans", async () => {
+    await seedPlan();
+    await getPool().query("UPDATE plans SET state='approved' WHERE plan_id=$1", [PLAN_ID]);
+    const { app } = createTestContext(getPool());
+    const headers = { Authorization: `Bearer ${APP_TOKEN}` };
+
+    const pending = await app.request("/v1/approvals?status=pending", { headers });
+    const pendingItems = (await pending.json()) as {
+      items: { planId: string; objectiveId: string; goal: string; status: string }[];
+    };
+    expect(pendingItems.items).toEqual([
+      expect.objectContaining({ planId: PLAN_ID, status: "submitted" }),
+    ]);
+
+    const submitted = await app.request("/v1/approvals?status=submitted", { headers });
+    expect(((await submitted.json()) as typeof pendingItems).items).toEqual([
+      expect.objectContaining({ planId: PLAN_ID, status: "submitted" }),
+    ]);
   });
 
   it("creates exact openEnvelope calldata from the owned offered plan", async () => {

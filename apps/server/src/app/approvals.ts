@@ -76,16 +76,20 @@ export async function listApprovalsRoute(
   const cursor = decodeApprovalCursor(params.get("cursor"));
   const rows = await dependencies.pool.query<ApprovalRow>(
     `SELECT p.plan_id,p.plan,p.state AS plan_state,o.objective_id,o.state AS objective_state,
-            o.submission,p.created_at,$2::text AS status
+            o.submission,p.created_at,
+            CASE WHEN p.state='approved' AND o.state='awaiting-approval'
+              THEN 'submitted' ELSE $2::text END AS status
      FROM plans p JOIN objectives o ON o.objective_id=p.objective_id
      WHERE o.user_id=$1 AND (
        ($2='pending' AND p.state='offered' AND o.state='awaiting-approval'
          AND NOT EXISTS (SELECT 1 FROM outbox_events e WHERE e.name='approval.intent-issued'
            AND e.objective_id=o.objective_id)) OR
+       ($2='pending' AND p.state='approved' AND o.state='awaiting-approval') OR
        ($2='intent-issued' AND p.state='offered' AND o.state='awaiting-approval'
          AND EXISTS (SELECT 1 FROM outbox_events e WHERE e.name='approval.intent-issued'
            AND e.objective_id=o.objective_id)) OR
-       ($2='submitted' AND p.state='approved' AND o.state='opening') OR
+       ($2='submitted' AND p.state='approved'
+         AND o.state IN ('opening','awaiting-approval')) OR
        ($2='opened' AND o.envelope_ref IS NOT NULL) OR
        ($2='expired' AND p.state='expired') OR
        ($2='declined' AND o.state='dismissed'))
