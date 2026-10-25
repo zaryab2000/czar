@@ -3,7 +3,11 @@ import { loadConfig } from "@czar/config";
 import { buildTree, payeeLeaf, verifyProof } from "@czar/hashing";
 import { USDC_ADDRESS, type PaymentRequirements } from "@czar/x402";
 import { describe, expect, it } from "vitest";
-import { createPlanner, recomputePlanHash } from "#src/planner/index";
+import {
+  computeObjectiveGatewayVolume,
+  createPlanner,
+  recomputePlanHash,
+} from "#src/planner/index";
 import { createSafeProber } from "#src/planner/probe";
 import { route, routingParamsFromConfig, cVd, pocketWorthIt } from "#src/router/index";
 import type { PlannerService } from "#src/planner/ports";
@@ -149,6 +153,17 @@ function makePlanner(
 }
 
 describe("planner fallback", () => {
+  it("sums only paid Gateway volume and excludes job and unpaid steps", () => {
+    expect(
+      computeObjectiveGatewayVolume([
+        { kind: "paid", expectedCalls: 5, gatewayUnitAmount: 8_000n },
+        { kind: "paid", expectedCalls: 9 },
+        { kind: "job", expectedCalls: 5, gatewayUnitAmount: 5_000_000n },
+        { kind: "unpaid", expectedCalls: 5, gatewayUnitAmount: 5_000_000n },
+      ]),
+    ).toBe(40_000n);
+  });
+
   it("computes V from every selected paid step's live Gateway offer", async () => {
     const gatewayOffers = [
       { ...offer, amount: "8000" },

@@ -67,6 +67,25 @@ interface PaidStepDraft {
 
 type CollectedEntry = { readonly kind: "unpaid"; readonly step: Step } | PaidStepDraft;
 
+export interface GatewayVolumeEntry {
+  readonly kind: "paid" | "job" | "unpaid";
+  readonly expectedCalls: number;
+  readonly gatewayUnitAmount?: bigint;
+}
+
+export function computeObjectiveGatewayVolume(entries: readonly GatewayVolumeEntry[]): bigint {
+  let volume = 0n;
+  for (const entry of entries) {
+    if (!Number.isSafeInteger(entry.expectedCalls) || entry.expectedCalls < 0)
+      throw new RangeError("Gateway volume expectedCalls must be a non-negative safe integer.");
+    if (entry.gatewayUnitAmount !== undefined && entry.gatewayUnitAmount < 0n)
+      throw new RangeError("Gateway offer amount must be non-negative.");
+    if (entry.kind !== "paid" || entry.gatewayUnitAmount === undefined) continue;
+    volume += BigInt(entry.expectedCalls) * entry.gatewayUnitAmount;
+  }
+  return volume;
+}
+
 export function createPlanner(dependencies: PlannerDependencies) {
   const config = dependencies.config ?? loadConfig();
   const ports = {
@@ -290,21 +309,22 @@ function preparePaidStep(
 
 function computeGatewayVolume(entries: readonly CollectedEntry[], config: Config): bigint {
   const jobThreshold = routingParamsFromConfig(config).jobThresholdAtomic;
-  return entries.reduce((total, entry) => {
-    if (
-      entry.kind !== "paid" ||
-      entry.candidate.jobProvider ||
-      entry.candidate.unprobed ||
-      entry.candidate.amount >= jobThreshold
-    )
-      return total;
-    const gatewayOffer = entry.candidate.offers.find(
-      (offer) => offer.extra["name"] === GATEWAY_EXTRA_NAME && isUsablePlannerOffer(offer),
-    );
-    return gatewayOffer
-      ? total + BigInt(entry.callInputs.length) * BigInt(gatewayOffer.amount)
-      : total;
-  }, 0n);
+  const volumeEntries: GatewayVolumeEntry[] = entries.map((entry) => {
+    if (entry.kind === "unpaid") return { kind: "unpaid", expectedCalls: entry.step.expectedCalls };
+    const job = entry.candidate.jobProvider === true || entry.candidate.amount >= jobThreshold;
+    const gatewayOffer =
+      !job && !entry.candidate.unprobed
+        ? entry.candidate.offers.find(
+            (offer) => offer.extra["name"] === GATEWAY_EXTRA_NAME && isUsablePlannerOffer(offer),
+          )
+        : undefined;
+    return {
+      kind: job ? "job" : "paid",
+      expectedCalls: entry.callInputs.length,
+      ...(gatewayOffer ? { gatewayUnitAmount: BigInt(gatewayOffer.amount) } : {}),
+    };
+  });
+  return computeObjectiveGatewayVolume(volumeEntries);
 }
 
 function getSingleStringInput(fields: unknown): string | null {

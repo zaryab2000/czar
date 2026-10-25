@@ -158,6 +158,8 @@ export function route(input: RouterInput): RouteResult {
 
   const offers = usableOffers(input.offers, input.planNetwork);
   if (calls === 0) return skipped("fee-exceeds-payment");
+  if (!offers.hasExact && offers.hasGateway && !input.params.gatewayEnabled)
+    return skipped("no-usable-offer");
   const gasPrice = floorGasPrice(input.eth_gasPrice);
   const gatewayUsable =
     input.params.gatewayEnabled && offers.hasGateway && gasPrice <= input.params.maxGasPriceWei;

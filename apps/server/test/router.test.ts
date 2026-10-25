@@ -121,7 +121,7 @@ describe("CZ-14 payment router cost model", () => {
           params: disabled,
         }),
       ),
-    ).toMatchObject({ error: "unsupported-offer" });
+    ).toMatchObject({ error: "unsupported-offer", reason: "no-usable-offer" });
 
     const enabled = routingParamsFromConfig(
       loadConfig({ envFile: { "routing.gatewayEnabled": true } }),
