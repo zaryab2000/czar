@@ -50,4 +50,5 @@ record a fixture or define a local attestation mock before T-050a exercises this
 ## Deferred
 
 - Per D94, the running-Arc Facilitator/Gateway stand-in round trip is deferred to T-050a.
-- No hosted Circle endpoint, testnet, real funds, or private key was used.
+- No hosted Circle endpoint, testnet, funds, or existing key material was used. The signer-envelope
+  tests generate a throwaway key in memory only; it is neither persisted nor printed.
