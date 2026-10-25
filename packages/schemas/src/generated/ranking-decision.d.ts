@@ -5,9 +5,9 @@
  */
 export interface RankingDecision {
   /**
-   * Schema version, major.minor; this file is 1.0.
+   * Schema version, major.minor; this file is 1.1 (2026-10-25: snapshot_anchor_tx may be null for the unanchored interim producer, SCR-137).
    */
-  schemaVersion: "1.0";
+  schemaVersion: "1.1";
   /**
    * Query id.
    */
@@ -17,17 +17,17 @@ export interface RankingDecision {
    */
   received_at: string;
   /**
-   * Policy version.
+   * Policy version: pol_ + 16 hex of keccak256 over the policy definition (SL PolicyVersion); for the interim producer, over its JCS descriptor (SCR-137).
    */
   policy_version: string;
   /**
-   * Anchored snapshot root.
+   * Snapshot root: the anchored FEATURE_SNAPSHOT root (SL); for the Phase 1 interim producer, keccak256 of the stored JCS interim snapshot (SCR-137).
    */
   snapshot_id: string;
   /**
-   * Anchor transaction.
+   * Anchor transaction of snapshot_id; null means the snapshot is not anchored (Phase 1 interim producer, SCR-137) and must never be presented as anchored.
    */
-  snapshot_anchor_tx: string;
+  snapshot_anchor_tx: string | null;
   /**
    * The query.
    */
