@@ -3279,4 +3279,166 @@ export const PARAMETERS = [
     source:
       "docs/specs/06-review/change-requests/SCR-125-app-passkey-enrolment-reads-and-wallet-tests.md:104",
   },
+  {
+    key: "planner.pollMs",
+    type: "integer",
+    default: 1000,
+    unit: "ms",
+    reason:
+      "claim the next objective.received each second; well under the P-03 20 s budget (SCR-132)",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:278",
+  },
+  {
+    key: "planner.claimTimeoutSeconds",
+    type: "integer",
+    default: 300,
+    unit: "s",
+    reason:
+      "a planning claim older than this with no stored plan was left by a crashed worker; above the P-03 timeout plus probes (SCR-132)",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:61",
+  },
+  {
+    key: "payer.dispatchPollMs",
+    type: "integer",
+    default: 1000,
+    unit: "ms",
+    reason: "how often CZ-15 looks for executing envelopes without a live lease (SCR-132)",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:278",
+  },
+  {
+    key: "api.openingPollMs",
+    type: "integer",
+    default: 5000,
+    unit: "ms",
+    reason:
+      "EnvelopeOpened reaches the indexer within a few blocks; faster polling only loads the indexer (SCR-132)",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:88",
+  },
+  {
+    key: "indexer.gatewayBalanceMaxAgeSeconds",
+    type: "integer",
+    default: 120,
+    unit: "s",
+    reason:
+      "four Gateway polls at indexer.gatewayPollSeconds 30; an older balance is stale (SCR-127)",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:147",
+  },
+  {
+    key: "payer.gatewayRecoveryPollSeconds",
+    type: "integer",
+    default: 60,
+    unit: "s",
+    reason:
+      "closed-pocket recovery pass and manual-return reconciliation; slower than the 30 s indexer poll it reads (SCR-127, SCR-133)",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:393",
+  },
+  {
+    key: "payer.manualReturnHoldHours",
+    type: "integer",
+    default: 72,
+    unit: "hours",
+    reason:
+      "owner gets three days to record a slow-path return before the pocket is written off; the USDC is already in the vault (SCR-133)",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:395",
+  },
+  {
+    key: "signer.keyAddressPerMin",
+    type: "integer",
+    default: 60,
+    unit: "calls/min",
+    reason:
+      "startup and port refresh need a handful of public-address reads; kms limits apply to sign only (SCR-129)",
+    source: "docs/specs/04-components/server/server-autonomy-roi-keys.md:362",
+  },
+  {
+    key: "merchants.facilitatorBaseUrl",
+    type: "string",
+    default: "https://api.circle.com/v1/facilitator/x402",
+    unit: "url",
+    reason:
+      "Circle Facilitator base; the merchant posts /verify and /settle under it; local overlay points at the D92 stand-in (SCR-130)",
+    source: "docs/specs/04-components/server/server-supply-side.md:143",
+  },
+  {
+    key: "merchants.publicOrigin",
+    type: "string",
+    default: null,
+    unit: "origin",
+    reason: "resourceUrl = publicOrigin + /v1/<svc>; per environment (SCR-130)",
+    source: "docs/specs/04-components/server/server-supply-side.md:143",
+    noDefault: true,
+  },
+  {
+    key: "chain.gatewayApiBaseUrl",
+    type: "string",
+    default: "https://gateway-api-testnet.circle.com",
+    unit: "url",
+    reason: "Gateway API base for indexer polls, /v1/transfer and /v1/balances (A2-30, SCR-130)",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:147",
+  },
+  {
+    key: "fetch.localStandinOrigins",
+    type: "string[]",
+    default: null,
+    unit: "",
+    reason:
+      "exact http://127.0.0.1:<port> origins of the D92 Circle stand-ins; local overlay only, same rules as fetch.localMerchantOrigins (SCR-130)",
+    source: "docs/specs/04-components/shared/cross-cutting.md:59",
+    noDefault: true,
+  },
+  {
+    key: "selection.czarRegisteredServices",
+    type: "object",
+    default: {},
+    unit: "service-map",
+    reason:
+      "Czar-registered services keyed by serviceId, each {resource, capabilities[]}; Phase 1 transport for CZ-20 registration (SCR-131)",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:672",
+  },
+  {
+    key: "selection.registeredRecrawlHours",
+    type: "integer",
+    default: 24,
+    unit: "hours",
+    reason: "CZ-20: registered services are re-crawled every 24 h (SCR-131)",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:672",
+  },
+  {
+    key: "app.circleClientUrl",
+    type: "string",
+    default: null,
+    unit: "url",
+    reason: "Circle Modular Wallets client URL (A6-19); per environment (SCR-135)",
+    source: "docs/specs/04-components/app/app-and-notifications.md:40",
+    noDefault: true,
+  },
+  {
+    key: "app.circleClientKey",
+    type: "string",
+    default: null,
+    unit: "",
+    reason:
+      "K2 public-facing Circle client key (spec 01 K2 row); per environment, not a secret (SCR-135)",
+    source: "docs/specs/04-components/app/app-and-notifications.md:40",
+    noDefault: true,
+  },
+  {
+    key: "app.arcRpcUrl",
+    type: "string",
+    default: null,
+    unit: "url",
+    reason:
+      "app-side Arc RPC for chain reads; https on testnet, loopback only in the local overlay (SCR-135)",
+    source: "docs/specs/04-components/app/app-and-notifications.md:40",
+    noDefault: true,
+  },
+  {
+    key: "indexer.closedPocketQuietHours",
+    type: "integer",
+    default: 48,
+    unit: "hours",
+    reason:
+      "a Closed pocket stays polled until every balance reads zero this long; covers an attestation re-credit (A2-18) and a late nanopayment status (A2-26) (SCR-127)",
+    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:147",
+  },
 ] as const satisfies readonly ParameterSpec[];

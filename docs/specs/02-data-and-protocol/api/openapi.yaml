@@ -606,6 +606,45 @@ components:
         value: { type: string, const: "0" }
         chainId: { type: integer }
 
+    ManualReturn:
+      type: object
+      description: "A pocket return waiting for, or done by, the owner's recordManualReturn UserOp (SCR-133)."
+      x-privacyClass: public
+      additionalProperties: false
+      required: [envelopeRef, vault, pocket, returnedAmount, returnTx, state]
+      properties:
+        envelopeRef: { type: string }
+        vault: { $ref: "#/components/schemas/Address" }
+        pocket: { $ref: "#/components/schemas/Address" }
+        returnedAmount: { $ref: "#/components/schemas/Amount6", description: "USDC the pocket key returned to the vault after the slow withdrawal; the amount the app submits." }
+        returnTx: { $ref: "#/components/schemas/Hash32" }
+        state: { type: string, enum: [manual-return-required, recorded, expired], description: "expired = the pocket closed before the return was recorded; the USDC is already in the vault." }
+        recordedCredit: { $ref: "#/components/schemas/Amount6", description: "credit from ManualReturnRecorded; may be lower than returnedAmount (contract bound)." }
+        recordedTx: { $ref: "#/components/schemas/Hash32" }
+
+    PairingCode:
+      type: object
+      description: "One-time pairing code for pairDevice (SCR-134)."
+      x-privacyClass: server-only
+      additionalProperties: false
+      required: [code, expiresAt]
+      properties:
+        code: { type: string, pattern: "^[0-9]{8}$", description: "Shown once in the app; never logged." }
+        expiresAt: { $ref: "#/components/schemas/Timestamp" }
+
+    Device:
+      type: object
+      description: "A paired computer (SCR-134)."
+      x-privacyClass: server-only
+      additionalProperties: false
+      required: [deviceId, deviceName, platform, createdAt]
+      properties:
+        deviceId: { type: string, pattern: "^dev_[0-9A-HJKMNP-TV-Z]{26}$" }
+        deviceName: { type: string, maxLength: 64 }
+        platform: { type: string, enum: [macos, linux, windows] }
+        createdAt: { $ref: "#/components/schemas/Timestamp" }
+        revokedAt: { $ref: "#/components/schemas/Timestamp" }
+
     EnvelopeDetail:
       type: object
       x-privacyClass: public
@@ -1519,6 +1558,77 @@ paths:
         "4XX": { $ref: "#/components/responses/Problem" }
         "200": { description: Intent, content: { application/json: { schema: { $ref: "#/components/schemas/FreezeIntent" } } } }
 
+  /v1/pockets/manual-returns:
+    get:
+      tags: [app]
+      summary: Pocket returns for the owner to record with a recordManualReturn UserOp (SCR-133).
+      operationId: listManualReturns
+      security: [ { AppSession: [] } ]
+      parameters:
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "4XX": { $ref: "#/components/responses/Problem" }
+        "200":
+          description: Page of ManualReturn
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Page" }
+                  - type: object
+                    properties:
+                      items: { type: array, items: { $ref: "#/components/schemas/ManualReturn" } }
+
+  /v1/devices/pairing-codes:
+    post:
+      tags: [app]
+      summary: Issue an 8-digit pairing code for pairDevice (SCR-134).
+      operationId: createPairingCode
+      security: [ { AppSession: [] } ]
+      parameters: [ { $ref: "#/components/parameters/IdempotencyKey" } ]
+      responses:
+        "4XX": { $ref: "#/components/responses/Problem" }
+        "201": { description: Code issued, content: { application/json: { schema: { $ref: "#/components/schemas/PairingCode" } } } }
+
+  /v1/devices:
+    get:
+      tags: [app]
+      summary: The session user's paired devices (SCR-134).
+      operationId: listDevices
+      security: [ { AppSession: [] } ]
+      parameters:
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "4XX": { $ref: "#/components/responses/Problem" }
+        "200":
+          description: Page of Device
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Page" }
+                  - type: object
+                    properties:
+                      items: { type: array, items: { $ref: "#/components/schemas/Device" } }
+
+  /v1/devices/{deviceId}/revoke:
+    post:
+      tags: [app]
+      summary: Revoke a paired device; its token is refused from then on (SCR-134).
+      operationId: revokeDevice
+      security: [ { AppSession: [] } ]
+      parameters:
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+        - name: deviceId
+          in: path
+          required: true
+          schema: { type: string, pattern: "^dev_[0-9A-HJKMNP-TV-Z]{26}$" }
+      responses:
+        "4XX": { $ref: "#/components/responses/Problem" }
+        "204": { description: Revoked }
+
   /v1/ledger/receipts:
     get:
       tags: [app]
@@ -1684,4 +1794,5 @@ paths:
 # - D85 (2026-10-20): Plan.fillInPlace via ApprovalIntentRequest; Result.fillInPlace; ResultAck.fill counts.
 # - D86/D87 (2026-10-20): uploadJobDeliverable route and ProviderUploadSignature scheme; JobBrief v2.
 # - D87 (2026-10-20): Result.artifacts, ResultAck.artifacts counts, getResultArtifact route (H6, N2).
+# - SCR-133, SCR-134 (2026-10-25): listManualReturns, createPairingCode, listDevices, revokeDevice and the ManualReturn, PairingCode, Device schemas.
 # - D90 (2026-10-20): completeModelCall accepts P-07 (source-belief-extractor). Nothing else changes here; demandEvidence and the server approval policy for confirmed objectives are held in SCR-030.

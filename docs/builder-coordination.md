@@ -29,32 +29,33 @@ another lane.
 
 ### Lane 1 — Contracts and chain
 
-- **Owns:** `contracts/`, `packages/vault-client/`, `apps/signer/`, `deployments/`, `env/`
+- **Owns:** `contracts/`, `packages/vault-client/`, `apps/signer/`, `deployments/`, `env/`, `apps/indexer/`, `ops/` (SCR-136)
 - **Task queue:** T-026 → T-022 → T-105 → T-036 → T-037 → T-040
+- **Track A (SCR-136):** TA-01, TA-02, TA-03, TA-04, TA-07, TA-10, TA-11, then T-124 (TA-20) and the T-125 encoder and indexer part (TA-22a). Briefs: `docs/builder-prompts/track-a/`.
 - **Local arc-anvil port:** 8545
 
-### Lane 2 — Server payments
+### Lane 2 — Server payments and runtime
 
-- **Owns:** `apps/server/src/boundary/`, `apps/server/src/payer/`, `apps/server/src/receipts/`
-- **Task queue:** T-046 → T-048 → T-049 → T-050 → T-052 → T-054
+- **Owns:** `apps/server/src/boundary/`, `apps/server/src/payer/`, `apps/server/src/evidence/receipts.ts` (file), and the server core: `apps/server/src/main.ts` (SCR-126 §2), `local-main.ts`, `local-app.ts`, `index.ts`, `planner/`, `objectives/`, `router/`, `db/`, `models/`, `object-store.ts` (SCR-136)
+- **Task queue:** T-046 → T-048 → T-049 → T-052 → T-054 (done or in review); Track A: T-122 (TA-08, TA-09), T-085 server listener (TA-12), T-053 (TA-21), T-125 server part (TA-22b), then T-050a
 - **Local arc-anvil port:** 8546
 
-### Lane 3 — Acceptance and evidence
+### Lane 3 — Acceptance, evidence, selection and supply
 
-- **Owns:** `apps/server/src/acceptance/`, `apps/server/src/evidence/`
-- **Task queue:** T-047 → T-056 → T-057 → T-058 → T-055
+- **Owns:** `apps/server/src/acceptance/`, `apps/server/src/evidence/` (except `receipts.ts`), `apps/server/src/selection/`, `apps/merchants/` (SCR-136)
+- **Task queue:** T-047 (merged); Track A: T-123 (TA-06), T-043 reopened (TA-05). T-056, T-057, T-058, T-055, T-090, T-091, T-115 follow the evidence and social-network replan (Track B)
 - **Local arc-anvil port:** 8547
 
 ### Lane 4 — Daemon and plugins (Mac side)
 
 - **Owns:** `apps/daemon/`, `apps/redact-sidecar/`, `plugins/`, `apps/mcp/`
-- **Task queue:** T-109 → T-062 → T-063 → T-066 → T-068 → T-069 → T-073
+- **Task queue:** T-109 → T-062 → T-063 → T-066 → T-068 → T-069 → T-073 (held: re-planned with the evidence and social-network layer, Track B)
 - **Local arc-anvil port:** 8548
 
 ### Lane 5 — Web app
 
-- **Owns:** `apps/web/`, `apps/server/src/app/`
-- **Task queue:** T-081 → T-084 → T-086 → T-082
+- **Owns:** `apps/web/`, `apps/server/src/app/`, `apps/server/src/app.ts` (route registration), `apps/server/src/http/`, `apps/server/src/devices/` (SCR-136)
+- **Task queue:** T-081 → T-084 → T-086 → T-082 (merged); Track A: TA-14, TA-16, TA-13, TA-15, T-125 app part (TA-22c)
 - **Local arc-anvil port:** 8549
 
 ---
@@ -81,8 +82,9 @@ These packages are shared across lanes: `@czar/schemas`, `@czar/hashing`, `@czar
 - Edit a shared package **only** where your task requires it.
 - Put the shared-package change in a **separate small commit** so the architect can review it in
   isolation.
-- **Config registry:** append keys only. Never rename or remove an existing key.
-- **Migrations:** fetch `origin/build-v1` before opening the PR and check migration numbering.
+- **Config registry:** append keys only. Never rename or remove an existing key. Keys named in an accepted SCR are added by the architect in the spec-application branch; builders do not add them (SCR-136).
+- **Server routes:** a lane registers its own non-app routes in `apps/server/src/app.ts` in a separate small commit that Lane 5 reviews (SCR-136).
+- **Migrations:** each lane adds migrations for its own tables in `apps/server/migrations/` (SCR-136); fetch `origin/build-v1` before opening the PR and check migration numbering.
   Merge base updates into a published branch; do not rewrite already pushed commits.
   Recheck numbering after other migration PRs merge.
 
