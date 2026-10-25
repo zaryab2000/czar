@@ -59,6 +59,7 @@ Two items remain proposals, not approved decisions:
 - `fnm exec --using=22.22.0 pnpm exec vitest run test/postgres-projection.test.ts` from
   `apps/signer/` — 11 passed after adding the slow-withdraw eligibility cases.
 - `fnm exec --using=22.22.0 pnpm lint` — passed.
+- GitHub Actions runs `40205563664` (push) and `40205579662` (pull request), plus `40205563676` and `40205579698` (gitleaks), failed before jobs started because recent account payments failed or the spending limit needs to be increased; no hosted job result is available.
 - `git diff --check` — passed.
 - `fnm exec --using=22.22.0 prek run` — unavailable; this repository has no `prek.toml` or `.pre-commit-config.yaml`.
 - A previous full indexer-suite invocation failed in the existing `replay-anvil.test.ts` while
