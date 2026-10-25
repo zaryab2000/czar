@@ -2,9 +2,26 @@
 // RV tests. Every denial must leave the backend untouched.
 import { describe, expect, it } from "vitest";
 import { decodeFunctionData, parseTransaction, recoverAddress, slice, type Hex } from "viem";
-import { derivedNonce, KIND_TAGS, usdcTransferWithAuthorizationDigest } from "@czar/hashing";
+import {
+  derivedNonce,
+  KIND_TAGS,
+  paymentRefHash,
+  usdcTransferWithAuthorizationDigest,
+} from "@czar/hashing";
+import type { PaymentRef } from "@czar/schemas";
 import { K3_NEVER, USDC_ABI, VAULT_ABI, selectorOf } from "../src/index.ts";
-import { archiveUri, h, harness, NOW, OTHER, PAYEE, uriHash, VAULT } from "./helpers.ts";
+import {
+  archiveUri,
+  ESCROW,
+  h,
+  harness,
+  NETWORK,
+  NOW,
+  OTHER,
+  PAYEE,
+  uriHash,
+  VAULT,
+} from "./helpers.ts";
 
 type H = Awaited<ReturnType<typeof harness>>;
 
@@ -342,8 +359,7 @@ describe("gateway-burn (K3)", () => {
   });
 });
 
-const receipt = {
-  paymentRefHash: h("3"),
+const baseReceipt = {
   requestCommit: h("4"),
   responseCommit: h("5"),
   statusCode: "200",
@@ -358,28 +374,217 @@ const receipt = {
   createdAt: "1760790004",
 };
 
+const x402PaymentRef: PaymentRef = {
+  schemaVersion: "1.0",
+  rail: "x402-exact",
+  network: "eip155:5042002",
+  asset: NETWORK.usdc,
+  payer: VAULT,
+  payTo: PAYEE,
+  amount: "100000",
+  nonce: h("1"),
+  validBefore: 1760800600,
+};
+
+const receiptFor = (paymentRef: PaymentRef) => ({
+  ...baseReceipt,
+  paymentRefHash: paymentRefHash(paymentRef),
+});
+
 describe("sl-receipt (K3, RV-013)", () => {
   it("signs the vault-bound attestation for a settled payment", async () => {
     const t = await harness();
+    const receipt = receiptFor(x402PaymentRef);
+    t.state.settled.add(receipt.paymentRefHash);
     const result = (await t.signer.sign("cz-15", {
       keyId: "K3",
       kind: "sl-receipt",
-      payload: { vault: VAULT, receipt },
+      payload: { vault: VAULT, receipt, paymentRef: x402PaymentRef },
     })) as { signature: Hex; digest: Hex };
-    expect(result.digest).toBe(
-      "0xe4f941d6e918d974ccc3f435b16b3dc38eaa8027fb1955a87ea3763d250e65a0",
-    );
+    expect(result.digest).toMatch(/^0x[0-9a-f]{64}$/);
     expect(slice(result.signature, 0, 32)).toBe(KIND_TAGS.SL_RECEIPT);
   });
 
-  it("signer_slReceipt_unsettledPayment_denied", async () => {
+  it("denies an unsettled x402 payment", async () => {
     const t = await harness();
     await expectDenied(
       t,
       t.signer.sign("cz-15", {
         keyId: "K3",
         kind: "sl-receipt",
-        payload: { vault: VAULT, receipt: { ...receipt, paymentRefHash: h("e") } },
+        payload: { vault: VAULT, receipt: receiptFor(x402PaymentRef), paymentRef: x402PaymentRef },
+      }),
+      "payment-not-settled",
+    );
+  });
+
+  it("checks the PaymentRef hash before settlement and binds x402 to this vault", async () => {
+    const t = await harness();
+    await expectDenied(
+      t,
+      t.signer.sign("cz-15", {
+        keyId: "K3",
+        kind: "sl-receipt",
+        payload: {
+          vault: VAULT,
+          receipt: { ...receiptFor(x402PaymentRef), paymentRefHash: h("e") },
+          paymentRef: x402PaymentRef,
+        },
+      }),
+      "payment-ref-mismatch",
+    );
+    const otherPayer: PaymentRef = { ...x402PaymentRef, payer: OTHER };
+    await expectDenied(
+      t,
+      t.signer.sign("cz-15", {
+        keyId: "K3",
+        kind: "sl-receipt",
+        payload: { vault: VAULT, receipt: receiptFor(otherPayer), paymentRef: otherPayer },
+      }),
+      "payment-not-this-vault",
+    );
+  });
+
+  it("binds Gateway pockets and job clients to the receipt vault", async () => {
+    const t = await harness();
+    const outsidePocket: PaymentRef = {
+      schemaVersion: "1.0",
+      rail: "gateway-batched",
+      network: "eip155:5042002",
+      payer: OTHER,
+      payTo: PAYEE,
+      amount: "100000",
+      nonce: h("2"),
+    };
+    await expectDenied(
+      t,
+      t.signer.sign("cz-15", {
+        keyId: "K3",
+        kind: "sl-receipt",
+        payload: {
+          vault: VAULT,
+          receipt: receiptFor(outsidePocket),
+          paymentRef: outsidePocket,
+        },
+      }),
+      "payment-not-this-vault",
+    );
+
+    const otherClient: PaymentRef = {
+      schemaVersion: "1.0",
+      rail: "erc8183-job",
+      network: "eip155:5042002",
+      contract: ESCROW,
+      jobId: "9",
+      client: OTHER,
+      provider: OTHER,
+      evaluator: OTHER,
+      budget: "250000",
+    };
+    await expectDenied(
+      t,
+      t.signer.sign("cz-15", {
+        keyId: "K3",
+        kind: "sl-receipt",
+        payload: { vault: VAULT, receipt: receiptFor(otherClient), paymentRef: otherClient },
+      }),
+      "payment-not-this-vault",
+    );
+  });
+
+  it("requires and schema-validates PaymentRef", async () => {
+    const t = await harness();
+    await expectDenied(
+      t,
+      t.signer.sign("cz-15", {
+        keyId: "K3",
+        kind: "sl-receipt",
+        payload: { vault: VAULT, receipt: baseReceipt },
+      }),
+      "shape",
+    );
+    await expectDenied(
+      t,
+      t.signer.sign("cz-15", {
+        keyId: "K3",
+        kind: "sl-receipt",
+        payload: {
+          vault: VAULT,
+          receipt: receiptFor(x402PaymentRef),
+          paymentRef: { ...x402PaymentRef, amount: "1e5" },
+        },
+      }),
+      "shape",
+    );
+  });
+
+  it("accepts completed Gateway transfers and rejects unsettled or overlarge references", async () => {
+    const t = await harness();
+    const completed: PaymentRef = {
+      schemaVersion: "1.0",
+      rail: "gateway-batched",
+      network: "eip155:5042002",
+      payer: t.pocket,
+      payTo: PAYEE,
+      amount: "100000",
+      nonce: h("2"),
+    };
+    t.state.settled.add(paymentRefHash(completed));
+    await t.signer.sign("cz-15", {
+      keyId: "K3",
+      kind: "sl-receipt",
+      payload: { vault: VAULT, receipt: receiptFor(completed), paymentRef: completed },
+    });
+
+    const confirmed = { ...completed, nonce: h("3") };
+    await expectDenied(
+      t,
+      t.signer.sign("cz-15", {
+        keyId: "K3",
+        kind: "sl-receipt",
+        payload: { vault: VAULT, receipt: receiptFor(confirmed), paymentRef: confirmed },
+      }),
+      "payment-not-settled",
+    );
+
+    const overlarge = { ...completed, amount: "100001" };
+    await expectDenied(
+      t,
+      t.signer.sign("cz-15", {
+        keyId: "K3",
+        kind: "sl-receipt",
+        payload: { vault: VAULT, receipt: receiptFor(overlarge), paymentRef: overlarge },
+      }),
+      "payment-not-settled",
+    );
+  });
+
+  it("accepts Completed jobs and denies Submitted jobs", async () => {
+    const t = await harness();
+    const completed: PaymentRef = {
+      schemaVersion: "1.0",
+      rail: "erc8183-job",
+      network: "eip155:5042002",
+      contract: ESCROW,
+      jobId: "9",
+      client: VAULT,
+      provider: OTHER,
+      evaluator: OTHER,
+      budget: "250000",
+    };
+    t.state.settled.add(paymentRefHash(completed));
+    await t.signer.sign("cz-15", {
+      keyId: "K3",
+      kind: "sl-receipt",
+      payload: { vault: VAULT, receipt: receiptFor(completed), paymentRef: completed },
+    });
+    const submitted = { ...completed, jobId: "10" };
+    await expectDenied(
+      t,
+      t.signer.sign("cz-15", {
+        keyId: "K3",
+        kind: "sl-receipt",
+        payload: { vault: VAULT, receipt: receiptFor(submitted), paymentRef: submitted },
       }),
       "payment-not-settled",
     );

@@ -1,6 +1,7 @@
 // Service-level checks: caller identity, key/kind table, rate limits, audit rows, pocket-key retirement.
 import { describe, expect, it } from "vitest";
-import { h, harness, OTHER, PAYEE, VAULT } from "./helpers.ts";
+import { paymentRefHash } from "@czar/hashing";
+import { h, harness, NETWORK, OTHER, PAYEE, VAULT } from "./helpers.ts";
 import { postgresAudit } from "../src/postgres-audit.ts";
 
 const usdc = {
@@ -60,8 +61,19 @@ describe("signer service", () => {
   it("writes one audit row per request with ids and digests only, no raw text", async () => {
     const t = await harness();
     const origin = "https://merchant.example/very-private-path?q=secret-query";
+    const paymentRef = {
+      schemaVersion: "1.0",
+      rail: "x402-exact",
+      network: "eip155:5042002",
+      asset: NETWORK.usdc,
+      payer: VAULT,
+      payTo: PAYEE,
+      amount: "100000",
+      nonce: h("1"),
+      validBefore: 1760800600,
+    } as const;
     const receipt = {
-      paymentRefHash: h("3"),
+      paymentRefHash: paymentRefHash(paymentRef),
       requestCommit: h("4"),
       responseCommit: h("5"),
       statusCode: "200",
@@ -75,10 +87,11 @@ describe("signer service", () => {
       disclosure: "2",
       createdAt: "4",
     };
+    t.state.settled.add(receipt.paymentRefHash);
     await t.signer.sign("cz-15", {
       keyId: "K3",
       kind: "sl-receipt",
-      payload: { vault: VAULT, receipt },
+      payload: { vault: VAULT, receipt, paymentRef },
     });
     await t.signer.sign("cz-15", { keyId: "K3", kind: "usdc-3009", payload: usdc });
     await t.signer

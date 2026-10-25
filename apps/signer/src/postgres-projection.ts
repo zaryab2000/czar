@@ -1,4 +1,5 @@
 import type { Address, Hash32 } from "@czar/hashing";
+import type { PaymentRef } from "@czar/schemas";
 import type { Config } from "@czar/config";
 import { czarVaultAbi, czarVaultFactoryAbi } from "@czar/vault-client";
 import { keccak256, stringToHex, type PublicClient } from "viem";
@@ -287,7 +288,7 @@ function serverProjection(
         ? undefined
         : readStoredPlan(row["plan"], row["state"], row["objective_state"]);
     },
-    settledPayment: (vault, hash) => hasSettledPayment(sql, vault, hash),
+    settledPayment: (vault, paymentRef) => hasSettledPayment(sql, vault, paymentRef),
     job: (escrow, id) => readJob(sql, escrow, id),
     reportExists: (hash) => exists(sql, "acceptance_reports", "report_hash", hash),
     checksCommitExists: (hash) => checksCommitExists(sql, hash),
@@ -296,13 +297,47 @@ function serverProjection(
   };
 }
 
-async function hasSettledPayment(sql: Sql, vault: Address, hash: Hash32): Promise<boolean> {
-  const result = await sql(
-    `SELECT 1 FROM evidence_receipts
-     WHERE lower(payment_ref_hash)=lower($1) AND lower(envelope_ref) LIKE lower($2) LIMIT 1`,
-    [hash, `eip155:%:${vault.toLowerCase()}:%`],
-  );
+async function hasSettledPayment(
+  sql: Sql,
+  vault: Address,
+  paymentRef: PaymentRef,
+): Promise<boolean> {
+  const result = await settledPaymentQuery(sql, vault, paymentRef);
   return result.rows.length > 0;
+}
+
+async function settledPaymentQuery(
+  sql: Sql,
+  vault: Address,
+  paymentRef: PaymentRef,
+): Promise<SqlRows> {
+  switch (paymentRef.rail) {
+    case "x402-exact":
+      return sql(
+        `SELECT 1 FROM authorizations
+         WHERE lower(vault)=lower($1) AND lower(nonce)=lower($2)
+           AND amount::numeric=$3::numeric AND settled=true LIMIT 1`,
+        [vault, paymentRef.nonce, paymentRef.amount],
+      );
+    case "gateway-batched":
+      return sql(
+        `SELECT 1 FROM gateway_transfers
+         WHERE lower(from_address)=lower($1) AND lower(nonce)=lower($2)
+           AND lower(to_address)=lower($3) AND amount::numeric=$4::numeric
+           AND status='completed' LIMIT 1`,
+        [paymentRef.payer, paymentRef.nonce, paymentRef.payTo, paymentRef.amount],
+      );
+    case "erc8183-job":
+      return sql(
+        `SELECT 1 FROM jobs
+         WHERE lower(job_escrow)=lower($1) AND job_id=$2 AND state='Completed'
+           AND lower(mirror->>'provider')=lower($3)
+           AND (mirror->>'budget')::numeric=$4::numeric LIMIT 1`,
+        [paymentRef.contract, paymentRef.jobId, paymentRef.provider, paymentRef.budget],
+      );
+    case "mpp":
+      return { rows: [] };
+  }
 }
 
 async function readJob(sql: Sql, escrow: Address, jobId: bigint) {

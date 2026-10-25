@@ -1,4 +1,5 @@
 import type { Address, Hash32 } from "@czar/hashing";
+import type { PaymentRef } from "@czar/schemas";
 import { loadConfig } from "@czar/config";
 import { keccak256, stringToHex } from "viem";
 import { describe, expect, it } from "vitest";
@@ -40,6 +41,111 @@ describe("Postgres signer projection", () => {
       periodLength: 604800,
       nonce: 7n,
     });
+  });
+
+  it("matches x402 settlement facts and does not query evidence_receipts", async () => {
+    const paymentRef: PaymentRef = {
+      schemaVersion: "1.0",
+      rail: "x402-exact",
+      network: "eip155:5042002",
+      asset: "0x00000000000000000000000000000000000000b2",
+      payer: vault,
+      payTo: payee,
+      amount: "100000",
+      nonce: `0x${"11".repeat(32)}`,
+      validBefore: 1_800_000_000,
+    };
+    const calls: { query: string; values: unknown[] | undefined }[] = [];
+    const projection = createPostgresProjection({
+      config: loadConfig(),
+      database: {
+        async query(query, values) {
+          calls.push({ query, values });
+          return { rows: [{}] };
+        },
+      },
+      chain: fakeChain(),
+      factory,
+    });
+
+    await expect(projection.settledPayment(vault, paymentRef)).resolves.toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.query).toContain("FROM authorizations");
+    expect(calls[0]?.query).toContain("settled=true");
+    expect(calls[0]?.values).toEqual([vault, paymentRef.nonce, paymentRef.amount]);
+    expect(calls[0]?.query).not.toContain("evidence_receipts");
+  });
+
+  it("matches only completed Gateway transfers with the same amount and payee", async () => {
+    const paymentRef: PaymentRef = {
+      schemaVersion: "1.0",
+      rail: "gateway-batched",
+      network: "eip155:5042002",
+      payer: payee,
+      payTo: vault,
+      amount: "100000",
+      nonce: `0x${"22".repeat(32)}`,
+    };
+    const calls: { query: string; values: unknown[] | undefined }[] = [];
+    const projection = createPostgresProjection({
+      config: loadConfig(),
+      database: {
+        async query(query, values) {
+          calls.push({ query, values });
+          return { rows: values?.[3] === "100000" ? [{}] : [] };
+        },
+      },
+      chain: fakeChain(),
+      factory,
+    });
+
+    await expect(projection.settledPayment(vault, paymentRef)).resolves.toBe(true);
+    await expect(
+      projection.settledPayment(vault, { ...paymentRef, amount: "100001" }),
+    ).resolves.toBe(false);
+    expect(calls[0]?.query).toContain("status='completed'");
+    expect(calls[0]?.query).toContain("lower(to_address)=lower($3)");
+    expect(calls[0]?.values).toEqual([payee, paymentRef.nonce, vault, paymentRef.amount]);
+  });
+
+  it("matches Completed job facts by escrow, job id, provider and budget", async () => {
+    const paymentRef: PaymentRef = {
+      schemaVersion: "1.0",
+      rail: "erc8183-job",
+      network: "eip155:5042002",
+      contract: "0x00000000000000000000000000000000000000c3",
+      jobId: "9",
+      client: vault,
+      provider: payee,
+      evaluator: factory,
+      budget: "250000",
+    };
+    const calls: { query: string; values: unknown[] | undefined }[] = [];
+    const projection = createPostgresProjection({
+      config: loadConfig(),
+      database: {
+        async query(query, values) {
+          calls.push({ query, values });
+          return { rows: values?.[1] === "9" ? [{}] : [] };
+        },
+      },
+      chain: fakeChain(),
+      factory,
+    });
+
+    await expect(projection.settledPayment(vault, paymentRef)).resolves.toBe(true);
+    await expect(projection.settledPayment(vault, { ...paymentRef, jobId: "10" })).resolves.toBe(
+      false,
+    );
+    expect(calls[0]?.query).toContain("state='Completed'");
+    expect(calls[0]?.query).toContain("mirror->>'provider'");
+    expect(calls[0]?.query).toContain("mirror->>'budget'");
+    expect(calls[0]?.values).toEqual([
+      paymentRef.contract,
+      paymentRef.jobId,
+      paymentRef.provider,
+      paymentRef.budget,
+    ]);
   });
 
   it("rebuilds stored plan leaves and used calls from server and indexer rows", async () => {
