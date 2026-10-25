@@ -16,6 +16,7 @@ import {
 import type { Amount6, PocketRecord } from "@czar/schemas";
 import type { Address } from "viem";
 import { mirrorKey } from "@czar/indexer/mirrors";
+import { resolveIndexerRpcUrl } from "@czar/indexer/chain";
 import {
   envVarName,
   loadConfig,
@@ -61,10 +62,7 @@ const config = loadConfig({
 await validateLocalOnlyConfig({
   config,
   overlayPath: localConfigPath ?? "",
-  arcRpcUrl:
-    process.env["CZAR_ARC_RPC_URL"] ??
-    process.env["CZAR_INDEXER_RPC_URL"] ??
-    (config.has("app.arcRpcUrl") ? (config.get("app.arcRpcUrl") as string) : ""),
+  arcRpcUrl: resolveIndexerRpcUrl(process.env["CZAR_INDEXER_RPC_URL"]),
 });
 const payoutAddresses = config.get("indexer.merchantPayoutAddresses") as string[];
 for (const address of payoutAddresses) {

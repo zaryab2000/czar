@@ -14,7 +14,8 @@
   variable-length USDC signature bytes (including its 416-byte envelope), confirmed settlement
   receipts before reporting success, enforced the indexer endpoint guard without a local overlay,
   matched HTTP protocol checks to URL parsing semantics, required nodeInfo for every stand-in
-  startup, and assigned deterministic distinct IDs to pocket-scoped transfer fixtures.
+  startup, assigned deterministic distinct IDs to pocket-scoped transfer fixtures, and aligned the
+  guarded RPC URL with the endpoint Ponder actually uses, including its testnet default.
 
 ## Checks
 
@@ -24,7 +25,7 @@ Commands use the repository-pinned Node runtime, 22.22.0.
 |---|---|
 | `fnm exec --using=22.22.0 pnpm --filter @czar/config test` | Passed: 46 tests in 5 files after review fixes. |
 | `fnm exec --using=22.22.0 pnpm --filter @czar/x402 test` | Passed: 86 tests in 4 files. |
-| `fnm exec --using=22.22.0 pnpm --filter @czar/indexer test` | Passed: 54 tests in 10 files, including T-021 replay on arc-anvil. |
+| `fnm exec --using=22.22.0 pnpm --filter @czar/indexer test` | Passed: 57 tests in 11 files, including RPC guard resolution and T-021 replay on arc-anvil. |
 | `fnm exec --using=22.22.0 pnpm typecheck` | Passed: all 14 typechecked workspace projects. |
 | `fnm exec --using=22.22.0 pnpm lint` | Passed: oxlint and oxfmt. |
 | `fnm exec --using=22.22.0 pnpm --filter @czar/server test` | 256 passed, 1 failed. `app-reads.test.ts` expects 200 but receives 503 because its RPC at `127.0.0.1:8549` is not running. The other 44 test files passed. |
