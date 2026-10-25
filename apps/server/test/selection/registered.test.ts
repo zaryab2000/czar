@@ -263,17 +263,18 @@ describe("registered selection", () => {
   it("reconstructs gate order and exploration from the stored snapshot and decision query", async () => {
     const ids = Array.from({ length: 7 }, (_, index) => `svc_${String(index + 1).repeat(32)}`);
     const failed = ids[0]!;
+    const siwxOnlyService = ids[3]!;
     const mixed = ids[6]!;
     const fetchImpl = vi.fn<SafeFetch>(async (url) => {
       if (url.includes("failed")) throw new Error("probe unavailable");
       if (url.includes("wrong-network"))
         return response("5", "0x1", "eip155:1", undefined, bareUrl(url));
-      if (url.includes("siwx"))
-        return response("5", "0x2", NETWORK, undefined, bareUrl(url), { extra: { siwx: true } });
       if (url.includes("siwx-only"))
         return response("5", "0x3", NETWORK, undefined, bareUrl(url), {
           extra: { siwxOnly: true },
         });
+      if (url.includes("siwx"))
+        return response("5", "0x2", NETWORK, undefined, bareUrl(url), { extra: { siwx: true } });
       if (url.includes("batch"))
         return response("5", "0x4", NETWORK, undefined, bareUrl(url), {
           extra: { paymentFlow: "batch-settlement" },
@@ -320,6 +321,27 @@ describe("registered selection", () => {
         { network: NETWORK, scheme: "exact", asset: USDC_ASSET, amount: "25" },
         { network: NETWORK, scheme: "exact", asset: USDC_ASSET, amount: "50" },
       ],
+    });
+    const siwxOnlySnapshot = snapshot.services.find(
+      (service) => service.serviceId === siwxOnlyService,
+    );
+    expect(siwxOnlySnapshot?.probe).toMatchObject({
+      state: "ok",
+      offers: [
+        {
+          network: NETWORK,
+          scheme: "exact",
+          asset: USDC_ASSET,
+          siwx: false,
+          siwxOnly: true,
+          batchSettlement: false,
+        },
+      ],
+    });
+    expect(reconstructed.excluded).toContainEqual({
+      service_id: siwxOnlyService,
+      gate: "offer",
+      detail: "no-payable-live-offer",
     });
     expect(reconstructed.excluded).toEqual(decision.excluded);
     const reconstructedUnverified = reconstructed.eligible.map(({ service_id }) => ({
