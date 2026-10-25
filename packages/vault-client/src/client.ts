@@ -1,7 +1,15 @@
 // T-026: typed contract handles over the compiled interfaces (viem 2.57.x). Every call and its arguments are typed
 // from the ABI, so a renamed function or a wrong argument fails at compile time.
-import { getContract, type Address, type Client, type PublicClient } from "viem";
+import { getContract, type Address, type Client, type Hex, type PublicClient } from "viem";
 import { czarVaultAbi, czarVaultFactoryAbi } from "./abi.ts";
+
+export interface CategoryLimits {
+  readonly userMax: bigint;
+  readonly autoLimit: bigint;
+  readonly usedInPeriod: bigint;
+  readonly periodId: bigint;
+  readonly lastRaiseAt: bigint;
+}
 
 export const usdcBalanceAbi = [
   {
@@ -37,6 +45,22 @@ export async function readEnvelopeCount(input: {
   readonly vault: Address;
 }): Promise<bigint> {
   return getVault(input.vault, input.client).read.envelopeCount();
+}
+
+/** Reads one category's earned-autonomy limits from a Czar vault. */
+export async function getLimits(input: {
+  readonly client: PublicClient;
+  readonly vault: Address;
+  readonly categoryId: Hex;
+}): Promise<CategoryLimits> {
+  const limits = await getVault(input.vault, input.client).read.getLimits([input.categoryId]);
+  return {
+    userMax: limits.userMax,
+    autoLimit: limits.autoLimit,
+    usedInPeriod: limits.usedInPeriod,
+    periodId: limits.periodId,
+    lastRaiseAt: limits.lastRaiseAt,
+  };
 }
 
 export const getVaultFactory = (
