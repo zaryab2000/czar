@@ -3,7 +3,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { derivedNonce } from "@czar/hashing";
+import { derivedNonce, receiptAttestationDigest, receiptStructHash } from "@czar/hashing";
 import vectors from "@czar/hashing/vectors" with { type: "json" };
 import { decide, FACTORY_ABI, K3_ALLOWED, K3_NEVER, VAULT_ABI } from "../src/index.ts";
 import { defaultState, fakeProjection, NETWORK, VAULT } from "./helpers.ts";
@@ -67,7 +67,7 @@ describe("vector replay through the signer", () => {
     );
   });
 
-  it("sl-receipt reproduces receiptAttestation_5042002 from the slReceipt_5042002 fields", async () => {
+  it("receiptAttestation_5042002 remains canonical for the SL receipt fields", () => {
     const m = v.slReceipt_5042002.message;
     const receipt = {
       ...m,
@@ -76,10 +76,9 @@ describe("vector replay through the signer", () => {
       tComplete: BigInt(m.tComplete),
       createdAt: BigInt(m.createdAt),
     };
-    const state = defaultState("0x000000000000000000000000000000000000b0c0");
-    state.settled.add(m.paymentRefHash);
-    const decision = await decide(ctx(state), "sl-receipt", { vault: VAULT, receipt });
-    expect(decision.type === "digest" && decision.digest).toBe(v.receiptAttestation_5042002.digest);
+    expect(receiptAttestationDigest(5042002, VAULT, receiptStructHash(receipt as never))).toBe(
+      v.receiptAttestation_5042002.digest,
+    );
   });
 
   it("autonomy-raise reproduces autonomyRaise_5042002", async () => {

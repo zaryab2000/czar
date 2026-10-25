@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createPaymentReceipt } from "#src/evidence/receipts";
-import { jcs, type Hash32 } from "@czar/hashing";
+import { jcs, paymentRefHash, type Hash32 } from "@czar/hashing";
 import { loadConfig } from "@czar/config";
+import { parseRequest, type SignRequest } from "@czar/signer";
 import { keccak256 } from "viem";
 import { setupDatabase } from "#test/db";
 import { testSigner } from "#test/payer/test-signer";
@@ -14,6 +15,42 @@ beforeEach(async () => {
 });
 
 describe("settled payment receipts", () => {
+  it("sends the full PaymentRef through the real signer request parser", async () => {
+    const input = receiptInput("settled");
+    const signer = await testSigner();
+    const sign = vi.fn((caller: string, request: SignRequest) => signer.sign(caller, request));
+
+    await createPaymentReceipt(input, {
+      pool: getPool(),
+      config: loadConfig(),
+      signer: { sign },
+      settlement: { isSettled: async () => true },
+      now: () => new Date("2026-10-21T00:00:00Z"),
+    });
+
+    expect(sign).toHaveBeenCalledOnce();
+    const [caller, request] = sign.mock.calls[0]!;
+    expect(caller).toBe("cz-15");
+    expect(request.kind).toBe("sl-receipt");
+    const expectedReceipt = Object.fromEntries(
+      Object.entries({ ...input.attestation, paymentRefHash: paymentRefHash(input.payment) }).map(
+        ([key, value]) => [key, String(value)],
+      ),
+    );
+    expect(request.payload).toEqual({
+      vault: input.payment.payer,
+      paymentRef: input.payment,
+      receipt: expectedReceipt,
+    });
+    const parsed = parseRequest("sl-receipt", request.payload);
+    expect(parsed["vault"]).toBe(input.payment.payer);
+    expect(parsed["paymentRef"]).toEqual(input.payment);
+    expect(parsed["receipt"]).toEqual({
+      ...input.attestation,
+      paymentRefHash: paymentRefHash(input.payment),
+    });
+  });
+
   it("does not sign or persist an unpaid or released authorization", async () => {
     const sign = vi.fn();
     for (const state of ["unpaid", "released"] as const) {

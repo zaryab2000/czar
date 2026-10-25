@@ -4,6 +4,7 @@ import { randomBytes } from "node:crypto";
 import { dirname } from "node:path";
 import { keccak256, toBytes, type Hex, type TransactionSerializableEIP1559 } from "viem";
 import { loadConfig } from "@czar/config";
+import { paymentRefHash } from "@czar/hashing";
 import type { Address, Hash32 } from "@czar/hashing";
 import {
   createSigner,
@@ -261,7 +262,7 @@ export function fakeProjection(state: State): Projection {
         : undefined,
     pocketBalances: async () => state.balances,
     nanoSpent: async () => state.nanoSpent,
-    settledPayment: async (_vault, ref) => state.settled.has(ref),
+    settledPayment: async (_vault, paymentRef) => state.settled.has(paymentRefHash(paymentRef)),
     autonomy: async () => state.autonomy,
     job: async () => state.job,
     reportExists: async (hash) => state.reports.has(hash),

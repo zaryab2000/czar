@@ -16,6 +16,7 @@
     "@czar/config": "workspace:*",
     "@czar/hashing": "workspace:*",
     "@czar/logging": "workspace:*",
+    "@czar/schemas": "workspace:*",
     "@czar/vault-client": "workspace:*",
     "@napi-rs/keyring": "2.1.1",
     "pg": "8.23.1",

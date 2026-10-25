@@ -58,7 +58,11 @@ export async function createPaymentReceipt(
     request: {
       keyId: "K3",
       kind: "sl-receipt",
-      payload: { vault: String(input.payment.payer), receipt: signerReceipt(attestation) },
+      payload: {
+        vault: String(input.payment.payer),
+        paymentRef: input.payment,
+        receipt: signerReceipt(attestation),
+      },
     },
   });
   if (!("signature" in signed)) throw new Error("K3 did not return an SL_RECEIPT signature.");

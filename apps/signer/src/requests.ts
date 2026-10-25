@@ -2,6 +2,8 @@
 // wrong types and out-of-range integers are refused before any projection read.
 import type { AbiParameter } from "viem";
 import type { Address, Hash32 } from "@czar/hashing";
+import type { PaymentRef } from "@czar/schemas";
+import { validatePaymentRef } from "@czar/schemas";
 import type { Kind } from "./kinds.ts";
 
 export class ShapeError extends Error {
@@ -14,7 +16,9 @@ export class ShapeError extends Error {
 }
 
 type Field = "address" | "bytes32" | "uint" | "uint8" | "uint16" | "uint32" | "uint64" | "string";
-type Shape = Readonly<Record<string, Field | readonly string[] | "object" | "receipt" | "args">>;
+type Shape = Readonly<
+  Record<string, Field | readonly string[] | "object" | "receipt" | "paymentRef" | "args">
+>;
 
 const RECEIPT_FIELDS: Readonly<Record<string, Field>> = {
   paymentRefHash: "bytes32",
@@ -53,7 +57,7 @@ export const SHAPES: Readonly<Record<Kind, Shape>> = {
     validBefore: "uint",
   },
   "gateway-burn": { vault: "address", pullbackId: "uint64" },
-  "sl-receipt": { vault: "address", receipt: "receipt" },
+  "sl-receipt": { vault: "address", receipt: "receipt", paymentRef: "paymentRef" },
   "autonomy-raise": {
     vault: "address",
     categoryId: "bytes32",
@@ -171,6 +175,9 @@ export function parseRequest(kind: Kind, payload: unknown): Record<string, unkno
       out[key] = value;
     } else if (type === "receipt") {
       out[key] = fixed(RECEIPT_FIELDS, value, key);
+    } else if (type === "paymentRef") {
+      if (!validatePaymentRef(value)) throw new ShapeError(key);
+      out[key] = value as PaymentRef;
     } else if (type === "object") {
       out[key] = fixed(REPORT_FIELDS, value, key);
     } else if (type === "args") {

@@ -19,6 +19,7 @@ import {
   receiptStructHash,
   toTypedDataHash,
   domainSeparator,
+  paymentRefHash,
   transferWithAuthorizationStructHash,
   usdcTransferWithAuthorizationDigest,
   type Address,
@@ -43,6 +44,7 @@ import {
 } from "./abi.ts";
 import type { Kind } from "./kinds.ts";
 import type { Projection } from "./projection.ts";
+import type { PaymentRef } from "@czar/schemas";
 import { coerceArgs, type ShapeError } from "./requests.ts";
 
 export class Denied extends Error {
@@ -117,6 +119,7 @@ type Req = {
   readonly step?: unknown;
   readonly selector?: unknown;
   readonly report?: unknown;
+  readonly paymentRef?: unknown;
   readonly receipt?: unknown;
   readonly pullbackId?: unknown;
   readonly args?: unknown;
@@ -411,9 +414,14 @@ const RECEIPT_TUPLE = {
 async function slReceipt(ctx: PolicyContext, req: Req): Promise<Decision> {
   const vault = req.vault as Address;
   const receipt = req.receipt as unknown as SlReceipt;
-  if (!(await ctx.projection.isVault(vault))) deny("unknown-vault");
-  if (!(await ctx.projection.settledPayment(vault, receipt.paymentRefHash)))
+  const paymentRef = req.paymentRef as PaymentRef;
+  if (!eq(paymentRefHash(paymentRef), receipt.paymentRefHash)) deny("payment-ref-mismatch");
+  if (paymentRef.network !== `eip155:${ctx.network.chainId}`) deny("payment-not-settled");
+  if (paymentRef.rail === "x402-exact" && !eq(paymentRef.asset, ctx.network.usdc))
     deny("payment-not-settled");
+  if (!(await ctx.projection.isVault(vault))) deny("unknown-vault");
+  if (!(await paymentRefBelongsToVault(ctx, vault, paymentRef))) deny("payment-not-this-vault");
+  if (!(await ctx.projection.settledPayment(vault, paymentRef))) deny("payment-not-settled");
   const digest = receiptAttestationDigest(ctx.network.chainId, vault, receiptStructHash(receipt));
   const wrap = (agentSig: Hex): Hex =>
     encodeAbiParameters(
@@ -421,6 +429,25 @@ async function slReceipt(ctx: PolicyContext, req: Req): Promise<Decision> {
       [KIND_TAGS.SL_RECEIPT, receipt as never, agentSig],
     );
   return { type: "digest", digest, wrap, purpose: {} };
+}
+
+async function paymentRefBelongsToVault(
+  ctx: PolicyContext,
+  vault: Address,
+  paymentRef: PaymentRef,
+): Promise<boolean> {
+  switch (paymentRef.rail) {
+    case "x402-exact":
+      return eq(paymentRef.payer, vault);
+    case "gateway-batched": {
+      const pocket = await ctx.projection.pocket(paymentRef.payer as Address);
+      return pocket !== undefined && eq(pocket.vault, vault);
+    }
+    case "erc8183-job":
+      return eq(paymentRef.client, vault);
+    case "mpp":
+      return false;
+  }
 }
 
 async function autonomyRaise(ctx: PolicyContext, req: Req): Promise<Decision> {

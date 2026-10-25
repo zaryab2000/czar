@@ -1,6 +1,7 @@
 // What the signer reads from the CZ-19 projections and CZ-13/CZ-16/CZ-17 tables before it signs.
 // The signer never trusts the caller for these facts (CZ-27 §5.2). Implementations live with the indexer.
 import type { Address, Hash32 } from "@czar/hashing";
+import type { PaymentRef } from "@czar/schemas";
 
 export interface FreezeState {
   readonly frozen: boolean;
@@ -103,7 +104,7 @@ export interface Projection {
   pocketBalances(pocket: Address): Promise<PocketBalances>;
   /** The paying step's `stepIndex` the pocket pays for, cumulative nanopayment totals. */
   nanoSpent(pocket: Address, payTo: Address): Promise<{ step: bigint; pocket: bigint }>;
-  settledPayment(vault: Address, paymentRefHash: Hash32): Promise<boolean>;
+  settledPayment(vault: Address, paymentRef: PaymentRef): Promise<boolean>;
   autonomy(vault: Address, categoryId: Hash32): Promise<AutonomyView | undefined>;
   job(escrow: Address, jobId: bigint): Promise<JobView | undefined>;
   reportExists(reportHash: Hash32): Promise<boolean>;

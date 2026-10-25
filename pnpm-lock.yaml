@@ -186,6 +186,9 @@ importers:
       '@czar/logging':
         specifier: workspace:*
         version: link:../../packages/logging
+      '@czar/schemas':
+        specifier: workspace:*
+        version: link:../../packages/schemas
       '@czar/vault-client':
         specifier: workspace:*
         version: link:../../packages/vault-client
