@@ -5,10 +5,28 @@ import { setupDatabase } from "#test/db";
 import { makeObjectiveSubmission, seedDevice, TEST_DEVICE_ID, TEST_USER_ID } from "#test/fixtures";
 import { testSigner } from "#test/payer/test-signer";
 import { createLocalServerMain } from "#src/local-main";
+import { createPlannerPocketKeySource, createPlannerProfileSource } from "#src/main";
 
 const getPool = setupDatabase();
 
 describe("server composition root", () => {
+  it("maps paid planner task classes to the seeded acceptance profile and K4 owner", async () => {
+    const profileIdFor = vi.fn((taskClass: string) => {
+      if (taskClass !== "data-json") throw new RangeError(`Unsupported ${taskClass}`);
+      return "prof_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    });
+    const profiles = createPlannerProfileSource({ profileIdFor } as never);
+    expect(profiles.profileIdFor("data-json.search")).toBe(profileIdFor("data-json"));
+    expect(profiles.profileIdFor("data-json.extract")).toBe(profileIdFor("data-json"));
+    expect(() => profiles.profileIdFor("local")).toThrow("local-template-v1 profile ID");
+
+    const address = "0x0000000000000000000000000000000000000005" as const;
+    const createPocketKey = vi.fn(async (_caller: string) => address);
+    const pocketKeys = createPlannerPocketKeySource({ createPocketKey } as never);
+    await expect(pocketKeys.createPocketKey("pln_test")).resolves.toBe(address);
+    expect(createPocketKey).toHaveBeenCalledWith("cz-15");
+  });
+
   beforeAll(async () => {
     await seedDevice(getPool());
     await getPool().query("DELETE FROM profiles WHERE task_class='data-json'");

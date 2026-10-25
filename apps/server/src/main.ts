@@ -625,8 +625,8 @@ function createPlannerPorts(
   return {
     ranking: selection.rank,
     directory: selection.directory,
-    profiles: { profileIdFor: (taskClass) => acceptance.profileIdFor(taskClass) },
-    pocketKeys: { createPocketKey: (_planId) => signer.createPocketKey("cz-13") },
+    profiles: createPlannerProfileSource(acceptance),
+    pocketKeys: createPlannerPocketKeySource(signer),
     agentHosts: { hasAgentHost: async () => false },
     allowance: {
       async remaining(userId, categoryId) {
@@ -652,6 +652,28 @@ function createPlannerPorts(
     },
     prober: createSafeProber(options.config),
   };
+}
+
+export function createPlannerProfileSource(
+  acceptance: Pick<Awaited<ReturnType<typeof createAcceptanceChecker>>, "profileIdFor">,
+): PlannerPorts["profiles"] {
+  return {
+    profileIdFor(taskClass) {
+      if (taskClass === "data-json.search" || taskClass === "data-json.extract")
+        return acceptance.profileIdFor("data-json");
+      if (taskClass === "local")
+        throw new Error(
+          "The local-template-v1 profile ID must be supplied by the CZ-11 assembler.",
+        );
+      return acceptance.profileIdFor(taskClass);
+    },
+  };
+}
+
+export function createPlannerPocketKeySource(
+  signer: Pick<ServerSigner, "createPocketKey">,
+): PlannerPorts["pocketKeys"] {
+  return { createPocketKey: (_planId) => signer.createPocketKey("cz-15") };
 }
 
 function requireSelection(selection: RegisteredSelection | undefined): RegisteredSelection {

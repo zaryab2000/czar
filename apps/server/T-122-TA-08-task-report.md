@@ -65,3 +65,22 @@ Reviewed the TA-09 receipt-producer commit `286d7e8f1926b255886e950d182db1c63895
 on PR #75. The scoped producer sends the full `PaymentRef`; its regression asserts the
 payload and exercises the real signer parser. No defect was found in that commit, and a
 confirmation was posted on PR #75.
+
+## PR #80 follow-up
+
+- Added the merged `merchant_payment_identifiers` table to the migration test's expected
+  public tables. The baseline test reproduced the 30-versus-29 mismatch before the fix.
+- Production planner profile wiring now maps `data-json.search` and `data-json.extract` to
+  the seeded `data-json` acceptance profile. Pocket-key creation now uses signer caller
+  `cz-15`, which owns K4 under the existing signer policy.
+- **Open cross-lane dependency:** local steps require the `local-template-v1` profile ID
+  (02 §4.6 and D82), but no local-profile identity producer exists in the current server,
+  daemon, or package code. The profile adapter fails explicitly for `local`; CZ-11/Lane 4
+  must supply the canonical profile ID before production local-step planning can work.
+- Regression evidence: the profile/pocket adapter test failed before the adapters existed,
+  then `test/main.test.ts` passed (1 file, 2 tests); migration test passed (1 file, 3 tests).
+- `fnm exec --using=22.22.0 pnpm --filter @czar/server typecheck` and
+  `fnm exec --using=22.22.0 pnpm lint` passed after the follow-up changes. Full server suite
+  was not rerun; Arc-backed failures remain as listed above.
+- PR #80 bot run 2 reviewed `754d7c4`. No third bot review was requested. A manual final
+  review is needed for the new head; the local-profile dependency remains unresolved.
