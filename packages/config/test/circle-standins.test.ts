@@ -5,6 +5,12 @@ import {
   validateStandinStartup,
   type StandinOptions,
 } from "../../../ops/local/circle-standins/server.ts";
+import {
+  harness,
+  PAYEE as signerPayee,
+  VAULT as signerVault,
+} from "../../../apps/signer/test/helpers.ts";
+import { derivedNonce } from "../../../packages/hashing/src/ids.ts";
 
 const overlayPath = new URL("../../../env/local.toml", import.meta.url);
 const localConfig = loadConfig({
@@ -26,6 +32,36 @@ const startup = (overrides: Partial<StandinOptions> = {}): StandinOptions => ({
   fetchFn: async () => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: {} })),
   ...overrides,
 });
+const txHash = `0x${"ab".repeat(32)}` as const;
+const authorization = {
+  from: "0x00000000000000000000000000000000000000b1",
+  to: "0x00000000000000000000000000000000000000c1",
+  value: "2500",
+  validAfter: "0",
+  validBefore: "2000000000",
+  nonce: `0x${"22".repeat(32)}`,
+};
+
+function abiWord(value: bigint): string {
+  return value.toString(16).padStart(64, "0");
+}
+
+function settleRequest(signature: string, auth = authorization): Request {
+  return new Request("http://127.0.0.1:4999/settle", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      x402Version: 2,
+      paymentPayload: { payload: { signature, authorization: auth } },
+      paymentRequirements: {
+        asset: "0x3600000000000000000000000000000000000000",
+        amount: auth.value,
+        payTo: auth.to,
+        network: "eip155:5042002",
+      },
+    }),
+  });
+}
 
 describe("D92 stand-in startup guards", () => {
   it("refuses a non-loopback process RPC", async () => {
@@ -92,45 +128,43 @@ describe("D92 Facilitator routes", () => {
   });
 
   it("settles by submitting transferWithAuthorization from an unlocked RPC account", async () => {
+    const signerHarness = await harness();
+    const signed = await signerHarness.signer.sign("cz-15", {
+      keyId: "K3",
+      kind: "usdc-3009",
+      payload: {
+        vault: signerVault,
+        reservationId: "12",
+        index: "1",
+        to: signerPayee,
+        value: "100000",
+        validBefore: "1760800600",
+      },
+    });
+    if (!("signature" in signed)) throw new Error("signer did not return its USDC envelope");
+    const signerAuthorization = {
+      from: signerVault,
+      to: signerPayee,
+      value: "100000",
+      validAfter: "0",
+      validBefore: "1760800600",
+      nonce: derivedNonce(signerVault, 12n, 1),
+    };
     const rpc = vi.fn(async (method: string, _params: readonly unknown[]) => {
       if (method === "eth_accounts") return ["0x00000000000000000000000000000000000000a1"];
-      return `0x${"ab".repeat(32)}`;
+      if (method === "eth_sendTransaction") return txHash;
+      if (method === "eth_getTransactionReceipt") return { status: "0x1" };
+      return null;
     });
-    const paymentPayload = {
-      payload: {
-        signature: `0x${"11".repeat(65)}`,
-        authorization: {
-          from: "0x00000000000000000000000000000000000000b1",
-          to: "0x00000000000000000000000000000000000000c1",
-          value: "2500",
-          validAfter: "0",
-          validBefore: "2000000000",
-          nonce: `0x${"22".repeat(32)}`,
-        },
-      },
-    };
     const response = await handleStandinRequest(
-      new Request("http://127.0.0.1:4999/settle", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          x402Version: 2,
-          paymentPayload,
-          paymentRequirements: {
-            asset: "0x3600000000000000000000000000000000000000",
-            amount: "2500",
-            payTo: paymentPayload.payload.authorization.to,
-            network: "eip155:5042002",
-          },
-        }),
-      }),
+      settleRequest(signed.signature, signerAuthorization),
       rpc,
     );
     expect(await response.json()).toMatchObject({
       success: true,
-      transaction: `0x${"ab".repeat(32)}`,
+      transaction: txHash,
       network: "eip155:5042002",
-      payer: paymentPayload.payload.authorization.from,
+      payer: signerAuthorization.from,
     });
     expect(rpc).toHaveBeenNthCalledWith(1, "eth_accounts", []);
     const call = rpc.mock.calls.at(1);
@@ -141,9 +175,34 @@ describe("D92 Facilitator routes", () => {
     expect(transaction.from).toBe("0x00000000000000000000000000000000000000a1");
     expect(transaction.to).toBe("0x3600000000000000000000000000000000000000");
     expect(transaction.data.slice(0, 10)).toBe("0xcf092995");
-    expect(transaction.data.slice(10 + 2 * 64, 10 + 3 * 64)).toBe("9c4".padStart(64, "0"));
-    expect(transaction.data.slice(10 + 5 * 64, 10 + 6 * 64)).toBe("22".repeat(32));
-    expect(transaction.data.slice(10 + 6 * 64, 10 + 7 * 64)).toBe("c0".padStart(64, "0"));
+    const data = transaction.data.slice(2);
+    expect(data.slice(0, 8)).toBe("cf092995");
+    expect(data.slice(8 + 6 * 64, 8 + 7 * 64)).toBe(abiWord(224n));
+    const signatureOffset = Number.parseInt(data.slice(8 + 6 * 64, 8 + 7 * 64), 16);
+    const signatureLengthStart = 8 + signatureOffset * 2;
+    expect(data.slice(signatureLengthStart, signatureLengthStart + 64)).toBe(abiWord(416n));
+    expect(data.slice(signatureLengthStart + 64, signatureLengthStart + 64 + 416 * 2)).toBe(
+      signed.signature.slice(2),
+    );
+    expect(data.slice(8, 8 + 64)).toBe(signerAuthorization.from.slice(2).padStart(64, "0"));
+    expect(data.slice(8 + 64, 8 + 128)).toBe(signerAuthorization.to.slice(2).padStart(64, "0"));
+    expect(data.slice(8 + 2 * 64, 8 + 3 * 64)).toBe(abiWord(100000n));
+    expect(data.slice(8 + 5 * 64, 8 + 6 * 64)).toBe(signerAuthorization.nonce.slice(2));
+    expect(rpc).toHaveBeenLastCalledWith("eth_getTransactionReceipt", [txHash]);
+  });
+
+  it.each([
+    [null, 202, "settlement_pending"],
+    [{ status: "0x0" }, 502, "transaction_reverted"],
+  ])("does not claim settlement when RPC reports %j", async (receipt, status, errorReason) => {
+    const rpc = vi.fn(async (method: string) => {
+      if (method === "eth_accounts") return ["0x00000000000000000000000000000000000000a1"];
+      if (method === "eth_sendTransaction") return txHash;
+      return receipt;
+    });
+    const response = await handleStandinRequest(settleRequest(`0x${"11".repeat(65)}`), rpc);
+    expect(response.status).toBe(status);
+    expect(await response.json()).toMatchObject({ success: false, errorReason });
   });
 });
 

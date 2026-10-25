@@ -52,6 +52,17 @@ describe("local-only endpoint guard", () => {
     ).rejects.toThrow("did not answer anvil_nodeInfo");
   });
 
+  it("rejects a local endpoint when no local overlay is selected", async () => {
+    await expect(
+      validateLocalOnlyConfig({
+        config: loadConfig({ envFile: localValues }),
+        overlayPath: "",
+        arcRpcUrl: "http://127.0.0.1:8545",
+        fetchFn: answered,
+      }),
+    ).rejects.toThrow("local overlay");
+  });
+
   it("rejects non-loopback HTTP and accepts HTTPS defaults", async () => {
     const config = loadConfig({
       envFile: { ...localValues, "chain.gatewayApiBaseUrl": "http://gateway.example" },
