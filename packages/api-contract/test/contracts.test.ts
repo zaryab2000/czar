@@ -25,6 +25,9 @@ describe("OpenAPI contracts", () => {
     expect(ids).toContain("completeModelCall");
     expect(ids).toContain("getJobBrief");
     expect(ids).toContain("getLocalSoul");
+    expect(ids).toContain("createPairingCode");
+    expect(ids).toContain("listDevices");
+    expect(ids).toContain("revokeDevice");
     expect(new Set(ids).size).toBe(ids.length);
     for (const [document, filename] of [
       ["public", "openapi.yaml"],
@@ -148,6 +151,28 @@ describe("OpenAPI contracts", () => {
         retryable: false,
       }),
     ).toBe(true);
+  });
+
+  it("validates the SCR-134 device management contracts", () => {
+    expect(
+      validateRecordedExchange("createPairingCode", {
+        responseStatus: 201,
+        responseBody: { code: "01234567", expiresAt: "2026-10-25T00:05:00Z" },
+      }).valid,
+    ).toBe(true);
+    expect(
+      validateRecordedExchange("createPairingCode", {
+        responseStatus: 201,
+        responseBody: { code: "invalid", expiresAt: "2026-10-25T00:05:00Z" },
+      }).valid,
+    ).toBe(false);
+    expect(
+      validateRecordedExchange("listDevices", {
+        responseStatus: 200,
+        responseBody: { items: [], nextCursor: null },
+      }).valid,
+    ).toBe(true);
+    expect(validateRecordedExchange("revokeDevice", { responseStatus: 204 }).valid).toBe(true);
   });
 
   it("validates getJobBrief using its external job-brief schema", () => {

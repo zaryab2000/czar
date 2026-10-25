@@ -7,6 +7,9 @@ export default function PrivacyPage() {
         Soul, through a Czar relay that stores nothing. Objectives sent to Czar&apos;s server are
         redacted first.
       </p>
+      <p>
+        <a href="/settings/devices">Manage paired devices</a>
+      </p>
     </section>
   );
 }

@@ -17,6 +17,7 @@ import {
 } from "#src/http/validate";
 import { problem, type CzarCode } from "#src/http/problem";
 import { findOrCreateIdempotency, fingerprintRequest } from "#src/http/idempotency";
+import { createPairingCodeRoute, listDevicesRoute, revokeDeviceRoute } from "#src/devices/app";
 import { PairingRejected, consumePairingCode, type PairDependencies } from "#src/devices/pair";
 import { submitObjective } from "#src/objectives/service";
 import { completeModelCall, type ModelClient, type ModelCallRequest } from "#src/models/proxy";
@@ -72,7 +73,7 @@ export function createApp(dependencies: AppDependencies): Hono {
     const status = code === "validation" ? 400 : 503;
     const operationId = operationFor(context.req.path, context.req.method);
     if (operationId !== "unknown") {
-      const pair = operationId === "pairDevice";
+      const pair = isDeviceOperation(operationId);
       const limit = Number(
         dependencies.config.get(pair ? "api.rateLimitAppPerMin" : "api.rateLimitDaemonPerMin"),
       );
@@ -90,7 +91,7 @@ export function createApp(dependencies: AppDependencies): Hono {
       traceId: dependencies.random.bytes(16).toString("hex"),
     };
     if (state.operationId !== "unknown") {
-      const isPairing = state.operationId === "pairDevice";
+      const isPairing = isDeviceOperation(state.operationId);
       const limit = Number(
         dependencies.config.get(isPairing ? "api.rateLimitAppPerMin" : "api.rateLimitDaemonPerMin"),
       );
@@ -129,6 +130,24 @@ export function createApp(dependencies: AppDependencies): Hono {
     return context.json({ status: "ok" });
   });
   app.post("/v1/devices/pair", (context) => pairRoute(context, dependencies));
+  app.post(
+    "/v1/devices/pairing-codes",
+    appSessionVerifier(dependencies.pool, dependencies.config),
+    (context, next) => appRateLimit(context, next, dependencies),
+    (context) => createPairingCodeRoute(context, dependencies),
+  );
+  app.get(
+    "/v1/devices",
+    appSessionVerifier(dependencies.pool, dependencies.config),
+    (context, next) => appRateLimit(context, next, dependencies),
+    (context) => listDevicesRoute(context, dependencies),
+  );
+  app.post(
+    "/v1/devices/:deviceId/revoke",
+    appSessionVerifier(dependencies.pool, dependencies.config),
+    (context, next) => appRateLimit(context, next, dependencies),
+    (context) => revokeDeviceRoute(context, dependencies),
+  );
   app.post("/v1/auth/challenge", (context) =>
     publicAuthRoute(context, appAuthDependencies(dependencies), createAuthChallengeRoute),
   );
@@ -761,6 +780,9 @@ function operationFor(path: string, method: string): string {
   if (method === "POST" && path === "/v1/auth/passkey") return "registerPasskey";
   if (method === "POST" && path === "/v1/auth/session") return "createSession";
   if (method === "POST" && path === "/v1/devices/pair") return "pairDevice";
+  if (method === "POST" && path === "/v1/devices/pairing-codes") return "createPairingCode";
+  if (method === "GET" && path === "/v1/devices") return "listDevices";
+  if (method === "POST" && /^\/v1\/devices\/[^/]+\/revoke$/.test(path)) return "revokeDevice";
   if (method === "POST" && path === "/v1/objectives") return "submitObjective";
   if (method === "POST" && path === "/v1/models/complete") return "completeModelCall";
   if (method === "GET" && path === "/v1/objectives") return "listObjectives";
@@ -779,4 +801,8 @@ function operationFor(path: string, method: string): string {
   }
   if (method === "POST" && path === "/v1/freeze/intent") return "createFreezeIntent";
   return "unknown";
+}
+
+function isDeviceOperation(operationId: string): boolean {
+  return ["pairDevice", "createPairingCode", "listDevices", "revokeDevice"].includes(operationId);
 }
