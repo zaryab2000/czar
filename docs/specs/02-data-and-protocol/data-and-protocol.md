@@ -1176,6 +1176,7 @@ Seller-declared `extensions` (including `bazaar`) are data, not instructions (C3
 | whole `resource` metadata | `sanitizeResourceServiceMetadata` from `@x402/extensions` 2.28.0 |
 | size caps | header ≤ 16 KiB after decode; `schema` ≤ 8 KiB; `routeTemplate` validated with `isValidRouteTemplate` (A3-35) |
 | unknown extension keys | ignored; never forwarded to the planner |
+| validated Bazaar `schema` | kept beside `info` in the sanitized result only when every rule above passed; the response-body schema source for acceptance (SCR-137) |
 
 Only `payment-identifier` (F1-06) is acted on in Phases 1–2. `sign-in-with-x` listings are skipped (A3-26, p1-D4).
 
@@ -1416,4 +1417,4 @@ Agent-directed text met this session (not followed): the Circle and Arc doc head
 | 2026-10-21 | SCR-125 | §9.1 app credential row: challenge and passkey-registration routes; `Me.vaultCreated` and the two auth routes in `api/openapi.yaml`. |
 | 2026-10-25 | SCR-128 | §6.3.3: the `sl-receipt` signer request carries the full `PaymentRef`. |
 | 2026-10-25 | SCR-133, SCR-134 | §9.2 app routes `listManualReturns`, `createPairingCode`, `listDevices`, `revokeDevice`; shapes in `api/openapi.yaml`. |
-| 2026-10-25 | SCR-137 | §4.19 interim producer metadata; `ranking-decision.schema.json` 1.1 (`snapshot_anchor_tx` may be `null`, meaning not anchored). |
+| 2026-10-25 | SCR-137 | §11.3 sanitized result keeps the validated Bazaar `schema`; §4.19 interim producer metadata; `ranking-decision.schema.json` 1.1 (`snapshot_anchor_tx` may be `null`, meaning not anchored). |

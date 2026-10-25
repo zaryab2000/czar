@@ -30,8 +30,9 @@
   - It is **not** `pol_default_v1`, and no policy tarball or `GET /v1/policy/{policy_version}` is served for it.
 - **`snapshot_id`**: `keccak256(utf8(JCS(snapshot)))`, where `snapshot` is
   `{"kind":"czar-registered-interim-snapshot","policy_version":…,"network":…,"services":[…]}`.
-  - `services` is sorted by `serviceId`. Each entry is `{serviceId, resourceUrl, method, payTo, amount, scheme, network, probedAt}`, the sanitized live-402 fields this decision used.
-  - The producer stores the exact JCS bytes in a server table `selection_interim_snapshots(snapshot_id text PRIMARY KEY, body jsonb NOT NULL, created_at timestamptz NOT NULL)`, a Lane 3 migration. Rows are kept for `selection.decisionRetentionDays`.
+  - `services` is sorted by `serviceId`. Each entry is `{serviceId, serviceName, capabilities, resourceUrl, method, payTo, amount, scheme, network, probedAt}`: the configured capability assignments used for matching (sorted) and the sanitized live-402 fields this decision used. A config change to capabilities therefore yields a new `snapshot_id` (amended after PR #65 review).
+  - The producer stores the exact JCS text in a server table `selection_interim_snapshots(snapshot_id text PRIMARY KEY, body_jcs text NOT NULL, created_at timestamptz NOT NULL, last_used_at timestamptz NOT NULL)`, a Lane 3 migration. `body_jcs` is the canonical UTF-8 text whose keccak256 is `snapshot_id`; verification hashes those stored bytes and never re-serialises them (`jsonb` is not used because it does not keep the exact bytes).
+  - A decision that reuses an existing snapshot sets `last_used_at` to its own time. A row is deleted only when `last_used_at` is older than `selection.decisionRetentionDays`, so every decision's snapshot outlives that decision's retention window.
   - A decision is reproducible from `(policy_version, snapshot_id)`, as SL invariant 8 requires.
 - **`snapshot_anchor_tx`**: `null`. The schema allows `Hash32 | null`.
   - `null` means the snapshot is **not anchored**. No consumer (planner, app, evidence) may present such a decision as anchored.
@@ -60,16 +61,23 @@
     - No new size limit: the values are fixed operator config, and the resource validates them like any request (for `czar-search`, CZ-20 §5.7).
     - It comes only from config, never from a catalog, a 402 body or a user.
   - **`capabilities`**: a subset of `drives.capabilityTaxonomy`.
+  - **`serviceName`**: the merchant's own service name (CZ-20, e.g. `czar-search`), shown in labels and used for the signer's `K10:<serviceName>` key; it is not the map key.
+- **Map key = `serviceId`** (`SlServiceId`, `^svc_[0-9a-f]{32}$`), derived once by the SL rule `"svc_" + hex(keccak256(utf8(origin ‖ method ‖ first_seen_path ‖ first_seen_ts)))[0:32]` (SL §5.1) at registration, with `first_seen_ts` the RFC 3339 registration time. It is recorded in config and never recomputed, so it stays stable. The producer refuses an entry whose key does not match the pattern.
 - **Probe:**
   - The directory probes with `resource.method` at `resource.url` plus `probeInput`, unpaid, through `@czar/x402` `safeFetch` and the existing origin rules, with `selection.probeTimeoutMs`.
   - Only a `402` with a valid x402 `PAYMENT-REQUIRED` counts. Any other status is a failed probe.
   - The directory record handed to the planner carries `probeInput` beside the bare `resource`. CZ-13's probe-before-plan (CZ-18 §5.3) uses it; paid calls never use it (they use the plan's `callInputs`).
-- **Local overlay value for `czar-search`:** `{"czar-search": {"resource": {"url": "http://127.0.0.1:8787/v1/search", "method": "GET"}, "probeInput": {"query": {"q": "czar probe"}}, "capabilities": ["web-search"]}}`.
+- **Local overlay value for `czar-search`:** `{"svc_223349701b9428c8a6dc42d8a7c99c4a": {"serviceName": "czar-search", "resource": {"url": "http://127.0.0.1:8787/v1/search", "method": "GET"}, "probeInput": {"query": {"q": "czar probe"}}, "capabilities": ["web-search"]}}`. The key is the SL rule over `http://127.0.0.1:8787`, `GET`, `/v1/search`, `2026-10-25T00:00:00Z`. The testnet overlay registers its own key from its own origin and time (T-121).
+
+### 4. Where the response schema comes from in code
+- `@czar/x402`'s sanitizer (`packages/x402/src/extensions.ts`) keeps only `info` and `routeTemplate` today and discards the validated `schema`.
+- Ruling: `SanitizedExtensions.bazaar` gains `schema`, the declaration's schema exactly as validated, present only when the declaration passed every 02 §11.3 rule. TA-06 (Lane 3) adds it as an additive change to the shared package, in a separate small commit (the shared-package rule in `docs/builder-coordination.md`).
+- No consumer re-parses the raw 402 to recover the schema; the sanitizer is the only reader of seller extensions.
 
 ## Affected tasks and briefs
 - **T-123 / TA-06 (Lane 3):**
   - the §1 metadata and the `selection_interim_snapshots` migration
-  - the §2 port rule
+  - the §2 port rule and the §4 additive `@czar/x402` change (separate commit)
   - the §3 directory shape and probe
 - **T-122 / TA-08 (Lane 2):** the planner prober (`apps/server/src/planner/probe.ts`) sends the directory record's `probeInput`, if present; the internal `PlannerService` type gains optional `probeInput`. A small addition to TA-08.
 - **T-122 (Lane 2):** the planner test fixture moves to `schemaVersion: "1.1"` (done in this change so `build-v1` stays green).
