@@ -120,6 +120,12 @@ export interface QueryStore {
     pockets: Row[];
     jobs: Row[];
   } | null>;
+  envelopeByPlanHash(planHash: string): Promise<{
+    envelope: Row;
+    reservations: Row[];
+    pockets: Row[];
+    jobs: Row[];
+  } | null>;
   reservationsNeedingSettle(
     vault: string,
     cursor: IdCursor | null,
@@ -150,6 +156,28 @@ const afterId = (column: Parameters<typeof gt>[0], cursor: IdCursor | null): SQL
 const mirrorOf = (row: { mirror: unknown }): Row => row.mirror as Row;
 
 export function createQueryStore(db: QueryDb): QueryStore {
+  const envelopeByRef = async (envelopeRef: string) => {
+    const [envelope] = await db
+      .select()
+      .from(envelopes)
+      .where(eq(envelopes.envelopeRef, envelopeRef))
+      .limit(1);
+    if (!envelope) return null;
+    const scope = (table: typeof reservations | typeof pockets | typeof jobs) =>
+      and(eq(table.vault, envelope.vault), eq(table.envelopeId, envelope.envelopeId));
+    const [reservationRows, pocketRows, jobRows] = await Promise.all([
+      db.select().from(reservations).where(scope(reservations)).orderBy(asc(reservations.id)),
+      db.select().from(pockets).where(scope(pockets)).orderBy(asc(pockets.id)),
+      db.select().from(jobs).where(scope(jobs)).orderBy(asc(jobs.id)),
+    ]);
+    return {
+      envelope: mirrorOf(envelope),
+      reservations: reservationRows.map(mirrorOf),
+      pockets: pocketRows.map(mirrorOf),
+      jobs: jobRows.map(mirrorOf),
+    };
+  };
+
   return {
     async vaultByOwner(owner) {
       const [vault] = await db.select().from(vaults).where(eq(vaults.owner, owner)).limit(1);
@@ -170,25 +198,17 @@ export function createQueryStore(db: QueryDb): QueryStore {
     },
 
     async envelopeByRef(envelopeRef) {
+      return envelopeByRef(envelopeRef);
+    },
+
+    async envelopeByPlanHash(planHash) {
       const [envelope] = await db
-        .select()
+        .select({ envelopeRef: envelopes.envelopeRef })
         .from(envelopes)
-        .where(eq(envelopes.envelopeRef, envelopeRef))
+        .where(sql`${envelopes.mirror}->>'planHash' = ${planHash}`)
+        .orderBy(asc(envelopes.id))
         .limit(1);
-      if (!envelope) return null;
-      const scope = (table: typeof reservations | typeof pockets | typeof jobs) =>
-        and(eq(table.vault, envelope.vault), eq(table.envelopeId, envelope.envelopeId));
-      const [reservationRows, pocketRows, jobRows] = await Promise.all([
-        db.select().from(reservations).where(scope(reservations)).orderBy(asc(reservations.id)),
-        db.select().from(pockets).where(scope(pockets)).orderBy(asc(pockets.id)),
-        db.select().from(jobs).where(scope(jobs)).orderBy(asc(jobs.id)),
-      ]);
-      return {
-        envelope: mirrorOf(envelope),
-        reservations: reservationRows.map(mirrorOf),
-        pockets: pocketRows.map(mirrorOf),
-        jobs: jobRows.map(mirrorOf),
-      };
+      return envelope ? envelopeByRef(envelope.envelopeRef) : null;
     },
 
     async reservationsNeedingSettle(vault, cursor, limit) {

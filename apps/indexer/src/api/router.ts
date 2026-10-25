@@ -47,10 +47,16 @@ export function createIndexerApi(store: QueryStore, config: Config = loadConfig(
   app.get("/envelopes/:envelopeRef", async (context) => {
     const found = await store.envelopeByRef(context.req.param("envelopeRef"));
     if (!found) return problem(context, 404, "not-found");
-    assertValid(validateEnvelope, found.envelope, "Envelope");
-    found.reservations.forEach((item) => assertValid(validateReservation, item, "Reservation"));
-    found.pockets.forEach(assertPocketProjection);
-    found.jobs.forEach((item) => assertValid(validateJobRecord, item, "JobRecord"));
+    assertEnvelopeResponse(found);
+    return context.json(found);
+  });
+
+  app.get("/envelopes/by-plan-hash/:planHash", async (context) => {
+    const planHash = context.req.param("planHash");
+    if (!HASH32.test(planHash)) return problem(context, 400, "validation");
+    const found = await store.envelopeByPlanHash(planHash);
+    if (!found) return problem(context, 404, "not-found");
+    assertEnvelopeResponse(found);
     return context.json(found);
   });
 
@@ -253,6 +259,18 @@ function problem(context: Context, status: 400 | 404, czarCode: string): Respons
 
 function assertValid(validate: Validate, value: unknown, label: string): void {
   if (!validate(value)) throw new Error(`Indexed ${label} failed @czar/schemas validation`);
+}
+
+function assertEnvelopeResponse(found: {
+  envelope: Record<string, unknown>;
+  reservations: Record<string, unknown>[];
+  pockets: Record<string, unknown>[];
+  jobs: Record<string, unknown>[];
+}): void {
+  assertValid(validateEnvelope, found.envelope, "Envelope");
+  found.reservations.forEach((item) => assertValid(validateReservation, item, "Reservation"));
+  found.pockets.forEach(assertPocketProjection);
+  found.jobs.forEach((item) => assertValid(validateJobRecord, item, "JobRecord"));
 }
 
 /** The indexer never holds `keyRef` (SO provenance, SCR-114); every other PocketRecord rule applies. */
