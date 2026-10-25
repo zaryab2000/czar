@@ -11,6 +11,7 @@ import { completeBoundaryModelCall } from "#src/models/proxy";
 import {
   createTestContext,
   seedDevice,
+  testAppConfig,
   TEST_DEVICE_ID,
   TEST_TOKEN,
   TEST_USER_ID,
@@ -261,7 +262,7 @@ describe("completeModelCall route", () => {
   });
 
   it("modelProxy_abortsAClientThatExceedsThePromptTimeout", async () => {
-    const config = loadConfig({ envFile: { "models.screen.timeoutMs": 5 } });
+    const config = testAppConfig({ "models.screen.timeoutMs": 5 });
     const modelClient = { complete: vi.fn(() => new Promise<never>(() => {})) };
     const context = createTestContext(getPool(), { modelClient, config });
     const response = await postModelCall(
@@ -276,11 +277,9 @@ describe("completeModelCall route", () => {
 
   it("refuses prompts whose committed markdown is missing before reserving budget", async () => {
     await seedModelDevice(getPool(), capUserId, capDeviceId, capToken);
-    const config = loadConfig({
-      envFile: {
-        "models.userMonthlyTokens": 20,
-        "models.sourceExtractorMonthlyTokens": 10,
-      },
+    const config = testAppConfig({
+      "models.userMonthlyTokens": 20,
+      "models.sourceExtractorMonthlyTokens": 10,
     });
     const modelClient = { complete: vi.fn(async () => modelResponse) };
     const context = createTestContext(getPool(), { modelClient, config });
@@ -315,7 +314,7 @@ describe("completeModelCall route", () => {
     const userId = "usr_01K7ZT9P4N5Q6R7S8T9V0W1X2B";
     const token = Buffer.alloc(32, 11).toString("base64url");
     await seedModelDevice(getPool(), userId, "dev_01K7ZT9P4N5Q6R7S8T9V0W1X2B", token);
-    const config = loadConfig({ envFile: { "models.screenMonthlyTokens": 30 } });
+    const config = testAppConfig({ "models.screenMonthlyTokens": 30 });
     const modelClient = {
       complete: vi.fn(async (_request: unknown, _options: unknown) => ({
         output: { answer: "screened" },
@@ -360,7 +359,7 @@ describe("completeModelCall route", () => {
     const userId = "usr_01K7ZT9P4N5Q6R7S8T9V0W1X2C";
     const token = Buffer.alloc(32, 12).toString("base64url");
     await seedModelDevice(getPool(), userId, "dev_01K7ZT9P4N5Q6R7S8T9V0W1X2C", token);
-    const config = loadConfig({ envFile: { "models.screenMonthlyTokens": 6000 } });
+    const config = testAppConfig({ "models.screenMonthlyTokens": 6000 });
     const firstGate = deferred();
     const releaseFirst = firstGate.resolve;
     const modelClient = {

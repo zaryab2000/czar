@@ -42,9 +42,16 @@ test("creates a passkey and later completes createSession", async ({ page, brows
   let assertions = 0;
   let submittedNotices = 0;
   let registeredMsca: Address | undefined;
+  let walletConfigRequests = 0;
+  const requestPaths: string[] = [];
   const { plan, intent } = approvalFixture();
   page.on("request", (request) => {
     const url = new URL(request.url());
+    requestPaths.push(url.pathname);
+    if (url.pathname === "/v1/app/wallet-config") {
+      walletConfigRequests += 1;
+      expect(request.headers()["authorization"]).toBeUndefined();
+    }
     if (url.pathname === "/v1/auth/challenge") challengeRequests += 1;
     if (url.pathname === "/v1/auth/passkey") {
       registrations += 1;
@@ -121,7 +128,11 @@ test("creates a passkey and later completes createSession", async ({ page, brows
     });
   });
   await page.goto("/onboarding/passkey");
+  const walletConfigResponsePromise = page.waitForResponse((response) => {
+    return new URL(response.url()).pathname === "/v1/app/wallet-config";
+  });
   await page.getByRole("button", { name: "Create passkey" }).click();
+  const walletConfigResponse = await walletConfigResponsePromise;
   await expect(
     page.getByText("Passkey created. Your Czar account is ready to set up."),
   ).toBeVisible({
@@ -130,6 +141,16 @@ test("creates a passkey and later completes createSession", async ({ page, brows
   await page.getByRole("button", { name: "Verify passkey sign-in" }).click();
   await expect.poll(() => assertions).toBe(1);
   expect(challengeRequests).toBe(2);
+  expect(walletConfigRequests).toBe(1);
+  expect(requestPaths.indexOf("/v1/app/wallet-config")).toBeLessThan(
+    requestPaths.indexOf("/v1/auth/challenge"),
+  );
+  expect(walletConfigResponse.headers()["cache-control"]).toBe("no-store");
+  await expect(walletConfigResponse.json()).resolves.toMatchObject({
+    circleClientUrl: "http://127.0.0.1:4337",
+    circleClientKey: "e2e-public-client-key",
+    arcRpcUrl: ARC_RPC,
+  });
   expect(registrations).toBe(1);
   expect(registeredMsca).toBeDefined();
   await rpc("anvil_setBalance", [registeredMsca, "0x3635c9adc5dea00000"]);
