@@ -81,6 +81,7 @@ export interface PolicyContext {
   /** Unix seconds. */
   readonly now: () => number;
   readonly freezeStateMaxAgeSec: number;
+  readonly gatewayWriteOffMaxAtomic: bigint;
   /** Addresses of the server keys, for checks that name them (K7 evaluator, K8 publisher, gas targets). */
   readonly keyAddress: (key: "K3" | "K7" | "K8") => Address;
   readonly merchantKeyAddress: (service: string) => Address;
@@ -304,6 +305,11 @@ async function vaultCall(ctx: PolicyContext, req: Req): Promise<Decision> {
       const view = await ctx.projection.pocket(pocket);
       if (view === undefined || !eq(view.vault, vault)) deny("unknown-pocket");
       if ((view as NonNullable<typeof view>).slowWithdrawalOpen) deny("slow-withdrawal-open");
+      if ((view as NonNullable<typeof view>).pendingPullback > 0n) deny("pending-pullback");
+      const balances = await ctx.projection.pocketBalances(pocket);
+      if (!balances.gatewayApiFresh) deny("gateway-balance-stale");
+      if (balances.gatewayAvailable > ctx.gatewayWriteOffMaxAtomic)
+        deny("gateway-balance-not-dust");
       break;
     }
     default:
@@ -656,8 +662,20 @@ async function pocketReturn(ctx: PolicyContext, req: Req): Promise<Decision> {
 
 async function pocketSlowWithdraw(ctx: PolicyContext, req: Req): Promise<Decision> {
   const pocket = req.pocket as Address;
-  await activePocket(ctx, pocket);
+  const view = await activePocket(ctx, pocket);
   if (!(await ctx.projection.slowWithdrawAllowed(pocket))) deny("slow-withdraw-not-allowed");
+  const balances = await ctx.projection.pocketBalances(pocket);
+  if (!balances.gatewayApiFresh) deny("gateway-balance-stale");
+  if (req.step === "initiate") {
+    if (view.slowWithdrawalOpen) deny("slow-withdrawal-open");
+    const value = req.value as bigint | undefined;
+    if (value === undefined) deny("shape");
+    if (value !== balances.gatewayAvailable) {
+      deny("slow-withdraw-value-mismatch");
+    }
+  } else if (!view.slowWithdrawalOpen) {
+    deny("slow-withdrawal-not-open");
+  }
   const data =
     req.step === "initiate"
       ? encodeFunctionData({

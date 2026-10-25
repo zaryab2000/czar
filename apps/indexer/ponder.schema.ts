@@ -213,6 +213,37 @@ export const gatewayTransfers = onchainTable(
   (t) => ({ pocketIdx: index("gateway_transfers_pocket_idx").on(t.pocketAddress) }),
 );
 
+// SCR-127 balance observations. `closedZeroSince` is indexer-internal state used to enforce the
+// Closed-pocket quiet period; it is never returned by the query API.
+export const pocketBalances = onchainTable(
+  "pocket_balances",
+  (t) => ({
+    pocket: t.text().primaryKey(),
+    vault: t.text().notNull(),
+    gatewayAvailableAtomic: t.text(),
+    gatewayPendingBatchAtomic: t.text(),
+    gatewayWithdrawingAtomic: t.text(),
+    withdrawalBlock: t.bigint(),
+    pocketUsdcAtomic: t.text(),
+    apiObservedAt: t.text(),
+    chainObservedBlock: t.bigint(),
+    apiConsecutiveFailures: t.integer().notNull(),
+    apiLastError: t.text(),
+    closedZeroSince: t.text(),
+  }),
+  (t) => ({ vaultIdx: index("pocket_balances_vault_idx").on(t.vault) }),
+);
+
+export const alerts = onchainTable("alerts", (t) => ({
+  id: t.text().primaryKey(),
+  rule: t.text().notNull(),
+  subject: t.text().notNull(),
+  active: t.boolean().notNull(),
+  firstSeenAt: t.text().notNull(),
+  updatedAt: t.text().notNull(),
+  details: t.jsonb().notNull(),
+}));
+
 export const dependencyState = onchainTable("dependency_state", (t) => ({
   id: t.text().primaryKey(),
   proxy: t.text().notNull(),

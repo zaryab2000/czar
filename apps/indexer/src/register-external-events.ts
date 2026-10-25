@@ -8,8 +8,10 @@ import {
   externalEvents,
   escrowJobs,
   gatewayTransfers,
+  alerts,
   haltFlags,
   pockets,
+  pocketBalances,
   pullbacks,
   vaults,
 } from "ponder:schema";
@@ -29,6 +31,11 @@ import { normalizeTransferAmount } from "#src/amounts";
 import { externalEventId, pocketDelegateState } from "#src/external-events";
 import { EXTERNAL_ADDRESSES } from "#src/external-events";
 import { pollGatewayTransfers } from "#src/gateway-poller";
+import {
+  isClosedPocketQuiet,
+  pollPocketBalance,
+  type PocketBalanceRow,
+} from "#src/gateway-balances";
 import { createAlertReporter } from "#src/alerts/reporter";
 import { haltPaths, type PinnedProxy } from "#src/alerts/rules";
 
@@ -71,6 +78,29 @@ for (const address of payoutAddresses) {
   }
 }
 const normalizedPayoutAddresses = payoutAddresses.map((address) => address.toLowerCase());
+const deploymentPath =
+  process.env["CZAR_INDEXER_DEPLOYMENT_PATH"] ??
+  new URL("../../../deployments/arc-testnet.json", import.meta.url).pathname;
+const deployment = JSON.parse(readFileSync(deploymentPath, "utf8")) as {
+  gatewayWallet?: string;
+  usdc?: string;
+  gatewayDomain?: number;
+};
+if (
+  !deployment.gatewayWallet ||
+  !/^0x[\da-fA-F]{40}$/.test(deployment.gatewayWallet) ||
+  !deployment.usdc ||
+  !/^0x[\da-fA-F]{40}$/.test(deployment.usdc) ||
+  !Number.isSafeInteger(deployment.gatewayDomain) ||
+  (deployment.gatewayDomain ?? -1) < 0
+) {
+  throw new Error(
+    `Invalid GatewayWallet, USDC or Gateway domain in deployment manifest: ${deploymentPath}`,
+  );
+}
+const gatewayWallet = deployment.gatewayWallet as Address;
+const gatewayUsdc = deployment.usdc as Address;
+const gatewayDomain = deployment.gatewayDomain as number;
 const logger = createLogger({ service: "indexer", component: "CZ-19" });
 const reportAlert = createAlertReporter(logger);
 const MS_PER_SECOND = 1000;
@@ -98,6 +128,30 @@ async function save(context: Context, event: Event, name: string, payload: unkno
       payload: jsonValue(payload),
     })
     .onConflictDoNothing();
+}
+
+async function updateAlert(
+  context: Context,
+  rule: "pocket-stale" | "gateway-poll-failing",
+  subject: string,
+  active: boolean,
+  now: number,
+  details: Record<string, unknown>,
+): Promise<void> {
+  const id = `${rule}:${subject}`;
+  const previous = await context.db.find(alerts, { id });
+  await context.db
+    .insert(alerts)
+    .values({
+      id,
+      rule,
+      subject,
+      active,
+      firstSeenAt: previous?.firstSeenAt ?? new Date(now).toISOString(),
+      updatedAt: new Date(now).toISOString(),
+      details,
+    })
+    .onConflictDoUpdate({ active, updatedAt: new Date(now).toISOString(), details });
 }
 
 /** True when the address is a Czar vault, a Czar pocket or a configured merchant payout address.
@@ -408,11 +462,80 @@ ponder.on("GatewayPoll:block", async ({ context }) => {
     const pocketAddresses = new Set(
       pocketRows.map((row) => (row.mirror as PocketRecord).pocket.toLowerCase()),
     );
+    const currentTime = Date.now();
+    let cycleErrors = 0;
+    const pollAddresses = new Set<string>();
+    for (const row of pocketRows) {
+      const mirror = row.mirror as PocketRecord;
+      const balanceRow = await context.db.find(pocketBalances, {
+        pocket: mirror.pocket.toLowerCase(),
+      });
+      if (
+        mirror.state === "Closed" &&
+        balanceRow &&
+        isClosedPocketQuiet({
+          now: currentTime,
+          quietMs: (config.get("indexer.closedPocketQuietHours") as number) * 3_600_000,
+          zeroSince: balanceRow.closedZeroSince,
+          gatewayAvailable: BigInt(balanceRow.gatewayAvailableAtomic ?? "0"),
+          gatewayWithdrawing: BigInt(balanceRow.gatewayWithdrawingAtomic ?? "0"),
+          usdc: BigInt(balanceRow.pocketUsdcAtomic ?? "0"),
+        })
+      )
+        continue;
+      pollAddresses.add(mirror.pocket.toLowerCase());
+      const observed = await pollPocketBalance(
+        {
+          pocket: mirror.pocket as Address,
+          vault: mirror.vault as Address,
+          state: mirror.state,
+          domain: gatewayDomain,
+          gatewayWallet,
+          usdc: gatewayUsdc,
+          apiBase: config.get("chain.gatewayApiBaseUrl") as string,
+          timeoutMs: config.get("fetch.timeoutMs") as number,
+          quietMs: (config.get("indexer.closedPocketQuietHours") as number) * 3_600_000,
+        },
+        {
+          fetch,
+          chain: context.client as never,
+          now: () => currentTime,
+          store: {
+            find: async (address) => {
+              const found = await context.db.find(pocketBalances, { pocket: address });
+              return found as PocketBalanceRow | null;
+            },
+            async save(balance) {
+              await context.db
+                .insert(pocketBalances)
+                .values(balance)
+                .onConflictDoUpdate({ ...balance });
+            },
+          },
+        },
+      );
+      if (observed.apiError || observed.chainError) cycleErrors += 1;
+      const maxAge = config.get("indexer.gatewayBalanceMaxAgeSeconds") as number;
+      const stale =
+        observed.row.apiObservedAt === null ||
+        currentTime - Date.parse(observed.row.apiObservedAt) > maxAge * MS_PER_SECOND;
+      await updateAlert(context, "pocket-stale", mirror.pocket.toLowerCase(), stale, currentTime, {
+        observedAt: observed.row.apiObservedAt,
+      });
+    }
     const targets = [
       ...pocketRows
         .filter((row) => {
           const state = (row.mirror as PocketRecord).state;
-          return state === "Funded" || state === "Draining";
+          const address = (row.mirror as PocketRecord).pocket.toLowerCase();
+          return (
+            pollAddresses.has(address) &&
+            (state === "Registered" ||
+              state === "DelegateReady" ||
+              state === "Funded" ||
+              state === "Draining" ||
+              state === "Closed")
+          );
         })
         .map((row) => ({
           kind: "pocket" as const,
@@ -443,15 +566,15 @@ ponder.on("GatewayPoll:block", async ({ context }) => {
           apiBase: config.get("chain.gatewayApiBaseUrl") as string,
         },
       );
-      if (outcome.error) {
-        consecutiveGatewayErrors += 1;
-        if (consecutiveGatewayErrors > (config.get("indexer.gatewayPollFailMax") as number)) {
-          logger.error("gateway_poll_failing");
-        }
-      } else {
-        consecutiveGatewayErrors = 0;
-      }
+      if (outcome.error) cycleErrors += 1;
     }
+    consecutiveGatewayErrors = cycleErrors === 0 ? 0 : consecutiveGatewayErrors + cycleErrors;
+    const pollFailing =
+      consecutiveGatewayErrors > (config.get("indexer.gatewayPollFailMax") as number);
+    await updateAlert(context, "gateway-poll-failing", "global", pollFailing, currentTime, {
+      consecutiveErrors: consecutiveGatewayErrors,
+    });
+    if (pollFailing) logger.error("gateway_poll_failing");
   } finally {
     gatewayPollInFlight = false;
   }

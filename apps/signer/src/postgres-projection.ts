@@ -2,7 +2,7 @@ import type { Address, Hash32 } from "@czar/hashing";
 import type { PaymentRef } from "@czar/schemas";
 import type { Config } from "@czar/config";
 import { czarVaultAbi, czarVaultFactoryAbi } from "@czar/vault-client";
-import { keccak256, stringToHex, type PublicClient } from "viem";
+import { keccak256, parseAbi, stringToHex, type PublicClient } from "viem";
 import type { AuditQueryExecutor } from "./postgres-audit.ts";
 import type {
   AutonomyView,
@@ -34,6 +34,11 @@ const VAULT = czarVaultAbi;
 const FACTORY = czarVaultFactoryAbi;
 const BPS_BASE = 10_000n;
 const ZERO32 = `0x${"0".repeat(64)}` as Hash32;
+const GATEWAY_ABI = parseAbi([
+  "function withdrawingBalance(address token, address depositor) view returns (uint256)",
+  "function withdrawalBlock(address token, address depositor) view returns (uint256)",
+]);
+const USDC_BALANCE_ABI = parseAbi(["function balanceOf(address account) view returns (uint256)"]);
 
 /** Production T-040 projection backed by the existing indexer and server Postgres tables. */
 export function createPostgresProjection(input: ProjectionInput): Projection {
@@ -41,7 +46,7 @@ export function createPostgresProjection(input: ProjectionInput): Projection {
     (await input.database.query(query, values)) as SqlRows;
   return {
     ...chainProjection(input),
-    ...indexerProjection(sql),
+    ...indexerProjection(input, sql),
     ...serverProjection(sql),
   };
 }
@@ -161,6 +166,7 @@ async function readAutonomy(
 }
 
 function indexerProjection(
+  input: ProjectionInput,
   sql: Sql,
 ): Pick<
   Projection,
@@ -168,12 +174,15 @@ function indexerProjection(
 > {
   return {
     envelope: (vault, id) => readEnvelope(sql, vault, id),
-    pocket: (address) => readPocket(sql, address),
-    pocketBalances: (address) => unavailablePocketBalances(sql, address),
-    nanoSpent: (pocket, payTo) => nanoSpend(sql, pocket, payTo),
-    async slowWithdrawAllowed() {
-      return false;
+    async pocket(address) {
+      const view = await readPocket(sql, address);
+      if (!view) return undefined;
+      const balances = await pocketBalances(input, sql, address);
+      return { ...view, slowWithdrawalOpen: balances.gatewayWithdrawing > 0n };
     },
+    pocketBalances: (address) => pocketBalances(input, sql, address),
+    nanoSpent: (pocket, payTo) => nanoSpend(sql, pocket, payTo),
+    slowWithdrawAllowed: (address) => isSlowWithdrawAllowed(input, sql, address),
   };
 }
 
@@ -224,18 +233,98 @@ async function readPocket(sql: Sql, pocket: Address): Promise<PocketView | undef
     envelopeId: BigInt(String(mirror["envelopeId"])),
     state: pocketState(mirror["state"]),
     funded: BigInt(String(mirror["funded"])),
-    slowWithdrawalOpen: mirror["slowWithdrawalOpen"] !== false,
+    pendingPullback: BigInt(String(mirror["pendingPullback"] ?? "0")),
+    slowWithdrawalOpen: false,
   };
 }
 
-async function unavailablePocketBalances(sql: Sql, pocket: Address): Promise<PocketBalances> {
-  const result = await sql(
-    "SELECT state FROM pullbacks WHERE lower(pocket)=lower($1) AND state='Pending' LIMIT 1",
-    [pocket],
+async function pocketBalances(
+  input: ProjectionInput,
+  sql: Sql,
+  pocket: Address,
+): Promise<PocketBalances> {
+  const [projection, pullbacksResult, block] = await Promise.all([
+    sql(
+      `SELECT gateway_available_atomic, api_observed_at, api_consecutive_failures
+       FROM pocket_balances WHERE lower(pocket)=lower($1) LIMIT 1`,
+      [pocket],
+    ),
+    sql("SELECT 1 FROM pullbacks WHERE lower(pocket)=lower($1) AND state='Pending' LIMIT 1", [
+      pocket,
+    ]),
+    input.chain.getBlockNumber(),
+  ]);
+  const row = projection.rows[0];
+  const observedAt =
+    typeof row?.["api_observed_at"] === "string" ? Date.parse(row["api_observed_at"]) : Number.NaN;
+  const maxAge = Number(input.config.get("indexer.gatewayBalanceMaxAgeSeconds")) * 1000;
+  const apiAge = Date.now() - observedAt;
+  const gatewayApiFresh =
+    Number.isFinite(observedAt) &&
+    apiAge >= 0 &&
+    apiAge <= maxAge &&
+    Number(row?.["api_consecutive_failures"] ?? 1) === 0;
+  const availableValue = row?.["gateway_available_atomic"];
+  const gatewayAvailable =
+    availableValue === null || availableValue === undefined ? 0n : BigInt(String(availableValue));
+  const gatewayWallet = String(input.config.get("chain.gatewayWalletAddress")) as Address;
+  const usdc = String(input.config.get("chain.usdcAddress")) as Address;
+  const [withdrawing, withdrawalBlock, usdcBalance, native] = await Promise.all([
+    input.chain.readContract({
+      address: gatewayWallet,
+      abi: GATEWAY_ABI,
+      functionName: "withdrawingBalance",
+      args: [usdc, pocket],
+      blockNumber: block,
+    }),
+    input.chain.readContract({
+      address: gatewayWallet,
+      abi: GATEWAY_ABI,
+      functionName: "withdrawalBlock",
+      args: [usdc, pocket],
+      blockNumber: block,
+    }),
+    input.chain.readContract({
+      address: usdc,
+      abi: USDC_BALANCE_ABI,
+      functionName: "balanceOf",
+      args: [pocket],
+      blockNumber: block,
+    }),
+    input.chain.getBalance({ address: pocket }),
+  ]);
+  return {
+    gatewayApi: gatewayAvailable,
+    gatewayAvailable,
+    gatewayWithdrawing: withdrawing,
+    withdrawalBlock,
+    usdc: usdcBalance,
+    native,
+    pendingPullback: pullbacksResult.rows.length > 0,
+    gatewayApiFresh,
+  };
+}
+
+async function isSlowWithdrawAllowed(
+  input: ProjectionInput,
+  sql: Sql,
+  pocket: Address,
+): Promise<boolean> {
+  const balances = await pocketBalances(input, sql, pocket);
+  if (!balances.gatewayApiFresh) return false;
+  const downHours = Number(input.config.get("payer.pullbackApiDownHours"));
+  const failures = await sql(
+    `SELECT 1 FROM payer_pullback_gateway_failures
+     WHERE lower(pocket)=lower($1)
+       AND unavailable_since <= now() - ($2 * interval '1 hour') LIMIT 1`,
+    [pocket, downHours],
   );
-  if (result.rows.length > 0)
-    throw new Error("Gateway balances unavailable; pending pullback prevents retirement");
-  throw new Error(`Gateway balance projection unavailable for ${pocket}`);
+  if (failures.rows.length > 0) return true;
+  const view = await readPocket(sql, pocket);
+  const dust =
+    BigInt(input.config.get("payer.pullbackMaxFeeAtomic") as number) +
+    BigInt(input.config.get("payer.pullbackSafetyAtomic") as number);
+  return view?.state === "Closed" && balances.gatewayAvailable <= dust;
 }
 
 async function nanoSpend(sql: Sql, pocket: Address, payTo: Address) {
@@ -243,12 +332,14 @@ async function nanoSpend(sql: Sql, pocket: Address, payTo: Address) {
     sql(
       `SELECT COALESCE(sum(amount::numeric), 0)::text AS total
        FROM gateway_transfers WHERE lower(from_address)=lower($1)
-         AND lower(to_address)=lower($2) AND status='completed'`,
+         AND lower(to_address)=lower($2)
+         AND status IN ('received','batched','confirmed','completed')`,
       [pocket, payTo],
     ),
     sql(
       `SELECT COALESCE(sum(amount::numeric), 0)::text AS total
-       FROM gateway_transfers WHERE lower(from_address)=lower($1) AND status='completed'`,
+       FROM gateway_transfers WHERE lower(from_address)=lower($1)
+         AND status IN ('received','batched','confirmed','completed')`,
       [pocket],
     ),
   ]);

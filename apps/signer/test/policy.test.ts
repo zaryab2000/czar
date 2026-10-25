@@ -289,6 +289,39 @@ describe("vault-call (K3)", () => {
     );
   });
 
+  it("requires a fresh Gateway balance and only writes off dust with no open pullback", async () => {
+    const stale = await harness();
+    stale.state.balances = { ...stale.state.balances, gatewayApiFresh: false };
+    await expectDenied(
+      stale,
+      stale.signer.sign("cz-15", vaultCall("writeOffPocket", { pocket: stale.pocket })),
+      "gateway-balance-stale",
+    );
+
+    const dusty = await harness();
+    dusty.state.balances = {
+      ...dusty.state.balances,
+      gatewayApi: 10_000n,
+      gatewayAvailable: 10_000n,
+    };
+    await dusty.signer.sign("cz-15", vaultCall("writeOffPocket", { pocket: dusty.pocket }));
+    dusty.state.balances = { ...dusty.state.balances, gatewayAvailable: 10_001n };
+    await expectDenied(
+      dusty,
+      dusty.signer.sign("cz-15", vaultCall("writeOffPocket", { pocket: dusty.pocket })),
+      "gateway-balance-not-dust",
+    );
+    dusty.state.pocket = {
+      ...(dusty.state.pocket as NonNullable<typeof dusty.state.pocket>),
+      pendingPullback: 1n,
+    };
+    await expectDenied(
+      dusty,
+      dusty.signer.sign("cz-15", vaultCall("writeOffPocket", { pocket: dusty.pocket })),
+      "pending-pullback",
+    );
+  });
+
   it("applies the freeze check to spending selectors only (freeze itself stays signable)", async () => {
     const t = await harness();
     t.state.frozen = true;
@@ -1009,6 +1042,22 @@ describe("K4 pocket kinds", () => {
     );
   });
 
+  it("allows a pocket return using live wallet balances when the Gateway figure is stale", async () => {
+    const t = await harness();
+    t.state.balances = {
+      ...t.state.balances,
+      usdc: 700n,
+      gatewayApiFresh: false,
+    };
+    await t.signer.sign("cz-15", {
+      keyId: "K4",
+      kind: "pocket-return",
+      payload: { pocket: t.pocket, kind: "usdc", amount: "700" },
+    });
+    const call = decodeFunctionData({ abi: USDC_ABI, data: t.prepared[0]?.data as Hex });
+    expect(call.args?.[0]?.toLowerCase()).toBe(VAULT);
+  });
+
   it("pocket-delegate names only the owning vault; slow withdraw needs the API-down or owner condition", async () => {
     const t = await harness();
     await t.signer.sign("cz-15", {
@@ -1035,6 +1084,22 @@ describe("K4 pocket kinds", () => {
       "slow-withdraw-not-allowed",
     );
     t.state.slowWithdrawAllowed = true;
+    t.state.balances = { ...t.state.balances, gatewayApiFresh: false };
+    await expectDenied(
+      t,
+      t.signer.sign("cz-15", {
+        keyId: "K4",
+        kind: "pocket-slow-withdraw",
+        payload: { pocket: t.pocket, step: "initiate", value: "10" },
+      }),
+      "gateway-balance-stale",
+    );
+    t.state.balances = {
+      ...t.state.balances,
+      gatewayApiFresh: true,
+      gatewayApi: 10n,
+      gatewayAvailable: 10n,
+    };
     await t.signer.sign("cz-15", {
       keyId: "K4",
       kind: "pocket-slow-withdraw",
@@ -1048,6 +1113,19 @@ describe("K4 pocket kinds", () => {
         payload: { pocket: t.pocket, step: "initiate" },
       }),
       "shape",
+    );
+    t.state.pocket = {
+      ...(t.state.pocket as NonNullable<typeof t.state.pocket>),
+      slowWithdrawalOpen: true,
+    };
+    await expectDenied(
+      t,
+      t.signer.sign("cz-15", {
+        keyId: "K4",
+        kind: "pocket-slow-withdraw",
+        payload: { pocket: t.pocket, step: "initiate", value: "10" },
+      }),
+      "slow-withdrawal-open",
     );
   });
 });

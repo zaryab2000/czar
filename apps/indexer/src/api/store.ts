@@ -24,6 +24,8 @@ import {
   jobs,
   haltFlags,
   pockets,
+  pocketBalances,
+  indexedEvents,
   pullbacks,
   reservations,
   vaults,
@@ -148,6 +150,10 @@ export interface QueryStore {
   latestAnchor(publisher: string, kind: number): Promise<AnchorHead | null>;
   anchorByBatch(root: string): Promise<Row | null>;
   dependencyState(): Promise<HaltFlag[]>;
+  pocketBalance(pocket: string): Promise<Record<string, unknown> | null>;
+  latestIndexedBlock(): Promise<bigint>;
+  fundedPocketsForVault(vault: string): Promise<Record<string, unknown>[]>;
+  closedPocketsWithBalance(): Promise<Record<string, unknown>[]>;
 }
 
 const afterId = (column: Parameters<typeof gt>[0], cursor: IdCursor | null): SQL | undefined =>
@@ -399,6 +405,65 @@ export function createQueryStore(db: QueryDb): QueryStore {
           transaction: string;
         }) => ({ ...row, block: row.block.toString() }),
       );
+    },
+
+    async pocketBalance(pocket) {
+      const [row] = await db
+        .select()
+        .from(pocketBalances)
+        .where(eq(pocketBalances.pocket, pocket))
+        .limit(1);
+      return row ?? null;
+    },
+
+    async latestIndexedBlock() {
+      const [row] = await db
+        .select({ block: sql`max(${indexedEvents.block})` })
+        .from(indexedEvents);
+      return BigInt(String(row?.block ?? 0));
+    },
+
+    async fundedPocketsForVault(vault) {
+      const rows = await db
+        .select({ mirror: pockets.mirror, envelopeRef: envelopes.envelopeRef })
+        .from(pockets)
+        .innerJoin(
+          envelopes,
+          and(eq(envelopes.vault, pockets.vault), eq(envelopes.envelopeId, pockets.envelopeId)),
+        )
+        .where(
+          and(
+            eq(pockets.vault, vault),
+            sql`${pockets.mirror}->>'state' IN ('Registered','DelegateReady','Funded','Draining')`,
+          ),
+        )
+        .orderBy(asc(pockets.pocket));
+      return rows.map((row: { mirror: unknown; envelopeRef: string }) => ({
+        ...(row.mirror as Record<string, unknown>),
+        envelopeRef: row.envelopeRef,
+      }));
+    },
+
+    async closedPocketsWithBalance() {
+      const rows = await db
+        .select({ pocket: pockets.pocket, mirror: pockets.mirror, balance: pocketBalances })
+        .from(pockets)
+        .innerJoin(pocketBalances, eq(pocketBalances.pocket, pockets.pocket))
+        .where(
+          and(
+            sql`${pockets.mirror}->>'state' = 'Closed'`,
+            or(
+              sql`${pocketBalances.gatewayAvailableAtomic}::numeric > 0`,
+              sql`${pocketBalances.gatewayWithdrawingAtomic}::numeric > 0`,
+            ),
+          ),
+        )
+        .orderBy(asc(pockets.pocket));
+      return rows.map((row: { pocket: string; mirror: unknown; balance: unknown }) => ({
+        pocket: row.pocket,
+        pocketRecord: row.mirror,
+        balance: row.balance,
+      }));
     },
   };
 }

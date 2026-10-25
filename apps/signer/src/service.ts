@@ -123,6 +123,9 @@ export function createSigner(options: SignerOptions): Signer {
     network,
     now: () => Math.floor(nowMs() / 1000),
     freezeStateMaxAgeSec: Number(config.get("signer.freezeStateMaxAgeSec")),
+    gatewayWriteOffMaxAtomic:
+      BigInt(config.get("payer.pullbackMaxFeeAtomic") as number) +
+      BigInt(config.get("payer.pullbackSafetyAtomic") as number),
     keyAddress,
     merchantKeyAddress: (service) => {
       const address = backend.address(`K10:${service}`);
@@ -298,6 +301,7 @@ export function createSigner(options: SignerOptions): Signer {
   async function requireZeroBalances(pocket: Address) {
     const b = await projection.pocketBalances(pocket);
     const view = await projection.pocket(pocket);
+    if (!b.gatewayApiFresh) throw new Denied("gateway-balance-stale");
     const dust = BigInt(config.get("signer.pocketDustAtomic") as number);
     const zero =
       b.gatewayApi === 0n &&

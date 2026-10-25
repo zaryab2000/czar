@@ -65,6 +65,7 @@ export interface PocketView {
   readonly envelopeId: bigint;
   readonly state: "Registered" | "Funded" | "Draining" | "Closed";
   readonly funded: bigint;
+  readonly pendingPullback: bigint;
   readonly slowWithdrawalOpen: boolean;
 }
 
@@ -87,9 +88,11 @@ export interface PocketBalances {
   readonly gatewayApi: bigint;
   readonly gatewayAvailable: bigint;
   readonly gatewayWithdrawing: bigint;
+  readonly withdrawalBlock: bigint;
   readonly usdc: bigint;
   readonly native: bigint;
   readonly pendingPullback: boolean;
+  readonly gatewayApiFresh: boolean;
 }
 
 export interface Projection {
