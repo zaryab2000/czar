@@ -340,6 +340,23 @@ describe("registered selection", () => {
     expect(retained.rows[0]!.snapshot_id).not.toBe(first.snapshot_id);
   });
 
+  it("keeps last_used_at monotonic when snapshot writes arrive in reverse time order", async () => {
+    let clock = new Date("2026-10-25T12:00:00Z");
+    const fetchImpl = vi.fn<SafeFetch>(async () => response("25", "0xaaaa"));
+    const selection = setup(fetchImpl, { [SERVICE_A]: registration() }, () => clock);
+    const laterDecision = await selection.rank.rank(query());
+    clock = new Date("2026-10-25T11:00:00Z");
+
+    const earlierDecision = await selection.rank.rank(query());
+    const saved = await getPool().query<{ last_used_at: Date }>(
+      "SELECT last_used_at FROM selection_interim_snapshots WHERE snapshot_id = $1",
+      [laterDecision.snapshot_id],
+    );
+
+    expect(earlierDecision.snapshot_id).toBe(laterDecision.snapshot_id);
+    expect(saved.rows[0]!.last_used_at.toISOString()).toBe("2026-10-25T12:00:00.000Z");
+  });
+
   it("recrawls live offers and changes the snapshot when the offer changes", async () => {
     let clock = new Date("2026-10-25T00:00:00Z");
     let payTo = "0xaaaa";

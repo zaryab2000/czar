@@ -423,7 +423,8 @@ async function persistSnapshot(
   const saved = await pool.query<{ body_jcs: string }>(
     `INSERT INTO selection_interim_snapshots (snapshot_id, body_jcs, created_at, last_used_at)
      VALUES ($1, $2, $3, $3)
-     ON CONFLICT (snapshot_id) DO UPDATE SET last_used_at = EXCLUDED.last_used_at
+     ON CONFLICT (snapshot_id) DO UPDATE SET
+       last_used_at = GREATEST(selection_interim_snapshots.last_used_at, EXCLUDED.last_used_at)
      RETURNING body_jcs`,
     [snapshotId, bodyJcs, usedAt],
   );
