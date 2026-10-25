@@ -5,7 +5,7 @@
 | ID | SCR-140 |
 | Filed by | Lane Orchestrator, 2026-10-25, from TA-13 preflight |
 | Spec and section | CZ-22 §4; 02 §9.2; OpenAPI `getMe` and app routes; SCR-135 |
-| Status | Proposed for Zaryab's approval by merge; applied in this branch |
+| Status | Architect-reviewed 2026-10-25 with the public-value rule below; accepted by Zaryab's merge |
 
 ## Problem
 
@@ -45,6 +45,25 @@ This endpoint **replaces** the `X-Czar-Bundler-Order` and
 the `Me` contract. There is one source for all browser wallet configuration.
 The existing bundler order, endpoint selection, and transport behavior remain
 unchanged. T-087 still owns secondary-bundler transport corrections.
+
+### Public-value rule (architect review, 2026-10-25)
+
+Every value in `AppWalletConfig` is published to any visitor, with no session.
+That is wider than today's `/v1/me` headers, which only signed-in users get.
+So:
+
+- `app.circleClientKey` (K2), `app.arcRpcUrl` and every `app.bundlerEndpoints`
+  URL must be a credential that is safe to publish. If a provider key is
+  embedded in a URL, it must be restricted on the provider side (allowed
+  origins or a sponsorship policy). It must never be a server-side secret.
+  Keys that must stay secret (K11, K12, K19) are never placed in these
+  config keys.
+- This is an operator rule for each environment's config. It is recorded in
+  the reasons of the three config keys when TA-13 lands. It is not a runtime
+  check, because the server cannot tell a restricted key from an
+  unrestricted one.
+- The response body and endpoint URLs are never logged. This repeats the
+  rule above and covers error paths too.
 
 ## Evidence
 
