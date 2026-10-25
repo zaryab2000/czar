@@ -13,7 +13,8 @@
 - Applied the current-head review fixes: corrected the dynamic ABI offset, accepted the signer’s
   variable-length USDC signature bytes (including its 416-byte envelope), confirmed settlement
   receipts before reporting success, enforced the indexer endpoint guard without a local overlay,
-  and matched HTTP protocol checks to URL parsing semantics.
+  matched HTTP protocol checks to URL parsing semantics, required nodeInfo for every stand-in
+  startup, and assigned deterministic distinct IDs to pocket-scoped transfer fixtures.
 
 ## Checks
 
@@ -21,7 +22,7 @@ Commands use the repository-pinned Node runtime, 22.22.0.
 
 | Command | Result |
 |---|---|
-| `fnm exec --using=22.22.0 pnpm --filter @czar/config test` | Passed: 45 tests in 5 files after review fixes. |
+| `fnm exec --using=22.22.0 pnpm --filter @czar/config test` | Passed: 46 tests in 5 files after review fixes. |
 | `fnm exec --using=22.22.0 pnpm --filter @czar/x402 test` | Passed: 86 tests in 4 files. |
 | `fnm exec --using=22.22.0 pnpm --filter @czar/indexer test` | Passed: 54 tests in 10 files, including T-021 replay on arc-anvil. |
 | `fnm exec --using=22.22.0 pnpm typecheck` | Passed: all 14 typechecked workspace projects. |

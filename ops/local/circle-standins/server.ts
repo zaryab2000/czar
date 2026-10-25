@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { fileURLToPath } from "node:url";
@@ -36,6 +37,7 @@ export async function validateStandinStartup(options: StandinOptions): Promise<v
     config: options.config,
     overlayPath: options.overlayPath,
     arcRpcUrl: options.rpcUrl,
+    requireAnvilNodeInfo: true,
     ...(options.fetchFn === undefined ? {} : { fetchFn: options.fetchFn }),
   });
 }
@@ -195,9 +197,22 @@ async function transfers(url: URL): Promise<Response> {
   const transferRow = { ...completed };
   const from = url.searchParams.get("from");
   const to = url.searchParams.get("to");
+  const scopedAddress = from ?? to;
+  if (scopedAddress)
+    transferRow["id"] = transferIdForAddress(String(completed["id"]), scopedAddress);
   if (from) transferRow["fromAddress"] = from;
   if (to) transferRow["toAddress"] = to;
   return json({ transfers: [transferRow] });
+}
+
+function transferIdForAddress(baseId: string, address: string): string {
+  const digest = createHash("sha256").update(`${baseId}:${address.toLowerCase()}`).digest("hex");
+  const chars = digest.slice(0, 32).split("");
+  chars[12] = "5";
+  const variant = Number.parseInt(chars[16] ?? "0", 16);
+  chars[16] = ((variant & 0x3) | 0x8).toString(16);
+  const uuid = chars.join("");
+  return `${uuid.slice(0, 8)}-${uuid.slice(8, 12)}-${uuid.slice(12, 16)}-${uuid.slice(16, 20)}-${uuid.slice(20)}`;
 }
 
 function createRpcCall(url: string, fetchFn: typeof fetch): RpcCall {
