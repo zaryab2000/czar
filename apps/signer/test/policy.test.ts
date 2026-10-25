@@ -418,6 +418,47 @@ describe("sl-receipt (K3, RV-013)", () => {
     );
   });
 
+  it("denies references for another chain or token on every supported rail", async () => {
+    const t = await harness();
+    const references: PaymentRef[] = [
+      { ...x402PaymentRef, network: "eip155:1" },
+      { ...x402PaymentRef, asset: OTHER },
+      {
+        schemaVersion: "1.0",
+        rail: "gateway-batched",
+        network: "eip155:1",
+        payer: PAYEE,
+        payTo: VAULT,
+        amount: "100000",
+        nonce: h("2"),
+      },
+      {
+        schemaVersion: "1.0",
+        rail: "erc8183-job",
+        network: "eip155:1",
+        contract: ESCROW,
+        jobId: "9",
+        client: VAULT,
+        provider: PAYEE,
+        evaluator: OTHER,
+        budget: "250000",
+      },
+    ];
+
+    for (const paymentRef of references) {
+      t.state.settled.add(paymentRefHash(paymentRef));
+      await expectDenied(
+        t,
+        t.signer.sign("cz-15", {
+          keyId: "K3",
+          kind: "sl-receipt",
+          payload: { vault: VAULT, receipt: receiptFor(paymentRef), paymentRef },
+        }),
+        "payment-not-settled",
+      );
+    }
+  });
+
   it("checks the PaymentRef hash before settlement and binds x402 to this vault", async () => {
     const t = await harness();
     await expectDenied(

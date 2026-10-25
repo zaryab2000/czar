@@ -416,6 +416,9 @@ async function slReceipt(ctx: PolicyContext, req: Req): Promise<Decision> {
   const receipt = req.receipt as unknown as SlReceipt;
   const paymentRef = req.paymentRef as PaymentRef;
   if (!eq(paymentRefHash(paymentRef), receipt.paymentRefHash)) deny("payment-ref-mismatch");
+  if (paymentRef.network !== `eip155:${ctx.network.chainId}`) deny("payment-not-settled");
+  if (paymentRef.rail === "x402-exact" && !eq(paymentRef.asset, ctx.network.usdc))
+    deny("payment-not-settled");
   if (!(await ctx.projection.isVault(vault))) deny("unknown-vault");
   if (!(await paymentRefBelongsToVault(ctx, vault, paymentRef))) deny("payment-not-this-vault");
   if (!(await ctx.projection.settledPayment(vault, paymentRef))) deny("payment-not-settled");
