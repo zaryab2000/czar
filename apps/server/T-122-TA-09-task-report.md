@@ -142,7 +142,11 @@ each call's AcceptanceReport hash and observation id, then retrieves that exact
 report on receipt recovery. The regression failed before the fix and passes after
 it. The automated review cap is exhausted, so this newest fix batch has not received
 hosted review. The round 3 security review was still running on `6c09f30` at report
-update time. The completed-job result P1 remains open as a cross-lane dependency.
+update time. It has since completed with no security findings on `6c09f30`. The
+automated review cap is exhausted, and `7f327b9` has no hosted code or security
+review. The completed-job result P1 remains open as a cross-lane dependency; PR
+readiness is held pending the T-055 producer/consumer decision and designated
+review of the latest receipt-binding fix.
 
 ## Deferred validation — D94
 
