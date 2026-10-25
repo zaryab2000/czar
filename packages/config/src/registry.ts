@@ -3392,7 +3392,7 @@ export const PARAMETERS = [
     default: {},
     unit: "service-map",
     reason:
-      "Czar-registered services keyed by serviceId, each {resource, capabilities[]}; Phase 1 transport for CZ-20 registration (SCR-131)",
+      "Czar-registered services keyed by serviceId, each {serviceName, resource: {url, method}, probeInput, capabilities[]}; Phase 1 transport for CZ-20 registration (SCR-131, SCR-137)",
     source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:672",
   },
   {
