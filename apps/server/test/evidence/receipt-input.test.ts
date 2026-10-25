@@ -22,6 +22,7 @@ describe("receipt input from durable payment trace", () => {
   it("commits to checks rather than the enclosing AcceptanceReport hash", () => {
     const checks = [{ name: "delivery", result: "pass" }];
     const completedAt = new Date("2026-10-25T12:00:04Z");
+    const paymentWithReorderedKeys = Object.fromEntries(Object.entries(payment).toReversed());
     const input = createReceiptInputFromTrace(
       {
         input: {
@@ -45,7 +46,7 @@ describe("receipt input from durable payment trace", () => {
           at: completedAt,
           payload: {
             index: 0,
-            paymentRef: payment,
+            paymentRef: paymentWithReorderedKeys,
             requestCommit: HASH,
             responseCommit: HASH,
             requirementsHashSeen: HASH,

@@ -87,6 +87,7 @@ import { getExecutionTrace } from "#src/payer/executions";
 import {
   createIndexerGatewayStatus,
   createIndexerSettlement,
+  verifyX402Transfer,
 } from "#src/evidence/indexer-settlement";
 
 export interface ServerMainOptions extends PairDependencies {
@@ -1052,6 +1053,7 @@ function createReceiptBuilder(options: ServerMainOptions, signer: Pick<Signer, "
         options.appReadOptions.indexerUrl,
         Number(options.config.get("api.pageMaxLimit")),
         Number(options.config.get("fetch.timeoutMs")),
+        (payment) => verifyX402Transfer(options.publicClient, payment),
       );
     await createPaymentReceipt(input, {
       pool: options.pool,

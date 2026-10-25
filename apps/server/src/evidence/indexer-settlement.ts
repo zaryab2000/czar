@@ -1,4 +1,29 @@
 import type { PaymentRef } from "@czar/schemas";
+import { decodeEventLog, type Hex, type PublicClient } from "viem";
+
+const ERC20_TRANSFER_ABI = [
+  {
+    type: "event",
+    name: "Transfer",
+    anonymous: false,
+    inputs: [
+      { name: "from", type: "address", indexed: true },
+      { name: "to", type: "address", indexed: true },
+      { name: "value", type: "uint256", indexed: false },
+    ],
+  },
+] as const;
+const ERC3009_AUTHORIZATION_ABI = [
+  {
+    type: "event",
+    name: "AuthorizationUsed",
+    anonymous: false,
+    inputs: [
+      { name: "authorizer", type: "address", indexed: true },
+      { name: "nonce", type: "bytes32", indexed: true },
+    ],
+  },
+] as const;
 
 interface SettlementFact {
   readonly rail?: unknown;
@@ -20,6 +45,7 @@ export function createIndexerSettlement(
   indexerUrl: string,
   pageLimit: number,
   timeoutMs: number,
+  verifyTransfer: (payment: Extract<PaymentRef, { rail: "x402-exact" }>) => Promise<boolean>,
   fetcher: typeof fetch = fetch,
 ): { isSettled(payment: PaymentRef): Promise<boolean> } {
   const query = createLedgerQuery(indexerUrl, pageLimit, timeoutMs, fetcher);
@@ -27,9 +53,56 @@ export function createIndexerSettlement(
   return {
     async isSettled(payment) {
       if (payment.rail !== "x402-exact") return false;
-      return query(payment.payer, (fact) => matches(payment, fact));
+      const indexed = await query(payment.payer, (fact) => matches(payment, fact));
+      return indexed && (await verifyTransfer(payment));
     },
   };
+}
+
+export async function verifyX402Transfer(
+  client: Pick<PublicClient, "getTransactionReceipt">,
+  payment: Extract<PaymentRef, { rail: "x402-exact" }>,
+): Promise<boolean> {
+  if (!payment.settlementTx || !/^0x[\da-fA-F]{64}$/.test(payment.settlementTx)) return false;
+  const receipt = await client.getTransactionReceipt({ hash: payment.settlementTx as Hex });
+  if (receipt.status !== "success") return false;
+  const tokenLogs = receipt.logs.filter(
+    (log) => log.address.toLowerCase() === payment.asset.toLowerCase(),
+  );
+  const authorizationUsed = tokenLogs.some((log) => {
+    try {
+      const event = decodeEventLog({
+        abi: ERC3009_AUTHORIZATION_ABI,
+        eventName: "AuthorizationUsed",
+        data: log.data,
+        topics: log.topics,
+      });
+      return (
+        event.args.authorizer.toLowerCase() === payment.payer.toLowerCase() &&
+        event.args.nonce.toLowerCase() === payment.nonce.toLowerCase()
+      );
+    } catch {
+      return false;
+    }
+  });
+  const transfer = tokenLogs.some((log) => {
+    try {
+      const event = decodeEventLog({
+        abi: ERC20_TRANSFER_ABI,
+        eventName: "Transfer",
+        data: log.data,
+        topics: log.topics,
+      });
+      return (
+        event.args.from.toLowerCase() === payment.payer.toLowerCase() &&
+        event.args.to.toLowerCase() === payment.payTo.toLowerCase() &&
+        event.args.value === BigInt(payment.amount)
+      );
+    } catch {
+      return false;
+    }
+  });
+  return authorizationUsed && transfer;
 }
 
 export function createIndexerGatewayStatus(
@@ -133,7 +206,6 @@ function matches(
     typeof fact.nonce === "string" &&
     fact.nonce.toLowerCase() === payment.nonce.toLowerCase() &&
     fact.amount === payment.amount &&
-    (payment.settlementTx === undefined || fact.settlementTx === payment.settlementTx) &&
     fact.status === "settled"
   );
 }

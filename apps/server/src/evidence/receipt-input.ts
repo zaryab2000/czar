@@ -23,7 +23,7 @@ export function createReceiptInputFromTrace(
   const requestSize = call.payload["requestSize"];
   const responseSize = call.payload["responseSize"];
   if (
-    JSON.stringify(paymentRef) !== JSON.stringify(context.paymentRef) ||
+    H(paymentRef) !== H(context.paymentRef) ||
     typeof requestCommit !== "string" ||
     typeof responseCommit !== "string" ||
     typeof requirementsHashSeen !== "string" ||
