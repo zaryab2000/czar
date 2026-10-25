@@ -274,9 +274,9 @@ async function createDecision(args: {
   readonly now: () => Date;
 }): Promise<RankingDecision> {
   const { query, services, network, policy, explorationEnabled, riskQuantile, weights, now } = args;
-  const candidates = services.filter(({ registration }) =>
-    registration.capabilities.includes(query.capability),
-  );
+  const candidates = services
+    .filter(({ registration }) => registration.capabilities.includes(query.capability))
+    .toSorted((left, right) => compareServiceId(left.serviceId, right.serviceId));
   const excluded: RankingDecision["excluded"] = [];
   const eligible: Array<{ serviceId: string; amount: bigint }> = [];
   for (const candidate of candidates) {
@@ -396,7 +396,7 @@ function snapshotOffer(
           ? 1
           : 0;
     if (amountOrder !== 0) return amountOrder;
-    return left.payTo.localeCompare(right.payTo) || left.scheme.localeCompare(right.scheme);
+    return compareText(left.payTo, right.payTo) || compareText(left.scheme, right.scheme);
   })[0]!;
 }
 
@@ -449,6 +449,10 @@ function comparePriceThenId(
 }
 
 function compareServiceId(left: string, right: string): number {
+  return compareText(left, right);
+}
+
+function compareText(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
