@@ -652,6 +652,34 @@ describe("autonomy-raise (K5)", () => {
     await expectDenied(t, sign("3000000"), "frozen");
   });
 
+  it("allows exactly the D40 userMax step and denies one atomic unit more", async () => {
+    const t = await harness();
+    const setLimits = (autoLimit: bigint, userMax: bigint, maxStepTo: bigint) => {
+      t.state.autonomy = {
+        autoLimit,
+        userMax,
+        maxStepTo,
+        lastRaiseAt: NOW - 700_000,
+        periodLength: 604_800,
+        nonce: 7n,
+      };
+    };
+    const sign = (newLimit: bigint) =>
+      t.signer.sign("cz-24", {
+        keyId: "K5",
+        kind: "autonomy-raise",
+        payload: raisePayload(newLimit.toString()),
+      });
+
+    setLimits(0n, 1_000n, 200n);
+    await sign(200n);
+    await expectDenied(t, sign(201n), "above-step");
+
+    setLimits(200n, 1_000n, 400n);
+    await sign(400n);
+    await expectDenied(t, sign(401n), "above-step");
+  });
+
   it("signer_k5_sendTransaction_denied", async () => {
     const t = await harness();
     await expectDenied(

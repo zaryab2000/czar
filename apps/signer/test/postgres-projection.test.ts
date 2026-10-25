@@ -12,35 +12,37 @@ const planHash = `0x${"ab".repeat(32)}` as Hash32;
 const payee = "0x00000000000000000000000000000000000000b1" as Address;
 
 describe("Postgres signer projection", () => {
-  it("projects autonomy limits using the registered protocol constants", async () => {
-    const projection = createPostgresProjection({
-      config: loadConfig(),
-      database: queryDatabase(() => []),
-      chain: {
-        async getBlock() {
-          return { timestamp: 1_800_000_000n };
-        },
-        async getBlockNumber() {
-          return 12n;
-        },
-        async getBalance() {
-          return 100n;
-        },
-        async readContract({ functionName }: { functionName: string }) {
-          if (functionName === "getLimits")
-            return { autoLimit: 100n, userMax: 500n, lastRaiseAt: 1_800_000_000n };
-          if (functionName === "autonomyNonce") return 7n;
-          throw new Error(`unexpected contract read: ${functionName}`);
-        },
-      } as never,
-      factory,
-    });
+  it("projects the D40 raise step from userMax with zero and nonzero autoLimit", async () => {
+    for (const autoLimit of [0n, 100n]) {
+      const projection = createPostgresProjection({
+        config: loadConfig(),
+        database: queryDatabase(() => []),
+        chain: {
+          async getBlock() {
+            return { timestamp: 1_800_000_000n };
+          },
+          async getBlockNumber() {
+            return 12n;
+          },
+          async getBalance() {
+            return 100n;
+          },
+          async readContract({ functionName }: { functionName: string }) {
+            if (functionName === "getLimits")
+              return { autoLimit, userMax: 500n, lastRaiseAt: 1_800_000_000n };
+            if (functionName === "autonomyNonce") return 7n;
+            throw new Error(`unexpected contract read: ${functionName}`);
+          },
+        } as never,
+        factory,
+      });
 
-    await expect(projection.autonomy(vault, planHash)).resolves.toMatchObject({
-      maxStepTo: 120n,
-      periodLength: 604800,
-      nonce: 7n,
-    });
+      await expect(projection.autonomy(vault, planHash)).resolves.toMatchObject({
+        maxStepTo: autoLimit + 100n,
+        periodLength: 604800,
+        nonce: 7n,
+      });
+    }
   });
 
   it("matches x402 settlement facts and does not query evidence_receipts", async () => {

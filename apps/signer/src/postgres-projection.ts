@@ -148,7 +148,7 @@ async function readAutonomy(
     userMax: limits.userMax,
     maxStepTo:
       limits.autoLimit +
-      (limits.autoLimit * BigInt(Number(input.config.get("signer.projection.maxRaiseStepBps")))) /
+      (limits.userMax * BigInt(Number(input.config.get("signer.projection.maxRaiseStepBps")))) /
         BPS_BASE,
     lastRaiseAt: Number(limits.lastRaiseAt),
     periodLength: Number(input.config.get("signer.projection.periodLengthSeconds")),
