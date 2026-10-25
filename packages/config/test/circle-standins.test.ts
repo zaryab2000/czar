@@ -63,6 +63,34 @@ function settleRequest(signature: string, auth = authorization): Request {
   });
 }
 
+async function signerPayment() {
+  const signerHarness = await harness();
+  const signed = await signerHarness.signer.sign("cz-15", {
+    keyId: "K3",
+    kind: "usdc-3009",
+    payload: {
+      vault: signerVault,
+      reservationId: "12",
+      index: "1",
+      to: signerPayee,
+      value: "100000",
+      validBefore: "1760800600",
+    },
+  });
+  if (!("signature" in signed)) throw new Error("signer did not return its USDC envelope");
+  return {
+    signature: signed.signature,
+    authorization: {
+      from: signerVault,
+      to: signerPayee,
+      value: "100000",
+      validAfter: "0",
+      validBefore: "1760800600",
+      nonce: derivedNonce(signerVault, 12n, 1),
+    },
+  };
+}
+
 describe("D92 stand-in startup guards", () => {
   it("refuses a non-loopback process RPC", async () => {
     await expect(
@@ -127,29 +155,32 @@ describe("D92 Facilitator routes", () => {
     });
   });
 
+  it("verifies the signer’s 416-byte ERC-1271 envelope", async () => {
+    const payment = await signerPayment();
+    const response = await handleStandinRequest(
+      new Request("http://127.0.0.1:4999/verify", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          x402Version: 2,
+          paymentPayload: {
+            payload: { signature: payment.signature, authorization: payment.authorization },
+          },
+          paymentRequirements: {
+            asset: "0x3600000000000000000000000000000000000000",
+            amount: payment.authorization.value,
+            payTo: payment.authorization.to,
+            network: "eip155:5042002",
+          },
+        }),
+      }),
+      vi.fn(),
+    );
+    expect(await response.json()).toMatchObject({ isValid: true, payer: signerVault });
+  });
+
   it("settles by submitting transferWithAuthorization from an unlocked RPC account", async () => {
-    const signerHarness = await harness();
-    const signed = await signerHarness.signer.sign("cz-15", {
-      keyId: "K3",
-      kind: "usdc-3009",
-      payload: {
-        vault: signerVault,
-        reservationId: "12",
-        index: "1",
-        to: signerPayee,
-        value: "100000",
-        validBefore: "1760800600",
-      },
-    });
-    if (!("signature" in signed)) throw new Error("signer did not return its USDC envelope");
-    const signerAuthorization = {
-      from: signerVault,
-      to: signerPayee,
-      value: "100000",
-      validAfter: "0",
-      validBefore: "1760800600",
-      nonce: derivedNonce(signerVault, 12n, 1),
-    };
+    const payment = await signerPayment();
     const rpc = vi.fn(async (method: string, _params: readonly unknown[]) => {
       if (method === "eth_accounts") return ["0x00000000000000000000000000000000000000a1"];
       if (method === "eth_sendTransaction") return txHash;
@@ -157,14 +188,14 @@ describe("D92 Facilitator routes", () => {
       return null;
     });
     const response = await handleStandinRequest(
-      settleRequest(signed.signature, signerAuthorization),
+      settleRequest(payment.signature, payment.authorization),
       rpc,
     );
     expect(await response.json()).toMatchObject({
       success: true,
       transaction: txHash,
       network: "eip155:5042002",
-      payer: signerAuthorization.from,
+      payer: payment.authorization.from,
     });
     expect(rpc).toHaveBeenNthCalledWith(1, "eth_accounts", []);
     const call = rpc.mock.calls.at(1);
@@ -182,12 +213,12 @@ describe("D92 Facilitator routes", () => {
     const signatureLengthStart = 8 + signatureOffset * 2;
     expect(data.slice(signatureLengthStart, signatureLengthStart + 64)).toBe(abiWord(416n));
     expect(data.slice(signatureLengthStart + 64, signatureLengthStart + 64 + 416 * 2)).toBe(
-      signed.signature.slice(2),
+      payment.signature.slice(2),
     );
-    expect(data.slice(8, 8 + 64)).toBe(signerAuthorization.from.slice(2).padStart(64, "0"));
-    expect(data.slice(8 + 64, 8 + 128)).toBe(signerAuthorization.to.slice(2).padStart(64, "0"));
+    expect(data.slice(8, 8 + 64)).toBe(payment.authorization.from.slice(2).padStart(64, "0"));
+    expect(data.slice(8 + 64, 8 + 128)).toBe(payment.authorization.to.slice(2).padStart(64, "0"));
     expect(data.slice(8 + 2 * 64, 8 + 3 * 64)).toBe(abiWord(100000n));
-    expect(data.slice(8 + 5 * 64, 8 + 6 * 64)).toBe(signerAuthorization.nonce.slice(2));
+    expect(data.slice(8 + 5 * 64, 8 + 6 * 64)).toBe(payment.authorization.nonce.slice(2));
     expect(rpc).toHaveBeenLastCalledWith("eth_getTransactionReceipt", [txHash]);
   });
 
