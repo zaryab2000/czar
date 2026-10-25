@@ -4,6 +4,9 @@ import {
   PAYEE_KIND,
   payeeLeaf,
   buildTree,
+  H,
+  slRequestCommit,
+  slResponseCommit,
   verifyProof,
   type Hash32,
 } from "@czar/hashing";
@@ -32,6 +35,7 @@ import {
   markStepHandedOff,
   releaseExecutorLease,
   startExecutorLeaseRenewal,
+  type ExecutorLeaseGuard,
   type ExecutionPhaseRow,
 } from "#src/payer/executions";
 import { MAX_AUTHORIZATIONS_PER_RESERVATION } from "#src/router/index";
@@ -51,6 +55,7 @@ export interface VaultDirectInput {
   readonly acceptedDependencies?: readonly DependencyResult[];
   readonly attempt?: number;
   readonly workerId?: string;
+  readonly dispatchLease?: ExecutorLeaseGuard;
 }
 
 export interface DependencyResult {
@@ -130,6 +135,15 @@ export interface BoundaryInput {
   readonly requestedAt: Date;
   readonly signedAt: Date;
   readonly maxTimeoutSeconds: number;
+  readonly attempt: number;
+  readonly receipt: {
+    readonly requestCommit: Hash32;
+    readonly responseCommit: Hash32;
+    readonly requirementsHashSeen: Hash32;
+    readonly requestSize: number;
+    readonly responseSize: number;
+    readonly mimeType: string;
+  };
 }
 
 export interface SettledReceiptContext extends BoundaryInput {
@@ -152,6 +166,8 @@ export async function executeVaultDirectStep(
   input: VaultDirectInput,
   dependencies: VaultDirectDependencies,
 ): Promise<VaultDirectResult> {
+  if (input.dispatchLease)
+    return executeStep(input, { ...dependencies, assertLeaseHeld: input.dispatchLease.assertHeld });
   const workerId = input.workerId ?? randomUUID();
   const ttlSeconds = Number(dependencies.config.get("payer.leaseSeconds"));
   const acquired = await acquireExecutorLease(
@@ -521,6 +537,12 @@ async function settleAndFinalize(
     requestedAt: Date;
     signedAt: Date;
     maxTimeoutSeconds: number;
+    requestCommit: Hash32;
+    responseCommit: Hash32;
+    requirementsHashSeen: Hash32;
+    requestSize: number;
+    responseSize: number;
+    mimeType: string;
   }[] = [];
   for (const call of calls) {
     const result = await authorizeAndCall(
@@ -595,9 +617,30 @@ async function settleAndFinalize(
       requestedAt: entry.requestedAt,
       signedAt: entry.signedAt,
       maxTimeoutSeconds: entry.maxTimeoutSeconds,
+      attempt,
+      receipt: {
+        requestCommit: entry.requestCommit,
+        responseCommit: entry.responseCommit,
+        requirementsHashSeen: entry.requirementsHashSeen,
+        requestSize: entry.requestSize,
+        responseSize: entry.responseSize,
+        mimeType: entry.mimeType,
+      },
     };
     const stepResult = await dependencies.boundary(context);
     results.push(stepResult);
+    const call = input.step.callInputs?.find((candidate) => candidate.callIndex === entry.index);
+    await appendExecutionPhase(dependencies.pool, {
+      planId: input.planId,
+      stepIndex: input.step.stepIndex,
+      attempt,
+      phase: "step.result",
+      payload: {
+        index: entry.index,
+        ...(call?.subjectIndex === undefined ? {} : { subjectIndex: call.subjectIndex }),
+        stepResult,
+      },
+    });
     if (await dependencies.chain.isSettled({ reservationId, index: entry.index }))
       await dependencies.recordReceipt({ ...context, stepResult });
   }
@@ -696,7 +739,7 @@ async function authorizeAndCall(
   const priorResult = trace.findLast(
     (row) => row.phase === "call.result" && row.payload["index"] === call.index,
   );
-  if (priorResult) return restoreCallResult(dependencies, priorResult, call.request.url);
+  if (priorResult) return restoreCallResult(dependencies, priorResult, call);
   const priorUnpaid = trace.findLast(
     (row) => row.phase === "call.unpaid" && row.payload["index"] === call.index,
   );
@@ -795,6 +838,14 @@ async function authorizeAndCall(
     return { errorCode: "unpaid" };
   const paymentRef = makePaymentRef(input, call, reservationId, validBefore, payload, settlement);
   const bodyRef = await dependencies.objects.put(response.body);
+  const mimeType = getHeader(response.headers, "content-type") ?? "";
+  const requestCommit = slRequestCommit({
+    ...call.request,
+    body: call.request.body ?? new Uint8Array(),
+  });
+  const responseCommit = slResponseCommit(response.status, mimeType, response.body);
+  const requirementsHashSeen = H(call.paymentRequired);
+  const requestSize = call.request.body?.byteLength ?? 0;
   await appendExecutionPhase(dependencies.pool, {
     planId: input.planId,
     stepIndex: input.step.stepIndex,
@@ -805,23 +856,51 @@ async function authorizeAndCall(
       status: response.status,
       settlement: settlement.state,
       settlementTx: settlement.transaction,
-      contentType: getHeader(response.headers, "content-type") ?? "",
+      contentType: mimeType,
       bodyRef,
       paymentPayload: payload,
       paymentRef,
+      requestedAt: requestedAt.toISOString(),
+      signedAt: signedAt.toISOString(),
+      requestCommit,
+      responseCommit,
+      requirementsHashSeen,
+      requestSize,
+      responseSize: response.body.byteLength,
     },
   });
   return {
-    response: { index: call.index, response, bodyRef, payload, paymentRef, requestedAt, signedAt },
+    response: {
+      index: call.index,
+      response,
+      bodyRef,
+      payload,
+      paymentRef,
+      requestedAt,
+      signedAt,
+      requestCommit,
+      responseCommit,
+      requirementsHashSeen,
+      requestSize,
+      responseSize: response.body.byteLength,
+      mimeType,
+    },
   };
 }
 
 async function restoreCallResult(
   dependencies: VaultDirectDependencies,
   row: ExecutionPhaseRow,
-  url: string,
+  call: PreparedCall,
 ) {
   const { bodyRef, status, contentType, paymentPayload, paymentRef } = row.payload;
+  const requestCommit = row.payload["requestCommit"];
+  const responseCommit = row.payload["responseCommit"];
+  const requirementsHashSeen = row.payload["requirementsHashSeen"];
+  const requestSize = row.payload["requestSize"];
+  const responseSize = row.payload["responseSize"];
+  const requestedAt = row.payload["requestedAt"];
+  const signedAt = row.payload["signedAt"];
   if (
     typeof bodyRef !== "string" ||
     typeof status !== "number" ||
@@ -829,7 +908,14 @@ async function restoreCallResult(
     !paymentPayload ||
     typeof paymentPayload !== "object" ||
     !paymentRef ||
-    typeof paymentRef !== "object"
+    typeof paymentRef !== "object" ||
+    typeof requestCommit !== "string" ||
+    typeof responseCommit !== "string" ||
+    typeof requirementsHashSeen !== "string" ||
+    typeof requestSize !== "number" ||
+    typeof responseSize !== "number" ||
+    typeof requestedAt !== "string" ||
+    typeof signedAt !== "string"
   )
     throw new Error("Stored call result cannot be recovered safely.");
   return {
@@ -837,15 +923,21 @@ async function restoreCallResult(
       index: Number(row.payload["index"]),
       response: {
         body: await dependencies.objects.get(bodyRef),
-        url,
+        url: call.request.url,
         status,
         headers: contentType ? { "content-type": contentType } : {},
       },
       bodyRef,
       payload: paymentPayload as PaymentPayload,
       paymentRef: paymentRef as PaymentRef,
-      requestedAt: new Date(0),
-      signedAt: new Date(0),
+      requestedAt: new Date(requestedAt),
+      signedAt: new Date(signedAt),
+      requestCommit: requestCommit as Hash32,
+      responseCommit: responseCommit as Hash32,
+      requirementsHashSeen: requirementsHashSeen as Hash32,
+      requestSize,
+      responseSize,
+      mimeType: contentType,
     },
   };
 }

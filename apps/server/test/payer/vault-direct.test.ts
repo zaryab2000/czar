@@ -20,6 +20,7 @@ const HASH = `0x${"01".repeat(32)}`;
 
 beforeAll(async () => seedDevice(getPool()));
 beforeEach(async () => {
+  await getPool().query("DELETE FROM executor_leases");
   await getPool().query("DELETE FROM step_executions");
   await getPool().query("DELETE FROM steps");
   await getPool().query("DELETE FROM plans");
@@ -107,6 +108,56 @@ describe("vault-direct executor", () => {
     expect(reserve).not.toHaveBeenCalled();
     expect(sign).not.toHaveBeenCalled();
     expect(safeFetch).not.toHaveBeenCalled();
+  });
+
+  it("keeps the dispatcher lease while running an unpaid step", async () => {
+    const envelopeRef = "eip155:5042002:0x0000000000000000000000000000000000000001:1";
+    await getPool().query(
+      "INSERT INTO executor_leases (envelope_ref,worker_id,expires_at) VALUES ($1,$2,$3)",
+      [envelopeRef, "dispatch-worker", new Date(Date.now() + 60_000)],
+    );
+    await expect(
+      executeVaultDirectStep(
+        {
+          planId: PLAN_ID,
+          envelopeRef,
+          envelopeId: 1n,
+          envelopeExpiresAt: new Date("2026-10-22T00:00:00Z"),
+          vault: VAULT,
+          plan: {} as never,
+          step: {
+            stepIndex: 0,
+            stepId: "stp_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
+            kind: "local",
+            capability: "table-fill",
+            unitAmount: "0",
+            expectedCalls: 0,
+            stepCap: "0",
+            routingReason: "below-pocket-threshold",
+            acceptanceProfileId: "prof_00000000000000000000000000000000",
+          },
+          userId: "usr_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
+          deviceId: "dev_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
+          dispatchLease: { assertHeld: vi.fn() },
+        },
+        {
+          pool: getPool(),
+          config: loadConfig(),
+          signer: { sign: vi.fn() },
+          chain: {} as never,
+          safeFetch: vi.fn(),
+          now: () => new Date("2026-10-21T00:00:00Z"),
+          boundary: vi.fn(),
+          recordReceipt: vi.fn(),
+          objects: { put: vi.fn(), get: vi.fn() },
+        },
+      ),
+    ).resolves.toMatchObject({ state: "handed_off" });
+    const lease = await getPool().query<{ worker_id: string }>(
+      "SELECT worker_id FROM executor_leases WHERE envelope_ref=$1",
+      [envelopeRef],
+    );
+    expect(lease.rows[0]?.worker_id).toBe("dispatch-worker");
   });
 
   it("recovers sent phases with the same authorization and payment header", async () => {

@@ -7,6 +7,64 @@ import { keccak256 } from "viem";
 
 export const HASH_RULE = "czar-hash-v1";
 
+export interface SlRequestInput {
+  readonly method: string;
+  readonly url: string;
+  readonly headers: Readonly<Record<string, string>>;
+  readonly body: Uint8Array;
+}
+
+/** Computes SL's request commitment after sorting URL query pairs and selected headers. */
+export function slRequestCommit(input: SlRequestInput): Hash32 {
+  const url = new URL(input.url);
+  const query = [...url.searchParams.entries()].toSorted(([ak, av], [bk, bv]) =>
+    ak === bk ? av.localeCompare(bv) : ak.localeCompare(bk),
+  );
+  url.search = new URLSearchParams(query).toString();
+  const headers = Object.entries(input.headers)
+    .filter(([name]) => !isExcludedReceiptHeader(name))
+    .map(([name, value]) => [name.toLowerCase(), value.trim()] as const)
+    .toSorted(([an, av], [bn, bv]) => (an === bn ? av.localeCompare(bv) : an.localeCompare(bn)))
+    .map(([name, value]) => `${name}:${value}`)
+    .join("\n");
+  return keccak256(
+    joinBytes([
+      new TextEncoder().encode(input.method.toUpperCase()),
+      new TextEncoder().encode(url.href),
+      new TextEncoder().encode(headers),
+      input.body,
+    ]),
+  );
+}
+
+/** Computes SL's response commitment over status, content type and response bytes. */
+export function slResponseCommit(status: number, contentType: string, body: Uint8Array): Hash32 {
+  if (!Number.isInteger(status) || status < 0 || status > 65_535)
+    throw new RangeError("SL response status must fit uint16.");
+  return keccak256(
+    joinBytes([
+      new TextEncoder().encode(String(status)),
+      new TextEncoder().encode(contentType),
+      body,
+    ]),
+  );
+}
+
+function isExcludedReceiptHeader(name: string): boolean {
+  return /^(authorization|proxy-authorization|payment(?:-|$)|x-payment(?:-|$))/i.test(name);
+}
+
+function joinBytes(parts: readonly Uint8Array[]): Uint8Array {
+  const totalLength = parts.reduce((sum, part) => sum + part.byteLength, 0);
+  const joined = new Uint8Array(totalLength);
+  let offset = 0;
+  for (const part of parts) {
+    joined.set(part, offset);
+    offset += part.byteLength;
+  }
+  return joined;
+}
+
 /** Computes the content-addressed Selection Layer profile id (SCR-122). */
 export function profileId(profile: Readonly<Record<string, unknown>>): string {
   const { profile_id: _profileId, ...profileCore } = profile;
