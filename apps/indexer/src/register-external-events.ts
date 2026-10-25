@@ -534,11 +534,10 @@ ponder.on("GatewayPoll:block", async ({ context }) => {
             blockNumber: BigInt(envelopeMirror.lastEventBlock),
           });
           envelopeClosedAt = Number(block.timestamp) * MS_PER_SECOND;
-        } catch (error) {
+        } catch {
           logger.warn("pocket_stale_close_block_unavailable", {
             pocket: mirror.pocket.toLowerCase(),
             block: envelopeMirror.lastEventBlock,
-            error: error instanceof Error ? error.message : String(error),
           });
         }
       }
