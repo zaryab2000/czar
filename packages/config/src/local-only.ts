@@ -28,7 +28,7 @@ export async function validateLocalOnlyConfig(options: LocalOnlyGuardOptions): P
     return Array.isArray(value) ? [...value] : [value];
   });
   const hasLoopback = configuredValues.some(
-    (value) => typeof value === "string" && value.startsWith("http:"),
+    (value) => typeof value === "string" && isHttpUrl(value),
   );
 
   for (const key of LOCAL_ONLY_KEYS) {
@@ -111,6 +111,14 @@ function isAllowedUrl(value: string): boolean {
       url.username === "" &&
       url.password === ""
     );
+  } catch {
+    return false;
+  }
+}
+
+function isHttpUrl(value: string): boolean {
+  try {
+    return new URL(value).protocol === "http:";
   } catch {
     return false;
   }

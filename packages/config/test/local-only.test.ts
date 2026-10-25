@@ -63,6 +63,17 @@ describe("local-only endpoint guard", () => {
     ).rejects.toThrow("local overlay");
   });
 
+  it("requires the local guard for uppercase HTTP loopback URLs", async () => {
+    await expect(
+      validateLocalOnlyConfig({
+        config: loadConfig({ envFile: { "chain.gatewayApiBaseUrl": "HTTP://127.0.0.1:4999" } }),
+        overlayPath: "",
+        arcRpcUrl: "https://rpc.testnet.arc.io",
+        fetchFn: answered,
+      }),
+    ).rejects.toThrow("local overlay");
+  });
+
   it("rejects non-loopback HTTP and accepts HTTPS defaults", async () => {
     const config = loadConfig({
       envFile: { ...localValues, "chain.gatewayApiBaseUrl": "http://gateway.example" },

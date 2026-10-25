@@ -181,10 +181,14 @@ describe("D92 Facilitator routes", () => {
 
   it("settles by submitting transferWithAuthorization from an unlocked RPC account", async () => {
     const payment = await signerPayment();
+    let receiptCalls = 0;
     const rpc = vi.fn(async (method: string, _params: readonly unknown[]) => {
       if (method === "eth_accounts") return ["0x00000000000000000000000000000000000000a1"];
       if (method === "eth_sendTransaction") return txHash;
-      if (method === "eth_getTransactionReceipt") return { status: "0x1" };
+      if (method === "eth_getTransactionReceipt") {
+        receiptCalls += 1;
+        return receiptCalls === 1 ? null : { status: "0x1" };
+      }
       return null;
     });
     const response = await handleStandinRequest(
@@ -220,6 +224,7 @@ describe("D92 Facilitator routes", () => {
     expect(data.slice(8 + 2 * 64, 8 + 3 * 64)).toBe(abiWord(100000n));
     expect(data.slice(8 + 5 * 64, 8 + 6 * 64)).toBe(payment.authorization.nonce.slice(2));
     expect(rpc).toHaveBeenLastCalledWith("eth_getTransactionReceipt", [txHash]);
+    expect(receiptCalls).toBe(2);
   });
 
   it.each([
