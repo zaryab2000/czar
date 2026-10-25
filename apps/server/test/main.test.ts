@@ -4,7 +4,7 @@ import { createLogger } from "@czar/logging";
 import { setupDatabase } from "#test/db";
 import { makeObjectiveSubmission, seedDevice, TEST_DEVICE_ID, TEST_USER_ID } from "#test/fixtures";
 import { testSigner } from "#test/payer/test-signer";
-import { createServerMain } from "#src/main";
+import { createLocalServerMain } from "#src/local-main";
 
 const getPool = setupDatabase();
 
@@ -16,6 +16,7 @@ describe("server composition root", () => {
 
   it("migrates and seeds acceptance before constructing the in-process T-035 signer", async () => {
     const order: string[] = [];
+    const logLines: string[] = [];
     const gatewayStatus = vi.fn(async () => "completed" as const);
     const vault = "0x0000000000000000000000000000000000000001" as const;
     const factory = "0x0000000000000000000000000000000000000002" as const;
@@ -24,11 +25,14 @@ describe("server composition root", () => {
     const signer = Object.assign(await testSigner(), {
       retirePocketKey: vi.fn(async () => ({ destroyAfterMs: 0 })),
     });
-    const root = await createServerMain({
+    const root = await createLocalServerMain({
       pool: getPool(),
       config: loadConfig(),
-      logger: createLogger({ service: "server", component: "CZ-15", sink: () => undefined }),
-      modelClient: { complete: vi.fn() },
+      logger: createLogger({
+        service: "server",
+        component: "CZ-15",
+        sink: (line) => logLines.push(line),
+      }),
       publicClient: {
         getBlockNumber: vi.fn(async () => 0n),
         readContract: vi.fn(async () => factory),
@@ -69,11 +73,10 @@ describe("server composition root", () => {
       gatewayStatus,
       settlement: { isSettled: async () => false },
       receiptInput: vi.fn(() => ({}) as never),
-      appReadOptions: {
-        rpcUrl: "http://127.0.0.1:8549",
-        factoryAddress: "0x0000000000000000000000000000000000000001",
-        indexerUrl: "http://127.0.0.1:42069",
-      },
+      rpcUrl: "http://127.0.0.1:8549",
+      factoryAddress: "0x0000000000000000000000000000000000000001",
+      indexerUrl: "http://127.0.0.1:42069",
+      openingLookup: { envelopeByPlanHash: vi.fn(async () => null) },
       revisePlanSubjects: async () => null,
       clock: { now: () => new Date("2026-10-21T00:00:00Z") },
       random: { bytes: (length: number) => Buffer.alloc(length, 7) },
@@ -81,12 +84,13 @@ describe("server composition root", () => {
 
     order.push("http");
     expect(order).toEqual(["signer", "http"]);
+    expect(logLines.some((line) => line.includes("planner_volume_source_missing"))).toBe(true);
     expect((await root.app.request("/not-found")).status).toBe(404);
     expect(root.executePayerStep).toBeTypeOf("function");
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(watchContractEvent).not.toHaveBeenCalled();
     await getPool().query("UPDATE users SET vault=NULL WHERE user_id=$1", [TEST_USER_ID]);
-    root.close();
+    await root.close();
 
     const objective = makeObjectiveSubmission("obj_01K7ZT9P4N5Q6R7S8T9V0W1X2Y");
     const planId = "pln_01K7ZT9P4N5Q6R7S8T9V0W1X2Y";
