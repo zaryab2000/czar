@@ -59,11 +59,18 @@ export async function createMerchantServer(
     emit: (event, fields) => options.logger.info(event.replaceAll(".", "_"), fields),
   });
   const server = options.server ?? createServer();
+  const activeHandlers = new Set<Promise<void>>();
+  let draining = false;
   const perRouteLimit = Number(options.config.get("merchants.perRoutePerMin"));
   let routeWindowStart = Date.now();
   let routeCount = 0;
   server.on("request", (incoming, outgoing) => {
-    void handleRequest(incoming, outgoing, route, options, () => {
+    if (draining) {
+      outgoing.writeHead(503, { "content-type": "application/json", connection: "close" });
+      outgoing.end('{"error":"merchant shutting down"}');
+      return;
+    }
+    const handler = handleRequest(incoming, outgoing, route, options, () => {
       const now = Date.now();
       if (now - routeWindowStart >= 60_000) {
         routeWindowStart = now;
@@ -72,6 +79,11 @@ export async function createMerchantServer(
       routeCount += 1;
       return routeCount <= perRouteLimit;
     });
+    activeHandlers.add(handler);
+    void handler.then(
+      () => activeHandlers.delete(handler),
+      () => activeHandlers.delete(handler),
+    );
   });
   await listen(
     server,
@@ -82,10 +94,14 @@ export async function createMerchantServer(
   return {
     server,
     stop() {
-      stopping ??= drain(
-        server,
-        options.drainTimeoutMs ?? Number(options.config.get("merchants.drainTimeoutMs")),
-      );
+      if (stopping === undefined) {
+        draining = true;
+        stopping = drain(
+          server,
+          activeHandlers,
+          options.drainTimeoutMs ?? Number(options.config.get("merchants.drainTimeoutMs")),
+        );
+      }
       return stopping;
     },
   };
@@ -99,14 +115,14 @@ async function handleRequest(
   allowRoute: () => boolean,
 ): Promise<void> {
   if (incoming.method === "GET" && incoming.url === "/health") {
-    send(
+    await send(
       outgoing,
       new Response('{"status":"ok"}', { headers: { "content-type": "application/json" } }),
     );
     return;
   }
-  if (incoming.url?.split("?", 1)[0] === SEARCH_PATH && !allowRoute()) {
-    send(
+  if (requestPath(incoming.url) === SEARCH_PATH && !allowRoute()) {
+    await send(
       outgoing,
       new Response('{"error":"route rate limit exceeded"}', {
         status: 429,
@@ -128,12 +144,12 @@ async function handleRequest(
       headers,
       ...(body === undefined ? {} : ({ body, duplex: "half" } as RequestInit)),
     });
-    send(outgoing, await route(request));
+    await send(outgoing, await route(request));
   } catch {
     options.logger.error("merchant.request_failed", {
       route: incoming.url?.split("?", 1)[0] ?? "unknown",
     });
-    send(
+    await send(
       outgoing,
       new Response('{"error":"merchant unavailable"}', {
         status: 503,
@@ -143,9 +159,20 @@ async function handleRequest(
   }
 }
 
-function send(outgoing: ServerResponse, response: Response): void {
+async function send(outgoing: ServerResponse, response: Response): Promise<void> {
+  if (outgoing.destroyed) return;
+  const body = Buffer.from(await response.arrayBuffer());
+  if (outgoing.destroyed) return;
   outgoing.writeHead(response.status, Object.fromEntries(response.headers.entries()));
-  void response.arrayBuffer().then((body) => outgoing.end(Buffer.from(body)));
+  outgoing.end(body);
+}
+
+function requestPath(url: string | undefined): string | undefined {
+  try {
+    return new URL(url ?? "/", "http://127.0.0.1").pathname;
+  } catch {
+    return undefined;
+  }
 }
 
 function listen(server: Server, port: number, host: string): Promise<void> {
@@ -158,14 +185,30 @@ function listen(server: Server, port: number, host: string): Promise<void> {
   });
 }
 
-function drain(server: Server, timeoutMs: number): Promise<void> {
+function drain(
+  server: Server,
+  activeHandlers: ReadonlySet<Promise<void>>,
+  timeoutMs: number,
+): Promise<void> {
   if (!server.listening) return Promise.resolve();
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => server.closeAllConnections(), timeoutMs);
+  const closeServer = new Promise<void>((resolve, reject) => {
     server.close((error) => {
-      clearTimeout(timer);
       if (error) reject(error);
       else resolve();
     });
+  });
+  const handlers = Promise.allSettled(activeHandlers).then(() => undefined);
+  let timer: NodeJS.Timeout | undefined;
+  const timedOut = new Promise<void>((resolve) => {
+    timer = setTimeout(() => {
+      server.closeAllConnections();
+      resolve();
+    }, timeoutMs);
+  });
+  return Promise.race([
+    Promise.all([closeServer, handlers]).then(() => undefined),
+    timedOut,
+  ]).finally(() => {
+    if (timer !== undefined) clearTimeout(timer);
   });
 }
