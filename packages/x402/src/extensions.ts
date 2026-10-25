@@ -10,7 +10,11 @@ export interface SanitizedExtensions {
   /** Present only when the declaration validated against its own schema. */
   readonly paymentIdentifier?: { readonly required: boolean };
   /** Present only when valid; never forwarded to the planner. */
-  readonly bazaar?: { readonly info: unknown; readonly routeTemplate?: string };
+  readonly bazaar?: {
+    readonly info: unknown;
+    readonly schema: Readonly<Record<string, unknown>>;
+    readonly routeTemplate?: string;
+  };
   /** Names of declared extensions that were dropped or ignored. */
   readonly dropped: readonly string[];
 }
@@ -66,6 +70,7 @@ export function sanitizeExtensions(extensions: unknown): SanitizedExtensions {
       if (route === undefined || (typeof route === "string" && isValidRouteTemplate(route))) {
         bazaar = {
           info: (declaration as Record<string, unknown>)["info"],
+          schema: (declaration as Record<string, unknown>)["schema"] as Record<string, unknown>,
           ...(typeof route === "string" ? { routeTemplate: route } : {}),
         };
         continue;

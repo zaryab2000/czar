@@ -53,7 +53,7 @@ describe("CZ-12 migrations", () => {
     }
   });
 
-  it("creates exactly the CZ-12 table foundation", async () => {
+  it("creates the current server table foundation", async () => {
     const result = await getPool().query<{ table_name: string }>(
       "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name",
     );
@@ -82,6 +82,7 @@ describe("CZ-12 migrations", () => {
       "rate_limit_buckets",
       "results",
       "schema_migrations",
+      "selection_interim_snapshots",
       "sessions",
       "step_executions",
       "steps",
