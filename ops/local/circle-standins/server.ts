@@ -296,7 +296,7 @@ function wordAddress(value: string): string {
 }
 
 function isSupportedSignature(value: string): boolean {
-  return /^0x(?:[\da-fA-F]{130}|[\da-fA-F]{832})$/.test(value);
+  return /^0x(?:[\da-fA-F]{2})+$/.test(value);
 }
 
 function wordNumber(value: string | number): string {
