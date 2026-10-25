@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   amount6FromDecimal,
+  advanceGatewayApiFailures,
   classifyBalanceFailure,
   isClosedPocketQuiet,
+  isPocketStale,
   pollPocketBalance,
   type PocketBalanceRow,
 } from "#src/gateway-balances";
@@ -24,6 +26,47 @@ function memoryStore(initial: PocketBalanceRow | null = null) {
 }
 
 describe("Gateway balance projection rules", () => {
+  it("alerts only for Funded or Draining pockets closed beyond the stale period", () => {
+    const now = Date.parse("2026-10-25T12:00:00.000Z");
+    const staleMs = 24 * 60 * 60 * 1000;
+    const condition = {
+      envelopeState: "Closed",
+      envelopeClosedAt: now - staleMs - 1,
+      now,
+      staleMs,
+    };
+
+    expect(isPocketStale({ ...condition, pocketState: "Funded" })).toBe(true);
+    expect(isPocketStale({ ...condition, pocketState: "Draining" })).toBe(true);
+    expect(isPocketStale({ ...condition, pocketState: "Registered" })).toBe(false);
+    expect(isPocketStale({ ...condition, pocketState: "Closed" })).toBe(false);
+    expect(isPocketStale({ ...condition, envelopeState: "Closing", pocketState: "Draining" })).toBe(
+      false,
+    );
+    expect(
+      isPocketStale({ ...condition, envelopeClosedAt: now - staleMs, pocketState: "Funded" }),
+    ).toBe(false);
+    expect(isPocketStale({ ...condition, envelopeClosedAt: null, pocketState: "Funded" })).toBe(
+      false,
+    );
+  });
+
+  it("counts consecutive Gateway API failures and resets on each successful API request", () => {
+    expect(
+      advanceGatewayApiFailures(8, [
+        { apiError: true, chainError: true },
+        { apiError: true, chainError: false },
+      ]),
+    ).toBe(10);
+    expect(
+      advanceGatewayApiFailures(10, [
+        { apiError: false, chainError: true },
+        { apiError: true, chainError: false },
+      ]),
+    ).toBe(1);
+    expect(advanceGatewayApiFailures(4, [{ apiError: false, chainError: true }])).toBe(0);
+  });
+
   it.each([
     ["0", 0n],
     ["1.2", 1_200_000n],

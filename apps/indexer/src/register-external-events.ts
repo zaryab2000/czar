@@ -5,6 +5,7 @@ import {
   anchors,
   authorizations,
   dependencyState,
+  envelopes,
   externalEvents,
   escrowJobs,
   gatewayTransfers,
@@ -33,6 +34,8 @@ import { EXTERNAL_ADDRESSES } from "#src/external-events";
 import { pollGatewayTransfers } from "#src/gateway-poller";
 import {
   isClosedPocketQuiet,
+  isPocketStale,
+  advanceGatewayApiFailures,
   pollPocketBalance,
   type PocketBalanceRow,
 } from "#src/gateway-balances";
@@ -106,7 +109,7 @@ const reportAlert = createAlertReporter(logger);
 const MS_PER_SECOND = 1000;
 let lastGatewayPollMs = 0;
 let gatewayPollInFlight = false;
-let consecutiveGatewayErrors = 0;
+let consecutiveGatewayApiErrors = 0;
 
 function jsonValue(value: unknown): unknown {
   if (typeof value === "bigint") return value.toString();
@@ -463,7 +466,7 @@ ponder.on("GatewayPoll:block", async ({ context }) => {
       pocketRows.map((row) => (row.mirror as PocketRecord).pocket.toLowerCase()),
     );
     const currentTime = Date.now();
-    let cycleErrors = 0;
+    const apiOutcomes: { apiError: boolean; chainError: boolean }[] = [];
     const pollAddresses = new Set<string>();
     for (const row of pocketRows) {
       const mirror = row.mirror as PocketRecord;
@@ -514,14 +517,57 @@ ponder.on("GatewayPoll:block", async ({ context }) => {
           },
         },
       );
-      if (observed.apiError || observed.chainError) cycleErrors += 1;
-      const maxAge = config.get("indexer.gatewayBalanceMaxAgeSeconds") as number;
-      const stale =
-        observed.row.apiObservedAt === null ||
-        currentTime - Date.parse(observed.row.apiObservedAt) > maxAge * MS_PER_SECOND;
-      await updateAlert(context, "pocket-stale", mirror.pocket.toLowerCase(), stale, currentTime, {
-        observedAt: observed.row.apiObservedAt,
+      apiOutcomes.push({ apiError: observed.apiError, chainError: observed.chainError });
+      const envelope =
+        mirror.state === "Funded" || mirror.state === "Draining"
+          ? await context.db.find(envelopes, {
+              id: mirrorKey(mirror.vault as Address, BigInt(mirror.envelopeId)),
+            })
+          : undefined;
+      const envelopeMirror = envelope?.mirror as
+        | { state?: string; lastEventBlock?: number }
+        | undefined;
+      let envelopeClosedAt: number | null = null;
+      if (envelopeMirror?.state === "Closed" && typeof envelopeMirror.lastEventBlock === "number") {
+        try {
+          const block = await context.client.getBlock({
+            blockNumber: BigInt(envelopeMirror.lastEventBlock),
+          });
+          envelopeClosedAt = Number(block.timestamp) * MS_PER_SECOND;
+        } catch (error) {
+          logger.warn("pocket_stale_close_block_unavailable", {
+            pocket: mirror.pocket.toLowerCase(),
+            block: envelopeMirror.lastEventBlock,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+      const stale = isPocketStale({
+        pocketState: mirror.state,
+        envelopeState: envelopeMirror?.state ?? null,
+        envelopeClosedAt,
+        now: currentTime,
+        staleMs: (config.get("indexer.pocketStaleHours") as number) * 3_600_000,
       });
+      const eligibleForStaleAlert = mirror.state === "Funded" || mirror.state === "Draining";
+      const alertInputsAvailable =
+        !eligibleForStaleAlert ||
+        (typeof envelopeMirror?.state === "string" &&
+          (envelopeMirror.state !== "Closed" || envelopeClosedAt !== null));
+      if (alertInputsAvailable) {
+        await updateAlert(
+          context,
+          "pocket-stale",
+          mirror.pocket.toLowerCase(),
+          stale,
+          currentTime,
+          {
+            pocketState: mirror.state,
+            envelopeState: envelopeMirror?.state ?? null,
+            envelopeClosedAt,
+          },
+        );
+      }
     }
     const targets = [
       ...pocketRows
@@ -566,13 +612,16 @@ ponder.on("GatewayPoll:block", async ({ context }) => {
           apiBase: config.get("chain.gatewayApiBaseUrl") as string,
         },
       );
-      if (outcome.error) cycleErrors += 1;
+      apiOutcomes.push({ apiError: outcome.error, chainError: false });
     }
-    consecutiveGatewayErrors = cycleErrors === 0 ? 0 : consecutiveGatewayErrors + cycleErrors;
+    consecutiveGatewayApiErrors = advanceGatewayApiFailures(
+      consecutiveGatewayApiErrors,
+      apiOutcomes,
+    );
     const pollFailing =
-      consecutiveGatewayErrors > (config.get("indexer.gatewayPollFailMax") as number);
+      consecutiveGatewayApiErrors > (config.get("indexer.gatewayPollFailMax") as number);
     await updateAlert(context, "gateway-poll-failing", "global", pollFailing, currentTime, {
-      consecutiveErrors: consecutiveGatewayErrors,
+      consecutiveErrors: consecutiveGatewayApiErrors,
     });
     if (pollFailing) logger.error("gateway_poll_failing");
   } finally {

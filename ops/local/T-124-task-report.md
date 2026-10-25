@@ -11,7 +11,10 @@
 - Added pocket balance, funded pockets for a vault, and Closed pockets with balance queries. The
   balance query returns API age, chain age, and derived `slowWithdrawalOpen`.
 - Added `pocket-stale` and `gateway-poll-failing` alert rows without storing Gateway response
-  bodies.
+  bodies. `pocket-stale` requires a Funded or Draining pocket with a Closed envelope older than
+  `indexer.pocketStaleHours`; API age alone does not activate it. The poll-failing streak counts
+  Gateway API failures only and resets on each successful API request; chain-read failures do not
+  contribute.
 - The signer reads Gateway balance data from the indexer projection and reads USDC, native,
   withdrawing balance, and withdrawal block from RPC. Stale or failed API observations deny
   retirement, write-off, and slow withdrawal. Pocket return uses current EOA balances and remains
@@ -51,15 +54,17 @@ Two items remain proposals, not approved decisions:
 - `fnm exec --using=22.22.0 pnpm --filter @czar/signer typecheck` — passed.
 - `fnm exec --using=22.22.0 pnpm --filter @czar/signer test` — 111 passed, 1 skipped.
 - `fnm exec --using=22.22.0 pnpm exec vitest run --exclude test/replay-anvil.test.ts` from
-  `apps/indexer/` — 77 passed. The excluded local Arc replay is reported below.
+  `apps/indexer/` — 79 passed. The excluded local Arc replay is reported below.
 - `fnm exec --using=22.22.0 pnpm exec vitest run test/gateway-balances.test.ts test/query-api.test.ts`
-  from `apps/indexer/` — 38 passed.
+  from `apps/indexer/` — 40 passed.
+- `fnm exec --using=22.22.0 pnpm exec vitest run test/gateway-balances.test.ts` from
+  `apps/indexer/` — 22 passed, including the pocket-stale and API-failure streak rules.
 - `fnm exec --using=22.22.0 pnpm exec vitest run test/postgres-projection.test.ts test/policy.test.ts
   test/service.test.ts` from `apps/signer/` — 71 passed.
 - `fnm exec --using=22.22.0 pnpm exec vitest run test/postgres-projection.test.ts` from
   `apps/signer/` — 11 passed after adding the slow-withdraw eligibility cases.
 - `fnm exec --using=22.22.0 pnpm lint` — passed.
-- GitHub Actions runs `40205563664` (push) and `40205579662` (pull request), plus `40205563676` and `40205579698` (gitleaks), failed before jobs started because recent account payments failed or the spending limit needs to be increased; no hosted job result is available.
+- GitHub Actions runs `40205563664` (push) and `40205579662` (pull request), plus `40205563676`, `40205579698`, `40205634767`, and `40205634725`, failed before jobs started because recent account payments failed or the spending limit needs to be increased; no hosted job result is available.
 - `git diff --check` — passed.
 - `fnm exec --using=22.22.0 prek run` — unavailable; this repository has no `prek.toml` or `.pre-commit-config.yaml`.
 - A previous full indexer-suite invocation failed in the existing `replay-anvil.test.ts` while

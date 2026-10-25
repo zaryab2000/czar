@@ -210,6 +210,30 @@ export function isClosedPocketQuiet(input: {
   return Number.isFinite(since) && input.now - since >= input.quietMs;
 }
 
+export function isPocketStale(input: {
+  pocketState: string;
+  envelopeState: string | null;
+  envelopeClosedAt: number | null;
+  now: number;
+  staleMs: number;
+}): boolean {
+  return (
+    (input.pocketState === "Funded" || input.pocketState === "Draining") &&
+    input.envelopeState === "Closed" &&
+    input.envelopeClosedAt !== null &&
+    input.now - input.envelopeClosedAt > input.staleMs
+  );
+}
+
+export function advanceGatewayApiFailures(
+  previous: number,
+  outcomes: readonly { apiError: boolean; chainError: boolean }[],
+): number {
+  let consecutive = previous;
+  for (const outcome of outcomes) consecutive = outcome.apiError ? consecutive + 1 : 0;
+  return consecutive;
+}
+
 export function parseGatewayBalance(
   body: unknown,
   domain: number,
