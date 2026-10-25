@@ -44,6 +44,20 @@ describe("Gateway transfers polling", () => {
     expect(shouldApplyGatewayStatus("completed", "failed")).toBe(false);
   });
 
+  it("uses the configured Gateway API base URL", async () => {
+    const fetcher = vi.fn().mockResolvedValue(response(recorded[0] ?? {}));
+    await pollGatewayTransfers(
+      { kind: "pocket", address: pocket },
+      { pageSize: 100, timeoutMs: 8000, pocketAddresses: new Set([pocket]) },
+      memoryStore(),
+      { fetch: fetcher, log: vi.fn(), apiBase: "http://127.0.0.1:4999" },
+    );
+    const call = fetcher.mock.calls.at(0);
+    if (!call) throw new Error("Gateway poll did not fetch a page");
+    expect(call[0]).toBeInstanceOf(URL);
+    expect((call[0] as URL).origin).toBe("http://127.0.0.1:4999");
+  });
+
   it("tracks recorded statuses in order and ignores a stale batched response", async () => {
     const staleBatched = recorded[1];
     if (!staleBatched) throw new Error("Recorded batched fixture is missing");

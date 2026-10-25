@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { ponder } from "ponder:registry";
 import { and, eq } from "drizzle-orm";
 import {
@@ -15,7 +16,13 @@ import {
 import type { Amount6, PocketRecord } from "@czar/schemas";
 import type { Address } from "viem";
 import { mirrorKey } from "@czar/indexer/mirrors";
-import { envVarName, loadConfig, PARAMETERS } from "@czar/config";
+import {
+  envVarName,
+  loadConfig,
+  PARAMETERS,
+  parseParameterToml,
+  validateLocalOnlyConfig,
+} from "@czar/config";
 import { createLogger } from "@czar/logging";
 import { normalizeTransferAmount } from "#src/amounts";
 import { externalEventId, pocketDelegateState } from "#src/external-events";
@@ -44,7 +51,23 @@ function configuredEnvironment(): Record<string, string> {
   return environment;
 }
 
-const config = loadConfig({ env: configuredEnvironment() });
+const localConfigPath = process.env["CZAR_LOCAL_CONFIG"];
+const config = loadConfig({
+  ...(localConfigPath === undefined
+    ? {}
+    : { envFile: parseParameterToml(readFileSync(localConfigPath, "utf8")) }),
+  env: configuredEnvironment(),
+});
+if (localConfigPath !== undefined) {
+  await validateLocalOnlyConfig({
+    config,
+    overlayPath: localConfigPath,
+    arcRpcUrl:
+      process.env["CZAR_ARC_RPC_URL"] ??
+      process.env["CZAR_INDEXER_RPC_URL"] ??
+      (config.has("app.arcRpcUrl") ? (config.get("app.arcRpcUrl") as string) : ""),
+  });
+}
 const payoutAddresses = config.get("indexer.merchantPayoutAddresses") as string[];
 for (const address of payoutAddresses) {
   if (!/^0x[\da-f]{40}$/.test(address)) {
@@ -421,6 +444,7 @@ ponder.on("GatewayPoll:block", async ({ context }) => {
         {
           fetch,
           log: (event) => logger.warn(event),
+          apiBase: config.get("chain.gatewayApiBaseUrl") as string,
         },
       );
       if (outcome.error) {
