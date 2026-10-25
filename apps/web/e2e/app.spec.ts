@@ -114,6 +114,98 @@ test("pending approvals update the tab title from the server count", async ({ pa
   await expect(page).toHaveTitle("(1) Czar");
 });
 
+test("submitted approvals show their network wait state without an approve action", async ({
+  page,
+}) => {
+  await page.route("**/v1/me", (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      headers: {
+        "X-Czar-Bundler-Order": "circle,pimlico,alchemy,zerodev",
+        "X-Czar-Bundler-Endpoints": "{}",
+      },
+      body: JSON.stringify({
+        userId: "usr_01J00000000000000000000000",
+        msca: "0x0000000000000000000000000000000000000001",
+        vault: "0x0000000000000000000000000000000000000002",
+        vaultCreated: true,
+        network: "eip155:5042002",
+        balances: {
+          vaultBalance: "1000000",
+          free: "1000000",
+          committed: "0",
+          mscaBalance: "1000",
+          pocketOutstanding: "0",
+          asOfBlock: 1,
+        },
+        limits: [],
+        frozen: false,
+        paused: false,
+        displayCurrency: "USD",
+      }),
+    }),
+  );
+  await page.route("**/v1/approvals?status=pending", (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      headers: {
+        "X-Czar-Pending-Poll-Seconds": "15",
+        "X-Czar-Approval-Confirm-Timeout-Seconds": "120",
+      },
+      body: JSON.stringify({
+        items: [
+          {
+            planId: "pln_01J00000000000000000000001",
+            objectiveId: "obj_01J00000000000000000000001",
+            goal: "Submitted research",
+            cap: "1000000",
+            capDisplay: "$1.00",
+            category: "research",
+            stepCount: 1,
+            createdAt: "2026-10-21T00:00:00Z",
+            expiresAt: "2026-10-22T00:00:00Z",
+            status: "submitted",
+          },
+          {
+            planId: "pln_01J00000000000000000000002",
+            objectiveId: "obj_01J00000000000000000000002",
+            goal: "New research",
+            cap: "2000000",
+            capDisplay: "$2.00",
+            category: "research",
+            stepCount: 1,
+            createdAt: "2026-10-21T00:00:00Z",
+            expiresAt: "2026-10-22T00:00:00Z",
+            status: "pending",
+          },
+        ],
+        nextCursor: null,
+      }),
+    }),
+  );
+  await page.route("**/v1/ledger/receipts**", (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ items: [], nextCursor: null }),
+    }),
+  );
+
+  await page.goto("/approvals");
+  await expect(
+    page.getByText("Approval sent. Waiting for the network to confirm it.").first(),
+  ).toBeVisible();
+  await expect(page.getByRole("link", { name: "Submitted research" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "New research" })).toBeVisible();
+  await expect(page).toHaveTitle("(1) Czar");
+
+  await page.goto("/home");
+  await expect(
+    page.getByText("Approval sent. Waiting for the network to confirm it.").first(),
+  ).toBeVisible();
+  await expect(page.getByRole("link", { name: "Submitted research" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "New research" })).toBeVisible();
+});
+
 test("approval review shows the plan path and payment details", async ({ page }) => {
   await page.route("**/v1/approvals?status=pending", (route) =>
     route.fulfill({
