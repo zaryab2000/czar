@@ -9,9 +9,9 @@
   "properties": {
     "schemaVersion": {
       "type": "string",
-      "description": "Schema version, major.minor; this file is 1.0.",
+      "description": "Schema version, major.minor; this file is 1.1 (2026-10-25: snapshot_anchor_tx may be null for the unanchored interim producer, SCR-137).",
       "x-privacyClass": "server-only",
-      "const": "1.0"
+      "const": "1.1"
     },
     "query_id": {
       "type": "string",
@@ -26,17 +26,24 @@
     },
     "policy_version": {
       "$ref": "common.schema.json#/$defs/SlPolicyVersion",
-      "description": "Policy version.",
+      "description": "Policy version: pol_ + 16 hex of keccak256 over the policy definition (SL PolicyVersion); for the interim producer, over its JCS descriptor (SCR-137).",
       "x-privacyClass": "server-only"
     },
     "snapshot_id": {
       "$ref": "common.schema.json#/$defs/Hash32",
-      "description": "Anchored snapshot root.",
+      "description": "Snapshot root: the anchored FEATURE_SNAPSHOT root (SL); for the Phase 1 interim producer, keccak256 of the stored JCS interim snapshot (SCR-137).",
       "x-privacyClass": "server-only"
     },
     "snapshot_anchor_tx": {
-      "$ref": "common.schema.json#/$defs/Hash32",
-      "description": "Anchor transaction.",
+      "oneOf": [
+        {
+          "$ref": "common.schema.json#/$defs/Hash32"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Anchor transaction of snapshot_id; null means the snapshot is not anchored (Phase 1 interim producer, SCR-137) and must never be presented as anchored.",
       "x-privacyClass": "server-only"
     },
     "query": {
