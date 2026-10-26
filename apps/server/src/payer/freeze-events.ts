@@ -59,23 +59,35 @@ export async function processPendingFrozenEvents(
      ORDER BY block_number,log_index`,
     [vault],
   );
+  const failures: unknown[] = [];
   for (const row of pending.rows) {
-    const event = toHaltEvent(vault, row);
-    const markAutoLimitsLowered = async () => {
+    try {
+      const event = toHaltEvent(vault, row);
+      const markAutoLimitsLowered = async () => {
+        await pool.query(
+          `UPDATE payer_freeze_autolimit_events
+           SET auto_limits_lowered_at=COALESCE(auto_limits_lowered_at,now())
+           WHERE vault=$1 AND block_number=$2 AND log_index=$3`,
+          [vault, row.block_number, row.log_index],
+        );
+      };
+      await listener(event, markAutoLimitsLowered);
       await pool.query(
-        `UPDATE payer_freeze_autolimit_events
-         SET auto_limits_lowered_at=COALESCE(auto_limits_lowered_at,now())
-         WHERE vault=$1 AND block_number=$2 AND log_index=$3`,
+        `UPDATE payer_freeze_autolimit_events SET processed_at=now()
+         WHERE vault=$1 AND block_number=$2 AND log_index=$3 AND processed_at IS NULL`,
         [vault, row.block_number, row.log_index],
       );
-    };
-    await listener(event, markAutoLimitsLowered);
-    await pool.query(
-      `UPDATE payer_freeze_autolimit_events SET processed_at=now()
-       WHERE vault=$1 AND block_number=$2 AND log_index=$3 AND processed_at IS NULL`,
-      [vault, row.block_number, row.log_index],
-    );
+    } catch (error) {
+      failures.push(error);
+    }
   }
+  throwCollectedFailures(failures);
+}
+
+function throwCollectedFailures(failures: readonly unknown[]): void {
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1)
+    throw new AggregateError(failures, `Failed to process ${failures.length} Frozen events.`);
 }
 
 export async function queueFrozenEvent(

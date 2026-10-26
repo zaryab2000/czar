@@ -134,6 +134,11 @@ scan could perform unbounded page requests in one poll. The follow-up changes
 above add the independent durable acknowledgement and a one-page-per-poll
 rotating scanner. Startup remains closed until historical catch-up is complete.
 
+A current-head review then found that one failed queued event stopped processing
+later events in the same batch. Processing now catches errors per event, leaves
+failed rows pending, continues through later rows, and propagates one error or
+an `AggregateError` after the batch so the source retries.
+
 Focused checks after these fixes:
 
 - `fnm exec --using=22.22.0 pnpm --filter @czar/server exec vitest run test/payer/freeze-events.test.ts test/payer/database-vault-event-source.test.ts test/payer/runtime.test.ts test/main.test.ts test/main-dispatch.test.ts test/migrate.test.ts`
@@ -141,6 +146,17 @@ Focused checks after these fixes:
 - `fnm exec --using=22.22.0 pnpm -r typecheck` — passed across 14 workspace
   projects with typecheck scripts.
 - `fnm exec --using=22.22.0 pnpm lint` — passed.
+- `git diff --check` — passed.
+
+Validation after the per-event retry fix:
+
+- `fnm exec --using=22.22.0 pnpm --filter @czar/server exec vitest run test/payer/freeze-events.test.ts test/payer/database-vault-event-source.test.ts test/payer/runtime.test.ts`
+  — passed: 3 files, 20 tests. The added regression confirms later rows are
+  lowered and processed after earlier drain errors, and all failures are
+  surfaced after iteration.
+- `fnm exec --using=22.22.0 pnpm -r typecheck` — passed across 14 workspace
+  projects with typecheck scripts.
+- `fnm exec --using=22.22.0 pnpm lint` — passed after formatting the test.
 - `git diff --check` — passed.
 
 An attempted command `fnm exec --using=22.22.0 pnpm --filter @czar/server test -- test/payer/freeze-events.test.ts`

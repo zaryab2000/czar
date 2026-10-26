@@ -165,6 +165,38 @@ describe("durable Frozen event work", () => {
     expect(store.pending()).toHaveLength(0);
   });
 
+  it("continues queued work and collects failures per Frozen event", async () => {
+    const store = fakeStore();
+    await enqueueEvent(store, { blockNumber: 5n, logIndex: 0, transactionHash: TX });
+    await enqueueEvent(store, {
+      blockNumber: 6n,
+      logIndex: 0,
+      transactionHash: `0x${"22".repeat(32)}`,
+    });
+    await enqueueEvent(store, {
+      blockNumber: 7n,
+      logIndex: 0,
+      transactionHash: `0x${"33".repeat(32)}`,
+    });
+    const listener = vi.fn(async (event: VaultHaltEvent, markLowered: () => Promise<void>) => {
+      await markLowered();
+      if (event.blockNumber !== 6n) throw new Error(`drain failed for block ${event.blockNumber}`);
+    });
+
+    await expect(processPendingFrozenEvents(store.pool, VAULT, listener)).rejects.toMatchObject({
+      errors: [
+        expect.objectContaining({ message: "drain failed for block 5" }),
+        expect.objectContaining({ message: "drain failed for block 7" }),
+      ],
+    });
+    expect(listener).toHaveBeenCalledTimes(3);
+    expect(store.eventRows()).toEqual([
+      expect.objectContaining({ block: "5", lowered: true, done: false }),
+      expect.objectContaining({ block: "6", lowered: true, done: true }),
+      expect.objectContaining({ block: "7", lowered: true, done: false }),
+    ]);
+  });
+
   it("scans historical Frozen logs even when the vault is no longer frozen", async () => {
     const store = fakeStore();
     const client = {
