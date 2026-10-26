@@ -4,6 +4,7 @@ import { randomBytes } from "node:crypto";
 import { dirname } from "node:path";
 import { keccak256, toBytes, type Hex, type TransactionSerializableEIP1559 } from "viem";
 import { loadConfig } from "@czar/config";
+import type { Logger } from "@czar/logging";
 import { paymentRefHash } from "@czar/hashing";
 import type { Address, Hash32 } from "@czar/hashing";
 import {
@@ -13,6 +14,7 @@ import {
   type KeystoreFs,
   type PlanLeaf,
   type Projection,
+  type OverdueManualReturnFacts,
   type SignerBackend,
   type SignerNetwork,
   type StoredPlan,
@@ -128,6 +130,7 @@ export interface State {
   native: Map<string, bigint>;
   slowWithdrawTrigger: "api-down" | "closed-dust" | null;
   pocketSpendAfterObservation: boolean;
+  overdueManualReturnFacts: OverdueManualReturnFacts;
 }
 
 export function defaultState(pocket: Address): State {
@@ -242,6 +245,19 @@ export function defaultState(pocket: Address): State {
     native: new Map(),
     slowWithdrawTrigger: null,
     pocketSpendAfterObservation: false,
+    overdueManualReturnFacts: {
+      pocketStateValid: false,
+      envelopeOpen: false,
+      pendingPullbackZero: false,
+      gatewayWithdrawingZero: false,
+      pocketUsdcZero: false,
+      slowWithdrawAudited: false,
+      pocketReturnAudited: false,
+      manualReturnRowValid: false,
+      returnReceiptValid: false,
+      returnOverdue: false,
+      manualReturnRecordedAfter: true,
+    },
   };
 }
 
@@ -279,6 +295,7 @@ export function fakeProjection(state: State): Projection {
     nativeBalance: async (address) => state.native.get(address.toLowerCase()) ?? 0n,
     slowWithdrawTrigger: async () => state.slowWithdrawTrigger,
     pocketSpendAfterObservation: async () => state.pocketSpendAfterObservation,
+    overdueManualReturnFacts: async () => state.overdueManualReturnFacts,
   };
 }
 
@@ -320,6 +337,9 @@ export async function harness(
     projection?: Partial<Projection>;
     prepareTransaction?: TransactionPreparer;
     auditSink?: AuditSink;
+    alert?: (message: string) => Promise<void>;
+    logger?: Pick<Logger, "error">;
+    withoutAlert?: boolean;
   } = {},
 ) {
   const fs = memoryFs();
@@ -338,6 +358,7 @@ export async function harness(
   const state = defaultState(pocket);
   state.job = { evaluator: inner.address("K7") as Address, clientVault: VAULT };
   const audit = memoryAudit();
+  const alerts: string[] = [];
   let nowMs = NOW * 1000;
   const prepared: TransactionSerializableEIP1559[] = [];
   const network = options.network ?? NETWORK;
@@ -348,6 +369,16 @@ export async function harness(
     network,
     config: loadConfig({ envFile: options.config ?? {} }),
     audit: options.auditSink ?? audit,
+    ...(options.withoutAlert === true
+      ? {}
+      : {
+          alert:
+            options.alert ??
+            (async (message: string) => {
+              alerts.push(message);
+            }),
+        }),
+    ...(options.logger === undefined ? {} : { logger: options.logger }),
     callers: CALLERS,
     nowMs: () => nowMs,
     prepareTransaction:
@@ -374,6 +405,7 @@ export async function harness(
     calls,
     state,
     audit,
+    alerts,
     fs,
     pocket,
     prepared,

@@ -99,6 +99,21 @@ export interface PocketBalances {
 
 export type SlowWithdrawTrigger = "api-down" | "closed-dust" | null;
 
+/** Evidence the signer independently checks before a stale-Gateway manual-return write-off. */
+export interface OverdueManualReturnFacts {
+  readonly pocketStateValid: boolean;
+  readonly envelopeOpen: boolean;
+  readonly pendingPullbackZero: boolean;
+  readonly gatewayWithdrawingZero: boolean;
+  readonly pocketUsdcZero: boolean;
+  readonly slowWithdrawAudited: boolean;
+  readonly pocketReturnAudited: boolean;
+  readonly manualReturnRowValid: boolean;
+  readonly returnReceiptValid: boolean;
+  readonly returnOverdue: boolean;
+  readonly manualReturnRecordedAfter: boolean;
+}
+
 export interface Projection {
   freezeState(vault: Address): Promise<FreezeState | undefined>;
   isVault(vault: Address): Promise<boolean>;
@@ -122,4 +137,10 @@ export interface Projection {
   /** The permitted slow-withdraw trigger, if any, from CZ-15 / SCR-127. */
   slowWithdrawTrigger(pocket: Address): Promise<SlowWithdrawTrigger>;
   pocketSpendAfterObservation(pocket: Address, observedAt: number): Promise<boolean>;
+  /** Reads SCR-145 evidence from chain, CZ-15 storage, signer audit and the indexer. */
+  overdueManualReturnFacts?(
+    pocket: Address,
+    vault: Address,
+    now: number,
+  ): Promise<OverdueManualReturnFacts>;
 }

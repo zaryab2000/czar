@@ -6,6 +6,8 @@ import {
   parseAbi,
   parseTransaction,
   recoverAddress,
+  keccak256,
+  serializeTransaction,
   slice,
   type Hex,
 } from "viem";
@@ -16,6 +18,7 @@ import {
   usdcTransferWithAuthorizationDigest,
 } from "@czar/hashing";
 import type { PaymentRef } from "@czar/schemas";
+import type { AuditRow } from "../src/service.ts";
 import { K3_NEVER, USDC_ABI, VAULT_ABI, selectorOf } from "../src/index.ts";
 import {
   archiveUri,
@@ -80,6 +83,20 @@ const vaultCall = (selector: string, args: unknown) => ({
   kind: "vault-call",
   payload: { vault: VAULT, selector, args },
 });
+
+const validOverdueManualReturnFacts = {
+  pocketStateValid: true,
+  envelopeOpen: true,
+  pendingPullbackZero: true,
+  gatewayWithdrawingZero: true,
+  pocketUsdcZero: true,
+  slowWithdrawAudited: true,
+  pocketReturnAudited: true,
+  manualReturnRowValid: true,
+  returnReceiptValid: true,
+  returnOverdue: true,
+  manualReturnRecordedAfter: false,
+} as const;
 
 describe("usdc-3009 (K3)", () => {
   it("signs the rebuilt digest and returns the 02 §6.3.1 envelope", async () => {
@@ -200,6 +217,7 @@ describe("vault-call (K3)", () => {
     )) as { signedTransaction: Hex };
     const tx = parseTransaction(signedTransaction);
     expect(tx.to).toBe(VAULT);
+    expect(t.audit.rows.at(-1)?.digest).toBe(keccak256(serializeTransaction(t.prepared.at(-1)!)));
     expect(decodeFunctionData({ abi: VAULT_ABI, data: tx.data as Hex }).functionName).toBe(
       "openEnvelope",
     );
@@ -326,6 +344,145 @@ describe("vault-call (K3)", () => {
       dusty,
       dusty.signer.sign("cz-15", vaultCall("writeOffPocket", { pocket: dusty.pocket })),
       "pending-pullback",
+    );
+  });
+
+  it("signs the stale-Gateway exception only when every SCR-145 predicate holds", async () => {
+    const auditRows: AuditRow[] = [];
+    const order: string[] = [];
+    const deliveredAlerts: string[] = [];
+    const t = await harness({
+      auditSink: {
+        async write(row) {
+          auditRows.push(row);
+          order.push("audit");
+        },
+      },
+      alert: async (message) => {
+        deliveredAlerts.push(message);
+        order.push("alert");
+      },
+    });
+    const observedAt = (NOW - 3600) * 1000;
+    t.state.balances = {
+      ...t.state.balances,
+      gatewayApiFresh: false,
+      gatewayApiObservedAt: observedAt,
+    };
+    t.state.overdueManualReturnFacts = { ...validOverdueManualReturnFacts };
+
+    const result = await t.signer.sign("cz-15", vaultCall("writeOffPocket", { pocket: t.pocket }));
+    const signedTx = (result as { signedTransaction: Hex }).signedTransaction;
+    const row = auditRows.at(-1);
+    const digest = keccak256(serializeTransaction(t.prepared.at(-1)!));
+
+    expect(t.calls).toHaveLength(1);
+    expect(row).toMatchObject({
+      outcome: "signed",
+      rule: "writeoff-manual-return-overdue",
+      digest,
+    });
+    expect(deliveredAlerts).toEqual([
+      `writeoff-overdue-stale-gateway vault=${VAULT} pocket=${t.pocket} ` +
+        `apiObservedAt=${new Date(observedAt).toISOString()} digest=${digest}`,
+    ]);
+    expect(order).toEqual(["audit", "alert"]);
+    expect(signedTx).toMatch(/^0x/);
+  });
+
+  it("keeps the signature when exception alert delivery fails and logs only its name", async () => {
+    const logs: { event: string; fields: Readonly<Record<string, unknown>> | undefined }[] = [];
+    const t = await harness({
+      alert: async () => {
+        throw new Error("private alert transport detail");
+      },
+      logger: {
+        error: (event, fields) => logs.push({ event, fields }),
+      },
+    });
+    t.state.balances = { ...t.state.balances, gatewayApiFresh: false };
+    t.state.overdueManualReturnFacts = { ...validOverdueManualReturnFacts };
+
+    await expect(
+      t.signer.sign("cz-15", vaultCall("writeOffPocket", { pocket: t.pocket })),
+    ).resolves.toHaveProperty("signedTransaction");
+
+    expect(t.audit.rows.at(-1)).toMatchObject({
+      outcome: "signed",
+      rule: "writeoff-manual-return-overdue",
+    });
+    expect(logs).toEqual([
+      {
+        event: "signer_alert_delivery_failed",
+        fields: { rule: "writeoff-overdue-stale-gateway" },
+      },
+    ]);
+  });
+
+  it("uses none in the alert when the stale Gateway view has no observation time", async () => {
+    const t = await harness();
+    t.state.balances = {
+      ...t.state.balances,
+      gatewayApiFresh: false,
+      gatewayApiObservedAt: null,
+    };
+    t.state.overdueManualReturnFacts = { ...validOverdueManualReturnFacts };
+
+    await t.signer.sign("cz-15", vaultCall("writeOffPocket", { pocket: t.pocket }));
+
+    expect(t.alerts[0]).toContain("apiObservedAt=none");
+  });
+
+  it("denies the exception if the shared signer alert port is absent", async () => {
+    const t = await harness({ withoutAlert: true });
+    t.state.balances = { ...t.state.balances, gatewayApiFresh: false };
+    t.state.overdueManualReturnFacts = { ...validOverdueManualReturnFacts };
+
+    await expectDenied(
+      t,
+      t.signer.sign("cz-15", vaultCall("writeOffPocket", { pocket: t.pocket })),
+      "gateway-balance-stale",
+    );
+  });
+
+  it("denies the stale-Gateway exception when any SCR-145 evidence predicate fails", async () => {
+    const failedFacts = [
+      "pocketStateValid",
+      "envelopeOpen",
+      "pendingPullbackZero",
+      "gatewayWithdrawingZero",
+      "pocketUsdcZero",
+      "slowWithdrawAudited",
+      "pocketReturnAudited",
+      "manualReturnRowValid",
+      "returnReceiptValid",
+      "returnOverdue",
+    ] as const;
+
+    for (const failedFact of failedFacts) {
+      const t = await harness();
+      t.state.balances = { ...t.state.balances, gatewayApiFresh: false };
+      t.state.overdueManualReturnFacts = {
+        ...validOverdueManualReturnFacts,
+        [failedFact]: false,
+      };
+      await expectDenied(
+        t,
+        t.signer.sign("cz-15", vaultCall("writeOffPocket", { pocket: t.pocket })),
+        "gateway-balance-stale",
+      );
+    }
+
+    const recorded = await harness();
+    recorded.state.balances = { ...recorded.state.balances, gatewayApiFresh: false };
+    recorded.state.overdueManualReturnFacts = {
+      ...validOverdueManualReturnFacts,
+      manualReturnRecordedAfter: true,
+    };
+    await expectDenied(
+      recorded,
+      recorded.signer.sign("cz-15", vaultCall("writeOffPocket", { pocket: recorded.pocket })),
+      "gateway-balance-stale",
     );
   });
 

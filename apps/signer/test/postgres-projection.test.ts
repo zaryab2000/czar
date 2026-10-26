@@ -1,10 +1,11 @@
 import type { Address, Hash32 } from "@czar/hashing";
 import type { PaymentRef } from "@czar/schemas";
 import { loadConfig } from "@czar/config";
-import { keccak256, stringToHex } from "viem";
+import { encodeAbiParameters, encodeEventTopics, keccak256, parseAbi, stringToHex } from "viem";
 import { describe, expect, it } from "vitest";
 import { createPostgresProjection } from "../src/postgres-projection.ts";
 import type { AuditQueryExecutor } from "../src/postgres-audit.ts";
+import type { Projection } from "../src/projection.ts";
 
 const vault = "0x00000000000000000000000000000000000000a1" as Address;
 const factory = "0x00000000000000000000000000000000000000a2" as Address;
@@ -374,6 +375,62 @@ describe("Postgres signer projection", () => {
 
     await expect(projection.pocket(payee)).resolves.toMatchObject({ slowWithdrawalOpen: false });
   });
+
+  it("checks SCR-145 chain, CZ-15, K4 audit, receipt, hold and event-order facts", async () => {
+    const fixture = overdueReturnProjection();
+    const now = Number(returnTimestamp) + 72 * 3600 + 1;
+
+    await expect(
+      readOverdueManualReturnFacts(fixture.projection, fixture.pocket, vault, now),
+    ).resolves.toMatchObject({
+      pocketStateValid: true,
+      envelopeOpen: true,
+      pendingPullbackZero: true,
+      gatewayWithdrawingZero: true,
+      pocketUsdcZero: true,
+      slowWithdrawAudited: true,
+      pocketReturnAudited: true,
+      manualReturnRowValid: true,
+      returnReceiptValid: true,
+      returnOverdue: true,
+      manualReturnRecordedAfter: false,
+    });
+    expect(fixture.auditQueries).toEqual([
+      { action: "signer:pocket-slow-withdraw", keyRef: `K4:${fixture.pocket}` },
+      { action: "signer:pocket-return", keyRef: `K4:${fixture.pocket}` },
+    ]);
+
+    fixture.setLaterReturns([{ block: "50", log_index: 6 }]);
+    await expect(
+      readOverdueManualReturnFacts(fixture.projection, fixture.pocket, vault, now),
+    ).resolves.toMatchObject({
+      manualReturnRecordedAfter: true,
+    });
+    fixture.setLaterReturns([{ block: "50", log_index: 4 }]);
+    await expect(
+      readOverdueManualReturnFacts(fixture.projection, fixture.pocket, vault, now),
+    ).resolves.toMatchObject({
+      manualReturnRecordedAfter: false,
+    });
+    fixture.setRow({ ...fixture.row, closed_pocket: true });
+    await expect(
+      readOverdueManualReturnFacts(fixture.projection, fixture.pocket, vault, now),
+    ).resolves.toMatchObject({ manualReturnRowValid: false });
+    fixture.setRow({ ...fixture.row, closed_pocket: false });
+    fixture.setReceiptStatus("reverted");
+    await expect(
+      readOverdueManualReturnFacts(fixture.projection, fixture.pocket, vault, now),
+    ).resolves.toMatchObject({ returnReceiptValid: false });
+    fixture.setReceiptStatus("success");
+    await expect(
+      readOverdueManualReturnFacts(
+        fixture.projection,
+        fixture.pocket,
+        vault,
+        Number(returnTimestamp) + 72 * 3600 - 1,
+      ),
+    ).resolves.toMatchObject({ returnReceiptValid: true, returnOverdue: false });
+  });
 });
 
 function queryDatabase(rowsFor: (sql: string) => Record<string, unknown>[]): AuditQueryExecutor {
@@ -382,6 +439,125 @@ function queryDatabase(rowsFor: (sql: string) => Record<string, unknown>[]): Aud
       return { rows: rowsFor(sql) };
     },
   };
+}
+
+function readOverdueManualReturnFacts(
+  projection: Projection,
+  pocket: Address,
+  vaultAddress: Address,
+  now: number,
+) {
+  const readFacts = projection.overdueManualReturnFacts;
+  if (readFacts === undefined)
+    throw new Error("Postgres projection has no SCR-145 evidence reader");
+  return readFacts(pocket, vaultAddress, now);
+}
+
+const returnTimestamp = 1_800_000_000n;
+
+function overdueReturnProjection() {
+  const pocket = "0x00000000000000000000000000000000000000c1" as Address;
+  const txHash = `0x${"33".repeat(32)}`;
+  const returnLogIndex = 5;
+  const transferAbi = parseAbi([
+    "event Transfer(address indexed from, address indexed to, uint256 value)",
+  ]);
+  const topics = encodeEventTopics({
+    abi: transferAbi,
+    eventName: "Transfer",
+    args: { from: pocket, to: vault },
+  });
+  let laterReturns: Record<string, unknown>[] = [];
+  let row: Record<string, unknown> = {
+    state: "manual-return-required",
+    closed_pocket: false,
+    return_tx: txHash,
+    return_block: "50",
+    return_log_index: returnLogIndex,
+    returned_amount: "8000",
+  };
+  let receiptStatus: "success" | "reverted" = "success";
+  const auditQueries: { action: unknown; keyRef: unknown }[] = [];
+  const database: AuditQueryExecutor = {
+    async query(query, values) {
+      if (query.includes("FROM payer_pullback_gateway_failures")) return { rows: [row] };
+      if (query.includes("FROM audit")) {
+        auditQueries.push({ action: values?.[0], keyRef: values?.[1] });
+        return { rows: [{}] };
+      }
+      if (query.includes("FROM manual_returns")) return { rows: laterReturns };
+      if (query.includes("FROM pocket_balances"))
+        return {
+          rows: [
+            {
+              gateway_available_atomic: "0",
+              api_observed_at: "2026-10-20T00:00:00.000Z",
+              api_consecutive_failures: 1,
+            },
+          ],
+        };
+      return { rows: [] };
+    },
+  };
+  const projection = createPostgresProjection({
+    config: loadConfig(),
+    database,
+    chain: overdueReturnChain(topics, returnLogIndex, () => receiptStatus),
+    factory,
+  });
+  return {
+    pocket,
+    projection,
+    row,
+    auditQueries,
+    setRow: (nextRow: Record<string, unknown>) => {
+      row = nextRow;
+    },
+    setLaterReturns: (returns: Record<string, unknown>[]) => {
+      laterReturns = returns;
+    },
+    setReceiptStatus: (status: "success" | "reverted") => {
+      receiptStatus = status;
+    },
+  };
+}
+
+function overdueReturnChain(
+  topics: ReturnType<typeof encodeEventTopics>,
+  returnLogIndex: number,
+  receiptStatus: () => "success" | "reverted",
+) {
+  return {
+    async getBlock() {
+      return { timestamp: returnTimestamp };
+    },
+    async getBlockNumber() {
+      return 60n;
+    },
+    async getBalance() {
+      return 0n;
+    },
+    async getTransactionReceipt() {
+      return {
+        status: receiptStatus(),
+        blockNumber: 50n,
+        logs: [
+          {
+            address: "0x3600000000000000000000000000000000000000",
+            data: encodeAbiParameters([{ type: "uint256" }], [8000n]),
+            topics,
+            logIndex: returnLogIndex,
+          },
+        ],
+      };
+    },
+    async readContract({ functionName }: { functionName: string }) {
+      if (functionName === "getPocket") return { envelopeId: 7n, state: 2, pendingPullback: 0n };
+      if (functionName === "getEnvelope") return { state: 1 };
+      if (["withdrawingBalance", "withdrawalBlock", "balanceOf"].includes(functionName)) return 0n;
+      throw new Error(`unexpected contract read: ${functionName}`);
+    },
+  } as never;
 }
 
 function fakeChain() {

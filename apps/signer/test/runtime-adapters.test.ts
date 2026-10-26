@@ -92,7 +92,6 @@ describe("local signer runtime adapters", () => {
         sendRawTransaction,
         waitForTransactionReceipt,
       } as never,
-      alert: async () => undefined,
     });
 
     await expect(adapters.submitTransaction(`0x${"01".repeat(32)}`)).rejects.toThrow("reverted");

@@ -1,7 +1,13 @@
 // The signer service (CZ-27 §6): caller and key checks → shape → policy (digest rebuilt) → rate limit →
 // backend → audit. A refusal returns `kms_denied` with the rule; nothing is signed and the backend is
 // never called.
-import type { Hex, TransactionSerializableEIP1559 } from "viem";
+import {
+  keccak256,
+  serializeTransaction,
+  type Hex,
+  type TransactionSerializableEIP1559,
+} from "viem";
+import { createLogger, type Logger } from "@czar/logging";
 import type { Config } from "@czar/config";
 import type { Address, Hash32 } from "@czar/hashing";
 import type { SignerBackend } from "./backend.ts";
@@ -76,9 +82,15 @@ export interface SignerOptions {
   /** Service identity → the keys it owns (CZ-27 §5.1 "owner service"). */
   readonly callers: Readonly<Record<string, readonly KeyId[]>>;
   readonly prepareTransaction: TransactionPreparer;
+  /** Shared signer alert delivery for policy and gas-refill alerts. */
+  readonly alert?: SignerAlertPort;
+  readonly logger?: Pick<Logger, "error">;
   /** Milliseconds. */
   readonly nowMs?: () => number;
 }
+
+/** Delivers public signer-operational alert messages. */
+export type SignerAlertPort = (message: string) => Promise<void>;
 
 const RATE_WINDOW_MS = 60_000;
 const ADDRESS_KEY_OWNERS: Readonly<Record<string, { caller: string; keyId: KeyId }>> = {
@@ -109,6 +121,7 @@ export interface Signer {
 export function createSigner(options: SignerOptions): Signer {
   const { backend, projection, network, config, audit, callers } = options;
   const nowMs = options.nowMs ?? Date.now;
+  const logger = options.logger ?? createLogger({ service: "signer", component: "CZ-27" });
   const windows = new Map<string, number[]>();
   const keyAddressWindows = new Map<string, number[]>();
   const retiring = new Map<string, number>();
@@ -208,6 +221,12 @@ export function createSigner(options: SignerOptions): Signer {
 
       const decision = await decide(ctx, kind, parsed);
       purpose = decision.purpose;
+      if (
+        decision.type === "transaction" &&
+        decision.alert !== undefined &&
+        options.alert === undefined
+      )
+        throw new Denied("gateway-balance-stale");
       takeRateSlot(keyId, keyRef);
 
       if (decision.type === "digest") {
@@ -236,8 +255,34 @@ export function createSigner(options: SignerOptions): Signer {
         (tx.value ?? 0n) !== decision.value
       )
         throw new Denied("prepared-transaction-mismatch");
+      digest = keccak256(serializeTransaction(tx)) as Hash32;
       const signedTransaction = await backend.signTransaction(keyRef, tx);
-      await audit.write({ at: nowMs(), caller, keyRef, kind, purpose, outcome: "signed" });
+      await audit.write({
+        at: nowMs(),
+        caller,
+        keyRef,
+        kind,
+        digest,
+        purpose,
+        outcome: "signed",
+        ...(decision.rule === undefined ? {} : { rule: decision.rule }),
+      });
+      if (decision.alert !== undefined) {
+        const observedAt =
+          decision.alert.apiObservedAt === null
+            ? "none"
+            : new Date(decision.alert.apiObservedAt).toISOString();
+        const message =
+          `${decision.alert.name} vault=${decision.alert.vault} pocket=${decision.alert.pocket} ` +
+          `apiObservedAt=${observedAt} digest=${digest}`;
+        if (options.alert !== undefined) {
+          try {
+            await options.alert(message);
+          } catch {
+            logger.error("signer_alert_delivery_failed", { rule: decision.alert.name });
+          }
+        }
+      }
       return { signedTransaction };
     } catch (error) {
       const denied = error instanceof Denied;

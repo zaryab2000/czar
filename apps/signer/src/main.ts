@@ -6,7 +6,12 @@ import { gitProbe, guardKeystorePath, nodeKeystoreFs, openLocalKeystore } from "
 import { startGasRefillJob, type GasRefillOptions } from "./gas-refill.ts";
 import { postgresAudit, type AuditQueryExecutor } from "./postgres-audit.ts";
 import type { Projection } from "./projection.ts";
-import { createSigner, type Signer, type TransactionPreparer } from "./service.ts";
+import {
+  createSigner,
+  type Signer,
+  type SignerAlertPort,
+  type TransactionPreparer,
+} from "./service.ts";
 import { keychainSignerIdentity, startSignerSocket } from "./socket.ts";
 import type { KeyId } from "./kinds.ts";
 
@@ -17,7 +22,8 @@ export interface SignerProcessOptions {
   readonly callers: Readonly<Record<string, readonly KeyId[]>>;
   readonly prepareTransaction: TransactionPreparer;
   readonly auditExecutor: AuditQueryExecutor;
-  readonly refill: Omit<GasRefillOptions, "config" | "signer" | "keyAddress">;
+  readonly refill: Omit<GasRefillOptions, "config" | "signer" | "keyAddress" | "alert">;
+  readonly alert: SignerAlertPort;
   readonly allowedCallers: Readonly<Record<string, readonly string[]>>;
   readonly keychainOpen?: KeychainOpen;
   readonly argv?: readonly string[];
@@ -54,6 +60,7 @@ export async function startSignerProcess(
     audit,
     callers: options.callers,
     prepareTransaction: options.prepareTransaction,
+    alert: options.alert,
   });
   const identity = keychainSignerIdentity(keychainService, options.keychainOpen);
   const stopSocket = await startSignerSocket({
@@ -68,6 +75,7 @@ export async function startSignerProcess(
       ...options.refill,
       config,
       signer,
+      alert: options.alert,
       keyAddress: (key) => {
         const address = backend.address(key);
         if (address === undefined) throw new Error(`local keystore has no ${key} key`);
