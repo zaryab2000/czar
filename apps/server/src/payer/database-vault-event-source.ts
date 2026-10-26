@@ -10,6 +10,7 @@ import type {
   VaultHaltEventSubscription,
 } from "#src/payer/runtime";
 import {
+  advanceFrozenScanTarget,
   processPendingFrozenEvents,
   queueFrozenEvent,
   scanFrozenEvents,
@@ -109,10 +110,24 @@ export function createDatabaseVaultEventSource(
               failures.push(error);
             }
           }
+          let scanHead: bigint | undefined;
+          let watermarkPersisted = false;
+          if (vaults.length > 0) {
+            try {
+              scanHead = await input.publicClient.getBlockNumber();
+              const caughtUpVaults = await advanceFrozenScanTarget(input.pool, vaults, scanHead);
+              for (const vault of vaults) scanCaughtUp.set(vault, caughtUpVaults.has(vault));
+              watermarkPersisted = true;
+            } catch (error) {
+              for (const vault of vaults) scanCaughtUp.set(vault, false);
+              logSourceError(input.logger, "reconcile_failed");
+              failures.push(error);
+            }
+          }
           if (vaults.length > 0) {
             const index = nextVaultScanIndex % vaults.length;
             const vault = vaults[index];
-            if (vault) {
+            if (vault && scanHead !== undefined && watermarkPersisted) {
               nextVaultScanIndex = index + 1;
               try {
                 const caughtUp = await scanFrozenEvents(
@@ -120,6 +135,7 @@ export function createDatabaseVaultEventSource(
                   input.pool,
                   vault,
                   BigInt(Number(input.config.get("indexer.getLogsBlockRange"))),
+                  scanHead,
                 );
                 scanCaughtUp.set(vault, caughtUp);
               } catch (error) {

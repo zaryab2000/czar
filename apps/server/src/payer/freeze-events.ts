@@ -18,13 +18,36 @@ interface PendingFreezeEvent {
 
 export async function hasPendingFrozenEvent(pool: Pool, vault: Address): Promise<boolean> {
   const result = await pool.query<{ pending: boolean }>(
-    `SELECT EXISTS (
-       SELECT 1 FROM payer_freeze_autolimit_events
-       WHERE vault=$1 AND processed_at IS NULL AND auto_limits_lowered_at IS NULL
+    `SELECT (
+       NOT EXISTS (
+         SELECT 1 FROM payer_freeze_autolimit_cursors WHERE vault=$1
+       ) OR EXISTS (
+         SELECT 1 FROM payer_freeze_autolimit_cursors
+         WHERE vault=$1 AND last_scanned_block < scan_target_block
+       ) OR EXISTS (
+         SELECT 1 FROM payer_freeze_autolimit_events
+         WHERE vault=$1 AND processed_at IS NULL AND auto_limits_lowered_at IS NULL
+       )
      ) AS pending`,
     [vault],
   );
   return result.rows[0]?.pending ?? false;
+}
+
+export async function advanceFrozenScanTarget(
+  pool: Pool,
+  vaults: readonly Address[],
+  targetBlock: bigint,
+): Promise<ReadonlySet<Address>> {
+  if (vaults.length === 0) return new Set();
+  const result = await pool.query<{ vault: string; caught_up: boolean }>(
+    `UPDATE payer_freeze_autolimit_cursors
+     SET scan_target_block=GREATEST(scan_target_block,$1::numeric)
+     WHERE vault=ANY($2::text[])
+     RETURNING vault,last_scanned_block >= scan_target_block AS caught_up`,
+    [targetBlock.toString(), vaults],
+  );
+  return new Set(result.rows.filter((row) => row.caught_up).map((row) => row.vault as Address));
 }
 
 export async function scanFrozenEvents(
@@ -32,17 +55,18 @@ export async function scanFrozenEvents(
   pool: Pool,
   vault: Address,
   maxBlockRange: bigint,
+  targetBlock?: bigint,
 ): Promise<boolean> {
   if (maxBlockRange <= 0n) throw new RangeError("Frozen event scan range must be positive.");
   const cursor = await pool.query<{ last_scanned_block: string }>(
     "SELECT last_scanned_block FROM payer_freeze_autolimit_cursors WHERE vault=$1",
     [vault],
   );
-  const head = await client.getBlockNumber();
+  const head = targetBlock ?? (await client.getBlockNumber());
   const nextBlock = cursor.rows[0] ? BigInt(cursor.rows[0].last_scanned_block) + 1n : 0n;
   if (nextBlock > head) return true;
   const page = await getFrozenEventPage(client, vault, nextBlock, head, maxBlockRange);
-  await persistFrozenEventPage(pool, vault, page.events, page.toBlock);
+  await persistFrozenEventPage(pool, vault, page.events, page.toBlock, head);
   return page.toBlock >= head;
 }
 
@@ -147,16 +171,21 @@ async function persistFrozenEventPage(
   vault: Address,
   events: readonly FrozenEventIdentity[],
   toBlock: bigint,
+  targetBlock: bigint,
 ): Promise<void> {
   const connection = await pool.connect();
   try {
     await connection.query("BEGIN");
     for (const event of events) await queueFrozenEvent(connection, vault, event);
     await connection.query(
-      `INSERT INTO payer_freeze_autolimit_cursors(vault,last_scanned_block) VALUES($1,$2)
+      `INSERT INTO payer_freeze_autolimit_cursors
+       (vault,last_scanned_block,scan_target_block) VALUES($1,$2,$3)
        ON CONFLICT(vault) DO UPDATE SET last_scanned_block=
-         GREATEST(payer_freeze_autolimit_cursors.last_scanned_block, EXCLUDED.last_scanned_block)`,
-      [vault, toBlock.toString()],
+         GREATEST(payer_freeze_autolimit_cursors.last_scanned_block, EXCLUDED.last_scanned_block),
+         scan_target_block=GREATEST(
+           payer_freeze_autolimit_cursors.scan_target_block, EXCLUDED.scan_target_block
+         )`,
+      [vault, toBlock.toString(), targetBlock.toString()],
     );
     await connection.query("COMMIT");
   } catch (error) {

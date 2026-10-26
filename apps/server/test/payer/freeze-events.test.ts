@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  advanceFrozenScanTarget,
   hasPendingFrozenEvent,
   scanFrozenEvents,
   processPendingFrozenEvents,
@@ -12,6 +13,7 @@ const TX = `0x${"11".repeat(32)}` as const;
 
 function fakeStore() {
   let cursor: string | undefined;
+  let target = "0";
   let transactionOpen = false;
   const committedCursors: string[] = [];
   const events = new Map<
@@ -28,9 +30,16 @@ function fakeStore() {
     if (["BEGIN", "COMMIT", "ROLLBACK"].includes(statement)) return { rows: [] };
     if (statement.includes("SELECT last_scanned_block"))
       return { rows: cursor === undefined ? [] : [{ last_scanned_block: cursor }] };
-    if (statement.includes("SELECT EXISTS"))
+    if (statement.includes("AS pending"))
       return {
-        rows: [{ pending: [...events.values()].some((event) => !event.done && !event.lowered) }],
+        rows: [
+          {
+            pending:
+              cursor === undefined ||
+              BigInt(cursor) < BigInt(target) ||
+              [...events.values()].some((event) => !event.done && !event.lowered),
+          },
+        ],
       };
     if (statement.includes("INSERT INTO payer_freeze_autolimit_events")) {
       expect(transactionOpen).toBe(true);
@@ -42,7 +51,17 @@ function fakeStore() {
     if (statement.includes("INSERT INTO payer_freeze_autolimit_cursors")) {
       expect(transactionOpen).toBe(true);
       cursor = String(values[1]);
+      target = String(values[2]);
       return { rows: [] };
+    }
+    if (statement.includes("UPDATE payer_freeze_autolimit_cursors")) {
+      target = BigInt(target) > BigInt(String(values[0])) ? target : String(values[0]);
+      return {
+        rows:
+          cursor === undefined
+            ? []
+            : [{ vault: VAULT, caught_up: BigInt(cursor) >= BigInt(target) }],
+      };
     }
     if (
       statement.includes("FROM payer_freeze_autolimit_events") &&
@@ -85,6 +104,10 @@ function fakeStore() {
     pending: () => [...events.values()].filter((row) => !row.done),
     eventRows: () => [...events.values()],
     hasUnloweredPending: () => [...events.values()].some((row) => !row.done && !row.lowered),
+    setScan: (lastScanned: string, scanTarget = lastScanned) => {
+      cursor = lastScanned;
+      target = scanTarget;
+    },
     cursor: () => cursor,
     committedCursors,
   };
@@ -107,9 +130,29 @@ describe("durable Frozen event work", () => {
       return { rows: [{ pending: true }] };
     });
     expect(await hasPendingFrozenEvent({ query } as never, VAULT)).toBe(true);
-    expect(query).toHaveBeenCalledWith(expect.stringContaining("auto_limits_lowered_at IS NULL"), [
-      VAULT,
-    ]);
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining("last_scanned_block < scan_target_block"),
+      [VAULT],
+    );
+  });
+
+  it("gates a freeze-unfreeze event until historical scanning reaches the watermark", async () => {
+    const store = fakeStore();
+    store.setScan("4", "4");
+    await advanceFrozenScanTarget(store.pool, [VAULT], 10n);
+    const currentFrozen = false;
+    expect(currentFrozen).toBe(false);
+    expect(await hasPendingFrozenEvent(store.pool, VAULT)).toBe(true);
+
+    const client = {
+      getBlockNumber: vi.fn(async () => 10n),
+      getContractEvents: vi.fn(async () => [{ blockNumber: 5n, logIndex: 2, transactionHash: TX }]),
+    };
+    await scanFrozenEvents(client as never, store.pool, VAULT, 10n, 10n);
+    expect(await hasPendingFrozenEvent(store.pool, VAULT)).toBe(true);
+    const listener = vi.fn(async (_event, markLowered) => markLowered());
+    await processPendingFrozenEvents(store.pool, VAULT, listener);
+    expect(await hasPendingFrozenEvent(store.pool, VAULT)).toBe(false);
   });
 
   it("retries an unfinished lowering after Unfrozen without requiring frozen state", async () => {
@@ -248,6 +291,7 @@ async function enqueueEvent(
   store: ReturnType<typeof fakeStore>,
   event: { blockNumber: bigint; logIndex: number; transactionHash: typeof TX },
 ): Promise<void> {
+  store.setScan(event.blockNumber.toString());
   await store.query("BEGIN");
   await queueFrozenEvent(store.pool, VAULT, event);
   await store.query("COMMIT");

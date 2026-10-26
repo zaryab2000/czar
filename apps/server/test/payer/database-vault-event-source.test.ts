@@ -151,7 +151,7 @@ describe("database vault event source", () => {
 
   it("advances one history page per poll and waits for initial catch-up", async () => {
     vi.useFakeTimers();
-    const { pool } = fakePool(() => [VAULT_ONE]);
+    const store = fakePool(() => [VAULT_ONE]);
     const pageRequests: { fromBlock: bigint; toBlock: bigint }[] = [];
     const client = {
       readContract: vi.fn(async ({ functionName }: { functionName: string }) => {
@@ -167,7 +167,7 @@ describe("database vault event source", () => {
       }),
     };
     const subscription = createDatabaseVaultEventSource({
-      pool,
+      pool: store.pool,
       publicClient: client as never,
       config: loadConfig({
         envFile: {
@@ -182,6 +182,7 @@ describe("database vault event source", () => {
     void subscription.ready.then(() => (ready = true));
     await vi.waitFor(() => expect(pageRequests).toHaveLength(1));
     expect(pageRequests[0]).toMatchObject({ fromBlock: 0n, toBlock: 9n });
+    expect(store.targets().get(VAULT_ONE)).toBe("25");
     expect(ready).toBe(false);
     await vi.advanceTimersByTimeAsync(1000);
     expect(pageRequests).toHaveLength(2);
@@ -193,10 +194,57 @@ describe("database vault event source", () => {
     expect(pageRequests[2]).toMatchObject({ fromBlock: 20n, toBlock: 25n });
     subscription();
   });
+
+  it("rechecks earlier vault cursors when a newer chain watermark arrives", async () => {
+    vi.useFakeTimers();
+    const store = fakePool(() => [VAULT_ONE, VAULT_TWO]);
+    const heads = [9n, 20n, 20n];
+    const pageRequests: { address: Address; fromBlock: bigint; toBlock: bigint }[] = [];
+    const client = {
+      readContract: vi.fn(async ({ functionName }: { functionName: string }) => {
+        if (functionName === "factory") return FACTORY;
+        if (functionName === "guardianPaused") return false;
+        throw new Error(`unexpected ${functionName}`);
+      }),
+      watchContractEvent: vi.fn(() => vi.fn()),
+      getBlockNumber: vi.fn(async () => heads.shift() ?? 20n),
+      getContractEvents: vi.fn(
+        async (request: { address: Address; fromBlock: bigint; toBlock: bigint }) => {
+          pageRequests.push(request);
+          return [];
+        },
+      ),
+    };
+    const subscription = createDatabaseVaultEventSource({
+      pool: store.pool,
+      publicClient: client as never,
+      config: loadConfig({
+        envFile: {
+          "payer.vaultEventPollMs": 1000,
+          "indexer.getLogsBlockRange": 100,
+        },
+      }),
+      logger: { error: vi.fn() } as never,
+    }).subscribe(vi.fn(async () => undefined));
+
+    let ready = false;
+    void subscription.ready.then(() => (ready = true));
+    await vi.waitFor(() => expect(pageRequests).toHaveLength(1));
+    expect(pageRequests[0]?.address).toBe(VAULT_ONE);
+    expect(ready).toBe(false);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(pageRequests[1]?.address).toBe(VAULT_TWO);
+    expect(ready).toBe(false);
+    await vi.advanceTimersByTimeAsync(1000);
+    await subscription.ready;
+    expect(pageRequests[2]).toMatchObject({ address: VAULT_ONE, fromBlock: 10n, toBlock: 20n });
+    subscription();
+  });
 });
 
 function fakePool(vaults: () => readonly Address[]) {
   const cursors = new Map<string, string>();
+  const targets = new Map<string, string>();
   const events = new Map<
     string,
     { block: string; index: number; tx: string; processed: boolean; lowered: boolean }
@@ -220,7 +268,22 @@ function fakePool(vaults: () => readonly Address[]) {
     }
     if (statement.includes("INSERT INTO payer_freeze_autolimit_cursors")) {
       cursors.set(String(values[0]), String(values[1]));
+      targets.set(String(values[0]), String(values[2]));
       return { rows: [] };
+    }
+    if (statement.includes("UPDATE payer_freeze_autolimit_cursors")) {
+      const target = String(values[0]);
+      const updatedVaults = values[1] as readonly string[];
+      for (const vault of values[1] as readonly string[]) {
+        if (BigInt(target) > BigInt(targets.get(vault) ?? "0")) targets.set(vault, target);
+      }
+      return {
+        rows: updatedVaults.flatMap((vault) => {
+          const lastScanned = cursors.get(vault);
+          if (lastScanned === undefined) return [];
+          return [{ vault, caught_up: BigInt(lastScanned) >= BigInt(targets.get(vault) ?? "0") }];
+        }),
+      };
     }
     if (statement.includes("SELECT block_number::text AS block_number"))
       return {
@@ -247,6 +310,7 @@ function fakePool(vaults: () => readonly Address[]) {
   return {
     pool: { query, connect: async () => ({ query, release: vi.fn() }) } as never,
     query,
+    targets: () => targets,
   };
 }
 

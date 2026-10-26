@@ -98,5 +98,10 @@ describe("CZ-12 migrations", () => {
     expect(freezeColumns.rows.map(({ column_name }) => column_name)).toContain(
       "auto_limits_lowered_at",
     );
+    const cursorColumns = await getPool().query<{ column_name: string }>(
+      `SELECT column_name FROM information_schema.columns
+       WHERE table_schema='public' AND table_name='payer_freeze_autolimit_cursors'`,
+    );
+    expect(cursorColumns.rows.map(({ column_name }) => column_name)).toContain("scan_target_block");
   });
 });
