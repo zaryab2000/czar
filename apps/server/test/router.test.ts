@@ -29,6 +29,7 @@ const SEED: RoutingParams = {
   },
   gatewayFeeAtomic: 3_500n,
   gatewayEnabled: true,
+  jobEnabled: true,
   maxFeeRatioBps: 1_000n,
   jobThresholdAtomic: 5_000_000n,
   maxGasPriceWei: 200_000_000_000n,
@@ -131,9 +132,39 @@ describe("CZ-14 payment router cost model", () => {
       kind: "gateway-nano",
     });
   });
+
+  it("keeps job routes off by default and enables them only by config", () => {
+    const disabled = routingParamsFromConfig(loadConfig());
+    expect(disabled.jobEnabled).toBe(false);
+    expect(route(input({ supplierIsAgent: true, params: disabled }))).toMatchObject({
+      skipped: true,
+      error: "unsupported-offer",
+    });
+
+    const enabled = routingParamsFromConfig(
+      loadConfig({ envFile: { "routing.jobEnabled": true } }),
+    );
+    expect(enabled.jobEnabled).toBe(true);
+    expect(route(input({ supplierIsAgent: true, params: enabled }))).toMatchObject({
+      kind: "erc8183-job",
+      routingReason: "specialist-agent",
+    });
+  });
 });
 
 describe("CZ-14 payment router decision order", () => {
+  it.each([
+    ["specialist-agent", { supplierIsAgent: true }],
+    ["acceptance-before-payment", { needsAcceptanceBeforePayment: true }],
+    ["above-job-threshold", { unitAmount: SEED.jobThresholdAtomic }],
+  ] as const)("rejects %s when job routing is disabled", (_name, overrides) => {
+    expect(route(input({ ...overrides, params: { ...SEED, jobEnabled: false } }))).toMatchObject({
+      skipped: true,
+      error: "unsupported-offer",
+      reason: "no-usable-offer",
+    });
+  });
+
   it.each([
     ["specialist-agent", { supplierIsAgent: true }, "specialist-agent"],
     [
