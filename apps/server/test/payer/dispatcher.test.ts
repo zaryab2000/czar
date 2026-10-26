@@ -60,6 +60,7 @@ describe("payer dispatcher", () => {
       config: { get: () => 60 } as never,
       now: () => new Date("2026-10-25T12:00:00Z"),
       isFrozen: async () => false,
+      hasPendingFrozenEvent: async () => false,
       isGuardianPaused: async () => false,
       runStep: async ({ step }) => {
         order.push(step.stepIndex);
@@ -89,6 +90,7 @@ describe("payer dispatcher", () => {
       config: { get: () => 60 } as never,
       now: () => new Date("2026-10-25T12:00:00Z"),
       isFrozen: async () => false,
+      hasPendingFrozenEvent: async () => false,
       isGuardianPaused: async () => false,
       runStep: async () => "done",
       complete,
@@ -113,6 +115,7 @@ describe("payer dispatcher", () => {
       config: { get: () => 60 } as never,
       now: () => new Date("2026-10-25T12:00:00Z"),
       isFrozen: async () => true,
+      hasPendingFrozenEvent: async () => false,
       isGuardianPaused: async () => false,
       runStep,
       complete: vi.fn(),
@@ -123,6 +126,34 @@ describe("payer dispatcher", () => {
     expect(runStep).not.toHaveBeenCalled();
   });
 
+  it("does not enter a step while frozen auto-limit lowering is pending", async () => {
+    const checks: string[] = [];
+    const runStep = vi.fn(
+      async (_input: Parameters<DispatcherDependencies["runStep"]>[0]) => "done" as const,
+    );
+    await dispatchExecutingObjectives({
+      pool: getPool(),
+      config: { get: () => 60 } as never,
+      now: () => new Date("2026-10-25T12:00:00Z"),
+      isFrozen: async () => {
+        checks.push("frozen-state");
+        return false;
+      },
+      hasPendingFrozenEvent: async () => {
+        checks.push("current-head-scan");
+        return true;
+      },
+      isGuardianPaused: async () => false,
+      runStep,
+      complete: vi.fn(),
+      onError: (error) => {
+        throw error;
+      },
+    });
+    expect(checks).toEqual(["frozen-state", "current-head-scan"]);
+    expect(runStep).not.toHaveBeenCalled();
+  });
+
   it("allows a dependent step to observe a terminal failed dependency", async () => {
     const order: number[] = [];
     await dispatchExecutingObjectives({
@@ -130,6 +161,7 @@ describe("payer dispatcher", () => {
       config: { get: () => 60 } as never,
       now: () => new Date("2026-10-25T12:00:00Z"),
       isFrozen: async () => false,
+      hasPendingFrozenEvent: async () => false,
       isGuardianPaused: async () => false,
       runStep: async ({ step }) => {
         order.push(step.stepIndex);
@@ -159,6 +191,7 @@ describe("payer dispatcher", () => {
       config: { get: () => 60 } as never,
       now: () => new Date("2026-10-25T12:00:00Z"),
       isFrozen: async () => false,
+      hasPendingFrozenEvent: async () => false,
       isGuardianPaused: async () => false,
       runStep: async () => "handed_off",
       complete,
@@ -190,6 +223,7 @@ describe("payer dispatcher", () => {
       config: { get: () => 60 } as never,
       now: () => new Date("2026-10-25T12:00:00Z"),
       isFrozen: async () => false,
+      hasPendingFrozenEvent: async () => false,
       isGuardianPaused: async () => false,
       runStep,
       complete: vi.fn(),
@@ -217,6 +251,7 @@ describe("payer dispatcher", () => {
       config: { get: () => 60 } as never,
       now: () => new Date("2026-10-25T12:00:00Z"),
       isFrozen: async () => false,
+      hasPendingFrozenEvent: async () => false,
       isGuardianPaused: async () => false,
       runStep,
       complete: vi.fn(),
@@ -241,6 +276,7 @@ describe("payer dispatcher", () => {
       config: { get: () => 60 } as never,
       now,
       isFrozen: async () => false,
+      hasPendingFrozenEvent: async () => false,
       isGuardianPaused: async () => false,
       runStep: async ({ step }) => {
         const lease = await getPool().query<{ expires_at: Date }>(
@@ -288,6 +324,7 @@ describe("payer dispatcher", () => {
       config: { get: () => 60 } as never,
       now: () => new Date("2026-10-25T12:00:00Z"),
       isFrozen: async () => false,
+      hasPendingFrozenEvent: async () => false,
       isGuardianPaused: async () => false,
       runStep,
       complete: vi.fn(),

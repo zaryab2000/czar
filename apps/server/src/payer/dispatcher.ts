@@ -33,6 +33,7 @@ export interface DispatcherDependencies {
   readonly pool: Pool;
   readonly config: Config;
   readonly isFrozen: (vault: `0x${string}`) => Promise<boolean>;
+  readonly hasPendingFrozenEvent: (vault: `0x${string}`) => Promise<boolean>;
   readonly isGuardianPaused: (vault: `0x${string}`) => Promise<boolean>;
   readonly runStep: (input: DispatchStepRequest) => Promise<DispatchStepOutcome>;
   readonly complete: (input: DispatchEnvelope) => Promise<void>;
@@ -180,6 +181,7 @@ async function runSteps(
     dispatchLease.assertHeld();
     if (await dependencies.isFrozen(envelope.vault)) return;
     if (await dependencies.isGuardianPaused(envelope.vault)) return;
+    if (await dependencies.hasPendingFrozenEvent(envelope.vault)) return;
     const trace = await getExecutionTrace(dependencies.pool, envelope.planId, step.stepIndex, 0);
     const outcome = await dependencies.runStep({
       ...envelope,
