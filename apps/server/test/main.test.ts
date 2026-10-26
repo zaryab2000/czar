@@ -60,7 +60,9 @@ describe("server composition root", () => {
       modelClient: { complete: vi.fn() },
       publicClient: {
         getBlockNumber: vi.fn(async () => 0n),
-        readContract: vi.fn(async () => factory),
+        readContract: vi.fn(async ({ functionName }: { functionName: string }) =>
+          functionName === "factory" ? factory : false,
+        ),
         watchContractEvent,
       } as never,
       walletClient: { sendRawTransaction: vi.fn(async () => `0x${"11".repeat(32)}`) } as never,
@@ -100,6 +102,8 @@ describe("server composition root", () => {
       receiptInput: vi.fn(() => ({}) as never),
       rpcUrl: "http://127.0.0.1:8549",
       factoryAddress: "0x0000000000000000000000000000000000000001",
+      gatewayMinter: "0x0000000000000000000000000000000000000003",
+      gatewayDomain: 5042002,
       indexerUrl: "http://127.0.0.1:42069",
       openingLookup: { envelopeByPlanHash: vi.fn(async () => null) },
       revisePlanSubjects: async () => null,
@@ -112,8 +116,7 @@ describe("server composition root", () => {
     expect(logLines.some((line) => line.includes("planner_volume_source_missing"))).toBe(false);
     expect((await root.app.request("/not-found")).status).toBe(404);
     expect(root.executePayerStep).toBeTypeOf("function");
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(watchContractEvent).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(watchContractEvent).toHaveBeenCalled());
     await getPool().query("UPDATE users SET vault=NULL WHERE user_id=$1", [TEST_USER_ID]);
     await root.close();
 

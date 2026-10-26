@@ -2,6 +2,8 @@ import type { Config } from "@czar/config";
 import type { Signer } from "@czar/signer";
 import type { Address } from "viem";
 import type { Pool } from "pg";
+import type { PocketBalanceSnapshot } from "#src/payer/indexer-pocket";
+import { appendExecutionPhase } from "#src/payer/executions";
 import {
   executeSlowPullbackFallback,
   type CancelPullbackInput,
@@ -15,7 +17,6 @@ interface PendingFallback {
   readonly step_index: number;
   readonly envelope_ref: string;
   readonly pocket: Address;
-  readonly value: string;
   readonly unavailable_since: Date;
   readonly pullback_id: string | null;
   readonly vault_address: Address | null;
@@ -28,6 +29,7 @@ export interface PullbackFallbackSchedulerDependencies {
   readonly config: Config;
   readonly signer: Pick<Signer, "sign">;
   readonly chain: SlowPullbackDependencies["chain"];
+  readonly readGatewayBalance: (pocket: Address) => Promise<PocketBalanceSnapshot>;
   readonly cancelPendingPullback: (input: CancelPullbackInput) => Promise<unknown>;
   readonly now: () => Date;
 }
@@ -40,7 +42,7 @@ export async function runPendingPullbackFallbacks(
       Number(dependencies.config.get("payer.pullbackApiDownHours")) * MILLISECONDS_PER_HOUR,
   );
   const rows = await dependencies.pool.query<PendingFallback>(
-    `SELECT plan_id,step_index,envelope_ref,pocket,value,unavailable_since,
+    `SELECT plan_id,step_index,envelope_ref,pocket,unavailable_since,
             pullback_id,vault_address,gateway_minter,attempt
      FROM payer_pullback_gateway_failures
      WHERE state='pending' AND unavailable_since <= $1
@@ -55,6 +57,8 @@ async function processFallback(
   row: PendingFallback,
   dependencies: PullbackFallbackSchedulerDependencies,
 ): Promise<void> {
+  const balance = await readFallbackBalance(row, dependencies);
+  if (balance === null) return;
   const pullback = pendingPullbackInput(row);
   await dependencies.cancelPendingPullback(pullback);
   const result = await executeSlowPullbackFallback(
@@ -64,7 +68,8 @@ async function processFallback(
       envelopeRef: row.envelope_ref,
       pocket: row.pocket,
       apiUnavailableSince: row.unavailable_since,
-      value: BigInt(row.value),
+      value: balance.gatewayAvailableAtomic,
+      trigger: "api-down",
     },
     dependencies,
   );
@@ -75,6 +80,41 @@ async function processFallback(
       [row.plan_id, row.step_index],
     );
   }
+}
+
+async function readFallbackBalance(
+  row: PendingFallback,
+  dependencies: PullbackFallbackSchedulerDependencies,
+): Promise<PocketBalanceSnapshot | null> {
+  try {
+    const balance = await dependencies.readGatewayBalance(row.pocket);
+    if (balance.apiObservedAt === null) {
+      await recordFallbackWait(row, dependencies, "pullback.gateway-figure-missing");
+      return null;
+    }
+    if (balance.gatewayAvailableAtomic <= 0n) {
+      await recordFallbackWait(row, dependencies, "pullback.gateway-balance-empty");
+      return null;
+    }
+    return balance;
+  } catch {
+    await recordFallbackWait(row, dependencies, "pullback.gateway-figure-missing");
+    return null;
+  }
+}
+
+async function recordFallbackWait(
+  row: PendingFallback,
+  dependencies: PullbackFallbackSchedulerDependencies,
+  phase: "pullback.gateway-figure-missing" | "pullback.gateway-balance-empty",
+): Promise<void> {
+  await appendExecutionPhase(dependencies.pool, {
+    planId: row.plan_id,
+    stepIndex: row.step_index,
+    attempt: row.attempt ?? 0,
+    phase,
+    payload: { pocket: row.pocket },
+  });
 }
 
 function pendingPullbackInput(row: PendingFallback): CancelPullbackInput {

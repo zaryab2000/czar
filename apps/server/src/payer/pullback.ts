@@ -8,7 +8,7 @@ import {
   type TransferSpec,
 } from "@czar/hashing";
 import type { Config } from "@czar/config";
-import type { Signer } from "@czar/signer";
+import { Denied, type Signer } from "@czar/signer";
 import type { SafeFetch } from "@czar/x402";
 import type { Pool } from "pg";
 import { PULLBACK_CANCEL_DELAY_BLOCKS } from "@czar/vault-client";
@@ -24,6 +24,11 @@ import {
 
 export { PULLBACK_CANCEL_DELAY_BLOCKS };
 const MILLISECONDS_PER_HOUR = 3_600_000;
+const SLOW_WITHDRAW_RETRY_RULES = new Set([
+  "gateway-figure-missing",
+  "pocket-spend-after-observation",
+  "slow-withdraw-value-mismatch",
+]);
 
 export interface PullbackValueInput {
   readonly outstanding: bigint;
@@ -72,6 +77,8 @@ export interface PullbackInput extends Omit<
   readonly outstanding: bigint;
   readonly pending: bigint;
   readonly availableBalance: bigint;
+  readonly availableBalanceObservedAt: Date | null;
+  readonly closedPocket?: boolean;
   readonly head: bigint;
   readonly attempt?: number;
   readonly workerId?: string;
@@ -130,6 +137,7 @@ export interface SlowPullbackInput {
   readonly pocket: Address;
   readonly apiUnavailableSince: Date;
   readonly value: bigint;
+  readonly trigger?: "api-down" | "closed-dust";
   readonly attempt?: number;
   readonly workerId?: string;
 }
@@ -154,6 +162,15 @@ export function calculatePullbackValue(input: PullbackValueInput): bigint {
   return outstanding < balance ? outstanding : balance;
 }
 
+export function calculateClosedPocketPullbackValue(
+  availableBalance: bigint,
+  maxFee: bigint,
+  safety: bigint,
+): bigint {
+  const headroom = maxFee + safety;
+  return availableBalance > headroom ? availableBalance - headroom : 0n;
+}
+
 export async function executeSlowPullbackFallback(
   input: SlowPullbackInput,
   dependencies: SlowPullbackDependencies,
@@ -161,10 +178,14 @@ export async function executeSlowPullbackFallback(
   | { readonly state: "waiting-withdrawal" }
   | { readonly state: "waiting-return" }
   | { readonly state: "manual-return-required"; readonly amount: string }
+  | { readonly state: "returned-to-vault"; readonly amount: string }
 > {
   const delayMs =
     Number(dependencies.config.get("payer.pullbackApiDownHours")) * MILLISECONDS_PER_HOUR;
-  if (dependencies.now().getTime() - input.apiUnavailableSince.getTime() < delayMs)
+  if (
+    input.trigger !== "closed-dust" &&
+    dependencies.now().getTime() - input.apiUnavailableSince.getTime() < delayMs
+  )
     throw new Error("Gateway API downtime has not reached the slow-withdraw threshold.");
   const attempt = input.attempt ?? 0;
   const workerId = input.workerId ?? `pullback-slow-${process.pid}-${randomUUID()}`;
@@ -201,15 +222,23 @@ async function runSlowPullback(
   | { readonly state: "waiting-withdrawal" }
   | { readonly state: "waiting-return" }
   | { readonly state: "manual-return-required"; readonly amount: string }
+  | { readonly state: "returned-to-vault"; readonly amount: string }
 > {
   const trace = await getExecutionTrace(dependencies.pool, input.planId, input.stepIndex, attempt);
-  if (!trace.some((row) => row.phase === "pullback.slow.initiated")) {
+  const initiationRecorded = trace.some((row) => row.phase === "pullback.slow.initiated");
+  const observedWithdrawalBlock = await dependencies.chain.withdrawalBlock(input.pocket);
+  if (!initiationRecorded && observedWithdrawalBlock === 0n) {
     await sendSlowWithdrawal(input, dependencies, attempt, "initiate", assertLeaseHeld);
     return { state: "waiting-withdrawal" };
   }
+  if (!initiationRecorded)
+    await writeSlowPhase(dependencies, input, attempt, "pullback.slow.initiated", {
+      recovered: true,
+      withdrawalBlock: observedWithdrawalBlock.toString(),
+    });
   if (!trace.some((row) => row.phase === "pullback.slow.withdrawn")) {
     const head = await dependencies.chain.getBlockNumber();
-    const availableAt = await dependencies.chain.withdrawalBlock(input.pocket);
+    const availableAt = observedWithdrawalBlock;
     if (head < availableAt) return { state: "waiting-withdrawal" };
     await sendSlowWithdrawal(input, dependencies, attempt, "withdraw", assertLeaseHeld);
     return { state: "waiting-return" };
@@ -229,15 +258,29 @@ async function sendSlowWithdrawal(
   const prior = trace.findLast((row) => row.phase === `${phase}.sent`);
   let transaction = prior?.payload["transaction"];
   if (typeof transaction !== "string") {
-    const signed = await dependencies.signer.sign("cz-15", {
-      keyId: `K4:${input.pocket}`,
-      kind: "pocket-slow-withdraw",
-      payload: {
+    let signed;
+    try {
+      signed = await dependencies.signer.sign("cz-15", {
+        keyId: `K4:${input.pocket}`,
+        kind: "pocket-slow-withdraw",
+        payload: {
+          pocket: input.pocket,
+          step,
+          ...(step === "initiate" ? { value: input.value.toString() } : {}),
+        },
+      });
+    } catch (error) {
+      if (
+        step !== "initiate" ||
+        !(error instanceof Denied) ||
+        !SLOW_WITHDRAW_RETRY_RULES.has(error.rule)
+      )
+        throw error;
+      await writeSlowPhase(dependencies, input, attempt, `pullback.slow.${error.rule}`, {
         pocket: input.pocket,
-        step,
-        ...(step === "initiate" ? { value: input.value.toString() } : {}),
-      },
-    });
+      });
+      return;
+    }
     if (!("signedTransaction" in signed))
       throw new Error(`K4 did not sign slow withdrawal ${step}.`);
     transaction = signed.signedTransaction;
@@ -262,7 +305,10 @@ async function returnSlowWithdrawalBalance(
   dependencies: SlowPullbackDependencies,
   attempt: number,
   assertLeaseHeld: () => void,
-): Promise<{ readonly state: "manual-return-required"; readonly amount: string }> {
+): Promise<
+  | { readonly state: "manual-return-required"; readonly amount: string }
+  | { readonly state: "returned-to-vault"; readonly amount: string }
+> {
   const amount = await dependencies.chain.pocketUsdcBalance(input.pocket);
   if (amount > 0n) {
     const trace = await getExecutionTrace(
@@ -297,7 +343,9 @@ async function returnSlowWithdrawalBalance(
       txHash,
     });
   }
-  return { state: "manual-return-required", amount: amount.toString() };
+  return input.trigger === "closed-dust"
+    ? { state: "returned-to-vault", amount: amount.toString() }
+    : { state: "manual-return-required", amount: amount.toString() };
 }
 
 async function writeSlowPhase(
@@ -355,6 +403,8 @@ export async function executePullback(
 ): Promise<
   | { readonly state: "confirmed"; readonly pullbackId: string; readonly value: string }
   | { readonly state: "written-off"; readonly pocket: Address }
+  | { readonly state: "waiting"; readonly reason: "gateway-balance-stale" }
+  | { readonly state: "waiting"; readonly reason: "closed-pocket-dust" }
 > {
   const workerId = input.workerId ?? `pullback-${process.pid}-${randomUUID()}`;
   const attempt = input.attempt ?? 0;
@@ -475,7 +525,16 @@ async function runPullback(
 ): Promise<
   | { readonly state: "confirmed"; readonly pullbackId: string; readonly value: string }
   | { readonly state: "written-off"; readonly pocket: Address }
+  | { readonly state: "waiting"; readonly reason: "gateway-balance-stale" }
+  | { readonly state: "waiting"; readonly reason: "closed-pocket-dust" }
 > {
+  if (!hasFreshGatewayBalance(input, dependencies)) {
+    await writePullbackPhase(dependencies, input, attempt, "pullback.gateway-balance-stale", {
+      ageSeconds: gatewayBalanceAgeSeconds(input, dependencies.now()),
+      pocket: input.pocket,
+    });
+    return { state: "waiting", reason: "gateway-balance-stale" };
+  }
   const configuredMaxFee = BigInt(Number(dependencies.config.get("payer.pullbackMaxFeeAtomic")));
   if (configuredMaxFee > (await dependencies.chain.maxPullbackFee()))
     throw new Error("Configured pullback max fee exceeds the vault maxPullbackFee.");
@@ -487,7 +546,7 @@ async function runPullback(
     trace,
     assertLeaseHeld,
   );
-  if (pullback.state === "written-off") return pullback;
+  if (pullback.state === "written-off" || pullback.state === "waiting") return pullback;
   const intent = buildPullbackBurnIntent({
     vault: input.vault,
     pocket: input.pocket,
@@ -563,13 +622,32 @@ async function runPullback(
   };
 }
 
+function hasFreshGatewayBalance(input: PullbackInput, dependencies: PullbackDependencies): boolean {
+  const ageSeconds = gatewayBalanceAgeSeconds(input, dependencies.now());
+  return (
+    ageSeconds >= 0 &&
+    ageSeconds <= Number(dependencies.config.get("indexer.gatewayBalanceMaxAgeSeconds"))
+  );
+}
+
+function gatewayBalanceAgeSeconds(input: PullbackInput, now: Date): number {
+  const observedAt = input.availableBalanceObservedAt;
+  if (!(observedAt instanceof Date) || Number.isNaN(observedAt.getTime()))
+    return Number.POSITIVE_INFINITY;
+  return Math.floor((now.getTime() - observedAt.getTime()) / 1000);
+}
+
 async function recoverOrRequestPullback(
   input: PullbackInput,
   dependencies: PullbackDependencies,
   attempt: number,
   trace: readonly ExecutionPhaseRow[],
   assertLeaseHeld: () => void,
-): Promise<PullbackRecord | { readonly state: "written-off"; readonly pocket: Address }> {
+): Promise<
+  | PullbackRecord
+  | { readonly state: "written-off"; readonly pocket: Address }
+  | { readonly state: "waiting"; readonly reason: "closed-pocket-dust" }
+> {
   const stored = trace.findLast((row) => row.phase === "pullback.requested");
   const cancelled = trace.findLast((row) => row.phase === "pullback.cancelled");
   if (stored && (!cancelled || cancelled.payload["pullbackId"] !== stored.payload["pullbackId"]))
@@ -587,14 +665,22 @@ async function recoverOrRequestPullback(
   }
   const maxFee = BigInt(Number(dependencies.config.get("payer.pullbackMaxFeeAtomic")));
   const safety = BigInt(Number(dependencies.config.get("payer.pullbackSafetyAtomic")));
-  const value = calculatePullbackValue({
-    outstanding: input.outstanding,
-    pending: input.pending,
-    availableBalance: input.availableBalance,
-    maxFee,
-    safety,
-  });
+  const value = input.closedPocket
+    ? calculateClosedPocketPullbackValue(input.availableBalance, maxFee, safety)
+    : calculatePullbackValue({
+        outstanding: input.outstanding,
+        pending: input.pending,
+        availableBalance: input.availableBalance,
+        maxFee,
+        safety,
+      });
   if (value <= 0n) {
+    if (input.closedPocket) {
+      await writePullbackPhase(dependencies, input, attempt, "pullback.closed-dust-waiting", {
+        pocket: input.pocket,
+      });
+      return { state: "waiting", reason: "closed-pocket-dust" };
+    }
     const prior = trace.findLast((row) => row.phase === "pullback.write-off.sent");
     let transaction = prior?.payload["transaction"];
     if (typeof transaction !== "string") {

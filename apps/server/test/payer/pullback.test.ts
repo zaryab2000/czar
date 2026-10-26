@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { transferSpecBytes, transferSpecHash } from "@czar/hashing";
-import type { SignRequest } from "@czar/signer";
+import { Denied, type SignRequest } from "@czar/signer";
 import {
   buildPullbackBurnIntent,
   cancelExpiredPullback,
@@ -52,6 +52,141 @@ beforeEach(async () => {
 });
 
 describe("pullback values", () => {
+  it("waits and records when the Gateway balance observation is stale", async () => {
+    const input = {
+      planId: PLAN_ID,
+      stepIndex: 0,
+      envelopeRef: "eip155:5042002:0x0000000000000000000000000000000000000001:1",
+      vault: "0x0000000000000000000000000000000000000001" as const,
+      pocket: "0x0000000000000000000000000000000000000002" as const,
+      gatewayWallet: "0x0000000000000000000000000000000000000003" as const,
+      gatewayMinter: "0x0000000000000000000000000000000000000004" as const,
+      usdc: "0x0000000000000000000000000000000000000005" as const,
+      gatewayDomain: 26,
+      outstanding: 900_000n,
+      pending: 0n,
+      availableBalance: 850_000n,
+      availableBalanceObservedAt: new Date("2026-10-21T23:57:00Z"),
+      head: 6_400n,
+    };
+    const requestPullback = vi.fn(async () => {
+      throw new Error("stale balance must not create pullback");
+    });
+    const dependencies = {
+      pool: getPool(),
+      config: loadConfig(),
+      signer: {
+        sign: vi.fn(async () => ({ signedTransaction: "0x1234" as const })),
+      },
+      chain: {
+        maxPullbackFee: vi.fn(async () => 20_000n),
+        findPendingPullback: vi.fn(async () => undefined),
+        requestPullback,
+        writeOffPocket: vi.fn(),
+      },
+      safeFetch: vi.fn(),
+      gatewayTransferUrl: "http://127.0.0.1:4999/v1/transfer",
+      now: () => new Date("2026-10-22T00:00:00Z"),
+    };
+
+    await expect(executePullback(input, dependencies as never)).resolves.toMatchObject({
+      state: "waiting",
+      reason: "gateway-balance-stale",
+    });
+    expect(requestPullback).not.toHaveBeenCalled();
+    const phases = await getExecutionTrace(getPool(), PLAN_ID, 0, 0);
+    expect(phases.at(-1)?.phase).toBe("pullback.gateway-balance-stale");
+  });
+
+  it("recovers a Closed pocket from fresh Gateway balance without an outstanding bound", async () => {
+    const input = {
+      planId: PLAN_ID,
+      stepIndex: 0,
+      envelopeRef: "eip155:5042002:0x0000000000000000000000000000000000000001:1",
+      vault: "0x0000000000000000000000000000000000000001" as const,
+      pocket: "0x0000000000000000000000000000000000000002" as const,
+      gatewayWallet: "0x0000000000000000000000000000000000000003" as const,
+      gatewayMinter: "0x0000000000000000000000000000000000000004" as const,
+      usdc: "0x0000000000000000000000000000000000000005" as const,
+      gatewayDomain: 26,
+      outstanding: 0n,
+      pending: 0n,
+      availableBalance: 80_000n,
+      availableBalanceObservedAt: new Date("2026-10-22T00:00:00Z"),
+      head: 6_400n,
+      closedPocket: true,
+    };
+    const requestPullback = vi.fn(async () => {
+      throw new Error("local Gateway unavailable");
+    });
+    const writeOffPocket = vi.fn();
+    const dependencies = {
+      pool: getPool(),
+      config: loadConfig(),
+      signer: {
+        sign: vi.fn(async (_caller: string, request: { kind: string }) =>
+          request.kind === "gateway-burn"
+            ? { signature: "0xbeef" as const, digest: `0x${"ef".repeat(32)}` as const }
+            : { signedTransaction: "0x1234" as const },
+        ),
+      },
+      chain: {
+        maxPullbackFee: vi.fn(async () => 20_000n),
+        findPendingPullback: vi.fn(async () => undefined),
+        requestPullback,
+        writeOffPocket,
+      },
+      safeFetch: vi.fn(),
+      gatewayTransferUrl: "http://127.0.0.1:4999/v1/transfer",
+      now: () => new Date("2026-10-22T00:00:00Z"),
+    };
+
+    await expect(executePullback(input, dependencies as never)).rejects.toThrow(
+      "local Gateway unavailable",
+    );
+    expect(requestPullback).toHaveBeenCalledWith(
+      expect.objectContaining({ value: 70_000n, maxFee: 10_000n }),
+    );
+    expect(writeOffPocket).not.toHaveBeenCalled();
+  });
+
+  it("payer_pocketClose_sweepsGasAndRecoversLateBalance", async () => {
+    const input = {
+      planId: PLAN_ID,
+      stepIndex: 0,
+      attempt: 0,
+      vault: "0x0000000000000000000000000000000000000001" as const,
+      pocket: "0x0000000000000000000000000000000000000002" as const,
+    };
+    let gateway = 70_000n;
+    const recoverLateGatewayBalance = vi.fn(async () => {
+      gateway = 0n;
+    });
+    const dependencies = {
+      pool: getPool(),
+      signer: {
+        sign: vi.fn(async () => ({ signedTransaction: "0x1234" as const })),
+        retirePocketKey: vi.fn(async () => ({ destroyAfterMs: 1_900_000_000_000 })),
+      },
+      chain: {
+        isClosed: vi.fn(async () => true),
+        hasPendingPullback: vi.fn(async () => false),
+        writeOffPocket: vi.fn(),
+        sweepableNativeBalance: vi.fn(async () => 2_000n),
+        pocketBalances: vi.fn(async () => ({ native: 0n, usdc: 0n, gateway })),
+        sendPocketTransaction: vi.fn(async () => "sweep-tx"),
+      },
+      recoverLateGatewayBalance,
+    };
+
+    const { sweepAndRetirePocketKey } = await import("#src/payer/pocket");
+    await expect(sweepAndRetirePocketKey(input, dependencies as never)).resolves.toMatchObject({
+      state: "retiring",
+    });
+    expect(recoverLateGatewayBalance).toHaveBeenCalledOnce();
+    expect(dependencies.signer.retirePocketKey).toHaveBeenCalledWith("cz-15", input.pocket);
+  });
+
   it("persists the first Gateway API failure time for the scheduler", async () => {
     const input = {
       planId: PLAN_ID,
@@ -66,6 +201,7 @@ describe("pullback values", () => {
       outstanding: 900_000n,
       pending: 0n,
       availableBalance: 850_000n,
+      availableBalanceObservedAt: new Date("2026-10-22T00:00:00Z"),
       head: 6_400n,
     } as const;
     const now = new Date("2026-10-22T00:00:00Z");
@@ -166,6 +302,7 @@ describe("pullback values", () => {
       outstanding: 100n,
       pending: 0n,
       availableBalance: 0n,
+      availableBalanceObservedAt: new Date("2026-10-22T00:00:00Z"),
       head: 6_400n,
     } as const;
     const dependencies = {
@@ -317,6 +454,7 @@ describe("pullback values", () => {
       outstanding: 900_000n,
       pending: 0n,
       availableBalance: 850_000n,
+      availableBalanceObservedAt: new Date("2026-10-22T00:00:00Z"),
       head: 6_400n,
       attempt: 0,
     } as const;
@@ -366,6 +504,7 @@ describe("pullback values", () => {
       outstanding: 900_000n,
       pending: 0n,
       availableBalance: 850_000n,
+      availableBalanceObservedAt: new Date("2026-10-22T00:00:00Z"),
       head: 6_400n,
     } as const;
     let requestCount = 0;
@@ -602,6 +741,7 @@ describe("pullback values", () => {
           outstanding: 900_000n,
           pending: 0n,
           availableBalance: 850_000n,
+          availableBalanceObservedAt: new Date("2026-10-22T00:00:00Z"),
           head: 6_400n,
           attempt: 0,
         },
@@ -625,7 +765,7 @@ describe("pullback values", () => {
     let usdc = 0n;
     const chain = {
       getBlockNumber: vi.fn(async () => head),
-      withdrawalBlock: vi.fn(async () => 200n),
+      withdrawalBlock: vi.fn(async () => (initiated ? 200n : 0n)),
       pocketUsdcBalance: vi.fn(async () => usdc),
       sendPocketTransaction: vi.fn(async (_transaction: string, kind: string) => {
         if (kind === "pullback.slow.initiate") initiated = true;
@@ -666,5 +806,131 @@ describe("pullback values", () => {
       amount: "825000",
     });
     expect(usdc).toBe(0n);
+  });
+
+  it("does not initiate another slow withdrawal when the Gateway already has one open", async () => {
+    const sendPocketTransaction = vi.fn(async () => "unexpected-tx");
+    const sign = vi.fn(async () => ({ signedTransaction: "0x1234" as const }));
+    const dependencies = {
+      pool: getPool(),
+      config: loadConfig(),
+      signer: { sign },
+      chain: {
+        getBlockNumber: vi.fn(async () => 100n),
+        withdrawalBlock: vi.fn(async () => 200n),
+        pocketUsdcBalance: vi.fn(async () => 0n),
+        sendPocketTransaction,
+      },
+      now: () => new Date("2026-10-22T00:00:00Z"),
+    };
+    const input = {
+      planId: PLAN_ID,
+      stepIndex: 0,
+      envelopeRef: "eip155:5042002:0x0000000000000000000000000000000000000001:1",
+      pocket: "0x0000000000000000000000000000000000000002",
+      apiUnavailableSince: new Date("2026-10-20T00:00:00Z"),
+      value: 825_000n,
+    } as const;
+
+    await expect(executeSlowPullbackFallback(input, dependencies)).resolves.toMatchObject({
+      state: "waiting-withdrawal",
+    });
+    expect(sign).not.toHaveBeenCalled();
+    expect(sendPocketTransaction).not.toHaveBeenCalled();
+    const phases = await getExecutionTrace(getPool(), PLAN_ID, 0, 0);
+    expect(phases.map((phase) => phase.phase)).toContain("pullback.slow.initiated");
+  });
+
+  it.each([
+    "gateway-figure-missing",
+    "pocket-spend-after-observation",
+    "slow-withdraw-value-mismatch",
+  ])("records %s and waits for the next Gateway observation", async (rule) => {
+    const sendPocketTransaction = vi.fn();
+    const dependencies = {
+      pool: getPool(),
+      config: loadConfig(),
+      signer: {
+        sign: vi.fn(async () => {
+          throw new Denied(rule);
+        }),
+      },
+      chain: {
+        getBlockNumber: vi.fn(async () => 100n),
+        withdrawalBlock: vi.fn(async () => 0n),
+        pocketUsdcBalance: vi.fn(async () => 0n),
+        sendPocketTransaction,
+      },
+      now: () => new Date("2026-10-22T00:00:00Z"),
+    };
+    const input = {
+      planId: PLAN_ID,
+      stepIndex: 0,
+      envelopeRef: "eip155:5042002:0x0000000000000000000000000000000000000001:1",
+      pocket: "0x0000000000000000000000000000000000000002",
+      apiUnavailableSince: new Date("2026-10-20T00:00:00Z"),
+      value: 825_000n,
+    } as const;
+
+    await expect(executeSlowPullbackFallback(input, dependencies)).resolves.toMatchObject({
+      state: "waiting-withdrawal",
+    });
+    expect(sendPocketTransaction).not.toHaveBeenCalled();
+    const phases = await getExecutionTrace(getPool(), PLAN_ID, 0, 0);
+    expect(phases.map((phase) => phase.phase)).toContain(`pullback.slow.${rule}`);
+  });
+
+  it("returns Closed-pocket dust to the vault without an owner manual-return prompt", async () => {
+    let head = 100n;
+    let withdrawalBlock = 0n;
+    let usdc = 0n;
+    const sendPocketTransaction = vi.fn(async (_transaction: string, kind: string) => {
+      if (kind === "pullback.slow.initiate") withdrawalBlock = 200n;
+      if (kind === "pullback.slow.withdraw") {
+        usdc = 5_000n;
+        head = 200n;
+      }
+      if (kind === "pocket-return:usdc") usdc = 0n;
+      return `${kind}-tx`;
+    });
+    const dependencies = {
+      pool: getPool(),
+      config: loadConfig(),
+      signer: { sign: vi.fn(async () => ({ signedTransaction: "0x1234" as const })) },
+      chain: {
+        getBlockNumber: vi.fn(async () => head),
+        withdrawalBlock: vi.fn(async () => withdrawalBlock),
+        pocketUsdcBalance: vi.fn(async () => usdc),
+        sendPocketTransaction,
+      },
+      now: () => new Date("2026-10-22T00:00:00Z"),
+    };
+    const input = {
+      planId: PLAN_ID,
+      stepIndex: 0,
+      envelopeRef: "eip155:5042002:0x0000000000000000000000000000000000000001:1",
+      pocket: "0x0000000000000000000000000000000000000002",
+      apiUnavailableSince: new Date("2026-10-21T23:59:00Z"),
+      value: 8_000n,
+      trigger: "closed-dust" as const,
+    };
+
+    await expect(executeSlowPullbackFallback(input as never, dependencies)).resolves.toMatchObject({
+      state: "waiting-withdrawal",
+    });
+    expect(sendPocketTransaction).toHaveBeenNthCalledWith(1, "0x1234", "pullback.slow.initiate");
+    expect(dependencies.signer.sign).toHaveBeenLastCalledWith(
+      "cz-15",
+      expect.objectContaining({ payload: expect.objectContaining({ value: "8000" }) }),
+    );
+    head = 200n;
+    await expect(executeSlowPullbackFallback(input as never, dependencies)).resolves.toMatchObject({
+      state: "waiting-return",
+    });
+    await expect(executeSlowPullbackFallback(input as never, dependencies)).resolves.toMatchObject({
+      state: "returned-to-vault",
+      amount: "5000",
+    });
+    expect(sendPocketTransaction).toHaveBeenLastCalledWith("0x1234", "pocket-return:usdc");
   });
 });
