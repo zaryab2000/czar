@@ -1,4 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Pool } from "pg";
 import { loadConfig } from "@czar/config";
 import { startPayerRuntime } from "#src/payer/runtime";
 import { writeOffOverdueManualReturn } from "#src/payer/pullback";
@@ -320,16 +321,63 @@ describe("manual return reconciliation", () => {
   });
 
   it("returns manual-return rows only to the objective's owning user", async () => {
-    const firstUserRows = await listManualReturnsForUser(getPool(), TEST_USER_ID);
-    const secondUserRows = await listManualReturnsForUser(getPool(), OTHER_USER_ID);
+    const firstUserPage = await listManualReturnsForUser(getPool(), TEST_USER_ID, {
+      cursor: null,
+      limit: 10,
+    });
+    const secondUserPage = await listManualReturnsForUser(getPool(), OTHER_USER_ID, {
+      cursor: null,
+      limit: 10,
+    });
 
-    expect(firstUserRows).toHaveLength(1);
-    expect(firstUserRows[0]?.envelopeRef).toBe("eip155:5042002:0xvault:1");
-    expect(secondUserRows).toHaveLength(1);
-    expect(secondUserRows[0]?.envelopeRef).toBe("eip155:5042002:0xvault:2");
+    expect(firstUserPage.items).toHaveLength(1);
+    expect(firstUserPage.items[0]?.envelopeRef).toBe("eip155:5042002:0xvault:1");
+    expect(secondUserPage.items).toHaveLength(1);
+    expect(secondUserPage.items[0]?.envelopeRef).toBe("eip155:5042002:0xvault:2");
     await expect(
-      listManualReturnsForUser(getPool(), "usr_01K7ZT9P4N5Q6R7S8T9V0W1X3A"),
-    ).resolves.toEqual([]);
+      listManualReturnsForUser(getPool(), "usr_01K7ZT9P4N5Q6R7S8T9V0W1X3A", {
+        cursor: null,
+        limit: 10,
+      }),
+    ).resolves.toEqual({ items: [], nextCursor: null });
+  });
+
+  it("bounds each manual-return page in SQL and uses a lookahead row", async () => {
+    const rows = [0, 1, 2].map((stepIndex) => ({
+      envelopeRef: `eip155:5042002:${VAULT}:${stepIndex + 1}`,
+      vault: VAULT,
+      pocket: POCKET,
+      returnedAmount: "100",
+      returnTx: `0x${String(stepIndex + 1).repeat(64)}`,
+      state: "manual-return-required" as const,
+      recordedCredit: null,
+      recordedTx: null,
+      manualReturnRequiredAt: `2026-10-26 00:00:0${stepIndex}+00`,
+      planId: `pln_01K7ZT9P4N5Q6R7S8T9V0W1X2${stepIndex}`,
+      stepIndex,
+    }));
+    const query = vi.fn().mockResolvedValue({ rows });
+    const pool = { query } as unknown as Pool;
+
+    const page = await listManualReturnsForUser(pool, TEST_USER_ID, {
+      cursor: null,
+      limit: 2,
+    });
+
+    expect(query).toHaveBeenCalledWith(expect.stringContaining("LIMIT $6"), [
+      TEST_USER_ID,
+      null,
+      null,
+      null,
+      false,
+      3,
+    ]);
+    expect(page.items).toHaveLength(2);
+    expect(page.nextCursor).toEqual({
+      manualReturnRequiredAt: rows[1]?.manualReturnRequiredAt,
+      planId: rows[1]?.planId,
+      stepIndex: 1,
+    });
   });
 
   it("starts write-off only when the configured hold has elapsed", async () => {

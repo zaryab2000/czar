@@ -12,12 +12,13 @@ import { shadowTotalsFixture } from "#src/summary-fixtures";
 
 export default function HomePage() {
   const load = useCallback(async () => {
-    const [me, approvals, receipts] = await Promise.all([
+    const [me, approvals, receipts, manualReturns] = await Promise.all([
       appApi.getMe(),
       appApi.listApprovals(),
       appApi.listReceipts(),
+      appApi.listAllManualReturns(),
     ]);
-    return { me, approvals, receipts };
+    return { me, approvals, receipts, manualReturns };
   }, []);
   const { data, error, loading, refresh } = useAppData(load);
 
@@ -31,6 +32,11 @@ export default function HomePage() {
       {error && <DataError message={error} refresh={refresh} />}
       {error && <p className="notice">Offline — balances may be stale.</p>}
       <BalanceGrid me={data.me} />
+      <ManualReturnNotice
+        count={
+          data.manualReturns.items.filter((item) => item.state === "manual-return-required").length
+        }
+      />
       {data.me.mode === "shadow" && <ShadowSummaryCard />}
       <OwnerControls me={data.me} refresh={refresh} />
       <section className="panel">
@@ -81,6 +87,16 @@ export default function HomePage() {
         <a href="/receipts">View receipts</a>
       </section>
     </div>
+  );
+}
+
+function ManualReturnNotice({ count }: { readonly count: number }) {
+  if (count === 0) return null;
+  return (
+    <section aria-label="Pocket returns" className="notice">
+      <p>{count} pocket returns to record</p>
+      <a href="/envelopes">Review envelopes</a>
+    </section>
   );
 }
 

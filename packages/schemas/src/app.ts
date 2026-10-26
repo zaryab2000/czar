@@ -140,6 +140,17 @@ export interface EnvelopeDetail {
   readonly jobs: readonly JobRecord[];
 }
 
+export interface ManualReturn {
+  readonly envelopeRef: string;
+  readonly vault: `0x${string}`;
+  readonly pocket: `0x${string}`;
+  readonly returnedAmount: string;
+  readonly returnTx: `0x${string}`;
+  readonly state: "manual-return-required" | "recorded" | "expired";
+  readonly recordedCredit?: string;
+  readonly recordedTx?: `0x${string}`;
+}
+
 export interface LedgerReceipt {
   readonly objectiveId: string;
   readonly envelopeRef: string;
