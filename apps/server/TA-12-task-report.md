@@ -26,10 +26,12 @@ watermarks continue advancing to the observed chain head independently of the
 startup target. Planner allowance and dispatcher decisions refresh that live
 watermark from the existing public client's current block number and fail closed
 while a vault cursor trails it, including before a new historical Frozen row is
-discovered. These decision checks do not fetch historical logs; the event
-source remains responsible for bounded backfill. A pending auto-limit lowering
-gates planner allowance and execution only until the lowering transaction is
-acknowledged; pocket-drain retry remains separate.
+discovered. Each decision also catches up the requested vault through that
+fixed block snapshot in bounded `indexer.getLogsBlockRange` pages. The event
+source remains responsible for global history replay and rotating background
+scans. A pending auto-limit lowering gates planner allowance and execution
+only until the lowering transaction is acknowledged; pocket-drain retry remains
+separate.
 
 Frozen event identities and scan cursors are persisted in PostgreSQL. Each
 source scan reads Frozen logs from the last durable cursor and replays pending
@@ -51,8 +53,10 @@ reads the zero limit and skips signing again.
   an advancing head cannot keep startup synchronization from completing. The
   durable live chain-head watermark separately gates allowance and dispatch
   while a vault's cursor lags, even before a missed Frozen event is indexed.
-  Cursor updates are monotonic, and queued work is replayed even if a later
-  historical page fails.
+  Decision-time checks catch the requested vault up to their captured head
+  using bounded pages, preventing other vaults' background scans from starving
+  an active vault. Cursor updates are monotonic, and queued work is replayed
+  even if a later historical page fails.
 - The event row records `auto_limits_lowered_at` separately from
   `processed_at`. A successful lowering is acknowledged before pocket draining;
   a failed drain remains retryable without repeating the lowering or blocking
@@ -153,14 +157,18 @@ later events in the same batch. Processing now catches errors per event, leaves
 failed rows pending, continues through later rows, and propagates one error or
 an `AggregateError` after the batch so the source retries.
 
-Lane 4 review then identified two gaps. First, updating each vault's target to
+Lane 4 review then identified three gaps. First, updating each vault's target to
 the advancing head while scanning only one page per poll could prevent startup
 readiness from resolving. Startup now pins the initial observed block as its
 own catch-up target; live scan watermarks remain independent and continue to
 gate spending. Second, a Frozen/Unfrozen sequence mined between source polls
 could leave no queued row while the vault appeared unfrozen. Both planner
 allowance and dispatcher checks now read the latest block number, advance the
-durable watermark, and fail closed until the scanner reaches it. The existing
+durable watermark, and fail closed until the requested vault reaches it. Third,
+background scans alone could leave an active vault behind while rotating across
+multiple vaults on a continuing chain. Decision-time checks now scan the
+requested vault through the captured head before returning an available gate;
+every log request remains bounded by `indexer.getLogsBlockRange`. The existing
 `PublicClient.getBlockNumber()` is the current-head source already used by the
 event scanner; no new chain interface or public contract was introduced.
 
@@ -204,8 +212,29 @@ Validation after the startup-target and decision-time watermark fixes:
   because no decision-time current-head check existed; it now verifies the
   fresh head advances the persisted target and the spending gate remains
   pending until the event scan and lowering finish.
+- The multi-vault regression runs the rotating source while the mocked chain
+  advances, then verifies the spending decision catches the requested vault up
+  through its captured head even though the background worker rotates scans.
 - `fnm exec --using=22.22.0 pnpm --filter @czar/server exec vitest run test/payer/freeze-events.test.ts test/payer/database-vault-event-source.test.ts test/payer/runtime.test.ts test/main.test.ts test/main-dispatch.test.ts test/migrate.test.ts`
-  — passed: 6 files, 32 tests.
+  — passed: 6 files, 33 tests.
+- `fnm exec --using=22.22.0 pnpm -r typecheck` — passed across 14 workspace
+  projects with typecheck scripts.
+- `fnm exec --using=22.22.0 pnpm lint` — passed.
+- `git diff --check` — passed.
+
+Validation after bounded decision-time catch-up:
+
+- The active-chain regression failed against the prior helper because the
+  requested vault remained behind the advancing watermark. It now runs the
+  two-vault rotating scanner, then verifies the planner/dispatcher gate catches
+  the requested vault up through a pinned decision head using configured-size
+  pages.
+- The dispatcher ordering regression failed before implementation because the
+  pending-scan gate returned before checking current Frozen state. The final
+  order checks Frozen and guardian pause first, then performs the current-head
+  scan immediately before entering a step.
+- `fnm exec --using=22.22.0 pnpm --filter @czar/server exec vitest run test/payer/freeze-events.test.ts test/payer/database-vault-event-source.test.ts test/payer/runtime.test.ts test/payer/dispatcher.test.ts test/main.test.ts test/main-dispatch.test.ts test/migrate.test.ts`
+  — passed: 7 files, 43 tests.
 - `fnm exec --using=22.22.0 pnpm -r typecheck` — passed across 14 workspace
   projects with typecheck scripts.
 - `fnm exec --using=22.22.0 pnpm lint` — passed.

@@ -38,9 +38,12 @@ export async function hasPendingFrozenEventAtCurrentHead(
   client: PublicClient,
   pool: Pool,
   vault: Address,
+  maxBlockRange: bigint,
 ): Promise<boolean> {
   const head = await client.getBlockNumber();
   await advanceFrozenScanTarget(pool, [vault], head);
+  let caughtUp = false;
+  while (!caughtUp) caughtUp = await scanFrozenEvents(client, pool, vault, maxBlockRange, head);
   return hasPendingFrozenEvent(pool, vault);
 }
 

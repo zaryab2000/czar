@@ -167,7 +167,7 @@ describe("durable Frozen event work", () => {
     };
 
     await expect(
-      hasPendingFrozenEventAtCurrentHead(client as never, store.pool, VAULT),
+      hasPendingFrozenEventAtCurrentHead(client as never, store.pool, VAULT, 10n),
     ).resolves.toBe(true);
     expect(store.query).toHaveBeenCalledWith(expect.stringContaining("scan_target_block"), [
       "12",
@@ -181,6 +181,34 @@ describe("durable Frozen event work", () => {
       await markLowered();
     });
     expect(await hasPendingFrozenEvent(store.pool, VAULT)).toBe(false);
+  });
+
+  it("catches the requested vault up to the decision head snapshot", async () => {
+    const store = fakeStore();
+    store.setScan("10", "10");
+    let latestHead = 35n;
+    const pages: { fromBlock: bigint; toBlock: bigint }[] = [];
+    const client = {
+      getBlockNumber: vi.fn(async () => latestHead),
+      getContractEvents: vi.fn(
+        async ({ fromBlock, toBlock }: { fromBlock: bigint; toBlock: bigint }) => {
+          pages.push({ fromBlock, toBlock });
+          latestHead += 10n;
+          return [];
+        },
+      ),
+    };
+
+    await expect(
+      hasPendingFrozenEventAtCurrentHead(client as never, store.pool, VAULT, 10n),
+    ).resolves.toBe(false);
+    expect(client.getBlockNumber).toHaveBeenCalledTimes(1);
+    expect(pages).toEqual([
+      { fromBlock: 11n, toBlock: 20n },
+      { fromBlock: 21n, toBlock: 30n },
+      { fromBlock: 31n, toBlock: 35n },
+    ]);
+    expect(store.cursor()).toBe("35");
   });
 
   it("retries an unfinished lowering after Unfrozen without requiring frozen state", async () => {

@@ -236,7 +236,12 @@ export async function createServerMain(options: ServerMainOptions): Promise<Serv
     now: options.clock.now,
     isFrozen: (vault) => readVaultPauseState(options, vault),
     hasPendingFrozenEvent: (vault) =>
-      hasPendingFrozenEventAtCurrentHead(options.publicClient, options.pool, vault),
+      hasPendingFrozenEventAtCurrentHead(
+        options.publicClient,
+        options.pool,
+        vault,
+        BigInt(Number(options.config.get("indexer.getLogsBlockRange"))),
+      ),
     isGuardianPaused: (vault) => readGuardianPauseState(options, vault),
     runStep: (input) =>
       runDispatchedStep(options, signerClient, payerDependencies, selection, input),
@@ -1409,6 +1414,7 @@ function createPlannerPorts(
               options.publicClient,
               options.pool,
               vault as Address,
+              BigInt(Number(options.config.get("indexer.getLogsBlockRange"))),
             )
           )
             return "0";

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { loadConfig } from "@czar/config";
 import type { Address } from "viem";
 import { createDatabaseVaultEventSource } from "#src/payer/database-vault-event-source";
+import { hasPendingFrozenEventAtCurrentHead } from "#src/payer/freeze-events";
 
 const VAULT_ONE = "0x0000000000000000000000000000000000000001" as const;
 const VAULT_TWO = "0x0000000000000000000000000000000000000002" as const;
@@ -288,6 +289,11 @@ describe("database vault event source", () => {
     expect(ready).toBe(true);
     expect(pageRequests).toHaveLength(6);
     expect(pageRequests.at(-1)?.toBlock).toBe(20n);
+    await expect(
+      hasPendingFrozenEventAtCurrentHead(client as never, store.pool, VAULT_ONE, 10n),
+    ).resolves.toBe(false);
+    expect(pageRequests.slice(6).at(-1)?.toBlock).toBe(80n);
+    expect(store.targets().get(VAULT_ONE)).toBe("80");
     subscription();
   });
 });
@@ -310,6 +316,22 @@ function fakePool(vaults: () => readonly Address[]) {
             ? []
             : [{ last_scanned_block: cursors.get(String(values[0])) }],
       };
+    if (statement.includes("AS pending")) {
+      const vault = String(values[0]);
+      const cursor = cursors.get(vault);
+      return {
+        rows: [
+          {
+            pending:
+              cursor === undefined ||
+              BigInt(cursor) < BigInt(targets.get(vault) ?? "0") ||
+              [...events.entries()].some(
+                ([key, event]) => key.startsWith(`${vault}:`) && !event.processed && !event.lowered,
+              ),
+          },
+        ],
+      };
+    }
     if (statement.includes("INSERT INTO payer_freeze_autolimit_events")) {
       const [vault, block, index, tx] = values as [string, string, number, string];
       const key = `${vault}:${block}:${index}`;

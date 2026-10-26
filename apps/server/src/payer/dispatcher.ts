@@ -179,9 +179,9 @@ async function runSteps(
     )
       return;
     dispatchLease.assertHeld();
-    if (await dependencies.hasPendingFrozenEvent(envelope.vault)) return;
     if (await dependencies.isFrozen(envelope.vault)) return;
     if (await dependencies.isGuardianPaused(envelope.vault)) return;
+    if (await dependencies.hasPendingFrozenEvent(envelope.vault)) return;
     const trace = await getExecutionTrace(dependencies.pool, envelope.planId, step.stepIndex, 0);
     const outcome = await dependencies.runStep({
       ...envelope,
