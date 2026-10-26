@@ -215,7 +215,7 @@ describe("Postgres signer projection", () => {
     await expect(projection.envelope(vault, 4n)).rejects.toThrow("missing stored plan");
   });
 
-  it("never claims Gateway balances when the local projection lacks them", async () => {
+  it("keeps pocket returns available without an API row while reading live wallet balances", async () => {
     const projection = createPostgresProjection({
       config: loadConfig(),
       database: queryDatabase(() => []),
@@ -223,12 +223,143 @@ describe("Postgres signer projection", () => {
       factory,
     });
 
-    await expect(projection.pocketBalances(payee)).rejects.toThrow(
-      "Gateway balance projection unavailable",
-    );
+    await expect(projection.pocketBalances(payee)).resolves.toMatchObject({
+      gatewayAvailable: 0n,
+      gatewayApiFresh: false,
+      gatewayWithdrawing: 0n,
+      withdrawalBlock: 0n,
+      usdc: 0n,
+      native: 100n,
+    });
   });
 
-  it("treats an absent slow-withdrawal projection as open", async () => {
+  it("marks an old API figure stale while reading chain balances and withdrawalBlock live", async () => {
+    const readFunctions: string[] = [];
+    const projection = createPostgresProjection({
+      config: loadConfig(),
+      database: queryDatabase((sql) =>
+        sql.includes("FROM pocket_balances")
+          ? [{ gateway_available_atomic: "5000", api_observed_at: "2026-10-24T00:00:00.000Z" }]
+          : [],
+      ),
+      chain: {
+        async getBlock() {
+          return { timestamp: 1_800_000_000n };
+        },
+        async getBlockNumber() {
+          return 12n;
+        },
+        async getBalance() {
+          return 100n;
+        },
+        async readContract({ functionName }: { functionName: string }) {
+          readFunctions.push(functionName);
+          if (functionName === "withdrawingBalance") return 9n;
+          if (functionName === "withdrawalBlock") return 777n;
+          if (functionName === "balanceOf") return 11n;
+          return false;
+        },
+      } as never,
+      factory,
+    });
+
+    await expect(projection.pocketBalances(payee)).resolves.toMatchObject({
+      gatewayApi: 5000n,
+      gatewayAvailable: 5000n,
+      gatewayApiFresh: false,
+      gatewayApiObservedAt: Date.parse("2026-10-24T00:00:00.000Z"),
+      gatewayWithdrawing: 9n,
+      withdrawalBlock: 777n,
+      currentBlock: 12n,
+      usdc: 11n,
+      native: 100n,
+    });
+    expect(readFunctions).toEqual(["withdrawingBalance", "withdrawalBlock", "balanceOf"]);
+  });
+
+  it("checks K4 gateway-nano audit rows since the observation safety boundary", async () => {
+    const queries: { query: string; values: unknown[] | undefined }[] = [];
+    const projection = createPostgresProjection({
+      config: loadConfig(),
+      database: {
+        async query(query, values) {
+          queries.push({ query, values });
+          return { rows: [{}] };
+        },
+      },
+      chain: fakeChain(),
+      factory,
+    });
+    const observedAt = Date.parse("2026-10-25T12:00:00.000Z");
+
+    await expect(projection.pocketSpendAfterObservation(payee, observedAt)).resolves.toBe(true);
+
+    expect(queries).toHaveLength(1);
+    expect(queries[0]?.query).toContain("action='signer:gateway-nano'");
+    expect(queries[0]?.query).toContain("outcome='signed'");
+    expect(queries[0]?.query).toContain("object_ids @>");
+    expect(JSON.parse(String(queries[0]?.values?.[0]))).toEqual([{ keyRef: `K4:${payee}` }]);
+    expect(queries[0]?.values?.[1]).toEqual(new Date(observedAt - 120_000).toISOString());
+  });
+
+  it("counts received, batched, confirmed and completed nanopayments only", async () => {
+    const statements: string[] = [];
+    const projection = createPostgresProjection({
+      config: loadConfig(),
+      database: {
+        async query(query) {
+          statements.push(query);
+          return { rows: [{ total: "12" }] };
+        },
+      },
+      chain: fakeChain(),
+      factory,
+    });
+
+    await expect(projection.nanoSpent(payee, vault)).resolves.toEqual({ step: 12n, pocket: 12n });
+    expect(statements).toHaveLength(2);
+    expect(
+      statements.every((query) => query.includes("'received','batched','confirmed','completed'")),
+    ).toBe(true);
+    expect(statements.every((query) => !query.includes("status='completed'"))).toBe(true);
+  });
+
+  it("allows slow withdrawal only for a fresh long outage or Closed-pocket dust", async () => {
+    let apiObservedAt = new Date().toISOString();
+    let outage = true;
+    const database = queryDatabase((query) => {
+      if (query.includes("FROM pocket_balances")) {
+        return [
+          {
+            gateway_available_atomic: "10000",
+            api_observed_at: apiObservedAt,
+            api_consecutive_failures: 0,
+          },
+        ];
+      }
+      if (query.includes("payer_pullback_gateway_failures")) return outage ? [{}] : [];
+      if (query.includes("FROM pockets")) {
+        return [
+          { vault, mirror: { envelopeId: 1, state: "Closed", funded: "1", pendingPullback: "0" } },
+        ];
+      }
+      return [];
+    });
+    const projection = createPostgresProjection({
+      config: loadConfig(),
+      database,
+      chain: fakeChain(),
+      factory,
+    });
+
+    await expect(projection.slowWithdrawTrigger(payee)).resolves.toBe("api-down");
+    outage = false;
+    await expect(projection.slowWithdrawTrigger(payee)).resolves.toBe("closed-dust");
+    apiObservedAt = "2020-01-01T00:00:00.000Z";
+    await expect(projection.slowWithdrawTrigger(payee)).resolves.toBeNull();
+  });
+
+  it("derives slow-withdrawal state from the current on-chain balance", async () => {
     const database = queryDatabase((sql) =>
       sql.includes("SELECT vault, mirror FROM pockets")
         ? [{ vault, mirror: { envelopeId: 7, state: "Funded", funded: "100" } }]
@@ -241,7 +372,7 @@ describe("Postgres signer projection", () => {
       factory,
     });
 
-    await expect(projection.pocket(payee)).resolves.toMatchObject({ slowWithdrawalOpen: true });
+    await expect(projection.pocket(payee)).resolves.toMatchObject({ slowWithdrawalOpen: false });
   });
 });
 
@@ -264,7 +395,8 @@ function fakeChain() {
     async getBalance() {
       return 100n;
     },
-    async readContract() {
+    async readContract({ functionName }: { functionName: string }) {
+      if (["withdrawingBalance", "withdrawalBlock", "balanceOf"].includes(functionName)) return 0n;
       return false;
     },
   } as never;

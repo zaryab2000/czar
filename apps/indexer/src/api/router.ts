@@ -18,8 +18,24 @@ type Validate = (value: unknown) => boolean;
 const ADDRESS = /^0x[0-9a-f]{40}$/;
 const HASH32 = /^0x[0-9a-f]{64}$/;
 const UINT = /^(0|[1-9][0-9]*)$/;
+const PUBLIC_BALANCE_FIELDS = [
+  "pocket",
+  "vault",
+  "gatewayAvailableAtomic",
+  "gatewayPendingBatchAtomic",
+  "gatewayWithdrawingAtomic",
+  "withdrawalBlock",
+  "apiObservedAt",
+  "chainObservedBlock",
+  "apiConsecutiveFailures",
+  "apiLastError",
+] as const;
 
-export function createIndexerApi(store: QueryStore, config: Config = loadConfig()): Hono {
+export function createIndexerApi(
+  store: QueryStore,
+  config: Config = loadConfig(),
+  currentBlock: () => Promise<bigint> = () => store.latestIndexedBlock(),
+): Hono {
   const app = new Hono();
   const clock = { now: () => Date.now() };
 
@@ -98,6 +114,47 @@ export function createIndexerApi(store: QueryStore, config: Config = loadConfig(
     return idPage(context, config, clock, "pullbacks-to-cancel", (cursor, limit) =>
       store.pullbacksToCancel(block, cursor, limit),
     );
+  });
+
+  app.get("/pocket-balances/:pocket", async (context) => {
+    const pocket = context.req.param("pocket").toLowerCase();
+    if (!ADDRESS.test(pocket)) return problem(context, 400, "validation");
+    const row = await store.pocketBalance(pocket);
+    if (!row) return problem(context, 404, "not-found");
+    const head = await currentBlock();
+    const apiObservedAt = typeof row["apiObservedAt"] === "string" ? row["apiObservedAt"] : null;
+    const chainObservedBlock =
+      typeof row["chainObservedBlock"] === "bigint" ? row["chainObservedBlock"] : null;
+    const apiAgeSeconds =
+      apiObservedAt === null
+        ? null
+        : Math.max(0, Math.floor((clock.now() - Date.parse(apiObservedAt)) / 1000));
+    const chainAgeBlocks =
+      chainObservedBlock === null
+        ? null
+        : (head > chainObservedBlock ? head - chainObservedBlock : 0n).toString();
+    const publicRow = publicBalanceRow(row);
+    return context.json({
+      ...serializeBalanceRow(publicRow),
+      apiAgeSeconds,
+      chainAgeBlocks,
+      slowWithdrawalOpen: BigInt(String(row["gatewayWithdrawingAtomic"] ?? "0")) > 0n,
+    });
+  });
+
+  app.get("/pockets/funded", async (context) => {
+    const vault = context.req.query("vault")?.toLowerCase();
+    if (!vault || !ADDRESS.test(vault)) return problem(context, 400, "validation");
+    return context.json({ items: jsonSafe(await store.fundedPocketsForVault(vault)) });
+  });
+
+  app.get("/pockets/closed-with-balance", async (context) => {
+    const rows = await store.closedPocketsWithBalance();
+    const items = rows.map((row) => ({
+      ...row,
+      balance: publicBalanceRow(row["balance"] as Record<string, unknown>),
+    }));
+    return context.json({ items: jsonSafe(items) });
   });
 
   app.get("/jobs/to-sync", async (context) =>
@@ -259,6 +316,28 @@ function problem(context: Context, status: 400 | 404, czarCode: string): Respons
 
 function assertValid(validate: Validate, value: unknown, label: string): void {
   if (!validate(value)) throw new Error(`Indexed ${label} failed @czar/schemas validation`);
+}
+
+function serializeBalanceRow(row: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(row).map(([key, value]) => [
+      key,
+      typeof value === "bigint" ? value.toString() : value,
+    ]),
+  );
+}
+
+function publicBalanceRow(row: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(PUBLIC_BALANCE_FIELDS.map((key) => [key, row[key]]));
+}
+
+function jsonSafe(value: unknown): unknown {
+  if (typeof value === "bigint") return value.toString();
+  if (Array.isArray(value)) return value.map(jsonSafe);
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, jsonSafe(item)]));
+  }
+  return value;
 }
 
 function assertEnvelopeResponse(found: {

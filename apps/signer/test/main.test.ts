@@ -70,10 +70,14 @@ function emptyProjection(): Projection {
     pocketBalances: async () => ({
       gatewayApi: 0n,
       gatewayAvailable: 0n,
+      gatewayApiObservedAt: null,
       gatewayWithdrawing: 0n,
+      withdrawalBlock: 0n,
+      currentBlock: 0n,
       usdc: 0n,
       native: 0n,
       pendingPullback: false,
+      gatewayApiFresh: true,
     }),
     nanoSpent: async () => ({ step: 0n, pocket: 0n }),
     settledPayment: async () => false,
@@ -84,6 +88,7 @@ function emptyProjection(): Projection {
     latestEvidenceRoot: async () => `0x${"00".repeat(32)}` as Hash32,
     evidenceBatchExists: async () => false,
     nativeBalance: async () => 0n,
-    slowWithdrawAllowed: async () => false,
+    slowWithdrawTrigger: async () => null,
+    pocketSpendAfterObservation: async () => false,
   };
 }

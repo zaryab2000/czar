@@ -126,7 +126,8 @@ export interface State {
   latestRoot: Hash32;
   batches: Set<string>;
   native: Map<string, bigint>;
-  slowWithdrawAllowed: boolean;
+  slowWithdrawTrigger: "api-down" | "closed-dust" | null;
+  pocketSpendAfterObservation: boolean;
 }
 
 export function defaultState(pocket: Address): State {
@@ -208,15 +209,20 @@ export function defaultState(pocket: Address): State {
       envelopeId: 1n,
       state: "Funded",
       funded: 5_000n,
+      pendingPullback: 0n,
       slowWithdrawalOpen: false,
     },
     balances: {
       gatewayApi: 0n,
       gatewayAvailable: 0n,
+      gatewayApiObservedAt: NOW * 1000,
       gatewayWithdrawing: 0n,
+      withdrawalBlock: 0n,
+      currentBlock: 67_000_000n,
       usdc: 0n,
       native: 0n,
       pendingPullback: false,
+      gatewayApiFresh: true,
     },
     nanoSpent: { step: 0n, pocket: 0n },
     settled: new Set([h("3")]),
@@ -234,7 +240,8 @@ export function defaultState(pocket: Address): State {
     latestRoot: h("0"),
     batches: new Set([h("7")]),
     native: new Map(),
-    slowWithdrawAllowed: false,
+    slowWithdrawTrigger: null,
+    pocketSpendAfterObservation: false,
   };
 }
 
@@ -270,7 +277,8 @@ export function fakeProjection(state: State): Projection {
     latestEvidenceRoot: async () => state.latestRoot,
     evidenceBatchExists: async (root) => state.batches.has(root),
     nativeBalance: async (address) => state.native.get(address.toLowerCase()) ?? 0n,
-    slowWithdrawAllowed: async () => state.slowWithdrawAllowed,
+    slowWithdrawTrigger: async () => state.slowWithdrawTrigger,
+    pocketSpendAfterObservation: async () => state.pocketSpendAfterObservation,
   };
 }
 
