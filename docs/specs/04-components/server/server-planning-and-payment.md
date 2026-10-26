@@ -239,7 +239,7 @@ Pure function inside the planner worker and inside CZ-15 (re-evaluated right bef
 
 Decision order (spec 01 §8.7 with D37/D38):
 
-1. Supplier is a specialist agent, or the step needs acceptance before payment, or `unitAmount ≥ routing.jobThresholdAtomic` (5,000,000) → `erc8183-job`.
+1. Supplier is a specialist agent, or the step needs acceptance before payment, or `unitAmount ≥ routing.jobThresholdAtomic` (5,000,000) → `erc8183-job`. **SCR-143:** while `routing.jobEnabled` is `false` (default) such a step is not routed to a job and ends `unsupported-offer`; the default becomes `true` only by a later SCR after the T-055 integration and the CZ-15 job-result builder merge.
 2. Offer set from the live 402: `hasExact` (scheme `exact`, plan network, `asset == USDC`), `hasGateway` (`GatewayWalletBatched` offer), `hasUpto` (refused in Phases 1–2), `hasBatchSettlement`/SIWX-only (refused). **SCR-141:** while `routing.gatewayEnabled` is `false` (default), `hasGateway = false` for every offer set, so no step is routed `gateway-nano` and a Gateway-only offer ends `unsupported-offer`; the default becomes `true` only by a later SCR after the SCR-127 pocket safety chain (TA-20, TA-21) merges.
 3. Cost model (03 `czar-vault.md` §13, parameters below):
    - `cVd(n) = (G_reserve + ⌈n / 32⌉ × G_settleBase + n × G_settleIdx + G_finalize) × gasPrice / n` (RV-039: settle calls are chunked by `FINALIZE_CHUNK` 32, and one `finalize` is counted)
@@ -294,6 +294,8 @@ Worked defaults at 20 Gwei (RV-039): `pocketThreshold(1) = 39,600`, `(10) = 5,04
 ### 5. Internal design
 
 #### 5.1 Step state machine (all paths)
+
+- **Invariant (SCR-143):** a paid step (`x402-exact`, `gateway-nano`, `erc8183-job`) becomes `done` only in the same database transaction that persists its schema-valid `StepResult`; unpaid steps follow their D82 hand-off states.
 
 ```mermaid
 stateDiagram-v2
@@ -404,7 +406,7 @@ Crash recovery:
    - **Cancel raced by a submit (N7).** If `cancelJob` reverts `JobNotCancellable`, re-read the escrow through the adapter: `Submitted` or `Completed` with the vault job `Opened` → ask CZ-16 to `reject` it (step 1a) and call `syncJob`, which releases the job (H1); any other state → `syncJob`. Then continue with the alternate.
 3. **Fund.** `fundJob(jobKey, expectedBudget)` with the amount from the latest `BudgetSet` (M1-b); the vault reads budget and fees in the same tx (JOB-1; fees must be 0 on Circle's instance, A4-07). `BudgetChanged` → re-read the budget and decide again (fund at the new amount if ≤ `reservedCap`, else cancel as in step 2).
 4. **Submit.** `JobSubmitted(deliverable)` → CZ-16 evaluates (its own service, K7); CZ-15 only waits.
-5. **Result.** `JobCompleted` → `syncJob` → `spent`; deliverable body → §5.6. `JobRejected`/`Refunded` → `syncJob` → un-spend; step `refunded` (user wording "Money back"). Expiry → `claimJobRefund(jobKey)` only for a job still `Funded` (nothing submitted) after `expiredAt`, or `Submitted` with no decision pending (M4); never while CZ-16 has a decision pending (`claimRefund` is open to anyone at `expiredAt` on Circle's instance, R4, so CZ-16 decides by `decisionCutoff`).
+5. **Result.** `JobCompleted` → `syncJob` → `spent`; deliverable body → §5.6. **SCR-143 order:** read CZ-16 `acceptance_decisions` for `jobKey` (`decision = complete`, state `Confirmed`/`Observed`, `deliverableHash` set; otherwise stay `pending`, never `done`); load the body through `payer_job_deliverables(jobKey, deliverableHash).body_ref` and check `keccak256(body) = deliverableHash` (mismatch or missing → `pending`, alert `job-result-missing`); run P-01 and P-02 (not the CZ-16 checks; the report is the evaluator's `reportHash`); persist `step.result`, the execution phase and `done` in one transaction. `JobRejected`/`Refunded` → `syncJob` → un-spend; step `refunded` (user wording "Money back"). Expiry → `claimJobRefund(jobKey)` only for a job still `Funded` (nothing submitted) after `expiredAt`, or `Submitted` with no decision pending (M4); never while CZ-16 has a decision pending (`claimRefund` is open to anyone at `expiredAt` on Circle's instance, R4, so CZ-16 decides by `decisionCutoff`).
 
 Crash recovery: every step re-reads `getJob` through the adapter (`syncJob`) and resumes; `openJob` without a recorded `JobOpened` within `payer.txWaitSeconds` is re-sent (a duplicate job stays unfunded and expires harmlessly, releasing its `reservedCap` on `syncJob`).
 
@@ -516,3 +518,4 @@ On-chain costs per 03 §13; one executor handles ≤ 50 steps/min; p95 vault-dir
 | 2026-10-25 | SCR-132 | CZ-12 opening watcher, late `EnvelopeOpened` match, `planning → received` reclaim, all-quarantined → `failed`, one trigger per plan, approval events; CZ-15 loops, completion, model gate, composition order (amends SCR-126 §2). |
 | 2026-10-25 | SCR-127, SCR-133 | CZ-15 pullback value from CZ-19 `pocketBalance` with a freshness rule, write-off at or below the fee, late-funds recovery pass, slow-path value; manual-return reconciliation and write-off hold. |
 | 2026-10-25 | SCR-141 | CZ-14 `V` computed from the plan; `routing.gatewayEnabled` (default false) turns Gateway routing off in Track A; CZ-15 slow-path amount and denial handling. |
+| 2026-10-26 | SCR-143 | CZ-14 `routing.jobEnabled` (default false); CZ-15 paid-step `done` invariant and job result order from `acceptance_decisions`. |
