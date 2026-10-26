@@ -154,9 +154,46 @@ designated reviewer to inspect the current PR head; no fourth bot run is availab
 ## Deferred validation — D94
 
 See [`reports/ta09-deferred-validation.md`](../../reports/ta09-deferred-validation.md).
-No Arc Anvil acceptance, process-level paid-flow run, crash/restart matrix, live
-Gateway, hosted model, testnet, funding, or deployment scenario was run in this
-development phase. These are not reported as passing.
+No successful Arc Anvil acceptance, process-level paid-flow run, crash/restart
+matrix, live Gateway, hosted model, testnet, funding, or deployment scenario was
+completed in this development phase. The full server suite attempted the receipt
+Arc fixture, but deployment setup failed before acceptance assertions; it is not
+reported as passing.
+
+## Revalidation after PR #87 merge
+
+Merged fresh `origin/build-v1` at `ca972d9` into this branch without rewriting
+history. The revalidation started from merge head `be664a3` and includes the
+subsequent test-fixture update.
+The server suite exposed three fixtures that returned non-schema `StepResult`
+objects after the new paid-completion validation. Updated those fixtures to return
+valid results; the focused rerun passes.
+
+- `fnm exec --using=22.22.0 pnpm --filter @czar/server test` — **exit 1**;
+  56 files: 53 passed, 3 failed; 303 tests passed, 2 skipped, 2 failed. The
+  remaining failures are environment/setup-bound and did not implicate the guard
+  or x402 completion changes:
+  - `test/app-reads.test.ts`: `/v1/me` got 503 because its configured RPC is
+    `127.0.0.1:8549` and no RPC listener is running.
+  - `test/job-routes.test.ts`: its child startup exits before route assertions;
+    the fixture supplies an unreachable RPC (`127.0.0.1:1`) and omits required
+    `CZAR_INDEXER_URL`.
+  - `test/evidence/receipt-arc.test.ts`: Arc deployment setup failed in
+    `script/deploy.sh` before the two acceptance tests (both skipped) could run.
+    The test suppresses the nested deploy output, so the underlying deploy error
+    was not available. This remains deferred Arc acceptance, not a passing check.
+- `fnm exec --using=22.22.0 pnpm --filter @czar/server exec vitest run
+  test/main-dispatch.test.ts test/payer/vault-direct.test.ts
+  test/payer/dispatcher.test.ts test/payer/acceptance.test.ts` — **4 files,
+  19 tests passed**.
+- `fnm exec --using=22.22.0 pnpm -r typecheck` — **passed**, all 14 projects
+  with typecheck scripts.
+- `fnm exec --using=22.22.0 pnpm lint` — **passed**, no warnings; formatting
+  clean across 432 files.
+- `git diff --check` — **passed**.
+
+No fourth automated review was requested. Zaryab is manually reviewing the
+changed head.
 
 ## SCR-143 guard follow-up
 

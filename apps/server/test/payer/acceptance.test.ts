@@ -104,7 +104,7 @@ describe("payer acceptance boundaries", () => {
       })),
       now: () => fakeNow,
       objects: { put: async () => "body-ref", get: async () => new Uint8Array() },
-      boundary: async () => ({ accepted: true }),
+      boundary: async () => validStepResult(),
       recordReceipt: async () => true,
     } as never);
 
@@ -157,7 +157,7 @@ describe("payer acceptance boundaries", () => {
       })),
       now: () => new Date("2026-10-21T00:00:00Z"),
       objects: { put: async () => "body-ref", get: async () => new Uint8Array() },
-      boundary: async () => ({ accepted: true }),
+      boundary: async () => validStepResult(),
       recordReceipt: async () => true,
     } as never);
 
@@ -232,7 +232,7 @@ describe("payer acceptance boundaries", () => {
         fakeNow = new Date(fakeNow.getTime() + milliseconds);
       },
       objects: { put: async () => "body-ref", get: async () => new Uint8Array() },
-      boundary: async ({ response }) => ({ body: new TextDecoder().decode(response.body) }),
+      boundary: async () => validStepResult(),
       recordReceipt: async () => true,
     });
 
@@ -318,5 +318,17 @@ function paidInput(payeeRoot: `0x${string}`): VaultDirectInput {
     },
     userId: TEST_USER_ID,
     deviceId: "dev_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
+  };
+}
+
+function validStepResult() {
+  return {
+    schemaVersion: "1.0" as const,
+    stepIndex: 0,
+    status: "delivered" as const,
+    source: { origin: "http://127.0.0.1:4021", payTo: PAYEE, paymentRefHash: HASH },
+    fields: [],
+    flags: [],
+    bodyCommit: HASH,
   };
 }
