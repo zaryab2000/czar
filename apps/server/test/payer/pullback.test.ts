@@ -408,13 +408,29 @@ describe("pullback values", () => {
   });
 
   it("persists the effective attempt when a closed-pocket transfer fails", async () => {
-    const prior = await getPool().query<{ attempt: number }>(
-      `INSERT INTO step_executions
-         (plan_id,step_index,attempt,phase,payload)
-       VALUES ($1,0,0,'pullback.confirmed','{}') RETURNING attempt`,
-      [PLAN_ID],
+    const oldUnavailableSince = new Date("2026-10-20T00:00:00Z");
+    const now = new Date("2026-10-22T00:00:00Z");
+    await getPool().query(
+      `INSERT INTO payer_pullback_gateway_failures
+         (plan_id,step_index,envelope_ref,pocket,value,unavailable_since,state,
+          pullback_id,vault_address,gateway_minter,attempt,closed_pocket)
+       VALUES ($1,0,$2,$3,90000,$4,'returned-to-vault',9,$5,$6,1,true)`,
+      [
+        PLAN_ID,
+        "eip155:5042002:0x0000000000000000000000000000000000000001:1",
+        "0x0000000000000000000000000000000000000002",
+        oldUnavailableSince,
+        "0x0000000000000000000000000000000000000001",
+        "0x0000000000000000000000000000000000000004",
+      ],
     );
-    expect(prior.rows[0]?.attempt).toBe(0);
+    await appendExecutionPhase(getPool(), {
+      planId: PLAN_ID,
+      stepIndex: 0,
+      attempt: 1,
+      phase: "pullback.slow.returned",
+      payload: { amount: "90000", txHash: "prior-return-tx" },
+    });
     const input = {
       planId: PLAN_ID,
       stepIndex: 0,
@@ -447,7 +463,7 @@ describe("pullback values", () => {
         maxPullbackFee: async () => 20_000n,
         writeOffPocket: async () => "write-off-tx",
         findPendingPullback: async () => undefined,
-        requestPullback: async () => ({
+        requestPullback: vi.fn(async () => ({
           pullbackId: 10n,
           value: 90_000n,
           maxFee: 10_000n,
@@ -455,7 +471,7 @@ describe("pullback values", () => {
           salt: `0x${"bc".repeat(32)}` as const,
           transferSpecHash: `0x${"de".repeat(32)}` as const,
           state: "Pending" as const,
-        }),
+        })),
         isTransferSpecHashUsed: async () => false,
         mintAttestation: async () => "mint-tx",
         confirmPullback: async () => "confirm-tx",
@@ -468,17 +484,118 @@ describe("pullback values", () => {
         throw new Error("closed-pocket Gateway unavailable");
       }),
       gatewayTransferUrl: "http://127.0.0.1:4999/v1/transfer",
-      now: () => new Date("2026-10-22T00:00:00Z"),
+      now: () => now,
     };
 
     await expect(executePullback(input, dependencies)).rejects.toThrow(
       "closed-pocket Gateway unavailable",
     );
-    const recorded = await getPool().query<{ attempt: number; closed_pocket: boolean }>(
-      "SELECT attempt,closed_pocket FROM payer_pullback_gateway_failures WHERE plan_id=$1",
+    const recorded = await getPool().query<{
+      attempt: number;
+      closed_pocket: boolean;
+      state: string;
+      unavailable_since: Date;
+      pullback_id: string;
+    }>(
+      `SELECT attempt,closed_pocket,state,unavailable_since,pullback_id
+       FROM payer_pullback_gateway_failures WHERE plan_id=$1`,
       [PLAN_ID],
     );
-    expect(recorded.rows).toEqual([{ attempt: 1, closed_pocket: true }]);
+    expect(recorded.rows).toEqual([
+      {
+        attempt: 2,
+        closed_pocket: true,
+        state: "pending",
+        unavailable_since: now,
+        pullback_id: "10",
+      },
+    ]);
+    const priorReturn = await getPool().query(
+      `SELECT phase,payload FROM step_executions
+       WHERE plan_id=$1 AND step_index=0 AND attempt=1
+       ORDER BY execution_id DESC LIMIT 1`,
+      [PLAN_ID],
+    );
+    expect(priorReturn.rows[0]?.phase).toBe("pullback.slow.returned");
+    expect(priorReturn.rows[0]?.payload).toMatchObject({ txHash: "prior-return-tx" });
+  });
+
+  it("starts a new outage cycle after a prior closed-pocket return", async () => {
+    const oldUnavailableSince = new Date("2026-10-20T00:00:00Z");
+    const now = new Date("2026-10-22T00:00:00Z");
+    await getPool().query(
+      `INSERT INTO payer_pullback_gateway_failures
+         (plan_id,step_index,envelope_ref,pocket,value,unavailable_since,state,
+          pullback_id,vault_address,gateway_minter,attempt,closed_pocket)
+       VALUES ($1,0,$2,$3,90000,$4,'returned-to-vault',9,$5,$6,1,true)`,
+      [
+        PLAN_ID,
+        "eip155:5042002:0x0000000000000000000000000000000000000001:1",
+        "0x0000000000000000000000000000000000000002",
+        oldUnavailableSince,
+        "0x0000000000000000000000000000000000000001",
+        "0x0000000000000000000000000000000000000004",
+      ],
+    );
+    await appendExecutionPhase(getPool(), {
+      planId: PLAN_ID,
+      stepIndex: 0,
+      attempt: 1,
+      phase: "pullback.slow.returned",
+      payload: { amount: "90000", txHash: "prior-return-tx" },
+    });
+    const input = {
+      planId: PLAN_ID,
+      stepIndex: 0,
+      envelopeRef: "eip155:5042002:0x0000000000000000000000000000000000000001:1",
+      vault: "0x0000000000000000000000000000000000000001" as const,
+      pocket: "0x0000000000000000000000000000000000000002" as const,
+      gatewayWallet: "0x0000000000000000000000000000000000000003" as const,
+      gatewayMinter: "0x0000000000000000000000000000000000000004" as const,
+      usdc: "0x0000000000000000000000000000000000000005" as const,
+      gatewayDomain: 26,
+      outstanding: 0n,
+      pending: 0n,
+      availableBalance: 100_000n,
+      availableBalanceObservedAt: now,
+      apiConsecutiveFailures: 1,
+      head: 6_400n,
+      closedPocket: true,
+    };
+
+    await expect(
+      executePullback(input, {
+        pool: getPool(),
+        config: loadConfig(),
+        signer: { sign: vi.fn() },
+        chain: {},
+        safeFetch: vi.fn(),
+        gatewayTransferUrl: "http://127.0.0.1:4999/v1/transfer",
+        now: () => now,
+      } as never),
+    ).resolves.toMatchObject({ state: "waiting", reason: "gateway-balance-stale" });
+    const recorded = await getPool().query(
+      `SELECT state,unavailable_since,attempt,closed_pocket,pullback_id
+       FROM payer_pullback_gateway_failures WHERE plan_id=$1`,
+      [PLAN_ID],
+    );
+    expect(recorded.rows).toEqual([
+      {
+        state: "pending",
+        unavailable_since: now,
+        attempt: 2,
+        closed_pocket: true,
+        pullback_id: null,
+      },
+    ]);
+    const priorReturn = await getPool().query(
+      `SELECT phase,payload FROM step_executions
+       WHERE plan_id=$1 AND step_index=0 AND attempt=1
+       ORDER BY execution_id DESC LIMIT 1`,
+      [PLAN_ID],
+    );
+    expect(priorReturn.rows[0]?.phase).toBe("pullback.slow.returned");
+    expect(priorReturn.rows[0]?.payload).toMatchObject({ txHash: "prior-return-tx" });
   });
 
   it("keeps the outage row while a slow withdrawal is active", async () => {

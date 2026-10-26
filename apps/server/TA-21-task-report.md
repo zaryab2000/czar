@@ -14,6 +14,7 @@ Implemented the Lane 2 halt-drain and late-pocket recovery composition for the l
 - Slow-withdrawal continuation now bypasses the balance gate once its durable transaction trace shows initiation, withdrawal, or return in progress.
 - Closed-pocket pullbacks and slow-return cycles use a new durable attempt only after the prior cycle is confirmed/returned; retries resume the existing attempt.
 - Gateway failures during closed-pocket recovery persist the selected attempt and closed-pocket status. The outage scheduler resumes that attempt through pocket-return, then records `returned-to-vault` instead of requesting owner manual-return.
+- A new closed-pocket outage after a prior return reopens the durable failure row with the new attempt and outage time; the previous return transaction remains in `step_executions`.
 - A healthy Gateway observation cannot delete a pending outage row while a slow withdrawal or return transaction is recorded; the scheduler retains the row until recovery completes.
 - The funded-pocket parser accepts `Registered` and `DelegateReady`; halt draining selects only `Funded` and `Draining` pockets.
 
@@ -39,7 +40,7 @@ Implemented the Lane 2 halt-drain and late-pocket recovery composition for the l
 
 ## Focused checks
 
-- `fnm exec --using=22.22.0 pnpm --filter @czar/server exec vitest run test/payer/pullback-scheduler.test.ts test/payer/pullback.test.ts test/payer/pocket.test.ts test/payer/runtime.test.ts test/payer/indexer-pocket.test.ts test/payer/pocket-recovery.test.ts test/main.test.ts` — 7 files passed, 50 tests passed.
+- `fnm exec --using=22.22.0 pnpm --filter @czar/server exec vitest run test/payer/pullback-scheduler.test.ts test/payer/pullback.test.ts test/payer/pocket.test.ts test/payer/runtime.test.ts test/payer/indexer-pocket.test.ts test/payer/pocket-recovery.test.ts test/main.test.ts` — 7 files passed, 51 tests passed.
 - `fnm exec --using=22.22.0 pnpm -r typecheck` — passed for all 14 of 15 workspace projects included by the command.
 - `fnm exec --using=22.22.0 pnpm lint` — passed (`oxlint --deny-warnings` and `oxfmt --check`).
 - `git diff --check` — passed.

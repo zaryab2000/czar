@@ -688,7 +688,12 @@ async function recordGatewayBalanceOutage(
        (plan_id,step_index,envelope_ref,pocket,value,unavailable_since,state,
         pullback_id,vault_address,gateway_minter,attempt,closed_pocket)
      VALUES ($1,$2,$3,$4,NULL,$5,'pending',NULL,$6,$7,$8,$9)
-     ON CONFLICT (plan_id,step_index) DO NOTHING`,
+     ON CONFLICT (plan_id,step_index) DO UPDATE SET
+       value=NULL,unavailable_since=EXCLUDED.unavailable_since,state='pending',
+       pullback_id=NULL,vault_address=EXCLUDED.vault_address,
+       gateway_minter=EXCLUDED.gateway_minter,attempt=EXCLUDED.attempt,
+       closed_pocket=EXCLUDED.closed_pocket
+     WHERE payer_pullback_gateway_failures.state='returned-to-vault'`,
     [
       input.planId,
       input.stepIndex,
@@ -923,6 +928,11 @@ async function recordGatewayPullbackFailure(
         pullback_id,vault_address,gateway_minter,attempt,closed_pocket)
      VALUES ($1,$2,$3,$4,$5,$6,'pending',$7,$8,$9,$10,$11)
      ON CONFLICT (plan_id,step_index) DO UPDATE SET
+       state=CASE WHEN payer_pullback_gateway_failures.state='returned-to-vault'
+         THEN 'pending' ELSE payer_pullback_gateway_failures.state END,
+       unavailable_since=CASE WHEN payer_pullback_gateway_failures.state='returned-to-vault'
+         THEN EXCLUDED.unavailable_since
+         ELSE payer_pullback_gateway_failures.unavailable_since END,
        value=EXCLUDED.value,pullback_id=EXCLUDED.pullback_id,
        vault_address=EXCLUDED.vault_address,gateway_minter=EXCLUDED.gateway_minter,
        attempt=EXCLUDED.attempt,closed_pocket=EXCLUDED.closed_pocket`,
