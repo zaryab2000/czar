@@ -161,6 +161,7 @@ export interface QueryStore {
       credit: string;
       txHash: string;
       block: string;
+      logIndex: number;
     }[]
   >;
 }
@@ -487,12 +488,21 @@ export function createQueryStore(db: QueryDb): QueryStore {
         .from(manualReturns)
         .where(eq(manualReturns.vault, vault))
         .orderBy(asc(manualReturns.block), asc(manualReturns.logIndex));
-      return rows.map((row: { pocket: string; credit: string; txHash: string; block: bigint }) => ({
-        pocket: row.pocket,
-        credit: row.credit,
-        txHash: row.txHash,
-        block: String(row.block),
-      }));
+      return rows.map(
+        (row: {
+          pocket: string;
+          credit: string;
+          txHash: string;
+          block: bigint;
+          logIndex: number;
+        }) => ({
+          pocket: row.pocket,
+          credit: row.credit,
+          txHash: row.txHash,
+          block: String(row.block),
+          logIndex: row.logIndex,
+        }),
+      );
     },
   };
 }

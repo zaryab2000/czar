@@ -223,8 +223,8 @@ describe("T-034 query store (SQL)", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
       items: [
-        { pocket: lower(POCKET), credit: "700", txHash: hash("a"), block: "9" },
-        { pocket: lower(POCKET), credit: "300", txHash: hash("b"), block: "9" },
+        { pocket: lower(POCKET), credit: "700", txHash: hash("a"), block: "9", logIndex: 1 },
+        { pocket: lower(POCKET), credit: "300", txHash: hash("b"), block: "9", logIndex: 2 },
       ],
     });
     const invalid = await app.request("/pockets/manual-returns?vault=bad");
