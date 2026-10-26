@@ -1,6 +1,6 @@
 import { czarVaultAbi } from "@czar/vault-client";
 import type { Address, Hex, PublicClient } from "viem";
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 import type { VaultHaltEvent } from "#src/payer/runtime";
 
 export interface FrozenEventIdentity {
@@ -15,11 +15,30 @@ interface PendingFreezeEvent {
   readonly transaction_hash: Hex;
 }
 
+export async function hasPendingFrozenEvent(
+  pool: Pool,
+  vault: Address,
+  chainHead: bigint,
+): Promise<boolean> {
+  const result = await pool.query<{ pending: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM payer_freeze_autolimit_events WHERE vault=$1 AND processed_at IS NULL
+     ) OR COALESCE(
+       (SELECT last_scanned_block FROM payer_freeze_autolimit_cursors WHERE vault=$1),
+       -1::numeric
+     ) < $2::numeric AS pending`,
+    [vault, chainHead.toString()],
+  );
+  return result.rows[0]?.pending ?? false;
+}
+
 export async function scanFrozenEvents(
   client: PublicClient,
   pool: Pool,
   vault: Address,
+  maxBlockRange: bigint,
 ): Promise<void> {
+  if (maxBlockRange <= 0n) throw new RangeError("Frozen event scan range must be positive.");
   const cursor = await pool.query<{ last_scanned_block: string }>(
     "SELECT last_scanned_block FROM payer_freeze_autolimit_cursors WHERE vault=$1",
     [vault],
@@ -27,19 +46,14 @@ export async function scanFrozenEvents(
   const head = await client.getBlockNumber();
   const nextBlock = cursor.rows[0] ? BigInt(cursor.rows[0].last_scanned_block) + 1n : 0n;
   if (nextBlock > head) return;
-  const events = await client.getContractEvents({
-    address: vault,
-    abi: czarVaultAbi,
-    eventName: "Frozen",
-    fromBlock: nextBlock,
-    toBlock: head,
-  });
-  for (const event of events) await queueFrozenEvent(pool, vault, event);
-  await pool.query(
-    `INSERT INTO payer_freeze_autolimit_cursors(vault,last_scanned_block) VALUES($1,$2)
-     ON CONFLICT(vault) DO UPDATE SET last_scanned_block=EXCLUDED.last_scanned_block`,
-    [vault, head.toString()],
-  );
+  let pageStart = nextBlock;
+  let pageRange = maxBlockRange;
+  while (pageStart <= head) {
+    const page = await getFrozenEventPage(client, vault, pageStart, head, pageRange);
+    await persistFrozenEventPage(pool, vault, page.events, page.toBlock);
+    pageStart = page.toBlock + 1n;
+    pageRange = page.range;
+  }
 }
 
 export async function processPendingFrozenEvents(
@@ -66,7 +80,7 @@ export async function processPendingFrozenEvents(
 }
 
 export async function queueFrozenEvent(
-  pool: Pool,
+  pool: Pool | PoolClient,
   vault: Address,
   event: FrozenEventIdentity,
 ): Promise<void> {
@@ -84,6 +98,82 @@ export async function queueFrozenEvent(
      VALUES($1,$2,$3,$4) ON CONFLICT(vault,block_number,log_index) DO NOTHING`,
     [vault, event.blockNumber.toString(), event.logIndex, event.transactionHash],
   );
+}
+
+interface FrozenEventPage {
+  readonly events: readonly FrozenEventIdentity[];
+  readonly toBlock: bigint;
+  readonly range: bigint;
+}
+
+async function getFrozenEventPage(
+  client: PublicClient,
+  vault: Address,
+  fromBlock: bigint,
+  head: bigint,
+  initialRange: bigint,
+): Promise<FrozenEventPage> {
+  let range = initialRange;
+  while (true) {
+    const toBlock = minBigInt(fromBlock + range - 1n, head);
+    try {
+      const events = await client.getContractEvents({
+        address: vault,
+        abi: czarVaultAbi,
+        eventName: "Frozen",
+        fromBlock,
+        toBlock,
+      });
+      return { events, toBlock, range };
+    } catch (error) {
+      if (!isLogRangeError(error) || range === 1n) throw error;
+      range = range / 2n || 1n;
+    }
+  }
+}
+
+async function persistFrozenEventPage(
+  pool: Pool,
+  vault: Address,
+  events: readonly FrozenEventIdentity[],
+  toBlock: bigint,
+): Promise<void> {
+  const connection = await pool.connect();
+  try {
+    await connection.query("BEGIN");
+    for (const event of events) await queueFrozenEvent(connection, vault, event);
+    await connection.query(
+      `INSERT INTO payer_freeze_autolimit_cursors(vault,last_scanned_block) VALUES($1,$2)
+       ON CONFLICT(vault) DO UPDATE SET last_scanned_block=EXCLUDED.last_scanned_block`,
+      [vault, toBlock.toString()],
+    );
+    await connection.query("COMMIT");
+  } catch (error) {
+    try {
+      await connection.query("ROLLBACK");
+    } catch (rollbackError) {
+      const failure = new Error("Frozen event page rollback failed.", { cause: error });
+      Object.defineProperty(failure, "rollbackError", { value: rollbackError });
+      throw failure;
+    }
+    throw error;
+  } finally {
+    connection.release();
+  }
+}
+
+function isLogRangeError(error: unknown): boolean {
+  let current: unknown = error;
+  while (typeof current === "object" && current !== null) {
+    const candidate = current as { code?: unknown; cause?: unknown };
+    if (candidate.code === -32012 || candidate.code === "-32012") return true;
+    current = candidate.cause;
+  }
+  return false;
+}
+
+function minBigInt(left: bigint, right: bigint): bigint {
+  return left < right ? left : right;
 }
 
 function toHaltEvent(vault: Address, row: PendingFreezeEvent): VaultHaltEvent {

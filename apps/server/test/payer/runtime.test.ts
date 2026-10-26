@@ -89,6 +89,38 @@ describe("payer runtime wiring", () => {
     runtime.stop();
   });
 
+  it("propagates GuardianPaused drain failure so the source can retry", async () => {
+    let listener: ((event: { name: string; vault: `0x${string}` }) => Promise<void>) | undefined;
+    const onError = vi.fn();
+    const lowerAutoLimits = vi.fn(async () => undefined);
+    const runtime = startPayerRuntime({
+      events: {
+        subscribe(next) {
+          listener = next;
+          return () => undefined;
+        },
+      },
+      pocketHalt: {
+        listFundedPockets: async () => ["0x0000000000000000000000000000000000000001"],
+        pullback: async () => {
+          throw new Error("temporary pullback failure");
+        },
+      },
+      lowerAutoLimits,
+      onError,
+    });
+
+    await expect(
+      listener?.({
+        name: "GuardianPaused",
+        vault: "0x0000000000000000000000000000000000000002",
+      }),
+    ).rejects.toThrow("failed for 1 funded pocket(s)");
+    expect(onError).toHaveBeenCalledWith("halt-drain", expect.any(Error));
+    expect(lowerAutoLimits).not.toHaveBeenCalled();
+    runtime.stop();
+  });
+
   it("lowers category auto limits after Frozen but not GuardianPaused", async () => {
     const listeners: ((event: { name: string; vault: `0x${string}` }) => Promise<void>)[] = [];
     const lowerAutoLimits = vi.fn(async () => undefined);

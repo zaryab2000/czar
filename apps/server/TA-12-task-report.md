@@ -24,6 +24,17 @@ events regardless of the vault's current frozen state. A crash after the
 on-chain lowering but before the work row is marked complete is safe: replay
 reads the zero limit and skips signing again.
 
+## Review fixes
+
+- Autonomous allowance is reported as zero while a Frozen event is pending or
+  the durable scan cursor trails chain head; the dispatcher also pauses until
+  the event scan and lowering are complete.
+- `GuardianPaused` drain failures now propagate so the event source retries
+  rather than marking the pause handled.
+- Historical Frozen logs use `indexer.getLogsBlockRange`, halve the page after
+  RPC `-32012`, and persist each page's events and cursor in one transaction.
+  A restart resumes at the first block after the last committed page.
+
 ## Files changed
 
 - `apps/server/src/main.ts` — compose K3 lower-limit calls and always attach the
@@ -33,10 +44,12 @@ reads the zero limit and skips signing again.
 - `apps/server/src/payer/runtime.ts` — Frozen-only callback, in-flight event
   deduplication, and retry propagation.
 - `apps/server/src/payer/freeze-events.ts` — durable event queue, cursor scan,
-  and pending-work replay.
+  pending-work replay, adaptive RPC paging, and pending-lowering lookup.
 - `apps/server/src/payer/database-vault-event-source.ts` and
   `apps/server/src/payer/vault-event-source.ts` — event identity capture,
   historical Frozen-log scan, and retry after unfreeze or downtime.
+- `apps/server/src/payer/dispatcher.ts` — pause spending while Frozen lowering
+  remains queued.
 - `apps/server/migrations/0017-freeze-auto-limit-events.sql` — event work and
   per-vault scan cursor tables.
 - `apps/server/test/payer/freeze-autolimit.test.ts` — nonzero/zero behavior,
@@ -45,16 +58,24 @@ reads the zero limit and skips signing again.
   unfreeze and recovery of historical Frozen events.
 - `apps/server/test/payer/runtime.test.ts` — Frozen vs GuardianPaused behavior,
   retry propagation, and concurrent duplicate event handling.
+- `apps/server/test/payer/dispatcher.test.ts` — queued Frozen lowering blocks
+  step execution.
+- `apps/server/test/main.test.ts` — startup composition retains the durable
+  freeze gate in the planner and dispatcher paths.
 - `apps/server/test/payer/database-vault-event-source.test.ts` and
   `apps/server/test/migrate.test.ts` — source replay and migration coverage.
 
 ## Checks
 
 - `fnm exec --using=22.22.0 pnpm --filter @czar/server exec vitest run test/payer/freeze-events.test.ts test/payer/database-vault-event-source.test.ts test/payer/runtime.test.ts test/payer/freeze-autolimit.test.ts test/migrate.test.ts`
-  — passed: 5 files, 18 tests.
+  — passed before the latest review fixes: 5 files, 18 tests.
+- `fnm exec --using=22.22.0 pnpm --filter @czar/server exec vitest run test/payer/freeze-events.test.ts test/payer/database-vault-event-source.test.ts test/payer/runtime.test.ts test/payer/freeze-autolimit.test.ts test/payer/dispatcher.test.ts test/main.test.ts test/migrate.test.ts`
+  — passed after the review fixes: 7 files, 33 tests (includes
+  `test/main.test.ts`).
 - `fnm exec --using=22.22.0 pnpm -r typecheck` — passed across all 14 workspace
-  projects with typecheck scripts.
-- `fnm exec --using=22.22.0 pnpm lint` — passed.
+  projects with typecheck scripts after the review fixes.
+- `fnm exec --using=22.22.0 pnpm lint` — passed after the review fixes.
+- `git diff --check` — passed after the review fixes.
 - `fnm exec --using=22.22.0 pnpm --filter @czar/server test` — run on the
   initial implementation commit `30579ff`; not green: 58 files passed, 3 failed;
   364 passed, 2 failed, 2 skipped. The two non-Arc

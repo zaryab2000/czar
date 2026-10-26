@@ -60,6 +60,7 @@ describe("payer dispatcher", () => {
       config: { get: () => 60 } as never,
       now: () => new Date("2026-10-25T12:00:00Z"),
       isFrozen: async () => false,
+      hasPendingFrozenEvent: async () => false,
       isGuardianPaused: async () => false,
       runStep: async ({ step }) => {
         order.push(step.stepIndex);
@@ -89,6 +90,7 @@ describe("payer dispatcher", () => {
       config: { get: () => 60 } as never,
       now: () => new Date("2026-10-25T12:00:00Z"),
       isFrozen: async () => false,
+      hasPendingFrozenEvent: async () => false,
       isGuardianPaused: async () => false,
       runStep: async () => "done",
       complete,
@@ -113,6 +115,27 @@ describe("payer dispatcher", () => {
       config: { get: () => 60 } as never,
       now: () => new Date("2026-10-25T12:00:00Z"),
       isFrozen: async () => true,
+      hasPendingFrozenEvent: async () => false,
+      isGuardianPaused: async () => false,
+      runStep,
+      complete: vi.fn(),
+      onError: (error) => {
+        throw error;
+      },
+    });
+    expect(runStep).not.toHaveBeenCalled();
+  });
+
+  it("does not enter a step while frozen auto-limit lowering is pending", async () => {
+    const runStep = vi.fn(
+      async (_input: Parameters<DispatcherDependencies["runStep"]>[0]) => "done" as const,
+    );
+    await dispatchExecutingObjectives({
+      pool: getPool(),
+      config: { get: () => 60 } as never,
+      now: () => new Date("2026-10-25T12:00:00Z"),
+      isFrozen: async () => false,
+      hasPendingFrozenEvent: async () => true,
       isGuardianPaused: async () => false,
       runStep,
       complete: vi.fn(),
@@ -130,6 +153,7 @@ describe("payer dispatcher", () => {
       config: { get: () => 60 } as never,
       now: () => new Date("2026-10-25T12:00:00Z"),
       isFrozen: async () => false,
+      hasPendingFrozenEvent: async () => false,
       isGuardianPaused: async () => false,
       runStep: async ({ step }) => {
         order.push(step.stepIndex);
@@ -159,6 +183,7 @@ describe("payer dispatcher", () => {
       config: { get: () => 60 } as never,
       now: () => new Date("2026-10-25T12:00:00Z"),
       isFrozen: async () => false,
+      hasPendingFrozenEvent: async () => false,
       isGuardianPaused: async () => false,
       runStep: async () => "handed_off",
       complete,
@@ -190,6 +215,7 @@ describe("payer dispatcher", () => {
       config: { get: () => 60 } as never,
       now: () => new Date("2026-10-25T12:00:00Z"),
       isFrozen: async () => false,
+      hasPendingFrozenEvent: async () => false,
       isGuardianPaused: async () => false,
       runStep,
       complete: vi.fn(),
@@ -217,6 +243,7 @@ describe("payer dispatcher", () => {
       config: { get: () => 60 } as never,
       now: () => new Date("2026-10-25T12:00:00Z"),
       isFrozen: async () => false,
+      hasPendingFrozenEvent: async () => false,
       isGuardianPaused: async () => false,
       runStep,
       complete: vi.fn(),
@@ -241,6 +268,7 @@ describe("payer dispatcher", () => {
       config: { get: () => 60 } as never,
       now,
       isFrozen: async () => false,
+      hasPendingFrozenEvent: async () => false,
       isGuardianPaused: async () => false,
       runStep: async ({ step }) => {
         const lease = await getPool().query<{ expires_at: Date }>(
@@ -288,6 +316,7 @@ describe("payer dispatcher", () => {
       config: { get: () => 60 } as never,
       now: () => new Date("2026-10-25T12:00:00Z"),
       isFrozen: async () => false,
+      hasPendingFrozenEvent: async () => false,
       isGuardianPaused: async () => false,
       runStep,
       complete: vi.fn(),

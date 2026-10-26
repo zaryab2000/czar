@@ -115,6 +115,7 @@ function fakePool(vaults: () => readonly Address[]) {
     { block: string; index: number; tx: string; processed: boolean }
   >();
   const query = vi.fn(async (statement: string, values: unknown[] = []) => {
+    if (["BEGIN", "COMMIT", "ROLLBACK"].includes(statement)) return { rows: [] };
     if (statement.includes("SELECT DISTINCT vault FROM users"))
       return { rows: vaults().map((vault) => ({ vault })) };
     if (statement.includes("SELECT last_scanned_block"))
@@ -152,7 +153,10 @@ function fakePool(vaults: () => readonly Address[]) {
     }
     throw new Error(`Unexpected database query: ${statement}`);
   });
-  return { pool: { query } as never, query };
+  return {
+    pool: { query, connect: async () => ({ query, release: vi.fn() }) } as never,
+    query,
+  };
 }
 
 function freezeLog(blockNumber: bigint) {

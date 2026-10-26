@@ -96,12 +96,13 @@ async function handleHaltEvent(
       failures.push(error);
     }
   }
-  if (event.name !== "Frozen" || !options.lowerAutoLimits) return;
-  try {
-    await options.lowerAutoLimits(event.vault);
-  } catch (error) {
-    options.onError?.("freeze-auto-limit", error);
-    failures.push(error);
+  if (event.name === "Frozen" && options.lowerAutoLimits) {
+    try {
+      await options.lowerAutoLimits(event.vault);
+    } catch (error) {
+      options.onError?.("freeze-auto-limit", error);
+      failures.push(error);
+    }
   }
   if (failures.length === 1) throw failures[0];
   if (failures.length > 1) throw new AggregateError(failures, "Frozen halt actions failed.");

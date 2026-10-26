@@ -84,7 +84,12 @@ export function createDatabaseVaultEventSource(
                 unsubscribe.push(source.subscribe(emit));
                 retryVaults.add(vault);
               }
-              await scanFrozenEvents(input.publicClient, input.pool, vault);
+              await scanFrozenEvents(
+                input.publicClient,
+                input.pool,
+                vault,
+                BigInt(Number(input.config.get("indexer.getLogsBlockRange"))),
+              );
               await runFrozenEvents(input.pool, vault, undefined, listener, frozenEventRuns);
               if (!retryVaults.has(vault)) continue;
               retryVaults.delete(vault);
