@@ -85,10 +85,14 @@ Implemented the Lane 2 halt-drain and late-pocket recovery composition for the l
   The `boundary.test.ts` timeout passed when rerun alone (8 tests), consistent with resource
   contention during the full run. `app-reads.test.ts` still fails `/v1/me` with 503 when rerun
   alone; its fixture points to RPC port 8549 without starting a chain or mocking RPC calls.
-  `job-routes.test.ts` still fails because its local server exits; inspection shows the child
-  environment omits `CZAR_INDEXER_URL`, which `local-main.ts` requires. The Arc receipt suite
-  failed while running `script/deploy.sh` against its test RPC; Arc acceptance remains deferred
-  and is not claimed as passing.
+  `job-routes.test.ts` now supplies the required `CZAR_INDEXER_URL`, but still cannot start the
+  actual local entry point because the fixture points `CZAR_ARC_RPC_URL` at port 1 and the
+  local-only guard requires Arc Anvil `anvil_nodeInfo`. A diagnostic with a temporary local RPC
+  and deployment fixture then stopped at the missing server signer keychain token. No keychain
+  token was read or created. These Arc/signing prerequisites are not available for this local
+  run, so the job-route smoke test remains blocked. The Arc receipt suite failed while running
+  `script/deploy.sh` against its test RPC; Arc acceptance remains deferred and is not claimed as
+  passing.
 - `fnm exec --using=22.22.0 pnpm --filter @czar/server typecheck` — passed.
 - `fnm exec --using=22.22.0 pnpm lint` — passed (`oxlint --deny-warnings` and `oxfmt --check`).
 - `git diff --check` — passed.
