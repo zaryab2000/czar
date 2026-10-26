@@ -3,6 +3,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadConfigFile, parameterEnvironment } from "@czar/config";
 import { Pool } from "pg";
 import {
   createPublicClient,
@@ -24,6 +25,7 @@ import {
 import { czarVaultAbi, czarVaultFactoryAbi, withFeeFloor } from "@czar/vault-client";
 import type { ObjectiveSubmission, Receipt, TaskSpec } from "@czar/schemas";
 import { ulid } from "#src/http/ids";
+import { validateT050aEndpoints } from "#test/local-thin-slice/preflight";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../../../");
 const RPC_URL = process.env["CZAR_T050A_ARC_RPC_URL"] ?? "http://127.0.0.1:8545";
@@ -73,6 +75,16 @@ const RECEIPT_OUTCOME: Readonly<Record<Receipt["outcome"], number>> = {
 };
 
 async function main(): Promise<void> {
+  const overlayPath = resolve(ROOT, process.env["CZAR_LOCAL_CONFIG"] ?? "env/local.toml");
+  const config = await loadConfigFile(overlayPath, { env: parameterEnvironment(process.env) });
+  await validateT050aEndpoints({
+    config,
+    overlayPath,
+    rpcUrl: RPC_URL,
+    serverUrl: SERVER_URL,
+    merchantUrl: MERCHANT_URL,
+    databaseUrl: DATABASE_URL,
+  });
   const startedAt = await publicClient.getBlockNumber();
   await assertServiceHealth(`${SERVER_URL}/health`);
   await assertServiceHealth(`${MERCHANT_URL}/health`);

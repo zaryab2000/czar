@@ -3,6 +3,11 @@
 **Status:** NOT RUN / DEFERRED pending Zaryab's explicit local-stack approval and local-key setup.
 **Task:** T-050a / M3-d. **Decision:** D92 local Arc and D94 acceptance boundary.
 
+Before any server or merchant request, database query, or transaction, the runner requires
+`env/local.toml`, loopback RPC, server, merchant, and Postgres endpoints, and a successful RPC
+`anvil_nodeInfo` response. The chain ID check is additional; it does not identify local Anvil
+by itself.
+
 ## Run details
 
 - Date and operator:
