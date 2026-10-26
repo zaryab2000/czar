@@ -65,6 +65,7 @@ describe("payer runtime wiring", () => {
       },
     };
     const onError = vi.fn();
+    const lowerAutoLimits = vi.fn(async () => undefined);
     const runtime = startPayerRuntime({
       events: source,
       pocketHalt: {
@@ -73,6 +74,7 @@ describe("payer runtime wiring", () => {
           throw new Error("temporary signer failure");
         },
       },
+      lowerAutoLimits,
       onError,
     });
 
@@ -83,6 +85,7 @@ describe("payer runtime wiring", () => {
       }),
     ).rejects.toThrow("failed for 1 funded pocket(s)");
     expect(onError).toHaveBeenCalledWith("halt-drain", expect.any(Error));
+    expect(lowerAutoLimits).toHaveBeenCalledOnce();
     runtime.stop();
   });
 

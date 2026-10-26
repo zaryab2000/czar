@@ -13,8 +13,10 @@ without changing category limits.
 
 The production composition subscribes to the database vault-event source even
 when pocket-drain dependencies are unavailable, so the auto-limit action still
-runs. Duplicate in-flight events for the same vault and event share one handler;
-replayed events re-read on-chain state and skip limits already at zero.
+runs. Duplicate in-flight events for the same vault and event share one handler.
+Pocket draining and auto-limit lowering are attempted independently; either
+failure causes the event source to retry. Replayed events re-read on-chain
+state and skip limits already at zero.
 
 ## Files changed
 

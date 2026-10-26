@@ -81,6 +81,7 @@ async function handleHaltEvent(
   options: PayerRuntimeOptions,
   drain: NonNullable<PayerRuntimeOptions["drain"]>,
 ): Promise<void> {
+  const failures: unknown[] = [];
   if (options.pocketHalt) {
     try {
       await drain(
@@ -89,7 +90,7 @@ async function handleHaltEvent(
       );
     } catch (error) {
       options.onError?.("halt-drain", error);
-      throw error;
+      failures.push(error);
     }
   }
   if (event.name !== "Frozen" || !options.lowerAutoLimits) return;
@@ -97,8 +98,10 @@ async function handleHaltEvent(
     await options.lowerAutoLimits(event.vault);
   } catch (error) {
     options.onError?.("freeze-auto-limit", error);
-    throw error;
+    failures.push(error);
   }
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1) throw new AggregateError(failures, "Frozen halt actions failed.");
 }
 
 function scheduleFallbacks(
