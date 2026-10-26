@@ -5,6 +5,11 @@ import { isAddress, type Address, type PublicClient } from "viem";
 import type { Pool } from "pg";
 import { createVaultEventSource } from "#src/payer/vault-event-source";
 import type { VaultHaltEvent, VaultHaltEventSource } from "#src/payer/runtime";
+import {
+  processPendingFrozenEvents,
+  queueFrozenEvent,
+  scanFrozenEvents,
+} from "#src/payer/freeze-events";
 
 interface DatabaseVaultEventSourceInput {
   readonly pool: Pool;
@@ -23,11 +28,20 @@ export function createDatabaseVaultEventSource(
       const seenVaults = new Set<Address>();
       const seenHalts = new Set<string>();
       const retryVaults = new Set<Address>();
+      const frozenEventRuns = new Map<Address, Promise<void>>();
       const unsubscribe: (() => void)[] = [];
       const emit = async (event: VaultHaltEvent) => {
         const vaultKey = event.vault.toLowerCase();
+        if (event.name === "Frozen") {
+          try {
+            await runFrozenEvents(input.pool, event.vault, event, listener, frozenEventRuns);
+          } catch {
+            retryVaults.add(event.vault);
+            logSourceError(input.logger, "halt_drain_failed");
+          }
+          return;
+        }
         if (event.name === "Unfrozen") {
-          seenHalts.delete(`Frozen:${vaultKey}`);
           return;
         }
         if (event.name === "GuardianUnpaused") {
@@ -70,6 +84,8 @@ export function createDatabaseVaultEventSource(
                 unsubscribe.push(source.subscribe(emit));
                 retryVaults.add(vault);
               }
+              await scanFrozenEvents(input.publicClient, input.pool, vault);
+              await runFrozenEvents(input.pool, vault, undefined, listener, frozenEventRuns);
               if (!retryVaults.has(vault)) continue;
               retryVaults.delete(vault);
               await reconcileHalt(input.publicClient, vault, emit);
@@ -97,6 +113,30 @@ export function createDatabaseVaultEventSource(
   };
 }
 
+function runFrozenEvents(
+  pool: Pool,
+  vault: Address,
+  event: VaultHaltEvent | undefined,
+  listener: (event: VaultHaltEvent) => Promise<void>,
+  runs: Map<Address, Promise<void>>,
+): Promise<void> {
+  const active = runs.get(vault);
+  if (active) return active;
+  const processing = processFrozenEvents(pool, vault, event, listener);
+  runs.set(vault, processing);
+  return processing.finally(() => runs.delete(vault));
+}
+
+async function processFrozenEvents(
+  pool: Pool,
+  vault: Address,
+  event: VaultHaltEvent | undefined,
+  listener: (event: VaultHaltEvent) => Promise<void>,
+): Promise<void> {
+  if (event) await queueFrozenEvent(pool, vault, event);
+  await processPendingFrozenEvents(pool, vault, listener);
+}
+
 async function reconcileHalt(
   client: PublicClient,
   vault: Address,
@@ -107,15 +147,11 @@ async function reconcileHalt(
     abi: czarVaultAbi,
     functionName: "factory",
   });
-  const [frozen, paused] = await Promise.all([
-    client.readContract({ address: vault, abi: czarVaultAbi, functionName: "frozen" }),
-    client.readContract({
-      address: factory,
-      abi: czarVaultFactoryAbi,
-      functionName: "guardianPaused",
-    }),
-  ]);
-  if (frozen) await emit({ name: "Frozen", vault });
+  const paused = await client.readContract({
+    address: factory,
+    abi: czarVaultFactoryAbi,
+    functionName: "guardianPaused",
+  });
   if (paused) await emit({ name: "GuardianPaused", vault });
 }
 

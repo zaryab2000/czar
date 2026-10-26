@@ -1,9 +1,12 @@
-import type { Address } from "viem";
+import type { Address, Hex } from "viem";
 import { drainPocketsAfterHalt, type PocketHaltDependencies } from "#src/payer/pocket";
 
 export interface VaultHaltEvent {
   readonly name: "Frozen" | "GuardianPaused" | string;
   readonly vault: Address;
+  readonly blockNumber?: bigint;
+  readonly logIndex?: number;
+  readonly transactionHash?: Hex;
 }
 
 export interface VaultHaltEventSource {

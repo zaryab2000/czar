@@ -1,7 +1,7 @@
 import { loadConfig, type Config } from "@czar/config";
 import { createLogger, type Logger } from "@czar/logging";
 import { czarVaultAbi, czarVaultFactoryAbi } from "@czar/vault-client";
-import type { Address, PublicClient } from "viem";
+import type { Address, Hex, PublicClient } from "viem";
 import type { VaultHaltEvent, VaultHaltEventSource } from "#src/payer/runtime";
 
 export function createVaultEventSource(
@@ -83,12 +83,28 @@ async function watchEvents(
 }
 
 async function notifyListeners(
-  logs: readonly { readonly eventName?: string }[],
+  logs: readonly {
+    readonly eventName?: string;
+    readonly blockNumber?: bigint | null;
+    readonly logIndex?: number | null;
+    readonly transactionHash?: Hex | null;
+  }[],
   eventName: "Frozen" | "Unfrozen" | "GuardianPaused" | "GuardianUnpaused",
   vault: Address,
   listener: (event: VaultHaltEvent) => Promise<void>,
 ): Promise<void> {
   for (const log of logs) {
-    if (log.eventName === eventName) await listener({ name: eventName, vault });
+    if (log.eventName !== eventName) continue;
+    await listener({
+      name: eventName,
+      vault,
+      ...(log.blockNumber === null || log.blockNumber === undefined
+        ? {}
+        : { blockNumber: log.blockNumber }),
+      ...(log.logIndex === null || log.logIndex === undefined ? {} : { logIndex: log.logIndex }),
+      ...(log.transactionHash === null || log.transactionHash === undefined
+        ? {}
+        : { transactionHash: log.transactionHash }),
+    });
   }
 }

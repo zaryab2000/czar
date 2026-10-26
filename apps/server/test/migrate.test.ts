@@ -74,6 +74,8 @@ describe("CZ-12 migrations", () => {
       "pairing_codes",
       "passkey_credentials",
       "pay_requests",
+      "payer_freeze_autolimit_cursors",
+      "payer_freeze_autolimit_events",
       "payer_job_briefs",
       "payer_job_deliverables",
       "payer_pullback_gateway_failures",
