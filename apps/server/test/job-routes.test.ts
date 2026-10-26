@@ -62,7 +62,6 @@ const testDatabase = setupDatabaseConnection();
 const getPool = testDatabase.getPool;
 let app: ReturnType<typeof createApp>;
 let objectDirectory: string;
-const localServerOutput = new WeakMap<ChildProcess, string[]>();
 const STARTUP_TIMEOUT_MS = 20_000;
 const STARTUP_POLL_MS = 100;
 const STOP_TIMEOUT_MS = 5_000;
@@ -291,7 +290,7 @@ async function findFreePort(): Promise<number> {
 }
 
 function startLocalServer(port: number, databaseUrl: string, objectPath: string): ChildProcess {
-  const child = spawn(
+  return spawn(
     process.execPath,
     ["--experimental-strip-types", "--disable-warning=ExperimentalWarning", "src/local-main.ts"],
     {
@@ -302,30 +301,20 @@ function startLocalServer(port: number, databaseUrl: string, objectPath: string)
         CZAR_DATABASE_URL: databaseUrl,
         CZAR_LOCAL_OBJECT_STORE_PATH: objectPath,
         CZAR_ARC_RPC_URL: "http://127.0.0.1:1",
-        CZAR_INDEXER_URL: "http://127.0.0.1:42069",
         CZAR_APP_CIRCLE_CLIENT_URL: "https://wallet.example.test",
         CZAR_APP_CIRCLE_CLIENT_KEY: "e2e-public-client-key",
         CZAR_APP_ARC_RPC_URL: "https://rpc.example.test",
         CZAR_SERVER_PORT: String(port),
       },
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: "ignore",
     },
   );
-  const output: string[] = [];
-  child.stdout?.on("data", (chunk: Buffer) => output.push(chunk.toString()));
-  child.stderr?.on("data", (chunk: Buffer) => output.push(chunk.toString()));
-  localServerOutput.set(child, output);
-  return child;
 }
 
 async function waitForServer(url: string, child: ChildProcess): Promise<void> {
   const deadline = Date.now() + STARTUP_TIMEOUT_MS;
   while (Date.now() < deadline) {
-    if (child.exitCode !== null) {
-      throw new Error(
-        `Local server exited with ${child.exitCode}: ${localServerOutput.get(child)?.join("")}`,
-      );
-    }
+    if (child.exitCode !== null) throw new Error(`Local server exited with ${child.exitCode}.`);
     try {
       await fetch(url);
       return;

@@ -85,12 +85,10 @@ Implemented the Lane 2 halt-drain and late-pocket recovery composition for the l
   The `boundary.test.ts` timeout passed when rerun alone (8 tests), consistent with resource
   contention during the full run. `app-reads.test.ts` still fails `/v1/me` with 503 when rerun
   alone; its fixture points to RPC port 8549 without starting a chain or mocking RPC calls.
-  `job-routes.test.ts` now supplies the required `CZAR_INDEXER_URL`, but still cannot start the
-  actual local entry point because the fixture points `CZAR_ARC_RPC_URL` at port 1 and the
-  local-only guard requires Arc Anvil `anvil_nodeInfo`. A diagnostic with a temporary local RPC
-  and deployment fixture then stopped at the missing server signer keychain token. No keychain
-  token was read or created. These Arc/signing prerequisites are not available for this local
-  run, so the job-route smoke test remains blocked. The Arc receipt suite failed while running
+  `job-routes.test.ts` remains NOT PASS/DEFERRED under D94: the actual local entry point requires
+  its local Arc deployment and signer runtime, which are not available in this validation run.
+  No test shim or production interface was added, and local job-route acceptance is not claimed.
+  The Arc receipt suite failed while running
   `script/deploy.sh` against its test RPC; Arc acceptance remains deferred and is not claimed as
   passing.
 - `fnm exec --using=22.22.0 pnpm --filter @czar/server typecheck` — passed.
@@ -123,3 +121,4 @@ Implemented the Lane 2 halt-drain and late-pocket recovery composition for the l
 - NOT RUN: Arc Anvil pocket/pullback acceptance, crash/restart matrix, and transaction-level halt-drain scenarios. These were deferred by the assignment.
 - NOT RUN: live Gateway or testnet validation; D92 remains in force.
 - Full server suite was run but did not pass; see the exact command, counts, and isolated failures above.
+- NOT PASS/DEFERRED under D94: the local job-route startup smoke test needs the local Arc deployment and signer runtime.
