@@ -8,6 +8,7 @@ import {
   cancelExpiredPullback,
   calculatePullbackValue,
   executeSlowPullbackFallback,
+  writeOffOverdueManualReturn,
   pullbackMaxBlockHeight,
   PULLBACK_CANCEL_DELAY_BLOCKS,
 } from "#src/payer/pullback";
@@ -744,6 +745,137 @@ describe("pullback values", () => {
     });
     expect(writeOffPocket).toHaveBeenCalledWith(input.pocket, "0x1234");
     expect(dependencies.safeFetch).not.toHaveBeenCalled();
+  });
+
+  it("holds manual-return write-off until the configured deadline", async () => {
+    const now = new Date("2026-10-22T00:00:00.000Z");
+    await getPool().query(
+      `INSERT INTO payer_pullback_gateway_failures
+         (plan_id,step_index,envelope_ref,pocket,value,unavailable_since,state,
+          pullback_id,vault_address,gateway_minter,attempt,return_tx,return_block,
+          return_log_index,returned_amount,manual_return_required_at)
+       VALUES($1,0,$2,$3,100,$4,'manual-return-required',NULL,$5,$6,0,$7,50,5,100,NULL)`,
+      [
+        PLAN_ID,
+        "eip155:5042002:0xvault:1",
+        SLOW_POCKET,
+        now,
+        SLOW_VAULT,
+        "0x0000000000000000000000000000000000000004",
+        `0x${"33".repeat(32)}`,
+      ],
+    );
+    const writeOffPocket = vi.fn(async () => "write-off-tx");
+    const input = {
+      planId: PLAN_ID,
+      stepIndex: 0,
+      envelopeRef: "eip155:5042002:0xvault:1",
+      vault: SLOW_VAULT,
+      pocket: SLOW_POCKET,
+      gatewayWallet: "0x0000000000000000000000000000000000000003" as const,
+      gatewayMinter: "0x0000000000000000000000000000000000000004" as const,
+      usdc: SLOW_USDC,
+      gatewayDomain: 26,
+      outstanding: 100n,
+      pending: 0n,
+      availableBalance: 0n,
+      availableBalanceObservedAt: now,
+      apiConsecutiveFailures: 0,
+      head: 6_400n,
+    } as const;
+    const dependencies = {
+      pool: getPool(),
+      config: loadConfig({ envFile: { "payer.manualReturnHoldHours": 72 } }),
+      signer: { sign: vi.fn(async () => ({ signedTransaction: "0x1234" as const })) },
+      chain: {
+        maxPullbackFee: vi.fn(async () => 20_000n),
+        findPendingPullback: vi.fn(async () => undefined),
+        writeOffPocket,
+        requestPullback: vi.fn(),
+        isTransferSpecHashUsed: vi.fn(async () => false),
+        mintAttestation: vi.fn(),
+        confirmPullback: vi.fn(),
+        cancelPullback: vi.fn(),
+        readPullback: vi.fn(),
+        getBlockNumber: vi.fn(async () => 6_400n),
+      },
+      safeFetch: vi.fn(),
+      gatewayTransferUrl: "http://127.0.0.1:4999/v1/transfer",
+      now: () => now,
+    };
+
+    await expect(executePullback(input, dependencies)).resolves.toMatchObject({
+      state: "waiting",
+      reason: "manual-return-hold",
+    });
+    expect(writeOffPocket).not.toHaveBeenCalled();
+    now.setTime(now.getTime() + 72 * 60 * 60 * 1000);
+    await expect(executePullback(input, dependencies)).resolves.toMatchObject({
+      state: "written-off",
+    });
+    expect(writeOffPocket).toHaveBeenCalledOnce();
+    const row = await getPool().query<{ state: string }>(
+      "SELECT state FROM payer_pullback_gateway_failures WHERE plan_id=$1",
+      [PLAN_ID],
+    );
+    expect(row.rows[0]?.state).toBe("expired");
+  });
+
+  it("writes off an overdue manual return without Gateway balance reads", async () => {
+    const now = new Date("2026-10-25T00:00:00.000Z");
+    await getPool().query(
+      `INSERT INTO payer_pullback_gateway_failures
+         (plan_id,step_index,envelope_ref,pocket,value,unavailable_since,state,attempt,
+          closed_pocket,pullback_id,vault_address,gateway_minter,return_tx,return_block,
+          return_log_index,returned_amount,manual_return_required_at)
+       VALUES($1,0,$2,$3,100,$4,'manual-return-required',0,false,NULL,$5,$6,$7,50,5,100,$8)`,
+      [
+        PLAN_ID,
+        "eip155:5042002:0xvault:1",
+        SLOW_POCKET,
+        now,
+        SLOW_VAULT,
+        "0x0000000000000000000000000000000000000004",
+        `0x${"33".repeat(32)}`,
+        new Date(now.getTime() - 72 * 60 * 60 * 1000),
+      ],
+    );
+    const signer = {
+      sign: vi.fn(async () => ({ signedTransaction: "0x1234" as const })),
+    };
+    const writeOffPocket = vi.fn(async () => "write-off-tx");
+    const result = await writeOffOverdueManualReturn(
+      {
+        planId: PLAN_ID,
+        stepIndex: 0,
+        attempt: 0,
+        envelopeRef: "eip155:5042002:0xvault:1",
+        vault: SLOW_VAULT,
+        pocket: SLOW_POCKET,
+      },
+      {
+        pool: getPool(),
+        config: loadConfig(),
+        signer,
+        chain: {
+          pocketWriteOffStatus: vi.fn(async () => ({
+            state: "funded" as const,
+            pendingPullback: 0n,
+          })),
+          writeOffPocket,
+        },
+        now: () => now,
+      },
+    );
+
+    expect(result).toBe("written-off");
+    expect(writeOffPocket).toHaveBeenCalledWith(SLOW_POCKET, "0x1234");
+    expect(signer.sign).toHaveBeenCalledOnce();
+    const row = await getPool().query<{ state: string }>(
+      "SELECT state FROM payer_pullback_gateway_failures WHERE plan_id=$1",
+      [PLAN_ID],
+    );
+    expect(row.rows[0]?.state).toBe("expired");
   });
 
   it("builds a same-chain burn intent that returns USDC only to the vault", () => {

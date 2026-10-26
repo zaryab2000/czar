@@ -14,12 +14,16 @@ import type { PullbackChain, PullbackRecord } from "#src/payer/pullback";
 const PENDING_PULLBACK = 1;
 const CONFIRMED_PULLBACK = 2;
 const CANCELLED_PULLBACK = 3;
+const POCKET_REGISTERED = 1;
+const POCKET_FUNDED = 2;
+const POCKET_DRAINING = 3;
+const POCKET_CLOSED = 4;
 
 export function createPullbackExecutionChain(input: {
   readonly client: PublicClient;
   readonly pool: Pool;
   readonly vault: Address;
-  readonly gatewayMinter: Address;
+  readonly gatewayMinter?: Address;
 }): PullbackChain {
   async function send(transaction: Hex): Promise<string> {
     const hash = await input.client.sendRawTransaction({ serializedTransaction: transaction });
@@ -64,6 +68,28 @@ export function createPullbackExecutionChain(input: {
         abi: czarVaultAbi,
         functionName: "maxPullbackFee",
       });
+    },
+    async pocketWriteOffStatus(pocket) {
+      const row = await input.client.readContract({
+        address: input.vault,
+        abi: czarVaultAbi,
+        functionName: "getPocket",
+        args: [pocket],
+      });
+      const state = Number(row.state);
+      return {
+        state:
+          state === POCKET_REGISTERED
+            ? "registered"
+            : state === POCKET_FUNDED
+              ? "funded"
+              : state === POCKET_DRAINING
+                ? "draining"
+                : state === POCKET_CLOSED
+                  ? "closed"
+                  : "unsupported",
+        pendingPullback: BigInt(row.pendingPullback),
+      };
     },
     writeOffPocket: (_pocket, transaction) => send(transaction),
     async findPendingPullback(pocket) {
@@ -117,13 +143,16 @@ export function createPullbackExecutionChain(input: {
       if (!record) throw new Error("Mined requestPullback has no vault record.");
       return record;
     },
-    isTransferSpecHashUsed: (hash: Hash32) =>
-      input.client.readContract({
+    isTransferSpecHashUsed: (hash: Hash32) => {
+      if (!input.gatewayMinter)
+        throw new Error("GatewayMinter address is required to verify a pullback attestation.");
+      return input.client.readContract({
         address: input.gatewayMinter,
         abi: czarGatewayMinterReplayAbi,
         functionName: "isTransferSpecHashUsed",
         args: [hash],
-      }),
+      });
+    },
     mintAttestation: (transaction) => send(transaction),
     confirmPullback: async (args) => send(args.transaction),
     cancelPullback: async (args) => send(args.transaction),

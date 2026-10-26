@@ -1,6 +1,14 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { czarVaultAbi, czarVaultFactoryAbi, getLimits } from "@czar/vault-client";
-import { keccak256, type Address, type Hex, type PublicClient, type WalletClient } from "viem";
+import {
+  decodeEventLog,
+  keccak256,
+  parseAbi,
+  type Address,
+  type Hex,
+  type PublicClient,
+  type WalletClient,
+} from "viem";
 import type { Config } from "@czar/config";
 import {
   PAYEE_KIND,
@@ -69,6 +77,7 @@ import { createViemVaultDirectChain } from "#src/payer/viem-chain";
 import {
   cancelExpiredPullback,
   executePullback,
+  writeOffOverdueManualReturn,
   type CancelPullbackInput,
   type PullbackInput,
 } from "#src/payer/pullback";
@@ -83,7 +92,11 @@ import {
   type PocketRecoveryOperations,
 } from "#src/payer/pocket-recovery";
 import {
+  runManualReturnRecovery,
   runPendingPullbackFallbacks,
+  type ManualReturnReceiptPosition,
+  type ManualReturnRow,
+  type ManualReturnWriteOffCandidate,
   type PullbackFallbackSchedulerDependencies,
 } from "#src/payer/pullback-scheduler";
 import { startPayerDispatcher, type DispatchStepRequest } from "#src/payer/dispatcher";
@@ -140,6 +153,12 @@ export interface ServerMainOptions extends PairDependencies {
 
 export type ServerSigner = Pick<Signer, "sign" | "createPocketKey" | "keyAddress"> &
   Partial<Pick<Signer, "retirePocketKey">>;
+
+// ICzarVault.PocketState: None, Registered, Funded, Draining, Closed.
+const POCKET_STATE_CLOSED = 4n;
+const usdcTransferAbi = parseAbi([
+  "event Transfer(address indexed from,address indexed to,uint256 value)",
+]);
 
 export interface ServerMain {
   readonly app: ReturnType<typeof createApp>;
@@ -427,19 +446,157 @@ function startProductionPayerRuntime(
     options.appReadOptions.indexerUrl,
     Number(options.config.get("fetch.timeoutMs")),
   );
+  const runRecoveryPass = async () => {
+    await pocketRecovery?.runClosedPocketRecovery();
+    await runManualReturnRecovery({
+      pool: options.pool,
+      config: options.config,
+      manualReturnsForVault: (vault) => pocketReader.manualReturnsForVault(vault),
+      manualReturnsAfterClosure: async (vault, pocket, fromBlock) => {
+        const events = await options.publicClient.getContractEvents({
+          address: vault,
+          abi: czarVaultAbi,
+          eventName: "ManualReturnRecorded",
+          args: { pocket },
+          fromBlock,
+        });
+        return events.flatMap((event) => {
+          if (
+            event.args.amount === undefined ||
+            event.blockNumber === null ||
+            event.logIndex === null ||
+            event.transactionHash === null
+          )
+            return [];
+          return [
+            {
+              pocket,
+              credit: event.args.amount.toString(),
+              block: event.blockNumber.toString(),
+              logIndex: event.logIndex,
+              txHash: event.transactionHash,
+            },
+          ];
+        });
+      },
+      recoverReturnPosition: (row) => recoverManualReturnPosition(options, row),
+      isPocketClosed: async (vault, pocket) => {
+        const record = await options.publicClient.readContract({
+          address: vault,
+          abi: czarVaultAbi,
+          functionName: "getPocket",
+          args: [pocket],
+        });
+        return BigInt(record.state) === POCKET_STATE_CLOSED;
+      },
+      onRowError: () =>
+        options.logger.error("manual_return_reconciliation_failure", {
+          rule: "receipt-position-unavailable",
+          state: "retry",
+        }),
+      onWriteOffError: () =>
+        options.logger.error("manual_return_writeoff_failure", {
+          rule: "writeoff-retry",
+          state: "retry",
+        }),
+      now: options.clock.now,
+      writeOffManualReturn: (row) => writeOffManualReturn(options, signer, row),
+    });
+  };
   return startPayerRuntime({
     ...(pocketHalt ? { events: vaultEvents, pocketHalt } : {}),
     fallbackPollSeconds: Number(options.config.get("payer.pullbackFallbackPollSeconds")),
     runFallbacks: () => runPullbackFallbacks(options, signer, fallbackChain, pocketReader),
-    ...(pocketRecovery
-      ? {
-          recoveryPollSeconds: Number(options.config.get("payer.gatewayRecoveryPollSeconds")),
-          runClosedRecovery: pocketRecovery.runClosedPocketRecovery,
-        }
-      : {}),
+    recoveryPollSeconds: Number(options.config.get("payer.gatewayRecoveryPollSeconds")),
+    runClosedRecovery: runRecoveryPass,
     onError: (operation) =>
       options.logger.error("payer_runtime_failure", { rule: operation, state: "error" }),
   });
+}
+
+async function writeOffManualReturn(
+  options: ServerMainOptions,
+  signer: ServerSigner,
+  row: ManualReturnWriteOffCandidate,
+): Promise<unknown> {
+  if (!row.vault_address) throw new Error("Manual-return write-off row has no vault address.");
+  const gatewayMinter = row.gateway_minter ?? options.gatewayMinter;
+  return writeOffOverdueManualReturn(
+    {
+      planId: row.plan_id,
+      stepIndex: row.step_index,
+      attempt: row.attempt ?? 0,
+      envelopeRef: row.envelope_ref,
+      vault: row.vault_address,
+      pocket: row.pocket,
+    },
+    {
+      pool: options.pool,
+      config: options.config,
+      signer,
+      chain: createPullbackExecutionChain({
+        client: options.publicClient,
+        pool: options.pool,
+        vault: row.vault_address,
+        ...(gatewayMinter ? { gatewayMinter } : {}),
+      }),
+      now: options.clock.now,
+    },
+  );
+}
+
+async function recoverManualReturnPosition(
+  options: ServerMainOptions,
+  row: ManualReturnRow,
+): Promise<ManualReturnReceiptPosition | null> {
+  const vault = row.vault_address;
+  if (vault === null) return null;
+  const txHash = row.return_tx ?? (await slowReturnTransactionHash(options.pool, row));
+  if (!txHash || !/^0x[\da-fA-F]{64}$/.test(txHash)) return null;
+  const receipt = await options.publicClient.getTransactionReceipt({ hash: txHash as Hex });
+  if (receipt.status !== "success") return null;
+  const usdc = (options.config.get("chain.usdcAddress") as Address).toLowerCase();
+  const matching = receipt.logs.flatMap((log) => {
+    if (log.address.toLowerCase() !== usdc) return [];
+    try {
+      const decoded = decodeEventLog({
+        abi: usdcTransferAbi,
+        eventName: "Transfer",
+        data: log.data,
+        topics: log.topics,
+      });
+      if (
+        decoded.args.from.toLowerCase() === row.pocket.toLowerCase() &&
+        decoded.args.to.toLowerCase() === vault.toLowerCase() &&
+        decoded.args.value > 0n
+      )
+        return [{ amount: decoded.args.value, logIndex: log.logIndex }];
+      return [];
+    } catch {
+      return [];
+    }
+  });
+  if (matching.length !== 1) return null;
+  const transfer = matching[0];
+  if (!transfer) return null;
+  return {
+    txHash: receipt.transactionHash,
+    amount: transfer.amount.toString(),
+    block: receipt.blockNumber.toString(),
+    logIndex: transfer.logIndex,
+  };
+}
+
+async function slowReturnTransactionHash(pool: Pool, row: ManualReturnRow): Promise<string | null> {
+  const trace = await pool.query<{ readonly payload: Record<string, unknown> }>(
+    `SELECT payload FROM step_executions
+     WHERE plan_id=$1 AND step_index=$2 AND attempt=$3
+       AND phase='pullback.slow.returned'
+     ORDER BY execution_id DESC LIMIT 1`,
+    [row.plan_id, row.step_index, row.attempt ?? 0],
+  );
+  const hash = trace.rows[0]?.payload["txHash"];
+  return typeof hash === "string" ? hash : null;
 }
 
 async function runPullbackFallbacks(
@@ -540,6 +697,8 @@ function createPocketOperations(
         throw new Error("The configured signer client does not expose pocket-key retirement.");
       return sweepAndRetirePocketKey(input, {
         pool: options.pool,
+        config: options.config,
+        now: options.clock.now,
         signer: {
           sign: signer.sign.bind(signer),
           retirePocketKey: signer.retirePocketKey.bind(signer),

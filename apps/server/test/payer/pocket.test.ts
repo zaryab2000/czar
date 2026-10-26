@@ -41,6 +41,7 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await getPool().query("DELETE FROM step_executions");
+  await getPool().query("DELETE FROM payer_pullback_gateway_failures WHERE plan_id=$1", [PLAN_ID]);
   await getPool().query("DELETE FROM plan_pocket_keys WHERE plan_id=$1", [PLAN_ID]);
   await getPool().query("DELETE FROM plan_pocket_keys WHERE lower(pocket_address)=lower($1)", [
     POCKET,
@@ -211,12 +212,61 @@ describe("pocket funding", () => {
           vault: POCKET as `0x${string}`,
           pocket: POCKET as `0x${string}`,
         },
-        { pool: getPool(), signer, chain },
+        { pool: getPool(), config: loadConfig(), now: () => new Date(), signer, chain },
       ),
     ).resolves.toMatchObject({ state: "retiring", sweptNative: "20000" });
     expect(chain.writeOffPocket).toHaveBeenCalledOnce();
     expect(chain.sendPocketTransaction).toHaveBeenCalledOnce();
     expect(signer.retirePocketKey).toHaveBeenCalledOnce();
+  });
+
+  it("does not bypass the manual-return hold through pocket close", async () => {
+    const now = new Date("2026-10-22T00:00:00.000Z");
+    await getPool().query(
+      `INSERT INTO payer_pullback_gateway_failures
+         (plan_id,step_index,envelope_ref,pocket,value,unavailable_since,state,
+          pullback_id,vault_address,gateway_minter,attempt,return_tx,return_block,
+          return_log_index,returned_amount,manual_return_required_at)
+       VALUES($1,0,$2,$3,100,$4,'manual-return-required',NULL,$5,$6,0,$7,50,5,100,$4)`,
+      [
+        PLAN_ID,
+        "eip155:5042002:0xvault:1",
+        POCKET,
+        now,
+        "0x0000000000000000000000000000000000000002",
+        "0x0000000000000000000000000000000000000003",
+        `0x${"33".repeat(32)}`,
+      ],
+    );
+    const writeOffPocket = vi.fn(async () => "write-off-tx");
+    const sign = vi.fn(async () => ({ signedTransaction: "0x1234" as const }));
+    await expect(
+      sweepAndRetirePocketKey(
+        {
+          planId: PLAN_ID,
+          stepIndex: 0,
+          attempt: 0,
+          vault: "0x0000000000000000000000000000000000000002",
+          pocket: POCKET,
+        },
+        {
+          pool: getPool(),
+          config: loadConfig({ envFile: { "payer.manualReturnHoldHours": 72 } }),
+          now: () => now,
+          signer: { sign, retirePocketKey: vi.fn() },
+          chain: {
+            isClosed: vi.fn(async () => false),
+            hasPendingPullback: vi.fn(async () => false),
+            writeOffPocket,
+            sweepableNativeBalance: vi.fn(async () => 0n),
+            pocketBalances: vi.fn(async () => ({ native: 0n, usdc: 0n, gateway: 0n })),
+            sendPocketTransaction: vi.fn(async () => "sweep-tx"),
+          },
+        },
+      ),
+    ).rejects.toThrow("manual-return hold");
+    expect(sign).not.toHaveBeenCalled();
+    expect(writeOffPocket).not.toHaveBeenCalled();
   });
 
   it("caps funding by both gateway step totals and the plan pocket basis points", () => {

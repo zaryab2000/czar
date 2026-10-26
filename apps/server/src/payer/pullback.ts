@@ -89,6 +89,10 @@ export interface PullbackInput extends Omit<
 export interface PullbackChain {
   maxPullbackFee(): Promise<bigint>;
   writeOffPocket(pocket: Address, transaction: `0x${string}`): Promise<string>;
+  pocketWriteOffStatus?(pocket: Address): Promise<{
+    readonly state: "registered" | "funded" | "draining" | "closed" | "unsupported";
+    readonly pendingPullback: bigint;
+  }>;
   findPendingPullback(pocket: Address): Promise<PullbackRecord | undefined>;
   requestPullback(input: {
     readonly pocket: Address;
@@ -613,7 +617,9 @@ async function recordVerifiedReturn(
       : "manual-return-required";
   const result = await dependencies.pool.query(
     `UPDATE payer_pullback_gateway_failures
-     SET return_tx=$3,return_block=$4,return_log_index=$5,returned_amount=$6,state=$7
+     SET return_tx=$3,return_block=$4,return_log_index=$5,returned_amount=$6,state=$7,
+         manual_return_required_at=CASE WHEN $7='manual-return-required'
+           THEN COALESCE(manual_return_required_at,$9) ELSE manual_return_required_at END
      WHERE plan_id=$1 AND step_index=$2 AND attempt=$8`,
     [
       input.planId,
@@ -624,6 +630,7 @@ async function recordVerifiedReturn(
       transfer.value.toString(),
       state,
       attempt,
+      dependencies.now(),
     ],
   );
   if (result.rowCount !== 1) throw new Error("Verified slow pullback return was not persisted.");
@@ -687,6 +694,7 @@ export async function executePullback(
   | { readonly state: "written-off"; readonly pocket: Address }
   | { readonly state: "waiting"; readonly reason: "gateway-balance-stale" }
   | { readonly state: "waiting"; readonly reason: "closed-pocket-dust" }
+  | { readonly state: "waiting"; readonly reason: "manual-return-hold" }
 > {
   const workerId = input.workerId ?? `pullback-${process.pid}-${randomUUID()}`;
   const initialAttempt = input.attempt ?? 0;
@@ -848,6 +856,7 @@ async function runPullback(
   | { readonly state: "written-off"; readonly pocket: Address }
   | { readonly state: "waiting"; readonly reason: "gateway-balance-stale" }
   | { readonly state: "waiting"; readonly reason: "closed-pocket-dust" }
+  | { readonly state: "waiting"; readonly reason: "manual-return-hold" }
 > {
   if (!hasFreshGatewayBalance(input, dependencies)) {
     await writePullbackPhase(dependencies, input, attempt, "pullback.gateway-balance-stale", {
@@ -1027,6 +1036,7 @@ async function recoverOrRequestPullback(
   | PullbackRecord
   | { readonly state: "written-off"; readonly pocket: Address }
   | { readonly state: "waiting"; readonly reason: "closed-pocket-dust" }
+  | { readonly state: "waiting"; readonly reason: "manual-return-hold" }
 > {
   const stored = trace.findLast((row) => row.phase === "pullback.requested");
   const cancelled = trace.findLast((row) => row.phase === "pullback.cancelled");
@@ -1061,6 +1071,12 @@ async function recoverOrRequestPullback(
       });
       return { state: "waiting", reason: "closed-pocket-dust" };
     }
+    if (await isManualReturnWriteOffHeld(input, dependencies)) {
+      await writePullbackPhase(dependencies, input, attempt, "pullback.manual-return-hold", {
+        pocket: input.pocket,
+      });
+      return { state: "waiting", reason: "manual-return-hold" };
+    }
     const prior = trace.findLast((row) => row.phase === "pullback.write-off.sent");
     let transaction = prior?.payload["transaction"];
     if (typeof transaction !== "string") {
@@ -1081,6 +1097,11 @@ async function recoverOrRequestPullback(
       pocket: input.pocket,
       txHash,
     });
+    await dependencies.pool.query(
+      `UPDATE payer_pullback_gateway_failures SET state='expired'
+       WHERE plan_id=$1 AND step_index=$2 AND state='manual-return-required'`,
+      [input.planId, input.stepIndex],
+    );
     return { state: "written-off", pocket: input.pocket };
   }
   const windowBlocks = BigInt(Number(dependencies.config.get("payer.pullbackWindowBlocks")));
@@ -1121,6 +1142,163 @@ async function recoverOrRequestPullback(
     serializePullback(requested, input.pocket),
   );
   return requested;
+}
+
+/** Returns whether a manual return is still inside its owner response window. */
+export async function isManualReturnWriteOffHeld(
+  input: Pick<PullbackInput, "planId" | "stepIndex">,
+  dependencies: Pick<PullbackDependencies, "pool" | "config" | "now">,
+): Promise<boolean> {
+  return (await manualReturnWriteOffStatus(input, dependencies)) === "held";
+}
+
+export interface ManualReturnWriteOffInput {
+  readonly planId: string;
+  readonly stepIndex: number;
+  readonly attempt: number;
+  readonly envelopeRef: string;
+  readonly vault: Address;
+  readonly pocket: Address;
+}
+
+export interface ManualReturnWriteOffDependencies {
+  readonly pool: Pool;
+  readonly config: Config;
+  readonly signer: Pick<Signer, "sign">;
+  readonly chain: Pick<PullbackChain, "pocketWriteOffStatus" | "writeOffPocket">;
+  readonly now: () => Date;
+}
+
+/** Writes off an overdue manual return without requiring a Gateway API observation. */
+export async function writeOffOverdueManualReturn(
+  input: ManualReturnWriteOffInput,
+  dependencies: ManualReturnWriteOffDependencies,
+): Promise<"written-off" | "already-closed" | "held" | "recorded" | "pending-pullback"> {
+  const workerId = `manual-return-${process.pid}-${randomUUID()}`;
+  const leaseSeconds = Number(dependencies.config.get("payer.leaseSeconds"));
+  const leased = await acquireExecutorLease(
+    dependencies.pool,
+    input.envelopeRef,
+    workerId,
+    leaseSeconds,
+    dependencies.now,
+  );
+  if (!leased) throw new Error("Another payer executor holds the envelope lease.");
+  const renewal = startExecutorLeaseRenewal(
+    dependencies.pool,
+    input.envelopeRef,
+    workerId,
+    leaseSeconds,
+    dependencies.now,
+  );
+  try {
+    const status = await manualReturnWriteOffStatus(input, dependencies);
+    if (status === "held") return "held";
+    if (status === "recorded") return "recorded";
+    if (status !== "due") return "already-closed";
+    const readStatus = dependencies.chain.pocketWriteOffStatus;
+    if (!readStatus)
+      throw new Error("Manual-return write-off requires an on-chain pocket state read.");
+    const pocketStatus = await readStatus(input.pocket);
+    if (pocketStatus.state === "closed") {
+      await expireManualReturn(input, dependencies.pool);
+      return "already-closed";
+    }
+    if (pocketStatus.state === "unsupported")
+      throw new Error("Manual-return write-off found an unsupported pocket state.");
+    if (pocketStatus.pendingPullback > 0n) return "pending-pullback";
+    const trace = await getExecutionTrace(
+      dependencies.pool,
+      input.planId,
+      input.stepIndex,
+      input.attempt,
+    );
+    if (trace.some((entry) => entry.phase === "pullback.write-off")) {
+      await expireManualReturn(input, dependencies.pool);
+      return "written-off";
+    }
+    const transaction = await writeOffTransaction(input, dependencies, trace);
+    const txHash = await dependencies.chain.writeOffPocket(input.pocket, transaction);
+    await appendExecutionPhase(dependencies.pool, {
+      planId: input.planId,
+      stepIndex: input.stepIndex,
+      attempt: input.attempt,
+      phase: "pullback.write-off",
+      payload: { pocket: input.pocket, txHash },
+    });
+    await expireManualReturn(input, dependencies.pool);
+    return "written-off";
+  } finally {
+    await renewal.stop();
+    await releaseExecutorLease(dependencies.pool, input.envelopeRef, workerId);
+  }
+}
+
+async function writeOffTransaction(
+  input: ManualReturnWriteOffInput,
+  dependencies: ManualReturnWriteOffDependencies,
+  trace: readonly ExecutionPhaseRow[],
+): Promise<`0x${string}`> {
+  const sent = trace.findLast((entry) => entry.phase === "pullback.write-off.sent");
+  const prior = sent?.payload["transaction"];
+  if (typeof prior === "string") return prior as `0x${string}`;
+  const signed = await dependencies.signer.sign("cz-15", {
+    keyId: "K3",
+    kind: "vault-call",
+    payload: { vault: input.vault, selector: "writeOffPocket", args: { pocket: input.pocket } },
+  });
+  if (!("signedTransaction" in signed)) throw new Error("K3 did not sign writeOffPocket.");
+  await appendExecutionPhase(dependencies.pool, {
+    planId: input.planId,
+    stepIndex: input.stepIndex,
+    attempt: input.attempt,
+    phase: "pullback.write-off.sent",
+    payload: { pocket: input.pocket, transaction: signed.signedTransaction },
+  });
+  return signed.signedTransaction;
+}
+
+async function manualReturnWriteOffStatus(
+  input: Pick<PullbackInput, "planId" | "stepIndex">,
+  dependencies: Pick<PullbackDependencies, "pool" | "config" | "now">,
+): Promise<"none" | "held" | "due" | "recorded" | "expired"> {
+  const requiredAt = await dependencies.pool.query<{
+    readonly state: string;
+    readonly at: Date | null;
+  }>(
+    `SELECT state,manual_return_required_at AS at
+     FROM payer_pullback_gateway_failures
+     WHERE plan_id=$1 AND step_index=$2
+       AND state IN ('manual-return-required','recorded','expired')`,
+    [input.planId, input.stepIndex],
+  );
+  const row = requiredAt.rows[0];
+  if (!row) return "none";
+  if (row.state === "recorded") return "recorded";
+  if (row.state === "expired") return "expired";
+  const start = row.at;
+  if (!start) {
+    await dependencies.pool.query(
+      `UPDATE payer_pullback_gateway_failures SET manual_return_required_at=$3
+       WHERE plan_id=$1 AND step_index=$2 AND state='manual-return-required'
+         AND manual_return_required_at IS NULL`,
+      [input.planId, input.stepIndex, dependencies.now()],
+    );
+    return "held";
+  }
+  const holdMs =
+    Number(dependencies.config.get("payer.manualReturnHoldHours")) * MILLISECONDS_PER_HOUR;
+  return dependencies.now().getTime() < start.getTime() + holdMs ? "held" : "due";
+}
+
+async function expireManualReturn(input: ManualReturnWriteOffInput, pool: Pool): Promise<void> {
+  const result = await pool.query(
+    `UPDATE payer_pullback_gateway_failures SET state='expired'
+     WHERE plan_id=$1 AND step_index=$2 AND state='manual-return-required'`,
+    [input.planId, input.stepIndex],
+  );
+  if (result.rowCount !== 1)
+    throw new Error("Manual-return state changed before the write-off was recorded.");
 }
 
 async function obtainAttestation(
