@@ -1,0 +1,220 @@
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { loadConfig } from "@czar/config";
+import {
+  listManualReturnsForUser,
+  reconcileManualReturns,
+  runManualReturnRecovery,
+} from "#src/payer/pullback-scheduler";
+import { setupDatabase } from "#test/db";
+import { makeObjectiveSubmission, seedDevice, TEST_USER_ID } from "#test/fixtures";
+
+const getPool = setupDatabase();
+const PLAN_ID = "pln_01K7ZT9P4N5Q6R7S8T9V0W1X2Y";
+const OTHER_USER_ID = "usr_01K7ZT9P4N5Q6R7S8T9V0W1X2Z";
+const OTHER_DEVICE_ID = "dev_01K7ZT9P4N5Q6R7S8T9V0W1X2Z";
+const OTHER_OBJECTIVE_ID = "obj_01K7ZT9P4N5Q6R7S8T9V0W1X2Z";
+const OTHER_PLAN_ID = "pln_01K7ZT9P4N5Q6R7S8T9V0W1X2Z";
+const POCKET = "0x0000000000000000000000000000000000000001" as const;
+const VAULT = "0x0000000000000000000000000000000000000002" as const;
+const NOW = new Date("2026-10-26T00:00:00.000Z");
+
+beforeAll(async () => {
+  const pool = getPool();
+  await seedDevice(pool);
+  const submission = makeObjectiveSubmission("obj_01K7ZT9P4N5Q6R7S8T9V0W1X2Y");
+  await pool.query(
+    `INSERT INTO objectives(objective_id,user_id,device_id,submission,objective_hash,state)
+     VALUES($1,$2,$3,$4::jsonb,$5,'received') ON CONFLICT DO NOTHING`,
+    [
+      submission.objectiveId,
+      TEST_USER_ID,
+      submission.deviceId,
+      JSON.stringify(submission),
+      submission.objectiveHash,
+    ],
+  );
+  await pool.query(
+    `INSERT INTO plans(plan_id,objective_id,plan,plan_hash,payee_root,state)
+     VALUES($1,$2,'{}',$3,$4,'offered') ON CONFLICT DO NOTHING`,
+    [PLAN_ID, submission.objectiveId, `0x${"11".repeat(32)}`, `0x${"22".repeat(32)}`],
+  );
+  await pool.query("INSERT INTO users(user_id) VALUES($1)", [OTHER_USER_ID]);
+  await pool.query(
+    `INSERT INTO devices(device_id,user_id,device_name,platform,token_hash)
+     VALUES($1,$2,'Other user device','macos',$3)`,
+    [OTHER_DEVICE_ID, OTHER_USER_ID, Buffer.alloc(32, 8)],
+  );
+  const otherSubmission = makeObjectiveSubmission(OTHER_OBJECTIVE_ID, {
+    deviceId: OTHER_DEVICE_ID,
+  });
+  await pool.query(
+    `INSERT INTO objectives(objective_id,user_id,device_id,submission,objective_hash,state)
+     VALUES($1,$2,$3,$4::jsonb,$5,'received')`,
+    [
+      OTHER_OBJECTIVE_ID,
+      OTHER_USER_ID,
+      OTHER_DEVICE_ID,
+      JSON.stringify(otherSubmission),
+      otherSubmission.objectiveHash,
+    ],
+  );
+  await pool.query(
+    `INSERT INTO plans(plan_id,objective_id,plan,plan_hash,payee_root,state)
+     VALUES($1,$2,'{}',$3,$4,'offered')`,
+    [OTHER_PLAN_ID, OTHER_OBJECTIVE_ID, `0x${"33".repeat(32)}`, `0x${"44".repeat(32)}`],
+  );
+});
+
+beforeEach(async () => {
+  await getPool().query(
+    "DELETE FROM payer_pullback_gateway_failures WHERE plan_id=ANY($1::text[])",
+    [[PLAN_ID, OTHER_PLAN_ID]],
+  );
+  await getPool().query(
+    `INSERT INTO payer_pullback_gateway_failures
+       (plan_id,step_index,envelope_ref,pocket,value,unavailable_since,state,
+        pullback_id,vault_address,gateway_minter,attempt,return_tx,return_block,
+        return_log_index,returned_amount)
+     VALUES($1,0,$2,$3,90000,$4,'manual-return-required',NULL,$5,$6,0,$7,50,5,8000)`,
+    [
+      PLAN_ID,
+      "eip155:5042002:0xvault:1",
+      POCKET,
+      NOW,
+      VAULT,
+      "0x0000000000000000000000000000000000000004",
+      `0x${"33".repeat(32)}`,
+    ],
+  );
+  await getPool().query(
+    `INSERT INTO payer_pullback_gateway_failures
+       (plan_id,step_index,envelope_ref,pocket,value,unavailable_since,state,
+        pullback_id,vault_address,gateway_minter,attempt,return_tx,return_block,
+        return_log_index,returned_amount,manual_return_required_at)
+     VALUES($1,0,$2,$3,90000,$4,'manual-return-required',NULL,$5,$6,0,$7,50,5,9000,$4)`,
+    [
+      OTHER_PLAN_ID,
+      "eip155:5042002:0xvault:2",
+      "0x0000000000000000000000000000000000000003",
+      NOW,
+      VAULT,
+      "0x0000000000000000000000000000000000000004",
+      `0x${"55".repeat(32)}`,
+    ],
+  );
+});
+
+describe("manual return reconciliation", () => {
+  it("records only a matching event ordered after the return transfer", async () => {
+    await reconcileManualReturns({
+      pool: getPool(),
+      manualReturnsForVault: async () => [
+        {
+          pocket: POCKET,
+          credit: "7000",
+          txHash: `0x${"44".repeat(32)}`,
+          block: "50",
+          logIndex: 6,
+        },
+      ],
+      isPocketClosed: async () => false,
+      now: () => NOW,
+    });
+
+    const row = await getPool().query<{
+      state: string;
+      recorded_credit: string | null;
+      recorded_tx: string | null;
+      recorded_at: Date | null;
+    }>(
+      `SELECT state,recorded_credit,recorded_tx,recorded_at
+       FROM payer_pullback_gateway_failures WHERE plan_id=$1`,
+      [PLAN_ID],
+    );
+    expect(row.rows[0]).toEqual({
+      state: "recorded",
+      recorded_credit: "7000",
+      recorded_tx: `0x${"44".repeat(32)}`,
+      recorded_at: NOW,
+    });
+  });
+
+  it("does not match a lower log index in the return transfer's block", async () => {
+    await reconcileManualReturns({
+      pool: getPool(),
+      manualReturnsForVault: async () => [
+        {
+          pocket: POCKET,
+          credit: "8000",
+          txHash: `0x${"44".repeat(32)}`,
+          block: "50",
+          logIndex: 4,
+        },
+      ],
+      isPocketClosed: async () => false,
+      now: () => NOW,
+    });
+
+    const row = await getPool().query<{ state: string; recorded_credit: string | null }>(
+      `SELECT state,recorded_credit FROM payer_pullback_gateway_failures WHERE plan_id=$1`,
+      [PLAN_ID],
+    );
+    expect(row.rows[0]).toEqual({ state: "manual-return-required", recorded_credit: null });
+  });
+
+  it("expires the pending manual return when the pocket closed first", async () => {
+    let closedPocketRead = false;
+    await reconcileManualReturns({
+      pool: getPool(),
+      manualReturnsForVault: async () => [],
+      isPocketClosed: async (vault, pocket) => {
+        closedPocketRead = true;
+        expect(vault).toBe(VAULT);
+        return pocket.toLowerCase() === POCKET.toLowerCase();
+      },
+      now: () => NOW,
+    });
+
+    const row = await getPool().query<{ state: string }>(
+      "SELECT state FROM payer_pullback_gateway_failures WHERE plan_id=$1",
+      [PLAN_ID],
+    );
+    expect(closedPocketRead).toBe(true);
+    expect(row.rows[0]?.state).toBe("expired");
+  });
+
+  it("returns manual-return rows only to the objective's owning user", async () => {
+    const firstUserRows = await listManualReturnsForUser(getPool(), TEST_USER_ID);
+    const secondUserRows = await listManualReturnsForUser(getPool(), OTHER_USER_ID);
+
+    expect(firstUserRows).toHaveLength(1);
+    expect(firstUserRows[0]?.envelopeRef).toBe("eip155:5042002:0xvault:1");
+    expect(secondUserRows).toHaveLength(1);
+    expect(secondUserRows[0]?.envelopeRef).toBe("eip155:5042002:0xvault:2");
+    await expect(
+      listManualReturnsForUser(getPool(), "usr_01K7ZT9P4N5Q6R7S8T9V0W1X3A"),
+    ).resolves.toEqual([]);
+  });
+
+  it("starts write-off only when the configured hold has elapsed", async () => {
+    const now = new Date(NOW);
+    const writeOffManualReturn = vi.fn(async () => undefined);
+    const dependencies = {
+      pool: getPool(),
+      config: loadConfig({ envFile: { "payer.manualReturnHoldHours": 72 } }),
+      manualReturnsForVault: async () => [],
+      isPocketClosed: async () => false,
+      writeOffManualReturn,
+      now: () => now,
+    };
+
+    await expect(runManualReturnRecovery(dependencies)).resolves.toBe(0);
+    expect(writeOffManualReturn).not.toHaveBeenCalled();
+    now.setTime(now.getTime() + 72 * 60 * 60 * 1000);
+    await expect(runManualReturnRecovery(dependencies)).resolves.toBe(1);
+    expect(writeOffManualReturn).toHaveBeenCalledOnce();
+    expect(writeOffManualReturn).toHaveBeenCalledWith(
+      expect.objectContaining({ plan_id: OTHER_PLAN_ID }),
+    );
+  });
+});

@@ -40,4 +40,37 @@ describe("indexer pocket reader", () => {
       reader.pocketBalance("0x0000000000000000000000000000000000000002"),
     ).rejects.toThrow("malformed pocket balance");
   });
+
+  it("reads manual-return events with their same-block log positions", async () => {
+    const fetcher = vi.fn(async () =>
+      Response.json({
+        items: [
+          {
+            pocket: "0x0000000000000000000000000000000000000002",
+            credit: "7000",
+            txHash: `0x${"44".repeat(32)}`,
+            block: "50",
+            logIndex: 6,
+          },
+        ],
+      }),
+    );
+    const reader = createIndexerPocketReader("http://127.0.0.1:42069", 2_000, fetcher);
+
+    await expect(
+      reader.manualReturnsForVault("0x0000000000000000000000000000000000000003"),
+    ).resolves.toEqual([
+      {
+        pocket: "0x0000000000000000000000000000000000000002",
+        credit: "7000",
+        txHash: `0x${"44".repeat(32)}`,
+        block: "50",
+        logIndex: 6,
+      },
+    ]);
+    expect(fetcher).toHaveBeenCalledWith(
+      "http://127.0.0.1:42069/pockets/manual-returns?vault=0x0000000000000000000000000000000000000003",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
 });

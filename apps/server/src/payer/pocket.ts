@@ -20,6 +20,7 @@ import {
 import type { Pool } from "pg";
 import { randomBytes, randomUUID } from "node:crypto";
 import { toHex, type Address } from "viem";
+import { isManualReturnWriteOffHeld } from "#src/payer/pullback";
 import {
   acquireExecutorLease,
   appendExecutionPhase,
@@ -58,7 +59,9 @@ export interface PocketCloseInput {
 
 export interface PocketCloseDependencies {
   readonly pool: Pool;
+  readonly config: Config;
   readonly signer: Pick<Signer, "sign" | "retirePocketKey">;
+  readonly now: () => Date;
   readonly recoverLateGatewayBalance?: (input: {
     readonly vault: Address;
     readonly pocket: Address;
@@ -129,6 +132,8 @@ export async function sweepAndRetirePocketKey(
   if (await dependencies.chain.hasPendingPullback(input.pocket))
     throw new Error("Cannot write off a pocket while a pullback is pending.");
   if (!(await dependencies.chain.isClosed(input.pocket))) {
+    if (await isManualReturnWriteOffHeld(input, dependencies))
+      throw new Error("Cannot write off a pocket during the manual-return hold.");
     const close = await dependencies.signer.sign("cz-15", {
       keyId: "K3",
       kind: "vault-call",
@@ -140,6 +145,11 @@ export async function sweepAndRetirePocketKey(
     });
     const txHash = await dependencies.chain.writeOffPocket(input.pocket, close.signedTransaction);
     await recordPocketPhase(dependencies.pool, input, "pocket.written-off", { txHash });
+    await dependencies.pool.query(
+      `UPDATE payer_pullback_gateway_failures SET state='expired'
+       WHERE plan_id=$1 AND step_index=$2 AND state='manual-return-required'`,
+      [input.planId, input.stepIndex],
+    );
   }
   const sweptNative = await sweepPocketBalance(input, dependencies, "native");
   await sweepPocketBalance(input, dependencies, "usdc");

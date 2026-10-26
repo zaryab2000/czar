@@ -613,7 +613,9 @@ async function recordVerifiedReturn(
       : "manual-return-required";
   const result = await dependencies.pool.query(
     `UPDATE payer_pullback_gateway_failures
-     SET return_tx=$3,return_block=$4,return_log_index=$5,returned_amount=$6,state=$7
+     SET return_tx=$3,return_block=$4,return_log_index=$5,returned_amount=$6,state=$7,
+         manual_return_required_at=CASE WHEN $7='manual-return-required'
+           THEN COALESCE(manual_return_required_at,$9) ELSE manual_return_required_at END
      WHERE plan_id=$1 AND step_index=$2 AND attempt=$8`,
     [
       input.planId,
@@ -624,6 +626,7 @@ async function recordVerifiedReturn(
       transfer.value.toString(),
       state,
       attempt,
+      dependencies.now(),
     ],
   );
   if (result.rowCount !== 1) throw new Error("Verified slow pullback return was not persisted.");
@@ -687,6 +690,7 @@ export async function executePullback(
   | { readonly state: "written-off"; readonly pocket: Address }
   | { readonly state: "waiting"; readonly reason: "gateway-balance-stale" }
   | { readonly state: "waiting"; readonly reason: "closed-pocket-dust" }
+  | { readonly state: "waiting"; readonly reason: "manual-return-hold" }
 > {
   const workerId = input.workerId ?? `pullback-${process.pid}-${randomUUID()}`;
   const initialAttempt = input.attempt ?? 0;
@@ -848,6 +852,7 @@ async function runPullback(
   | { readonly state: "written-off"; readonly pocket: Address }
   | { readonly state: "waiting"; readonly reason: "gateway-balance-stale" }
   | { readonly state: "waiting"; readonly reason: "closed-pocket-dust" }
+  | { readonly state: "waiting"; readonly reason: "manual-return-hold" }
 > {
   if (!hasFreshGatewayBalance(input, dependencies)) {
     await writePullbackPhase(dependencies, input, attempt, "pullback.gateway-balance-stale", {
@@ -1027,6 +1032,7 @@ async function recoverOrRequestPullback(
   | PullbackRecord
   | { readonly state: "written-off"; readonly pocket: Address }
   | { readonly state: "waiting"; readonly reason: "closed-pocket-dust" }
+  | { readonly state: "waiting"; readonly reason: "manual-return-hold" }
 > {
   const stored = trace.findLast((row) => row.phase === "pullback.requested");
   const cancelled = trace.findLast((row) => row.phase === "pullback.cancelled");
@@ -1061,6 +1067,12 @@ async function recoverOrRequestPullback(
       });
       return { state: "waiting", reason: "closed-pocket-dust" };
     }
+    if (await isManualReturnWriteOffHeld(input, dependencies)) {
+      await writePullbackPhase(dependencies, input, attempt, "pullback.manual-return-hold", {
+        pocket: input.pocket,
+      });
+      return { state: "waiting", reason: "manual-return-hold" };
+    }
     const prior = trace.findLast((row) => row.phase === "pullback.write-off.sent");
     let transaction = prior?.payload["transaction"];
     if (typeof transaction !== "string") {
@@ -1081,6 +1093,11 @@ async function recoverOrRequestPullback(
       pocket: input.pocket,
       txHash,
     });
+    await dependencies.pool.query(
+      `UPDATE payer_pullback_gateway_failures SET state='expired'
+       WHERE plan_id=$1 AND step_index=$2 AND state='manual-return-required'`,
+      [input.planId, input.stepIndex],
+    );
     return { state: "written-off", pocket: input.pocket };
   }
   const windowBlocks = BigInt(Number(dependencies.config.get("payer.pullbackWindowBlocks")));
@@ -1121,6 +1138,33 @@ async function recoverOrRequestPullback(
     serializePullback(requested, input.pocket),
   );
   return requested;
+}
+
+/** Returns whether a manual return is still inside its owner response window. */
+export async function isManualReturnWriteOffHeld(
+  input: Pick<PullbackInput, "planId" | "stepIndex">,
+  dependencies: Pick<PullbackDependencies, "pool" | "config" | "now">,
+): Promise<boolean> {
+  const requiredAt = await dependencies.pool.query<{ readonly at: Date | null }>(
+    `SELECT manual_return_required_at AS at
+     FROM payer_pullback_gateway_failures
+     WHERE plan_id=$1 AND step_index=$2 AND state='manual-return-required'`,
+    [input.planId, input.stepIndex],
+  );
+  const start = requiredAt.rows[0]?.at;
+  if (!requiredAt.rows.length) return false;
+  if (!start) {
+    await dependencies.pool.query(
+      `UPDATE payer_pullback_gateway_failures SET manual_return_required_at=$3
+       WHERE plan_id=$1 AND step_index=$2 AND state='manual-return-required'
+         AND manual_return_required_at IS NULL`,
+      [input.planId, input.stepIndex, dependencies.now()],
+    );
+    return true;
+  }
+  const holdMs =
+    Number(dependencies.config.get("payer.manualReturnHoldHours")) * MILLISECONDS_PER_HOUR;
+  return dependencies.now().getTime() < start.getTime() + holdMs;
 }
 
 async function obtainAttestation(

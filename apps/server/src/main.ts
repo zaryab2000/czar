@@ -83,7 +83,9 @@ import {
   type PocketRecoveryOperations,
 } from "#src/payer/pocket-recovery";
 import {
+  runManualReturnRecovery,
   runPendingPullbackFallbacks,
+  type ManualReturnWriteOffCandidate,
   type PullbackFallbackSchedulerDependencies,
 } from "#src/payer/pullback-scheduler";
 import { startPayerDispatcher, type DispatchStepRequest } from "#src/payer/dispatcher";
@@ -140,6 +142,9 @@ export interface ServerMainOptions extends PairDependencies {
 
 export type ServerSigner = Pick<Signer, "sign" | "createPocketKey" | "keyAddress"> &
   Partial<Pick<Signer, "retirePocketKey">>;
+
+// ICzarVault.PocketState: None, Registered, Funded, Draining, Closed.
+const POCKET_STATE_CLOSED = 4n;
 
 export interface ServerMain {
   readonly app: ReturnType<typeof createApp>;
@@ -427,19 +432,95 @@ function startProductionPayerRuntime(
     options.appReadOptions.indexerUrl,
     Number(options.config.get("fetch.timeoutMs")),
   );
+  const runRecoveryPass = async () => {
+    await pocketRecovery?.runClosedPocketRecovery();
+    await runManualReturnRecovery({
+      pool: options.pool,
+      config: options.config,
+      manualReturnsForVault: (vault) => pocketReader.manualReturnsForVault(vault),
+      isPocketClosed: async (vault, pocket) => {
+        const record = await options.publicClient.readContract({
+          address: vault,
+          abi: czarVaultAbi,
+          functionName: "getPocket",
+          args: [pocket],
+        });
+        return BigInt(record.state) === POCKET_STATE_CLOSED;
+      },
+      now: options.clock.now,
+      writeOffManualReturn: (row) => writeOffManualReturn(options, signer, row, pocketReader),
+    });
+  };
   return startPayerRuntime({
     ...(pocketHalt ? { events: vaultEvents, pocketHalt } : {}),
     fallbackPollSeconds: Number(options.config.get("payer.pullbackFallbackPollSeconds")),
     runFallbacks: () => runPullbackFallbacks(options, signer, fallbackChain, pocketReader),
-    ...(pocketRecovery
-      ? {
-          recoveryPollSeconds: Number(options.config.get("payer.gatewayRecoveryPollSeconds")),
-          runClosedRecovery: pocketRecovery.runClosedPocketRecovery,
-        }
-      : {}),
+    recoveryPollSeconds: Number(options.config.get("payer.gatewayRecoveryPollSeconds")),
+    runClosedRecovery: runRecoveryPass,
     onError: (operation) =>
       options.logger.error("payer_runtime_failure", { rule: operation, state: "error" }),
   });
+}
+
+async function writeOffManualReturn(
+  options: ServerMainOptions,
+  signer: ServerSigner,
+  row: ManualReturnWriteOffCandidate,
+  pocketReader: ReturnType<typeof createIndexerPocketReader>,
+): Promise<unknown> {
+  if (!row.vault_address) throw new Error("Manual-return write-off row has no vault address.");
+  if (options.gatewayDomain === undefined)
+    throw new Error("Manual-return write-off requires the configured Gateway domain.");
+  if (!row.gateway_minter)
+    throw new Error("Manual-return write-off row has no GatewayMinter address.");
+  const pockets = await pocketReader.fundedPocketsForVault(row.vault_address);
+  const pocket = pockets.find((candidate) => sameAddress(candidate.pocket, row.pocket));
+  if (!pocket)
+    throw new Error("Manual-return write-off pocket is absent from the live projection.");
+  const balance = await pocketReader.pocketBalance(row.pocket);
+  return executePullback(
+    {
+      planId: row.plan_id,
+      stepIndex: row.step_index,
+      envelopeRef: row.envelope_ref,
+      vault: row.vault_address,
+      pocket: row.pocket,
+      gatewayWallet: options.config.get("chain.gatewayWalletAddress") as Address,
+      gatewayMinter: row.gateway_minter,
+      usdc: options.config.get("chain.usdcAddress") as Address,
+      gatewayDomain: options.gatewayDomain,
+      outstanding: pocket.outstanding,
+      pending: pocket.pendingPullback,
+      availableBalance: balance.gatewayAvailableAtomic,
+      availableBalanceObservedAt: balance.apiObservedAt,
+      apiConsecutiveFailures: balance.apiConsecutiveFailures,
+      head: await options.publicClient.getBlockNumber(),
+      attempt: row.attempt ?? 0,
+    },
+    {
+      pool: options.pool,
+      config: options.config,
+      signer,
+      chain: createPullbackExecutionChain({
+        client: options.publicClient,
+        pool: options.pool,
+        vault: row.vault_address,
+        gatewayMinter: row.gateway_minter,
+      }),
+      safeFetch: options.safeFetch,
+      gatewayTransferUrl: requireGatewayTransferUrl(options.gatewayTransferUrl),
+      now: options.clock.now,
+    },
+  );
+}
+
+function requireGatewayTransferUrl(value: string | undefined): string {
+  if (!value) throw new Error("Gateway transfer URL is required for manual-return recovery.");
+  return value;
+}
+
+function sameAddress(first: Address, second: Address): boolean {
+  return first.toLowerCase() === second.toLowerCase();
 }
 
 async function runPullbackFallbacks(
@@ -540,6 +621,8 @@ function createPocketOperations(
         throw new Error("The configured signer client does not expose pocket-key retirement.");
       return sweepAndRetirePocketKey(input, {
         pool: options.pool,
+        config: options.config,
+        now: options.clock.now,
         signer: {
           sign: signer.sign.bind(signer),
           retirePocketKey: signer.retirePocketKey.bind(signer),

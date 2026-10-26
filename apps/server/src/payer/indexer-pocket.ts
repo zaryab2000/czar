@@ -21,10 +21,19 @@ export interface ClosedPocketProjection {
   readonly vault: Address;
 }
 
+export interface ManualReturnProjection {
+  readonly pocket: Address;
+  readonly credit: string;
+  readonly txHash: `0x${string}`;
+  readonly block: string;
+  readonly logIndex: number;
+}
+
 export interface IndexerPocketReader {
   pocketBalance(pocket: Address): Promise<PocketBalanceSnapshot>;
   fundedPocketsForVault(vault: Address): Promise<readonly FundedPocketProjection[]>;
   closedPocketsWithBalance(): Promise<readonly ClosedPocketProjection[]>;
+  manualReturnsForVault(vault: Address): Promise<readonly ManualReturnProjection[]>;
 }
 
 export function createIndexerPocketReader(
@@ -76,6 +85,31 @@ export function createIndexerPocketReader(
         throw new Error("Indexer returned malformed closed pockets.");
       return body["items"].map(parseClosedPocket);
     },
+    async manualReturnsForVault(vault) {
+      const url = new URL(`${baseUrl.origin}/pockets/manual-returns`);
+      url.searchParams.set("vault", vault);
+      const body = await requestRecord(url.toString(), timeoutMs, fetcher);
+      if (!Array.isArray(body["items"]))
+        throw new Error("Indexer returned malformed manual returns.");
+      return body["items"].map(parseManualReturn);
+    },
+  };
+}
+
+function parseManualReturn(value: unknown): ManualReturnProjection {
+  const row = requireRecord(value, "manual return");
+  const txHash = row["txHash"];
+  const logIndex = row["logIndex"];
+  if (typeof txHash !== "string" || !/^0x[\da-fA-F]{64}$/.test(txHash))
+    throw new Error("Indexer returned a malformed manual-return transaction hash.");
+  if (typeof logIndex !== "number" || !Number.isSafeInteger(logIndex) || logIndex < 0)
+    throw new Error("Indexer returned a malformed manual-return log index.");
+  return {
+    pocket: parseAddress(row["pocket"]),
+    credit: parseAtomic(row["credit"]).toString(),
+    txHash: txHash as `0x${string}`,
+    block: parseAtomic(row["block"]).toString(),
+    logIndex,
   };
 }
 

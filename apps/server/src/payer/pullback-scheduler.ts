@@ -2,7 +2,7 @@ import type { Config } from "@czar/config";
 import type { Signer } from "@czar/signer";
 import type { Address } from "viem";
 import type { Pool } from "pg";
-import type { PocketBalanceSnapshot } from "#src/payer/indexer-pocket";
+import type { ManualReturnProjection, PocketBalanceSnapshot } from "#src/payer/indexer-pocket";
 import { appendExecutionPhase, getExecutionTrace } from "#src/payer/executions";
 import {
   executeSlowPullbackFallback,
@@ -36,6 +36,48 @@ export interface PullbackFallbackSchedulerDependencies {
   readonly now: () => Date;
 }
 
+interface ManualReturnRow {
+  readonly plan_id: string;
+  readonly step_index: number;
+  readonly pocket: Address;
+  readonly vault_address: Address | null;
+  readonly return_block: string | null;
+  readonly return_log_index: number | null;
+}
+
+export interface ManualReturnWriteOffCandidate {
+  readonly plan_id: string;
+  readonly step_index: number;
+  readonly envelope_ref: string;
+  readonly pocket: Address;
+  readonly vault_address: Address | null;
+  readonly gateway_minter: Address | null;
+  readonly attempt: number | null;
+}
+
+export interface ManualReturnSummary {
+  readonly envelopeRef: string;
+  readonly vault: Address;
+  readonly pocket: Address;
+  readonly returnedAmount: string;
+  readonly returnTx: string;
+  readonly state: "manual-return-required" | "recorded" | "expired";
+  readonly recordedCredit?: string;
+  readonly recordedTx?: string;
+}
+
+export interface ManualReturnReconciliationDependencies {
+  readonly pool: Pool;
+  readonly manualReturnsForVault: (vault: Address) => Promise<readonly ManualReturnProjection[]>;
+  readonly isPocketClosed: (vault: Address, pocket: Address) => Promise<boolean>;
+  readonly now: () => Date;
+}
+
+export interface ManualReturnRecoveryDependencies extends ManualReturnReconciliationDependencies {
+  readonly config: Config;
+  readonly writeOffManualReturn: (row: ManualReturnWriteOffCandidate) => Promise<unknown>;
+}
+
 export async function runPendingPullbackFallbacks(
   dependencies: PullbackFallbackSchedulerDependencies,
 ): Promise<number> {
@@ -53,6 +95,168 @@ export async function runPendingPullbackFallbacks(
   );
   for (const row of rows.rows) await processFallback(row, dependencies);
   return rows.rows.length;
+}
+
+/** Reconciles pending manual returns against indexed vault events and pocket state. */
+export async function reconcileManualReturns(
+  dependencies: ManualReturnReconciliationDependencies,
+): Promise<number> {
+  const result = await dependencies.pool.query<ManualReturnRow>(
+    `SELECT plan_id,step_index,pocket,vault_address,return_block,return_log_index
+     FROM payer_pullback_gateway_failures
+     WHERE state='manual-return-required' AND closed_pocket=false
+     ORDER BY plan_id,step_index`,
+  );
+  const eventsByVault = new Map<string, readonly ManualReturnProjection[]>();
+  let changed = 0;
+  for (const row of result.rows) {
+    if (row.vault_address === null)
+      throw new Error(`Manual-return row lacks its vault address: ${row.plan_id}.`);
+    if (row.return_block === null || row.return_log_index === null)
+      throw new Error(`Manual-return row lacks its mined return position: ${row.plan_id}.`);
+    const key = row.vault_address.toLowerCase();
+    let events = eventsByVault.get(key);
+    if (!events) {
+      events = await dependencies.manualReturnsForVault(row.vault_address);
+      eventsByVault.set(key, events);
+    }
+    const matching = events.find((event) => isAfterReturn(event, row));
+    if (matching) {
+      changed += await markManualReturnRecorded(row, matching, dependencies);
+    } else if (await dependencies.isPocketClosed(row.vault_address, row.pocket)) {
+      changed += await markManualReturnExpired(row, dependencies);
+    }
+  }
+  return changed;
+}
+
+/** Reconciles manual returns and retries write-off after the configured owner hold. */
+export async function runManualReturnRecovery(
+  dependencies: ManualReturnRecoveryDependencies,
+): Promise<number> {
+  const updated = await reconcileManualReturns(dependencies);
+  const cutoff = new Date(
+    dependencies.now().getTime() -
+      Number(dependencies.config.get("payer.manualReturnHoldHours")) * MILLISECONDS_PER_HOUR,
+  );
+  const overdue = await dependencies.pool.query<ManualReturnWriteOffCandidate>(
+    `SELECT plan_id,step_index,envelope_ref,pocket,vault_address,gateway_minter,attempt
+     FROM payer_pullback_gateway_failures
+     WHERE state='manual-return-required' AND manual_return_required_at <= $1
+     ORDER BY manual_return_required_at,plan_id,step_index`,
+    [cutoff],
+  );
+  for (const row of overdue.rows) await dependencies.writeOffManualReturn(row);
+  return updated + overdue.rows.length;
+}
+
+/** Lists manual returns belonging to objectives owned by the supplied user. */
+export async function listManualReturnsForUser(
+  pool: Pool,
+  userId: string,
+): Promise<readonly ManualReturnSummary[]> {
+  const result = await pool.query<{
+    readonly envelopeRef: string;
+    readonly vault: Address | null;
+    readonly pocket: Address;
+    readonly returnedAmount: string;
+    readonly returnTx: string;
+    readonly state: ManualReturnSummary["state"];
+    readonly recordedCredit: string | null;
+    readonly recordedTx: string | null;
+  }>(
+    `SELECT f.envelope_ref AS "envelopeRef",f.vault_address AS vault,f.pocket,
+            f.returned_amount AS "returnedAmount",f.return_tx AS "returnTx",f.state,
+            f.recorded_credit AS "recordedCredit",f.recorded_tx AS "recordedTx"
+     FROM payer_pullback_gateway_failures f
+     JOIN plans p ON p.plan_id=f.plan_id
+     JOIN objectives o ON o.objective_id=p.objective_id
+     WHERE o.user_id=$1 AND f.state IN ('manual-return-required','recorded','expired')
+     ORDER BY f.manual_return_required_at,f.plan_id,f.step_index`,
+    [userId],
+  );
+  return result.rows.map(manualReturnSummary);
+}
+
+function manualReturnSummary(row: {
+  readonly envelopeRef: string;
+  readonly vault: Address | null;
+  readonly pocket: Address;
+  readonly returnedAmount: string;
+  readonly returnTx: string;
+  readonly state: ManualReturnSummary["state"];
+  readonly recordedCredit: string | null;
+  readonly recordedTx: string | null;
+}): ManualReturnSummary {
+  if (row.vault === null) throw new Error("Manual-return row is missing its owning vault address.");
+  if (row.state === "recorded") {
+    if (row.recordedCredit === null || row.recordedTx === null)
+      throw new Error("Recorded manual return is missing its credited event fields.");
+    return {
+      envelopeRef: row.envelopeRef,
+      vault: row.vault,
+      pocket: row.pocket,
+      returnedAmount: row.returnedAmount,
+      returnTx: row.returnTx,
+      state: row.state,
+      recordedCredit: row.recordedCredit,
+      recordedTx: row.recordedTx,
+    };
+  }
+  return {
+    envelopeRef: row.envelopeRef,
+    vault: row.vault,
+    pocket: row.pocket,
+    returnedAmount: row.returnedAmount,
+    returnTx: row.returnTx,
+    state: row.state,
+  };
+}
+
+async function markManualReturnRecorded(
+  row: ManualReturnRow,
+  event: ManualReturnProjection,
+  dependencies: ManualReturnReconciliationDependencies,
+): Promise<number> {
+  const result = await dependencies.pool.query(
+    `UPDATE payer_pullback_gateway_failures
+     SET state='recorded',recorded_credit=$3,recorded_tx=$4,recorded_at=$5
+     WHERE plan_id=$1 AND step_index=$2 AND state='manual-return-required'
+       AND return_block=$6 AND return_log_index=$7`,
+    [
+      row.plan_id,
+      row.step_index,
+      event.credit,
+      event.txHash,
+      dependencies.now(),
+      row.return_block,
+      row.return_log_index,
+    ],
+  );
+  return result.rowCount ?? 0;
+}
+
+async function markManualReturnExpired(
+  row: ManualReturnRow,
+  dependencies: ManualReturnReconciliationDependencies,
+): Promise<number> {
+  const result = await dependencies.pool.query(
+    `UPDATE payer_pullback_gateway_failures SET state='expired'
+     WHERE plan_id=$1 AND step_index=$2 AND state='manual-return-required'`,
+    [row.plan_id, row.step_index],
+  );
+  return result.rowCount ?? 0;
+}
+
+function isAfterReturn(event: ManualReturnProjection, row: ManualReturnRow): boolean {
+  if (row.return_block === null || row.return_log_index === null) return false;
+  if (event.pocket.toLowerCase() !== row.pocket.toLowerCase()) return false;
+  const eventBlock = BigInt(event.block);
+  const returnBlock = BigInt(row.return_block);
+  return (
+    eventBlock > returnBlock ||
+    (eventBlock === returnBlock && event.logIndex > row.return_log_index)
+  );
 }
 
 async function processFallback(
@@ -87,9 +291,11 @@ async function processFallback(
   );
   if (result.state === "manual-return-required") {
     await dependencies.pool.query(
-      `UPDATE payer_pullback_gateway_failures SET state='manual-return-required'
+      `UPDATE payer_pullback_gateway_failures
+       SET state='manual-return-required',
+           manual_return_required_at=COALESCE(manual_return_required_at,$3)
        WHERE plan_id=$1 AND step_index=$2`,
-      [row.plan_id, row.step_index],
+      [row.plan_id, row.step_index, dependencies.now()],
     );
   }
   if (result.state === "returned-to-vault") {
