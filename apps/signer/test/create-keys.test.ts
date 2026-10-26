@@ -64,6 +64,8 @@ describe("local deployment signer roles", () => {
     expect(deployScript).toContain('"../deployments/local-keys.json"');
     expect(deployScript).toContain("arc-cast rpc eth_sendTransaction");
     expect(deployScript).toContain("manifest[role].address");
+    expect(deployScript).toContain("tr '[:upper:]' '[:lower:]'");
+    expect(deployScript).not.toContain("${ADDRESS,,}");
     expect(deployScript).not.toContain(".arc-local-addresses.");
   });
 });

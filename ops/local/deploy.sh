@@ -69,7 +69,9 @@ const manifest = JSON.parse(await readFile(path, "utf8"));
 process.stdout.write(manifest[role].address);
 NODE
 	)"
-	if [ "${ADDRESS,,}" != "${SENDER,,}" ]; then
+	ADDRESS_LOWER="$(printf '%s' "$ADDRESS" | tr '[:upper:]' '[:lower:]')"
+	SENDER_LOWER="$(printf '%s' "$SENDER" | tr '[:upper:]' '[:lower:]')"
+	if [ "$ADDRESS_LOWER" != "$SENDER_LOWER" ]; then
 		TX="$(node -e 'process.stdout.write(JSON.stringify({from: process.argv[1], to: process.argv[2], value: "0xDE0B6B3A7640000"}))' "$SENDER" "$ADDRESS")"
 		arc-cast rpc eth_sendTransaction "$TX" --rpc-url "$RPC_URL" >/dev/null
 	fi
