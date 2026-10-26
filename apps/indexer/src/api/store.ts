@@ -22,6 +22,7 @@ import {
   escrowJobs,
   gatewayTransfers,
   jobs,
+  manualReturns,
   haltFlags,
   pockets,
   pocketBalances,
@@ -154,6 +155,14 @@ export interface QueryStore {
   latestIndexedBlock(): Promise<bigint>;
   fundedPocketsForVault(vault: string): Promise<Record<string, unknown>[]>;
   closedPocketsWithBalance(): Promise<Record<string, unknown>[]>;
+  manualReturnsForVault(vault: string): Promise<
+    {
+      pocket: string;
+      credit: string;
+      txHash: string;
+      block: string;
+    }[]
+  >;
 }
 
 const afterId = (column: Parameters<typeof gt>[0], cursor: IdCursor | null): SQL | undefined =>
@@ -463,6 +472,26 @@ export function createQueryStore(db: QueryDb): QueryStore {
         pocket: row.pocket,
         pocketRecord: row.mirror,
         balance: row.balance,
+      }));
+    },
+
+    async manualReturnsForVault(vault) {
+      const rows = await db
+        .select({
+          pocket: manualReturns.pocket,
+          credit: manualReturns.credit,
+          txHash: manualReturns.txHash,
+          block: manualReturns.block,
+          logIndex: manualReturns.logIndex,
+        })
+        .from(manualReturns)
+        .where(eq(manualReturns.vault, vault))
+        .orderBy(asc(manualReturns.block), asc(manualReturns.logIndex));
+      return rows.map((row: { pocket: string; credit: string; txHash: string; block: bigint }) => ({
+        pocket: row.pocket,
+        credit: row.credit,
+        txHash: row.txHash,
+        block: String(row.block),
       }));
     },
   };

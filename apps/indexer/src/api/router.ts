@@ -148,6 +148,12 @@ export function createIndexerApi(
     return context.json({ items: jsonSafe(await store.fundedPocketsForVault(vault)) });
   });
 
+  app.get("/pockets/manual-returns", async (context) => {
+    const vault = context.req.query("vault")?.toLowerCase();
+    if (!vault || !ADDRESS.test(vault)) return problem(context, 400, "validation");
+    return context.json({ items: jsonSafe(await store.manualReturnsForVault(vault)) });
+  });
+
   app.get("/pockets/closed-with-balance", async (context) => {
     const rows = await store.closedPocketsWithBalance();
     const items = rows.map((row) => ({
