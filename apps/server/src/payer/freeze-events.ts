@@ -34,6 +34,16 @@ export async function hasPendingFrozenEvent(pool: Pool, vault: Address): Promise
   return result.rows[0]?.pending ?? false;
 }
 
+export async function hasPendingFrozenEventAtCurrentHead(
+  client: PublicClient,
+  pool: Pool,
+  vault: Address,
+): Promise<boolean> {
+  const head = await client.getBlockNumber();
+  await advanceFrozenScanTarget(pool, [vault], head);
+  return hasPendingFrozenEvent(pool, vault);
+}
+
 export async function advanceFrozenScanTarget(
   pool: Pool,
   vaults: readonly Address[],

@@ -86,7 +86,7 @@ import { createPullbackExecutionChain } from "#src/payer/pullback-execution-chai
 import { executeJobStep, type JobExecutionInput } from "#src/payer/job";
 import { createJobChainAdapter } from "#src/payer/job-chain-adapter";
 import { createDatabaseVaultEventSource } from "#src/payer/database-vault-event-source";
-import { hasPendingFrozenEvent } from "#src/payer/freeze-events";
+import { hasPendingFrozenEventAtCurrentHead } from "#src/payer/freeze-events";
 import { createPullbackChainAdapter } from "#src/payer/pullback-chain-adapter";
 import { createIndexerPocketReader } from "#src/payer/indexer-pocket";
 import { lowerAutoLimitsAfterFreeze } from "#src/payer/freeze-autolimit";
@@ -235,7 +235,8 @@ export async function createServerMain(options: ServerMainOptions): Promise<Serv
     config: options.config,
     now: options.clock.now,
     isFrozen: (vault) => readVaultPauseState(options, vault),
-    hasPendingFrozenEvent: (vault) => hasPendingFrozenEvent(options.pool, vault),
+    hasPendingFrozenEvent: (vault) =>
+      hasPendingFrozenEventAtCurrentHead(options.publicClient, options.pool, vault),
     isGuardianPaused: (vault) => readGuardianPauseState(options, vault),
     runStep: (input) =>
       runDispatchedStep(options, signerClient, payerDependencies, selection, input),
@@ -1403,7 +1404,14 @@ function createPlannerPorts(
           );
           const vault = result.rows[0]?.vault;
           if (!vault) return "0";
-          if (await hasPendingFrozenEvent(options.pool, vault as Address)) return "0";
+          if (
+            await hasPendingFrozenEventAtCurrentHead(
+              options.publicClient,
+              options.pool,
+              vault as Address,
+            )
+          )
+            return "0";
           const limits = await getLimits({
             client: options.publicClient,
             vault: vault as Address,

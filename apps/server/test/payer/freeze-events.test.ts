@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   advanceFrozenScanTarget,
   hasPendingFrozenEvent,
+  hasPendingFrozenEventAtCurrentHead,
   scanFrozenEvents,
   processPendingFrozenEvents,
   queueFrozenEvent,
@@ -152,6 +153,33 @@ describe("durable Frozen event work", () => {
     expect(await hasPendingFrozenEvent(store.pool, VAULT)).toBe(true);
     const listener = vi.fn(async (_event, markLowered) => markLowered());
     await processPendingFrozenEvents(store.pool, VAULT, listener);
+    expect(await hasPendingFrozenEvent(store.pool, VAULT)).toBe(false);
+  });
+
+  it("refreshes the spending gate after Frozen and Unfrozen are mined between polls", async () => {
+    const store = fakeStore();
+    store.setScan("10", "10");
+    const client = {
+      getBlockNumber: vi.fn(async () => 12n),
+      getContractEvents: vi.fn(async () => [
+        { blockNumber: 11n, logIndex: 0, transactionHash: TX },
+      ]),
+    };
+
+    await expect(
+      hasPendingFrozenEventAtCurrentHead(client as never, store.pool, VAULT),
+    ).resolves.toBe(true);
+    expect(store.query).toHaveBeenCalledWith(expect.stringContaining("scan_target_block"), [
+      "12",
+      [VAULT],
+    ]);
+
+    await scanFrozenEvents(client as never, store.pool, VAULT, 10n, 12n);
+    expect(store.pending()).toHaveLength(1);
+    expect(await hasPendingFrozenEvent(store.pool, VAULT)).toBe(true);
+    await processPendingFrozenEvents(store.pool, VAULT, async (_event, markLowered) => {
+      await markLowered();
+    });
     expect(await hasPendingFrozenEvent(store.pool, VAULT)).toBe(false);
   });
 

@@ -18,17 +18,18 @@ Pocket draining and auto-limit lowering are attempted independently; either
 failure causes the event source to retry. Replayed events re-read on-chain
 state and skip limits already at zero.
 
-Production startup waits until the durable historical scan has caught up for
-every discovered vault before starting planner and dispatcher workers. Each
-source poll scans at most one successful log page globally, rotates across
-vaults, persists its cursor, and continues on the next poll. Each poll also
-advances a durable per-vault scan watermark to the observed chain head;
-allowance and dispatch remain gated while a vault's cursor trails that
-watermark, including before historical Frozen rows have been discovered.
-Allowance and dispatch checks read the durable queue without initiating RPC
-backfill. A pending auto-limit lowering gates planner allowance and execution
-only until the lowering transaction is acknowledged; pocket-drain retry remains
-separate.
+Production startup captures one startup block target and waits until the
+historical Frozen scan for every discovered vault reaches that fixed target.
+Each source poll scans at most one successful log page globally, rotates across
+vaults, persists its cursor, and continues on the next poll. Live per-vault scan
+watermarks continue advancing to the observed chain head independently of the
+startup target. Planner allowance and dispatcher decisions refresh that live
+watermark from the existing public client's current block number and fail closed
+while a vault cursor trails it, including before a new historical Frozen row is
+discovered. These decision checks do not fetch historical logs; the event
+source remains responsible for bounded backfill. A pending auto-limit lowering
+gates planner allowance and execution only until the lowering transaction is
+acknowledged; pocket-drain retry remains separate.
 
 Frozen event identities and scan cursors are persisted in PostgreSQL. Each
 source scan reads Frozen logs from the last durable cursor and replays pending
@@ -46,11 +47,12 @@ reads the zero limit and skips signing again.
 - Historical Frozen logs use `indexer.getLogsBlockRange`, halve the page after
   RPC `-32012`, and persist each page's events and cursor in one transaction.
   A single successful page is scanned per source poll, with a rotating vault
-  cursor. A durable chain-head watermark gates allowance and dispatch while a
-  vault's cursor lags, even before a missed Frozen event is indexed. Startup
-  readiness remains pending until every discovered vault has caught up. Cursor
-  updates are monotonic, and queued work is replayed even if a later historical
-  page fails.
+  cursor. Startup readiness uses a fixed target captured on the first scan, so
+  an advancing head cannot keep startup synchronization from completing. The
+  durable live chain-head watermark separately gates allowance and dispatch
+  while a vault's cursor lags, even before a missed Frozen event is indexed.
+  Cursor updates are monotonic, and queued work is replayed even if a later
+  historical page fails.
 - The event row records `auto_limits_lowered_at` separately from
   `processed_at`. A successful lowering is acknowledged before pocket draining;
   a failed drain remains retryable without repeating the lowering or blocking
@@ -65,7 +67,8 @@ reads the zero limit and skips signing again.
 - `apps/server/src/payer/runtime.ts` — Frozen-only callback, in-flight event
   deduplication, retry propagation, and startup readiness.
 - `apps/server/src/payer/freeze-events.ts` — durable event queue, cursor scan,
-  pending-work replay, adaptive RPC paging, and pending-lowering lookup.
+  pending-work replay, adaptive RPC paging, current-head spending gate, and
+  pending-lowering lookup.
 - `apps/server/src/payer/database-vault-event-source.ts` and
   `apps/server/src/payer/vault-event-source.ts` — event identity capture,
   historical Frozen-log scan, startup synchronization, and retry after unfreeze
@@ -90,12 +93,15 @@ reads the zero limit and skips signing again.
 - `apps/server/test/main.test.ts` — startup composition retains the durable
   freeze gate in the planner and dispatcher paths.
 - `apps/server/test/payer/database-vault-event-source.test.ts` and
-  `apps/server/test/migrate.test.ts` — source replay and migration coverage.
+  `apps/server/test/migrate.test.ts` — source replay and migration coverage,
+  including fixed-target startup while the live head advances.
 - `apps/server/test/main-dispatch.test.ts` — complete the mocked public client
   interface used by the real startup event scanner.
 - `apps/server/test/main.test.ts` and
   `apps/server/test/payer/vault-event-source.test.ts` — startup scan readiness
   and event subscription readiness.
+- `apps/server/test/payer/freeze-events.test.ts` — fail-closed current-head
+  check when Frozen and Unfrozen are mined between source polls.
 
 ## Checks
 
@@ -147,13 +153,16 @@ later events in the same batch. Processing now catches errors per event, leaves
 failed rows pending, continues through later rows, and propagates one error or
 an `AggregateError` after the batch so the source retries.
 
-Lane 4 review then identified that a missed Frozen event followed by Unfrozen
-could leave no queued event and a false current frozen state while backfill
-lagged. The source now persists the observed chain head as each vault's scan
-watermark, and the planner/dispatcher gate checks remain active until the
-durable cursor reaches it. Vaults without a scan cursor are gated as well.
-On every poll, caught-up state is recomputed against the advanced watermark, so
-a previously caught-up vault is gated again if a newer head passes its cursor.
+Lane 4 review then identified two gaps. First, updating each vault's target to
+the advancing head while scanning only one page per poll could prevent startup
+readiness from resolving. Startup now pins the initial observed block as its
+own catch-up target; live scan watermarks remain independent and continue to
+gate spending. Second, a Frozen/Unfrozen sequence mined between source polls
+could leave no queued row while the vault appeared unfrozen. Both planner
+allowance and dispatcher checks now read the latest block number, advance the
+durable watermark, and fail closed until the scanner reaches it. The existing
+`PublicClient.getBlockNumber()` is the current-head source already used by the
+event scanner; no new chain interface or public contract was introduced.
 
 Focused checks after these fixes:
 
@@ -181,6 +190,22 @@ Validation after the scan-watermark fix:
   — passed: 6 files, 30 tests. The freeze/unfreeze regression confirms a
   behind-cursor vault stays gated while the current chain state is unfrozen,
   then processes the discovered historical event after catch-up.
+- `fnm exec --using=22.22.0 pnpm -r typecheck` — passed across 14 workspace
+  projects with typecheck scripts.
+- `fnm exec --using=22.22.0 pnpm lint` — passed.
+- `git diff --check` — passed.
+
+Validation after the startup-target and decision-time watermark fixes:
+
+- The startup regression timed out against the previous implementation while
+  the mocked head advanced on each poll; it now passes against the pinned
+  startup target.
+- The between-polls spending-gate regression failed before implementation
+  because no decision-time current-head check existed; it now verifies the
+  fresh head advances the persisted target and the spending gate remains
+  pending until the event scan and lowering finish.
+- `fnm exec --using=22.22.0 pnpm --filter @czar/server exec vitest run test/payer/freeze-events.test.ts test/payer/database-vault-event-source.test.ts test/payer/runtime.test.ts test/main.test.ts test/main-dispatch.test.ts test/migrate.test.ts`
+  — passed: 6 files, 32 tests.
 - `fnm exec --using=22.22.0 pnpm -r typecheck` — passed across 14 workspace
   projects with typecheck scripts.
 - `fnm exec --using=22.22.0 pnpm lint` — passed.

@@ -234,10 +234,60 @@ describe("database vault event source", () => {
     expect(ready).toBe(false);
     await vi.advanceTimersByTimeAsync(1000);
     expect(pageRequests[1]?.address).toBe(VAULT_TWO);
-    expect(ready).toBe(false);
+    expect(ready).toBe(true);
     await vi.advanceTimersByTimeAsync(1000);
     await subscription.ready;
     expect(pageRequests[2]).toMatchObject({ address: VAULT_ONE, fromBlock: 10n, toBlock: 20n });
+    subscription();
+  });
+
+  it("completes startup catch-up against its pinned target while the chain advances", async () => {
+    vi.useFakeTimers();
+    const store = fakePool(() => [VAULT_ONE, VAULT_TWO]);
+    let head = 20n;
+    const pageRequests: { address: Address; fromBlock: bigint; toBlock: bigint }[] = [];
+    const client = {
+      readContract: vi.fn(async ({ functionName }: { functionName: string }) => {
+        if (functionName === "factory") return FACTORY;
+        if (functionName === "guardianPaused") return false;
+        throw new Error(`unexpected ${functionName}`);
+      }),
+      watchContractEvent: vi.fn(() => vi.fn()),
+      getBlockNumber: vi.fn(async () => {
+        const observed = head;
+        head += 10n;
+        return observed;
+      }),
+      getContractEvents: vi.fn(
+        async (request: { address: Address; fromBlock: bigint; toBlock: bigint }) => {
+          pageRequests.push(request);
+          return [];
+        },
+      ),
+    };
+    const subscription = createDatabaseVaultEventSource({
+      pool: store.pool,
+      publicClient: client as never,
+      config: loadConfig({
+        envFile: {
+          "payer.vaultEventPollMs": 1000,
+          "indexer.getLogsBlockRange": 10,
+        },
+      }),
+      logger: { error: vi.fn() } as never,
+    }).subscribe(vi.fn(async () => undefined));
+
+    let ready = false;
+    void subscription.ready.then(() => (ready = true));
+    await vi.waitFor(() => expect(pageRequests).toHaveLength(1));
+    for (let poll = 0; poll < 5; poll += 1) {
+      await vi.advanceTimersByTimeAsync(1000);
+      await vi.waitFor(() => expect(pageRequests).toHaveLength(poll + 2));
+    }
+    await subscription.ready;
+    expect(ready).toBe(true);
+    expect(pageRequests).toHaveLength(6);
+    expect(pageRequests.at(-1)?.toBlock).toBe(20n);
     subscription();
   });
 });

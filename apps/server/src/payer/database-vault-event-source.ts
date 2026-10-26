@@ -40,6 +40,7 @@ export function createDatabaseVaultEventSource(
       let resolveReady: (() => void) | undefined;
       let rejectReady: ((reason: unknown) => void) | undefined;
       let readySettled = false;
+      let startupTargetBlock: bigint | undefined;
       const ready = new Promise<void>((resolve, reject) => {
         resolveReady = resolve;
         rejectReady = reject;
@@ -111,12 +112,16 @@ export function createDatabaseVaultEventSource(
             }
           }
           let scanHead: bigint | undefined;
+          let scanTarget: bigint | undefined;
           let watermarkPersisted = false;
           if (vaults.length > 0) {
             try {
               scanHead = await input.publicClient.getBlockNumber();
-              const caughtUpVaults = await advanceFrozenScanTarget(input.pool, vaults, scanHead);
-              for (const vault of vaults) scanCaughtUp.set(vault, caughtUpVaults.has(vault));
+              startupTargetBlock ??= scanHead;
+              scanTarget = readySettled ? scanHead : startupTargetBlock;
+              await advanceFrozenScanTarget(input.pool, vaults, scanHead);
+              for (const vault of vaults)
+                if (!scanCaughtUp.has(vault)) scanCaughtUp.set(vault, false);
               watermarkPersisted = true;
             } catch (error) {
               for (const vault of vaults) scanCaughtUp.set(vault, false);
@@ -127,7 +132,7 @@ export function createDatabaseVaultEventSource(
           if (vaults.length > 0) {
             const index = nextVaultScanIndex % vaults.length;
             const vault = vaults[index];
-            if (vault && scanHead !== undefined && watermarkPersisted) {
+            if (vault && scanTarget !== undefined && watermarkPersisted) {
               nextVaultScanIndex = index + 1;
               try {
                 const caughtUp = await scanFrozenEvents(
@@ -135,7 +140,7 @@ export function createDatabaseVaultEventSource(
                   input.pool,
                   vault,
                   BigInt(Number(input.config.get("indexer.getLogsBlockRange"))),
-                  scanHead,
+                  scanTarget,
                 );
                 scanCaughtUp.set(vault, caughtUp);
               } catch (error) {
