@@ -75,6 +75,17 @@ export interface ManualReturnSummary {
   readonly recordedTx?: string;
 }
 
+export interface ManualReturnPageCursor {
+  readonly manualReturnRequiredAt: string | null;
+  readonly planId: string;
+  readonly stepIndex: number;
+}
+
+export interface ManualReturnPage {
+  readonly items: readonly ManualReturnSummary[];
+  readonly nextCursor: ManualReturnPageCursor | null;
+}
+
 export interface ManualReturnReconciliationDependencies {
   readonly pool: Pool;
   readonly manualReturnsForVault: (vault: Address) => Promise<readonly ManualReturnProjection[]>;
@@ -224,7 +235,8 @@ async function ensureReturnPosition(
 export async function listManualReturnsForUser(
   pool: Pool,
   userId: string,
-): Promise<readonly ManualReturnSummary[]> {
+  page: { readonly cursor: ManualReturnPageCursor | null; readonly limit: number },
+): Promise<ManualReturnPage> {
   const result = await pool.query<{
     readonly envelopeRef: string;
     readonly vault: Address | null;
@@ -234,18 +246,53 @@ export async function listManualReturnsForUser(
     readonly state: ManualReturnSummary["state"];
     readonly recordedCredit: string | null;
     readonly recordedTx: string | null;
+    readonly manualReturnRequiredAt: string | null;
+    readonly planId: string;
+    readonly stepIndex: number;
   }>(
     `SELECT f.envelope_ref AS "envelopeRef",f.vault_address AS vault,f.pocket,
             f.returned_amount AS "returnedAmount",f.return_tx AS "returnTx",f.state,
-            f.recorded_credit AS "recordedCredit",f.recorded_tx AS "recordedTx"
+            f.recorded_credit AS "recordedCredit",f.recorded_tx AS "recordedTx",
+            f.manual_return_required_at::text AS "manualReturnRequiredAt",
+            f.plan_id AS "planId",f.step_index AS "stepIndex"
      FROM payer_pullback_gateway_failures f
      JOIN plans p ON p.plan_id=f.plan_id
      JOIN objectives o ON o.objective_id=p.objective_id
      WHERE o.user_id=$1 AND f.state IN ('manual-return-required','recorded','expired')
-     ORDER BY f.manual_return_required_at,f.plan_id,f.step_index`,
-    [userId],
+       AND (
+         NOT $5::boolean
+         OR ($2::timestamptz IS NULL AND f.manual_return_required_at IS NULL
+             AND (f.plan_id,f.step_index) > ($3::text,$4::integer))
+         OR ($2::timestamptz IS NULL AND f.manual_return_required_at IS NOT NULL)
+         OR ($2::timestamptz IS NOT NULL AND f.manual_return_required_at IS NOT NULL
+             AND (f.manual_return_required_at,f.plan_id,f.step_index) >
+                 ($2::timestamptz,$3::text,$4::integer))
+       )
+     ORDER BY f.manual_return_required_at NULLS FIRST,f.plan_id,f.step_index
+     LIMIT $6`,
+    [
+      userId,
+      page.cursor?.manualReturnRequiredAt ?? null,
+      page.cursor?.planId ?? null,
+      page.cursor?.stepIndex ?? null,
+      page.cursor !== null,
+      page.limit + 1,
+    ],
   );
-  return result.rows.map(manualReturnSummary);
+  const hasMore = result.rows.length > page.limit;
+  const rows = result.rows.slice(0, page.limit);
+  const last = rows.at(-1);
+  return {
+    items: rows.map(manualReturnSummary),
+    nextCursor:
+      hasMore && last
+        ? {
+            manualReturnRequiredAt: last.manualReturnRequiredAt,
+            planId: last.planId,
+            stepIndex: last.stepIndex,
+          }
+        : null,
+  };
 }
 
 function manualReturnSummary(row: {

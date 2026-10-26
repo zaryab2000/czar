@@ -41,6 +41,7 @@ import {
   getEnvelopeRoute,
   getMeRoute,
   listEnvelopesRoute,
+  listManualReturnsRoute,
   listReceiptsRoute,
   type AppReadOptions,
 } from "#src/app/reads";
@@ -189,6 +190,12 @@ export function createApp(dependencies: AppDependencies): Hono {
     appSessionVerifier(dependencies.pool, dependencies.config),
     (context, next) => appRateLimit(context, next, dependencies),
     (context) => listReceiptsRoute(context, appReadDependencies(dependencies)),
+  );
+  app.get(
+    "/v1/pockets/manual-returns",
+    appSessionVerifier(dependencies.pool, dependencies.config),
+    (context, next) => appRateLimit(context, next, dependencies),
+    (context) => listManualReturnsRoute(context, appReadDependencies(dependencies)),
   );
   app.get(
     "/v1/approvals",
@@ -780,6 +787,7 @@ function operationFor(path: string, method: string): string {
   if (method === "GET" && path === "/v1/envelopes") return "listEnvelopes";
   if (method === "GET" && /^\/v1\/envelopes\/[^/]+$/.test(path)) return "getEnvelope";
   if (method === "GET" && path === "/v1/ledger/receipts") return "listReceipts";
+  if (method === "GET" && path === "/v1/pockets/manual-returns") return "listManualReturns";
   if (method === "POST" && path === "/v1/auth/challenge") return "createAuthChallenge";
   if (method === "POST" && path === "/v1/auth/passkey") return "registerPasskey";
   if (method === "POST" && path === "/v1/auth/session") return "createSession";

@@ -11,6 +11,7 @@ import type {
   EnvelopeDetail,
   FreezeIntent,
   LedgerReceipt,
+  ManualReturn,
   Me,
   SessionRequest,
   SessionResponse,
@@ -226,6 +227,12 @@ export const appApi = {
     return request<AppPage<import("@czar/schemas").Envelope>>(`/v1/envelopes?${query}`);
   },
   getEnvelope: (ref: string) => request<EnvelopeDetail>(`/v1/envelopes/${encodeURIComponent(ref)}`),
+  listManualReturns: (cursor?: string) => {
+    const query = new URLSearchParams();
+    if (cursor) query.set("cursor", cursor);
+    return request<AppPage<ManualReturn>>(`/v1/pockets/manual-returns?${query}`);
+  },
+  listAllManualReturns: () => listAllManualReturns(),
   listReceipts: (cursor?: string) => {
     const query = new URLSearchParams();
     if (cursor) query.set("cursor", cursor);
@@ -254,6 +261,22 @@ export const appApi = {
       body: JSON.stringify({ action }),
     }),
 };
+
+async function listAllManualReturns(): Promise<AppPage<ManualReturn>> {
+  const items: ManualReturn[] = [];
+  const seenCursors = new Set<string>();
+  let cursor: string | undefined;
+  while (true) {
+    const page = await appApi.listManualReturns(cursor);
+    items.push(...page.items);
+    if (page.nextCursor === null) return { items, nextCursor: null };
+    if (seenCursors.has(page.nextCursor)) {
+      throw new Error("The server repeated a manual-return pagination cursor.");
+    }
+    seenCursors.add(page.nextCursor);
+    cursor = page.nextCursor;
+  }
+}
 
 function parseAppWalletConfig(value: unknown): AppWalletConfig | undefined {
   if (!isRecord(value)) return undefined;
