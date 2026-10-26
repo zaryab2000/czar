@@ -353,7 +353,7 @@ async function returnSlowWithdrawalBalance(
       txHash,
     });
   }
-  return input.trigger === "closed-dust"
+  return input.trigger === "closed-dust" || input.closedPocketRecovery
     ? { state: "returned-to-vault", amount: amount.toString() }
     : { state: "manual-return-required", amount: amount.toString() };
 }
@@ -576,7 +576,7 @@ async function runPullback(
     await recordGatewayBalanceOutage(input, dependencies, attempt);
     return { state: "waiting", reason: "gateway-balance-stale" };
   }
-  await clearGatewayBalanceOutage(input, dependencies);
+  await clearGatewayBalanceOutage(input, dependencies, attempt);
   const configuredMaxFee = BigInt(Number(dependencies.config.get("payer.pullbackMaxFeeAtomic")));
   if (configuredMaxFee > (await dependencies.chain.maxPullbackFee()))
     throw new Error("Configured pullback max fee exceeds the vault maxPullbackFee.");
@@ -686,8 +686,8 @@ async function recordGatewayBalanceOutage(
   await dependencies.pool.query(
     `INSERT INTO payer_pullback_gateway_failures
        (plan_id,step_index,envelope_ref,pocket,value,unavailable_since,state,
-        pullback_id,vault_address,gateway_minter,attempt)
-     VALUES ($1,$2,$3,$4,NULL,$5,'pending',NULL,$6,$7,$8)
+        pullback_id,vault_address,gateway_minter,attempt,closed_pocket)
+     VALUES ($1,$2,$3,$4,NULL,$5,'pending',NULL,$6,$7,$8,$9)
      ON CONFLICT (plan_id,step_index) DO NOTHING`,
     [
       input.planId,
@@ -698,6 +698,7 @@ async function recordGatewayBalanceOutage(
       input.vault,
       input.gatewayMinter,
       attempt,
+      input.closedPocket ?? false,
     ],
   );
 }
@@ -705,11 +706,21 @@ async function recordGatewayBalanceOutage(
 async function clearGatewayBalanceOutage(
   input: PullbackInput,
   dependencies: PullbackDependencies,
+  attempt: number,
 ): Promise<void> {
   await dependencies.pool.query(
     `DELETE FROM payer_pullback_gateway_failures
-     WHERE plan_id=$1 AND step_index=$2 AND pullback_id IS NULL AND state='pending'`,
-    [input.planId, input.stepIndex],
+     WHERE plan_id=$1 AND step_index=$2 AND pullback_id IS NULL AND state='pending'
+       AND NOT EXISTS (
+         SELECT 1 FROM step_executions
+         WHERE plan_id=$1 AND step_index=$2 AND attempt=$3
+           AND phase IN (
+             'pullback.slow.initiate.sent','pullback.slow.initiated',
+             'pullback.slow.withdraw.sent','pullback.slow.withdrawn',
+             'pullback.slow.return.sent','pullback.slow.returned'
+           )
+       )`,
+    [input.planId, input.stepIndex, attempt],
   );
 }
 
@@ -882,11 +893,12 @@ async function obtainAttestation(
       ),
     });
   } catch (error) {
-    await recordGatewayPullbackFailure(input, pullback, dependencies);
+    await recordGatewayPullbackFailure(input, pullback, dependencies, attempt);
     throw error;
   }
   if (response.status < 200 || response.status >= 300) {
-    if (response.status >= 500) await recordGatewayPullbackFailure(input, pullback, dependencies);
+    if (response.status >= 500)
+      await recordGatewayPullbackFailure(input, pullback, dependencies, attempt);
     throw new Error(`Gateway transfer API failed with HTTP ${response.status}.`);
   }
   const result = parseTransferAttestation(response.body);
@@ -903,16 +915,17 @@ async function recordGatewayPullbackFailure(
   input: PullbackInput,
   pullback: PullbackRecord,
   dependencies: PullbackDependencies,
+  attempt: number,
 ): Promise<void> {
   await dependencies.pool.query(
     `INSERT INTO payer_pullback_gateway_failures
        (plan_id,step_index,envelope_ref,pocket,value,unavailable_since,state,
-        pullback_id,vault_address,gateway_minter,attempt)
-     VALUES ($1,$2,$3,$4,$5,$6,'pending',$7,$8,$9,$10)
+        pullback_id,vault_address,gateway_minter,attempt,closed_pocket)
+     VALUES ($1,$2,$3,$4,$5,$6,'pending',$7,$8,$9,$10,$11)
      ON CONFLICT (plan_id,step_index) DO UPDATE SET
        value=EXCLUDED.value,pullback_id=EXCLUDED.pullback_id,
        vault_address=EXCLUDED.vault_address,gateway_minter=EXCLUDED.gateway_minter,
-       attempt=EXCLUDED.attempt`,
+       attempt=EXCLUDED.attempt,closed_pocket=EXCLUDED.closed_pocket`,
     [
       input.planId,
       input.stepIndex,
@@ -923,7 +936,8 @@ async function recordGatewayPullbackFailure(
       pullback.pullbackId.toString(),
       input.vault,
       input.gatewayMinter,
-      input.attempt ?? 0,
+      attempt,
+      input.closedPocket ?? false,
     ],
   );
 }

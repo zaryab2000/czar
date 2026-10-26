@@ -2,7 +2,7 @@
 
 ## Status
 
-Implemented the Lane 2 halt-drain and late-pocket recovery composition for the local server path, and connected API-down slow withdrawal to the indexer's persisted Gateway balance projection. Four introduced review findings are fixed in the current batch. One canonical query gap remains an architect decision blocker; the PR is not ready for merge until that ruling is resolved. This report records development checks only; it does not claim Arc Anvil or live Gateway acceptance.
+Implemented the Lane 2 halt-drain and late-pocket recovery composition for the local server path, and connected API-down slow withdrawal to the indexer's persisted Gateway balance projection. Confirmed in-scope review findings to date are fixed. One canonical query gap remains an architect decision blocker; the PR is not ready for merge until that ruling is resolved. This report records development checks only; it does not claim Arc Anvil or live Gateway acceptance.
 
 ## Behavior
 
@@ -13,6 +13,8 @@ Implemented the Lane 2 halt-drain and late-pocket recovery composition for the l
 - The API-down scheduler uses `pocket_balances.gatewayAvailableAtomic` from the indexer, including a stale but timestamped last-good observation as specified by SCR-141. A missing observation or failed read records `pullback.gateway-figure-missing`; an observed zero balance records `pullback.gateway-balance-empty`. Both wait without cancelling or signing. Stale/failing balance observations are persisted with their first observed outage time, allowing the configured API-down fallback even when no pullback request exists yet. A healthy observation clears only an unlinked balance-outage row. The signer remains authoritative for age, observation, pending-withdrawal, and spend-after-observation checks.
 - Slow-withdrawal continuation now bypasses the balance gate once its durable transaction trace shows initiation, withdrawal, or return in progress.
 - Closed-pocket pullbacks and slow-return cycles use a new durable attempt only after the prior cycle is confirmed/returned; retries resume the existing attempt.
+- Gateway failures during closed-pocket recovery persist the selected attempt and closed-pocket status. The outage scheduler resumes that attempt through pocket-return, then records `returned-to-vault` instead of requesting owner manual-return.
+- A healthy Gateway observation cannot delete a pending outage row while a slow withdrawal or return transaction is recorded; the scheduler retains the row until recovery completes.
 - The funded-pocket parser accepts `Registered` and `DelegateReady`; halt draining selects only `Funded` and `Draining` pockets.
 
 ## Files changed
@@ -26,6 +28,7 @@ Implemented the Lane 2 halt-drain and late-pocket recovery composition for the l
 - `apps/server/src/payer/pullback.ts`
 - `apps/server/src/payer/runtime.ts`
 - `apps/server/migrations/0013-pullback-balance-outage.sql`
+- `apps/server/migrations/0014-pullback-closed-recovery.sql`
 - `apps/server/test/payer/indexer-pocket.test.ts`
 - `apps/server/test/main.test.ts`
 - `apps/server/test/payer/pocket-recovery.test.ts`
@@ -36,7 +39,7 @@ Implemented the Lane 2 halt-drain and late-pocket recovery composition for the l
 
 ## Focused checks
 
-- `fnm exec --using=22.22.0 pnpm --filter @czar/server exec vitest run test/payer/pullback-scheduler.test.ts test/payer/pullback.test.ts test/payer/pocket.test.ts test/payer/runtime.test.ts test/payer/indexer-pocket.test.ts test/payer/pocket-recovery.test.ts test/main.test.ts` — 7 files passed, 47 tests passed.
+- `fnm exec --using=22.22.0 pnpm --filter @czar/server exec vitest run test/payer/pullback-scheduler.test.ts test/payer/pullback.test.ts test/payer/pocket.test.ts test/payer/runtime.test.ts test/payer/indexer-pocket.test.ts test/payer/pocket-recovery.test.ts test/main.test.ts` — 7 files passed, 50 tests passed.
 - `fnm exec --using=22.22.0 pnpm -r typecheck` — passed for all 14 of 15 workspace projects included by the command.
 - `fnm exec --using=22.22.0 pnpm lint` — passed (`oxlint --deny-warnings` and `oxfmt --check`).
 - `git diff --check` — passed.

@@ -22,6 +22,7 @@ interface PendingFallback {
   readonly vault_address: Address | null;
   readonly gateway_minter: Address | null;
   readonly attempt: number | null;
+  readonly closed_pocket: boolean;
 }
 
 export interface PullbackFallbackSchedulerDependencies {
@@ -43,7 +44,7 @@ export async function runPendingPullbackFallbacks(
   );
   const rows = await dependencies.pool.query<PendingFallback>(
     `SELECT plan_id,step_index,envelope_ref,pocket,unavailable_since,
-            pullback_id,vault_address,gateway_minter,attempt
+            pullback_id,vault_address,gateway_minter,attempt,closed_pocket
      FROM payer_pullback_gateway_failures
      WHERE state='pending' AND unavailable_since <= $1
      ORDER BY unavailable_since,plan_id,step_index`,
@@ -75,6 +76,7 @@ async function processFallback(
       apiUnavailableSince: row.unavailable_since,
       value: balance?.gatewayAvailableAtomic ?? 0n,
       attempt,
+      closedPocketRecovery: row.closed_pocket,
       trigger: "api-down",
     },
     dependencies,
@@ -82,6 +84,13 @@ async function processFallback(
   if (result.state === "manual-return-required") {
     await dependencies.pool.query(
       `UPDATE payer_pullback_gateway_failures SET state='manual-return-required'
+       WHERE plan_id=$1 AND step_index=$2`,
+      [row.plan_id, row.step_index],
+    );
+  }
+  if (result.state === "returned-to-vault") {
+    await dependencies.pool.query(
+      `UPDATE payer_pullback_gateway_failures SET state='returned-to-vault'
        WHERE plan_id=$1 AND step_index=$2`,
       [row.plan_id, row.step_index],
     );

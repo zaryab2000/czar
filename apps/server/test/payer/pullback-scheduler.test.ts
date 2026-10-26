@@ -259,4 +259,59 @@ describe("slow pullback scheduler", () => {
     );
     expect(send).toHaveBeenCalledOnce();
   });
+
+  it("returns a closed-pocket API-down recovery to the vault without a manual prompt", async () => {
+    await getPool().query(
+      "UPDATE payer_pullback_gateway_failures SET attempt=1,closed_pocket=true WHERE plan_id=$1",
+      [PLAN_ID],
+    );
+    await appendExecutionPhase(getPool(), {
+      planId: PLAN_ID,
+      stepIndex: 0,
+      attempt: 1,
+      phase: "pullback.transfer.sent",
+      payload: { pullbackId: "9" },
+    });
+    const send = vi.fn(async (_transaction: `0x${string}`, kind: string) => `${kind}-tx`);
+    let head = 100n;
+    let pocketBalance = 0n;
+    let withdrawalBlock = 0n;
+    const dependencies = {
+      pool: getPool(),
+      config: loadConfig({ envFile: { "payer.pullbackApiDownHours": 24 } }),
+      signer: { sign: vi.fn(async () => ({ signedTransaction: "0x1234" as const })) },
+      readGatewayBalance: vi.fn(async () => ({
+        gatewayAvailableAtomic: 450_000n,
+        gatewayWithdrawingAtomic: 0n,
+        apiObservedAt: new Date(NOW.getTime() - 86_400_000),
+        apiConsecutiveFailures: 0,
+      })),
+      cancelPendingPullback: vi.fn(async () => undefined),
+      chain: {
+        getBlockNumber: async () => head,
+        withdrawalBlock: async () => withdrawalBlock,
+        pocketUsdcBalance: async () => pocketBalance,
+        sendPocketTransaction: send,
+      },
+      now: () => NOW,
+    };
+
+    await runPendingPullbackFallbacks(dependencies);
+    withdrawalBlock = 200n;
+    head = 200n;
+    pocketBalance = 5_000n;
+    await runPendingPullbackFallbacks(dependencies);
+    await runPendingPullbackFallbacks(dependencies);
+
+    expect(send.mock.calls.map(([, kind]) => kind)).toEqual([
+      "pullback.slow.initiate",
+      "pullback.slow.withdraw",
+      "pocket-return:usdc",
+    ]);
+    const row = await getPool().query(
+      "SELECT state FROM payer_pullback_gateway_failures WHERE plan_id=$1 AND step_index=0",
+      [PLAN_ID],
+    );
+    expect(row.rows[0]?.state).toBe("returned-to-vault");
+  });
 });
