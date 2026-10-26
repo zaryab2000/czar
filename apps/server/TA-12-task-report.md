@@ -18,11 +18,13 @@ Pocket draining and auto-limit lowering are attempted independently; either
 failure causes the event source to retry. Replayed events re-read on-chain
 state and skip limits already at zero.
 
-Production startup waits for the first durable historical scan before starting
-planner and dispatcher workers. A pending on-chain lowering stays in the event
-queue and gates new planner allowance and execution; normal block advancement
-is caught up before checking that queue, so it does not force approval solely
-because the periodic scanner has not run yet.
+Production startup waits until the durable historical scan has caught up for
+every discovered vault before starting planner and dispatcher workers. Each
+source poll scans at most one successful log page globally, rotates across
+vaults, persists its cursor, and continues on the next poll. Allowance and
+dispatch checks read the durable queue without initiating RPC backfill. A
+pending auto-limit lowering gates planner allowance and execution only until
+the lowering transaction is acknowledged; pocket-drain retry remains separate.
 
 Frozen event identities and scan cursors are persisted in PostgreSQL. Each
 source scan reads Frozen logs from the last durable cursor and replays pending
@@ -32,16 +34,21 @@ reads the zero limit and skips signing again.
 
 ## Review fixes
 
-- Planner and dispatcher first catch the durable Frozen scan up to the current
-  chain head, then pause only when queued lowering work remains. The server
-  awaits its initial historical scan before starting planner/dispatcher work.
+- Planner allowance and dispatcher checks only read the durable pending-lowering
+  marker; the event-source worker performs bounded RPC scanning. The server
+  awaits historical catch-up before starting planner/dispatcher work.
 - `GuardianPaused` drain failures now propagate so the event source retries
   rather than marking the pause handled.
 - Historical Frozen logs use `indexer.getLogsBlockRange`, halve the page after
   RPC `-32012`, and persist each page's events and cursor in one transaction.
-  Cursor updates are monotonic, so concurrent catch-up and background scans do
-  not move progress backward. Existing queued work is replayed even when a
-  later historical page fails.
+  A single successful page is scanned per source poll, with a rotating vault
+  cursor. Startup readiness remains pending until every discovered vault has
+  caught up. Cursor updates are monotonic, and queued work is replayed even if
+  a later historical page fails.
+- The event row records `auto_limits_lowered_at` separately from
+  `processed_at`. A successful lowering is acknowledged before pocket draining;
+  a failed drain remains retryable without repeating the lowering or blocking
+  normal execution after the limit action completed.
 
 ## Files changed
 
@@ -61,6 +68,8 @@ reads the zero limit and skips signing again.
   remains queued.
 - `apps/server/migrations/0017-freeze-auto-limit-events.sql` — event work and
   per-vault scan cursor tables.
+- `apps/server/migrations/0018-freeze-auto-limit-progress.sql` — durable
+  lowering acknowledgement independent of drain completion.
 - `apps/server/test/payer/freeze-autolimit.test.ts` — nonzero/zero behavior,
   replay, signer refusal, and equality with the onboarding category set.
 - `apps/server/test/payer/freeze-events.test.ts` — durable retry after an
@@ -74,6 +83,8 @@ reads the zero limit and skips signing again.
   freeze gate in the planner and dispatcher paths.
 - `apps/server/test/payer/database-vault-event-source.test.ts` and
   `apps/server/test/migrate.test.ts` — source replay and migration coverage.
+- `apps/server/test/main-dispatch.test.ts` — complete the mocked public client
+  interface used by the real startup event scanner.
 - `apps/server/test/main.test.ts` and
   `apps/server/test/payer/vault-event-source.test.ts` — startup scan readiness
   and event subscription readiness.
@@ -114,3 +125,27 @@ reads the zero limit and skips signing again.
   `payer_pocket_drain_disabled`. This PR does not claim that independent halt
   draining is complete.
 - No SCRs filed.
+
+## Manual review follow-up
+
+The designated reviewer identified two defects at `dc4a8c2`: a drain failure
+could keep an already-completed auto-limit action marked pending, and a cold
+scan could perform unbounded page requests in one poll. The follow-up changes
+above add the independent durable acknowledgement and a one-page-per-poll
+rotating scanner. Startup remains closed until historical catch-up is complete.
+
+Focused checks after these fixes:
+
+- `fnm exec --using=22.22.0 pnpm --filter @czar/server exec vitest run test/payer/freeze-events.test.ts test/payer/database-vault-event-source.test.ts test/payer/runtime.test.ts test/main.test.ts test/main-dispatch.test.ts test/migrate.test.ts`
+  — passed: 6 files, 27 tests.
+- `fnm exec --using=22.22.0 pnpm -r typecheck` — passed across 14 workspace
+  projects with typecheck scripts.
+- `fnm exec --using=22.22.0 pnpm lint` — passed.
+- `git diff --check` — passed.
+
+An attempted command `fnm exec --using=22.22.0 pnpm --filter @czar/server test -- test/payer/freeze-events.test.ts`
+was interpreted by Vitest as a full-suite run. It failed while the regression
+tests were intentionally in their red state; it also reported local RPC/Arc
+fixture failures and planner database fixture failures. This is not counted as
+validation. The full server suite remains unverified; Arc deployment and
+acceptance remain deferred.

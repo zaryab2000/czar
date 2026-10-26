@@ -79,12 +79,15 @@ describe("database vault event source", () => {
     await vi.waitFor(() => expect(watchContractEvent).toHaveBeenCalledTimes(4));
     expect(listener).toHaveBeenCalledWith(
       expect.objectContaining({ name: "Frozen", vault: VAULT_ONE, blockNumber: 5n }),
+      expect.any(Function),
     );
     vaults = [VAULT_ONE, VAULT_TWO];
     await vi.advanceTimersByTimeAsync(1000);
     await vi.waitFor(() => expect(watchContractEvent).toHaveBeenCalledTimes(8));
+    expect(getContractEvents).toHaveBeenCalledTimes(2);
     expect(listener).toHaveBeenCalledWith(
       expect.objectContaining({ name: "Frozen", vault: VAULT_TWO, blockNumber: 5n }),
+      expect.any(Function),
     );
     expect(listener).toHaveBeenCalledTimes(3);
     stop();
@@ -136,12 +139,59 @@ describe("database vault event source", () => {
     expect(listener).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({ name: "Frozen", vault: VAULT_ONE, blockNumber: 5n }),
+      expect.any(Function),
     );
     expect(listener).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({ name: "Frozen", vault: VAULT_ONE, blockNumber: 6n }),
+      expect.any(Function),
     );
     stop();
+  });
+
+  it("advances one history page per poll and waits for initial catch-up", async () => {
+    vi.useFakeTimers();
+    const { pool } = fakePool(() => [VAULT_ONE]);
+    const pageRequests: { fromBlock: bigint; toBlock: bigint }[] = [];
+    const client = {
+      readContract: vi.fn(async ({ functionName }: { functionName: string }) => {
+        if (functionName === "factory") return FACTORY;
+        if (functionName === "guardianPaused") return false;
+        throw new Error(`unexpected ${functionName}`);
+      }),
+      watchContractEvent: vi.fn(() => vi.fn()),
+      getBlockNumber: vi.fn(async () => 25n),
+      getContractEvents: vi.fn(async (request: { fromBlock: bigint; toBlock: bigint }) => {
+        pageRequests.push(request);
+        return request.fromBlock === 0n ? [freezeLog(5n)] : [];
+      }),
+    };
+    const subscription = createDatabaseVaultEventSource({
+      pool,
+      publicClient: client as never,
+      config: loadConfig({
+        envFile: {
+          "payer.vaultEventPollMs": 1000,
+          "indexer.getLogsBlockRange": 10,
+        },
+      }),
+      logger: { error: vi.fn() } as never,
+    }).subscribe(vi.fn(async () => undefined));
+
+    let ready = false;
+    void subscription.ready.then(() => (ready = true));
+    await vi.waitFor(() => expect(pageRequests).toHaveLength(1));
+    expect(pageRequests[0]).toMatchObject({ fromBlock: 0n, toBlock: 9n });
+    expect(ready).toBe(false);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(pageRequests).toHaveLength(2);
+    expect(pageRequests[1]).toMatchObject({ fromBlock: 10n, toBlock: 19n });
+    expect(ready).toBe(false);
+    await vi.advanceTimersByTimeAsync(1000);
+    await subscription.ready;
+    expect(pageRequests).toHaveLength(3);
+    expect(pageRequests[2]).toMatchObject({ fromBlock: 20n, toBlock: 25n });
+    subscription();
   });
 });
 
@@ -149,7 +199,7 @@ function fakePool(vaults: () => readonly Address[]) {
   const cursors = new Map<string, string>();
   const events = new Map<
     string,
-    { block: string; index: number; tx: string; processed: boolean }
+    { block: string; index: number; tx: string; processed: boolean; lowered: boolean }
   >();
   const query = vi.fn(async (statement: string, values: unknown[] = []) => {
     if (["BEGIN", "COMMIT", "ROLLBACK"].includes(statement)) return { rows: [] };
@@ -165,7 +215,7 @@ function fakePool(vaults: () => readonly Address[]) {
     if (statement.includes("INSERT INTO payer_freeze_autolimit_events")) {
       const [vault, block, index, tx] = values as [string, string, number, string];
       const key = `${vault}:${block}:${index}`;
-      events.set(key, events.get(key) ?? { block, index, tx, processed: false });
+      events.set(key, events.get(key) ?? { block, index, tx, processed: false, lowered: false });
       return { rows: [] };
     }
     if (statement.includes("INSERT INTO payer_freeze_autolimit_cursors")) {
@@ -180,12 +230,16 @@ function fakePool(vaults: () => readonly Address[]) {
             block_number: event.block,
             log_index: event.index,
             transaction_hash: event.tx,
+            auto_limits_lowered: event.lowered,
           })),
       };
     if (statement.includes("UPDATE payer_freeze_autolimit_events")) {
       const [vault, block, index] = values as [string, string, number];
       const event = events.get(`${vault}:${block}:${index}`);
-      if (event) event.processed = true;
+      if (event) {
+        if (statement.includes("auto_limits_lowered_at")) event.lowered = true;
+        else event.processed = true;
+      }
       return { rows: [] };
     }
     throw new Error(`Unexpected database query: ${statement}`);

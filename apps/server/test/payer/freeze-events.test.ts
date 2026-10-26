@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  freezeHandlingPending,
   hasPendingFrozenEvent,
   scanFrozenEvents,
   processPendingFrozenEvents,
+  queueFrozenEvent,
 } from "#src/payer/freeze-events";
 import type { VaultHaltEvent } from "#src/payer/runtime";
 
@@ -14,7 +14,10 @@ function fakeStore() {
   let cursor: string | undefined;
   let transactionOpen = false;
   const committedCursors: string[] = [];
-  const events = new Map<string, { block: string; index: number; tx: string; done: boolean }>();
+  const events = new Map<
+    string,
+    { block: string; index: number; tx: string; done: boolean; lowered: boolean }
+  >();
   const query = vi.fn(async (statement: string, values: unknown[] = []) => {
     if (statement === "BEGIN") transactionOpen = true;
     if (statement === "COMMIT") {
@@ -25,11 +28,15 @@ function fakeStore() {
     if (["BEGIN", "COMMIT", "ROLLBACK"].includes(statement)) return { rows: [] };
     if (statement.includes("SELECT last_scanned_block"))
       return { rows: cursor === undefined ? [] : [{ last_scanned_block: cursor }] };
+    if (statement.includes("SELECT EXISTS"))
+      return {
+        rows: [{ pending: [...events.values()].some((event) => !event.done && !event.lowered) }],
+      };
     if (statement.includes("INSERT INTO payer_freeze_autolimit_events")) {
       expect(transactionOpen).toBe(true);
       const [vault, block, index, tx] = values as [string, string, number, string];
       const key = `${vault}:${block}:${index}`;
-      events.set(key, events.get(key) ?? { block, index, tx, done: false });
+      events.set(key, events.get(key) ?? { block, index, tx, done: false, lowered: false });
       return { rows: [] };
     }
     if (statement.includes("INSERT INTO payer_freeze_autolimit_cursors")) {
@@ -55,9 +62,16 @@ function fakeStore() {
             block_number: event.block,
             log_index: event.index,
             transaction_hash: event.tx,
+            auto_limits_lowered: event.lowered,
           })),
       };
     if (statement.includes("UPDATE payer_freeze_autolimit_events")) {
+      if (statement.includes("auto_limits_lowered_at")) {
+        const [vault, block, index] = values as [string, string, number];
+        const event = events.get(`${vault}:${block}:${index}`);
+        if (event) event.lowered = true;
+        return { rows: [] };
+      }
       const [vault, block, index] = values as [string, string, number];
       const event = events.get(`${vault}:${block}:${index}`);
       if (event) event.done = true;
@@ -69,22 +83,22 @@ function fakeStore() {
     pool: { query, connect: async () => ({ query, release: vi.fn() }) } as never,
     query,
     pending: () => [...events.values()].filter((row) => !row.done),
+    eventRows: () => [...events.values()],
+    hasUnloweredPending: () => [...events.values()].some((row) => !row.done && !row.lowered),
     cursor: () => cursor,
     committedCursors,
   };
 }
 
 describe("durable Frozen event work", () => {
-  it("catches up a normal scan gap without forcing approval", async () => {
+  it("reports queued lowering as pending only until limits were lowered", async () => {
     const store = fakeStore();
-    const client = {
-      getBlockNumber: vi.fn(async () => 40n),
-      getContractEvents: vi.fn(async () => []),
-    };
-    await expect(freezeHandlingPending(client as never, store.pool, VAULT, 9_999n)).resolves.toBe(
-      false,
-    );
-    expect(store.cursor()).toBe("40");
+    await enqueueEvent(store, { blockNumber: 1n, logIndex: 0, transactionHash: TX });
+    expect(await hasPendingFrozenEvent(store.pool, VAULT)).toBe(true);
+    const listener = vi.fn(async (_event, markLowered) => markLowered());
+    await processPendingFrozenEvents(store.pool, VAULT, listener);
+    expect(await hasPendingFrozenEvent(store.pool, VAULT)).toBe(false);
+    expect(store.eventRows()[0]?.done).toBe(true);
   });
 
   it("reports queued Frozen lowering as pending for its vault", async () => {
@@ -93,7 +107,9 @@ describe("durable Frozen event work", () => {
       return { rows: [{ pending: true }] };
     });
     expect(await hasPendingFrozenEvent({ query } as never, VAULT)).toBe(true);
-    expect(query).toHaveBeenCalledWith(expect.stringContaining("processed_at IS NULL"), [VAULT]);
+    expect(query).toHaveBeenCalledWith(expect.stringContaining("auto_limits_lowered_at IS NULL"), [
+      VAULT,
+    ]);
   });
 
   it("retries an unfinished lowering after Unfrozen without requiring frozen state", async () => {
@@ -104,7 +120,7 @@ describe("durable Frozen event work", () => {
     };
     await scanFrozenEvents(client as never, store.pool, VAULT, 9_999n);
     const listener = vi
-      .fn<(_: VaultHaltEvent) => Promise<void>>()
+      .fn<(_: VaultHaltEvent, markLowered: () => Promise<void>) => Promise<void>>()
       .mockRejectedValueOnce(new Error("K3 refused"))
       .mockResolvedValue(undefined);
     await expect(processPendingFrozenEvents(store.pool, VAULT, listener)).rejects.toThrow(
@@ -114,13 +130,38 @@ describe("durable Frozen event work", () => {
 
     await processPendingFrozenEvents(store.pool, VAULT, listener);
     expect(listener).toHaveBeenCalledTimes(2);
-    expect(listener).toHaveBeenLastCalledWith({
-      name: "Frozen",
-      vault: VAULT,
-      blockNumber: 5n,
-      logIndex: 3,
-      transactionHash: TX,
+    expect(listener).toHaveBeenLastCalledWith(
+      {
+        name: "Frozen",
+        vault: VAULT,
+        blockNumber: 5n,
+        logIndex: 3,
+        transactionHash: TX,
+        autoLimitsLowered: false,
+      },
+      expect.any(Function),
+    );
+    expect(store.pending()).toHaveLength(0);
+  });
+
+  it("does not re-lower limits when draining failed after lowering", async () => {
+    const store = fakeStore();
+    await enqueueEvent(store, { blockNumber: 5n, logIndex: 3, transactionHash: TX });
+    const listener = vi.fn(async (_event, markLowered) => {
+      await markLowered();
+      throw new Error("drain failed");
     });
+    await expect(processPendingFrozenEvents(store.pool, VAULT, listener)).rejects.toThrow(
+      "drain failed",
+    );
+    expect(store.hasUnloweredPending()).toBe(false);
+    expect(store.pending()).toHaveLength(1);
+
+    const retry = vi.fn(async (event: VaultHaltEvent) => {
+      expect(event.autoLimitsLowered).toBe(true);
+    });
+    await processPendingFrozenEvents(store.pool, VAULT, retry);
+    expect(retry).toHaveBeenCalledOnce();
     expect(store.pending()).toHaveLength(0);
   });
 
@@ -139,7 +180,7 @@ describe("durable Frozen event work", () => {
     expect(listener).toHaveBeenCalledOnce();
   });
 
-  it("pages and shrinks oversized log scans, persisting each page before resuming", async () => {
+  it("scans at most one successful page and resumes from its durable cursor", async () => {
     const store = fakeStore();
     const requests: { fromBlock: bigint; toBlock: bigint }[] = [];
     const client = {
@@ -152,19 +193,30 @@ describe("durable Frozen event work", () => {
       }),
     };
 
-    await scanFrozenEvents(client as never, store.pool, VAULT, 9_999n);
+    await expect(scanFrozenEvents(client as never, store.pool, VAULT, 9_999n)).resolves.toBe(false);
 
     expect(requests[0]).toMatchObject({ fromBlock: 0n, toBlock: 9_998n });
     expect(requests[1]).toMatchObject({ fromBlock: 0n, toBlock: 4_998n });
     expect(requests.every(({ toBlock, fromBlock }) => toBlock - fromBlock <= 9_998n)).toBe(true);
-    expect(store.cursor()).toBe("25000");
-    expect(store.committedCursors).toEqual(["4998", "9997", "14996", "19995", "24994", "25000"]);
+    expect(store.cursor()).toBe("4998");
+    expect(store.committedCursors).toEqual(["4998"]);
 
+    for (let page = 0; page < 5; page += 1)
+      await scanFrozenEvents(client as never, store.pool, VAULT, 9_999n);
+    expect(store.cursor()).toBe("25000");
+    expect(await scanFrozenEvents(client as never, store.pool, VAULT, 9_999n)).toBe(true);
     client.getBlockNumber.mockResolvedValue(25_010n);
-    requests.length = 0;
-    await scanFrozenEvents(client as never, store.pool, VAULT, 9_999n);
-    expect(requests[0]?.fromBlock).toBe(25_001n);
+    expect(await scanFrozenEvents(client as never, store.pool, VAULT, 9_999n)).toBe(true);
+    expect(requests.at(-1)?.fromBlock).toBe(25_001n);
     expect(store.cursor()).toBe("25010");
-    expect(store.committedCursors.at(-1)).toBe("25010");
   });
 });
+
+async function enqueueEvent(
+  store: ReturnType<typeof fakeStore>,
+  event: { blockNumber: bigint; logIndex: number; transactionHash: typeof TX },
+): Promise<void> {
+  await store.query("BEGIN");
+  await queueFrozenEvent(store.pool, VAULT, event);
+  await store.query("COMMIT");
+}

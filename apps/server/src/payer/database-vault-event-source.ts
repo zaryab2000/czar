@@ -29,11 +29,20 @@ export function createDatabaseVaultEventSource(
     subscribe(listener) {
       let stopped = false;
       let scanning = false;
+      let nextVaultScanIndex = 0;
       const seenVaults = new Set<Address>();
+      const scanCaughtUp = new Map<Address, boolean>();
       const seenHalts = new Set<string>();
       const retryVaults = new Set<Address>();
       const frozenEventRuns = new Map<Address, Promise<void>>();
       const unsubscribe: (() => void)[] = [];
+      let resolveReady: (() => void) | undefined;
+      let rejectReady: ((reason: unknown) => void) | undefined;
+      let readySettled = false;
+      const ready = new Promise<void>((resolve, reject) => {
+        resolveReady = resolve;
+        rejectReady = reject;
+      });
       const emit = async (event: VaultHaltEvent) => {
         const vaultKey = event.vault.toLowerCase();
         if (event.name === "Frozen") {
@@ -67,10 +76,12 @@ export function createDatabaseVaultEventSource(
         if (stopped || scanning) return;
         scanning = true;
         const failures: unknown[] = [];
+        let allCaughtUp = false;
         try {
           const rows = await input.pool.query<{ vault: string }>(
             "SELECT DISTINCT vault FROM users WHERE vault IS NOT NULL ORDER BY vault",
           );
+          const vaults: Address[] = [];
           for (const row of rows.rows) {
             if (!isAddress(row.vault)) {
               logSourceError(input.logger, "invalid_address");
@@ -78,6 +89,8 @@ export function createDatabaseVaultEventSource(
               continue;
             }
             const vault = row.vault;
+            vaults.push(vault);
+            if (!scanCaughtUp.has(vault)) scanCaughtUp.set(vault, false);
             try {
               if (!seenVaults.has(vault)) {
                 seenVaults.add(vault);
@@ -95,47 +108,70 @@ export function createDatabaseVaultEventSource(
               logSourceError(input.logger, "reconcile_failed");
               failures.push(error);
             }
-            try {
-              await scanFrozenEvents(
-                input.publicClient,
-                input.pool,
-                vault,
-                BigInt(Number(input.config.get("indexer.getLogsBlockRange"))),
-              );
-            } catch (error) {
-              retryVaults.add(vault);
-              logSourceError(input.logger, "reconcile_failed");
-              failures.push(error);
+          }
+          if (vaults.length > 0) {
+            const index = nextVaultScanIndex % vaults.length;
+            const vault = vaults[index];
+            if (vault) {
+              nextVaultScanIndex = index + 1;
+              try {
+                const caughtUp = await scanFrozenEvents(
+                  input.publicClient,
+                  input.pool,
+                  vault,
+                  BigInt(Number(input.config.get("indexer.getLogsBlockRange"))),
+                );
+                scanCaughtUp.set(vault, caughtUp);
+              } catch (error) {
+                scanCaughtUp.set(vault, false);
+                retryVaults.add(vault);
+                logSourceError(input.logger, "reconcile_failed");
+                failures.push(error);
+              }
             }
+          }
+          for (const vault of vaults) {
             try {
               await runFrozenEvents(input.pool, vault, undefined, listener, frozenEventRuns);
             } catch {
               retryVaults.add(vault);
               logSourceError(input.logger, "halt_drain_failed");
             }
-            if (!retryVaults.has(vault)) continue;
-            retryVaults.delete(vault);
+          }
+          const retryVault = vaults.find((vault) => retryVaults.has(vault));
+          if (retryVault) {
+            retryVaults.delete(retryVault);
             try {
-              await reconcileHalt(input.publicClient, vault, emit);
+              await reconcileHalt(input.publicClient, retryVault, emit);
             } catch (error) {
-              retryVaults.add(vault);
+              retryVaults.add(retryVault);
               logSourceError(input.logger, "reconcile_failed");
               failures.push(error);
             }
           }
+          allCaughtUp = vaults.every((vault) => scanCaughtUp.get(vault) === true);
         } catch (error) {
           logSourceError(input.logger, "scan_failed");
           failures.push(error);
         } finally {
           scanning = false;
         }
-        if (initial && failures.length > 0)
-          throw new AggregateError(failures, "Initial vault event synchronization failed.");
+        if (initial && failures.length > 0) {
+          rejectReady?.(
+            new AggregateError(failures, "Initial vault event synchronization failed."),
+          );
+          readySettled = true;
+          return;
+        }
+        if (allCaughtUp && !readySettled) {
+          readySettled = true;
+          resolveReady?.();
+        }
       };
       const interval = Number(input.config.get("payer.vaultEventPollMs"));
       const timer = setInterval(() => void scan(), interval);
       timer.unref();
-      const ready = scan(true);
+      void scan(true);
       const stop = () => {
         stopped = true;
         clearInterval(timer);
@@ -150,7 +186,7 @@ function runFrozenEvents(
   pool: Pool,
   vault: Address,
   event: VaultHaltEvent | undefined,
-  listener: (event: VaultHaltEvent) => Promise<void>,
+  listener: Parameters<typeof processPendingFrozenEvents>[2],
   runs: Map<Address, Promise<void>>,
 ): Promise<void> {
   const active = runs.get(vault);
@@ -164,7 +200,7 @@ async function processFrozenEvents(
   pool: Pool,
   vault: Address,
   event: VaultHaltEvent | undefined,
-  listener: (event: VaultHaltEvent) => Promise<void>,
+  listener: Parameters<typeof processPendingFrozenEvents>[2],
 ): Promise<void> {
   if (event) await queueFrozenEvent(pool, vault, event);
   await processPendingFrozenEvents(pool, vault, listener);

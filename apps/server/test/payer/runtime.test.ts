@@ -165,6 +165,43 @@ describe("payer runtime wiring", () => {
     runtime.stop();
   });
 
+  it("skips completed lowering during a drain retry", async () => {
+    let listener:
+      | ((
+          event: { name: string; vault: `0x${string}`; autoLimitsLowered: boolean },
+          markLowered: () => Promise<void>,
+        ) => Promise<void>)
+      | undefined;
+    const lowerAutoLimits = vi.fn(async () => undefined);
+    const pullback = vi.fn(async () => undefined);
+    const runtime = startPayerRuntime({
+      events: {
+        subscribe(next) {
+          listener = next as typeof listener;
+          return Object.assign(() => undefined, { ready: Promise.resolve() });
+        },
+      },
+      pocketHalt: {
+        listFundedPockets: async () => ["0x0000000000000000000000000000000000000001"],
+        pullback,
+      },
+      lowerAutoLimits,
+    });
+    const markLowered = vi.fn(async () => undefined);
+    await listener?.(
+      {
+        name: "Frozen",
+        vault: "0x0000000000000000000000000000000000000002",
+        autoLimitsLowered: true,
+      },
+      markLowered,
+    );
+    expect(lowerAutoLimits).not.toHaveBeenCalled();
+    expect(markLowered).not.toHaveBeenCalled();
+    expect(pullback).toHaveBeenCalledOnce();
+    runtime.stop();
+  });
+
   it("shares one in-flight freeze operation for duplicate events", async () => {
     let listener: ((event: { name: string; vault: `0x${string}` }) => Promise<void>) | undefined;
     let completeLowering: (() => void) | undefined;
@@ -189,9 +226,10 @@ describe("payer runtime wiring", () => {
     const first = listener?.(event);
     const second = listener?.(event);
     await vi.waitFor(() => expect(lowerAutoLimits).toHaveBeenCalledOnce());
-    expect(listFundedPockets).toHaveBeenCalledOnce();
+    expect(listFundedPockets).not.toHaveBeenCalled();
     completeLowering?.();
     await Promise.all([first, second]);
+    expect(listFundedPockets).toHaveBeenCalledOnce();
     runtime.stop();
   });
 });

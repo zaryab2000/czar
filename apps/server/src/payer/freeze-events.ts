@@ -13,26 +13,18 @@ interface PendingFreezeEvent {
   readonly block_number: string;
   readonly log_index: number;
   readonly transaction_hash: Hex;
+  readonly auto_limits_lowered: boolean;
 }
 
 export async function hasPendingFrozenEvent(pool: Pool, vault: Address): Promise<boolean> {
   const result = await pool.query<{ pending: boolean }>(
     `SELECT EXISTS (
-       SELECT 1 FROM payer_freeze_autolimit_events WHERE vault=$1 AND processed_at IS NULL
+       SELECT 1 FROM payer_freeze_autolimit_events
+       WHERE vault=$1 AND processed_at IS NULL AND auto_limits_lowered_at IS NULL
      ) AS pending`,
     [vault],
   );
   return result.rows[0]?.pending ?? false;
-}
-
-export async function freezeHandlingPending(
-  client: PublicClient,
-  pool: Pool,
-  vault: Address,
-  maxBlockRange: bigint,
-): Promise<boolean> {
-  await scanFrozenEvents(client, pool, vault, maxBlockRange);
-  return hasPendingFrozenEvent(pool, vault);
 }
 
 export async function scanFrozenEvents(
@@ -40,7 +32,7 @@ export async function scanFrozenEvents(
   pool: Pool,
   vault: Address,
   maxBlockRange: bigint,
-): Promise<void> {
+): Promise<boolean> {
   if (maxBlockRange <= 0n) throw new RangeError("Frozen event scan range must be positive.");
   const cursor = await pool.query<{ last_scanned_block: string }>(
     "SELECT last_scanned_block FROM payer_freeze_autolimit_cursors WHERE vault=$1",
@@ -48,24 +40,20 @@ export async function scanFrozenEvents(
   );
   const head = await client.getBlockNumber();
   const nextBlock = cursor.rows[0] ? BigInt(cursor.rows[0].last_scanned_block) + 1n : 0n;
-  if (nextBlock > head) return;
-  let pageStart = nextBlock;
-  let pageRange = maxBlockRange;
-  while (pageStart <= head) {
-    const page = await getFrozenEventPage(client, vault, pageStart, head, pageRange);
-    await persistFrozenEventPage(pool, vault, page.events, page.toBlock);
-    pageStart = page.toBlock + 1n;
-    pageRange = page.range;
-  }
+  if (nextBlock > head) return true;
+  const page = await getFrozenEventPage(client, vault, nextBlock, head, maxBlockRange);
+  await persistFrozenEventPage(pool, vault, page.events, page.toBlock);
+  return page.toBlock >= head;
 }
 
 export async function processPendingFrozenEvents(
   pool: Pool,
   vault: Address,
-  listener: (event: VaultHaltEvent) => Promise<void>,
+  listener: (event: VaultHaltEvent, markAutoLimitsLowered: () => Promise<void>) => Promise<void>,
 ): Promise<void> {
   const pending = await pool.query<PendingFreezeEvent>(
-    `SELECT block_number::text AS block_number,log_index,transaction_hash
+    `SELECT block_number::text AS block_number,log_index,transaction_hash,
+            auto_limits_lowered_at IS NOT NULL AS auto_limits_lowered
      FROM payer_freeze_autolimit_events
      WHERE vault=$1 AND processed_at IS NULL
      ORDER BY block_number,log_index`,
@@ -73,7 +61,15 @@ export async function processPendingFrozenEvents(
   );
   for (const row of pending.rows) {
     const event = toHaltEvent(vault, row);
-    await listener(event);
+    const markAutoLimitsLowered = async () => {
+      await pool.query(
+        `UPDATE payer_freeze_autolimit_events
+         SET auto_limits_lowered_at=COALESCE(auto_limits_lowered_at,now())
+         WHERE vault=$1 AND block_number=$2 AND log_index=$3`,
+        [vault, row.block_number, row.log_index],
+      );
+    };
+    await listener(event, markAutoLimitsLowered);
     await pool.query(
       `UPDATE payer_freeze_autolimit_events SET processed_at=now()
        WHERE vault=$1 AND block_number=$2 AND log_index=$3 AND processed_at IS NULL`,
@@ -106,7 +102,6 @@ export async function queueFrozenEvent(
 interface FrozenEventPage {
   readonly events: readonly FrozenEventIdentity[];
   readonly toBlock: bigint;
-  readonly range: bigint;
 }
 
 async function getFrozenEventPage(
@@ -127,7 +122,7 @@ async function getFrozenEventPage(
         fromBlock,
         toBlock,
       });
-      return { events, toBlock, range };
+      return { events, toBlock };
     } catch (error) {
       if (!isLogRangeError(error) || range === 1n) throw error;
       range = range / 2n || 1n;
@@ -187,5 +182,6 @@ function toHaltEvent(vault: Address, row: PendingFreezeEvent): VaultHaltEvent {
     blockNumber: BigInt(row.block_number),
     logIndex: row.log_index,
     transactionHash: row.transaction_hash,
+    autoLimitsLowered: row.auto_limits_lowered,
   };
 }

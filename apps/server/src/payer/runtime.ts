@@ -7,10 +7,18 @@ export interface VaultHaltEvent {
   readonly blockNumber?: bigint;
   readonly logIndex?: number;
   readonly transactionHash?: Hex;
+  readonly autoLimitsLowered?: boolean;
 }
 
+export type MarkAutoLimitsLowered = () => Promise<void>;
+
 export interface VaultHaltEventSource {
-  subscribe(listener: (event: VaultHaltEvent) => Promise<void>): VaultHaltEventSubscription;
+  subscribe(
+    listener: (
+      event: VaultHaltEvent,
+      markAutoLimitsLowered?: MarkAutoLimitsLowered,
+    ) => Promise<void>,
+  ): VaultHaltEventSubscription;
 }
 
 export type VaultHaltEventSubscription = (() => void) & { readonly ready: Promise<void> };
@@ -70,12 +78,12 @@ function subscribeHaltEvents(options: PayerRuntimeOptions): VaultHaltEventSubscr
     throw new Error("Vault halt event source requires a halt action.");
   const drain = options.drain ?? drainPocketsAfterHalt;
   const inFlight = new Map<string, Promise<void>>();
-  return options.events.subscribe(async (event) => {
+  return options.events.subscribe(async (event, markAutoLimitsLowered) => {
     if (event.name !== "Frozen" && event.name !== "GuardianPaused") return;
     const key = `${event.name}:${event.vault.toLowerCase()}`;
     const previous = inFlight.get(key);
     if (previous) return previous;
-    const handling = handleHaltEvent(event, options, drain);
+    const handling = handleHaltEvent(event, options, drain, markAutoLimitsLowered);
     inFlight.set(key, handling);
     try {
       await handling;
@@ -89,8 +97,18 @@ async function handleHaltEvent(
   event: VaultHaltEvent,
   options: PayerRuntimeOptions,
   drain: NonNullable<PayerRuntimeOptions["drain"]>,
+  markAutoLimitsLowered?: MarkAutoLimitsLowered,
 ): Promise<void> {
   const failures: unknown[] = [];
+  if (event.name === "Frozen" && options.lowerAutoLimits && !event.autoLimitsLowered) {
+    try {
+      await options.lowerAutoLimits(event.vault);
+      await markAutoLimitsLowered?.();
+    } catch (error) {
+      options.onError?.("freeze-auto-limit", error);
+      failures.push(error);
+    }
+  }
   if (options.pocketHalt) {
     try {
       await drain(
@@ -99,14 +117,6 @@ async function handleHaltEvent(
       );
     } catch (error) {
       options.onError?.("halt-drain", error);
-      failures.push(error);
-    }
-  }
-  if (event.name === "Frozen" && options.lowerAutoLimits) {
-    try {
-      await options.lowerAutoLimits(event.vault);
-    } catch (error) {
-      options.onError?.("freeze-auto-limit", error);
       failures.push(error);
     }
   }
