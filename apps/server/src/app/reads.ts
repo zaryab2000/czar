@@ -19,7 +19,11 @@ import type { Pool } from "pg";
 import { USDC_ADDRESS } from "@czar/x402";
 import { problem } from "#src/http/problem";
 import { RequestValidationError } from "#src/http/validate";
-import { listManualReturnsForUser, type ManualReturnSummary } from "#src/payer/pullback-scheduler";
+import {
+  listManualReturnsForUser,
+  type ManualReturnPageCursor,
+  type ManualReturnSummary,
+} from "#src/payer/pullback-scheduler";
 
 export interface AppReadOptions {
   readonly rpcUrl: string;
@@ -260,14 +264,15 @@ export async function listManualReturnsRoute(
   const userId = context.get("appUserId") as string | undefined;
   if (!userId) return problemResponse(context, 401, "validation");
   const page = parsePage(context, dependencies.config);
-  const offset = decodeManualReturnCursor(page.cursor, userId);
-  if (offset > Number.MAX_SAFE_INTEGER - page.limit) throw new RequestValidationError();
-  const rows = await listManualReturnsForUser(dependencies.pool, userId);
-  const items = rows.slice(offset, offset + page.limit).map(toManualReturn);
-  const hasMore = offset + items.length < rows.length;
+  const cursor = decodeManualReturnCursor(page.cursor, userId);
+  const result = await listManualReturnsForUser(dependencies.pool, userId, {
+    cursor,
+    limit: page.limit,
+  });
   const response: AppPage<ManualReturn> = {
-    items,
-    nextCursor: hasMore ? encodeManualReturnCursor(userId, offset + items.length) : null,
+    items: result.items.map(toManualReturn),
+    nextCursor:
+      result.nextCursor === null ? null : encodeManualReturnCursor(userId, result.nextCursor),
   };
   assertExchange("listManualReturns", response);
   return context.json(response);
@@ -537,30 +542,44 @@ function parsePage(
   return { cursor: query.get("cursor"), limit };
 }
 
-function decodeManualReturnCursor(value: string | null, userId: string): number {
-  if (value === null) return 0;
+function decodeManualReturnCursor(
+  value: string | null,
+  userId: string,
+): ManualReturnPageCursor | null {
+  if (value === null) return null;
   try {
     const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as {
       userId?: unknown;
-      offset?: unknown;
+      manualReturnRequiredAt?: unknown;
+      planId?: unknown;
+      stepIndex?: unknown;
     };
     if (
       parsed.userId !== userId ||
-      typeof parsed.offset !== "number" ||
-      !Number.isSafeInteger(parsed.offset) ||
-      parsed.offset < 0
+      (parsed.manualReturnRequiredAt !== null &&
+        (typeof parsed.manualReturnRequiredAt !== "string" ||
+          !Number.isFinite(Date.parse(parsed.manualReturnRequiredAt)))) ||
+      typeof parsed.planId !== "string" ||
+      parsed.planId.length === 0 ||
+      typeof parsed.stepIndex !== "number" ||
+      !Number.isSafeInteger(parsed.stepIndex) ||
+      parsed.stepIndex < 0
     ) {
       throw new RequestValidationError();
     }
-    return parsed.offset;
+    return {
+      manualReturnRequiredAt: parsed.manualReturnRequiredAt as string | null,
+      planId: parsed.planId,
+      stepIndex: parsed.stepIndex,
+    };
   } catch (error) {
     if (error instanceof RequestValidationError) throw error;
     throw new RequestValidationError();
   }
 }
 
-function encodeManualReturnCursor(userId: string, offset: number): string {
-  return Buffer.from(JSON.stringify({ userId, offset })).toString("base64url");
+function encodeManualReturnCursor(userId: string, cursor: ManualReturnPageCursor): string {
+  return Buffer.from(JSON.stringify({ userId, ...cursor })).toString("base64url");
 }
 
 function readOptions(input: AppReadOptions | undefined): AppReadOptions {
