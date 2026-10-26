@@ -78,7 +78,7 @@ export function createPocketRecoveryOperations(
         readonly value: string | null;
         readonly attempt: number | null;
       }>(
-        `SELECT plan_id,pocket,vault_address,envelope_ref,unavailable_since,value,attempt
+        `SELECT plan_id,step_index,pocket,vault_address,envelope_ref,unavailable_since,value,attempt
          FROM payer_pullback_gateway_failures
          WHERE state='pending' AND closed_pocket=true
          ORDER BY unavailable_since,plan_id,step_index`,

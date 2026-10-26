@@ -59,22 +59,28 @@ describe("pocket halt discovery", () => {
       "fetch",
       vi.fn(async () => Response.json({ items: [] })),
     );
+    const durableRow = {
+      plan_id: "pln_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
+      pocket: POCKETS[0],
+      vault_address: VAULT,
+      step_index: 7,
+      envelope_ref: "eip155:5042002:0xvault:1",
+      unavailable_since: new Date("2026-10-21T00:00:00Z"),
+      value: "9000",
+      attempt: 2,
+    };
     const query = vi.fn(async (sql: string) => {
-      if (sql.includes("FROM payer_pullback_gateway_failures"))
+      if (sql.includes("FROM payer_pullback_gateway_failures")) {
+        const selectedColumns = sql.slice(sql.indexOf("SELECT") + 6, sql.indexOf("FROM"));
+        const selected = selectedColumns.split(",").map((column) => column.trim());
         return {
           rows: [
-            {
-              plan_id: "pln_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
-              pocket: POCKETS[0],
-              vault_address: VAULT,
-              step_index: 4,
-              envelope_ref: "eip155:5042002:0xvault:1",
-              unavailable_since: new Date("2026-10-21T00:00:00Z"),
-              value: "9000",
-              attempt: 2,
-            },
+            Object.fromEntries(
+              selected.map((column) => [column, durableRow[column as keyof typeof durableRow]]),
+            ),
           ],
         };
+      }
       if (sql.includes("FROM plan_pocket_keys"))
         return {
           rows: [
@@ -110,7 +116,7 @@ describe("pocket halt discovery", () => {
       expect.objectContaining({
         pocket: POCKETS[0],
         vault: VAULT,
-        stepIndex: 4,
+        stepIndex: 7,
         attempt: 2,
         trigger: "closed-dust",
       }),

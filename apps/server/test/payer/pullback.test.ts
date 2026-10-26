@@ -1452,4 +1452,65 @@ describe("pullback values", () => {
     );
     expect(row.rows[0]?.initiate_tx).toBe(keccak256("0x1234"));
   });
+
+  it("resumes after the durable row is written but before initiate signing", async () => {
+    const now = new Date("2026-10-22T00:00:00Z");
+    let crashAfterWrite = true;
+    const interruptedPool = {
+      query: async (sql: string, values?: readonly unknown[]) => {
+        const result = await getPool().query(sql, values as unknown[]);
+        if (crashAfterWrite && sql.includes("INSERT INTO payer_pullback_gateway_failures")) {
+          crashAfterWrite = false;
+          throw new Error("simulated stop after durable write");
+        }
+        return result;
+      },
+    };
+    const signer = { sign: vi.fn(async () => ({ signedTransaction: "0x1234" as const })) };
+    const sendPocketTransaction = vi.fn(async (transaction: `0x${string}`) =>
+      keccak256(transaction),
+    );
+    const input = {
+      planId: PLAN_ID,
+      stepIndex: 0,
+      envelopeRef: "eip155:5042002:0x0000000000000000000000000000000000000001:1",
+      pocket: SLOW_POCKET,
+      vault: SLOW_VAULT,
+      usdc: SLOW_USDC,
+      apiUnavailableSince: now,
+      value: 8_000n,
+      trigger: "closed-dust" as const,
+    };
+    const dependencies = {
+      pool: interruptedPool,
+      config: loadConfig(),
+      signer,
+      chain: {
+        getBlockNumber: async () => 100n,
+        withdrawalBlock: async () => 0n,
+        withdrawingBalance: async () => 0n,
+        pocketUsdcBalance: async () => 0n,
+        transactionReceipt: async () => null,
+        sendPocketTransaction,
+      },
+      now: () => now,
+    };
+
+    await expect(executeSlowPullbackFallback(input, dependencies as never)).rejects.toThrow(
+      "simulated stop after durable write",
+    );
+    expect(signer.sign).not.toHaveBeenCalled();
+    const persisted = await getPool().query(
+      `SELECT state,closed_pocket,attempt FROM payer_pullback_gateway_failures
+       WHERE plan_id=$1 AND step_index=0`,
+      [PLAN_ID],
+    );
+    expect(persisted.rows[0]).toMatchObject({ state: "pending", closed_pocket: true, attempt: 0 });
+
+    await expect(
+      executeSlowPullbackFallback(input, { ...dependencies, pool: getPool() } as never),
+    ).resolves.toMatchObject({ state: "waiting-withdrawal" });
+    expect(signer.sign).toHaveBeenCalledOnce();
+    expect(sendPocketTransaction).toHaveBeenCalledOnce();
+  });
 });

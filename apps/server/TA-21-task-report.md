@@ -51,6 +51,24 @@ Implemented the Lane 2 halt-drain and late-pocket recovery composition for the l
 - `fnm exec --using=22.22.0 pnpm --filter @czar/server typecheck` — passed.
 - `fnm exec --using=22.22.0 pnpm lint` — passed (`oxlint --deny-warnings` and `oxfmt --check`).
 - `git diff --check` — passed.
+
+## PR #91 review follow-up at `b3fa143`
+
+- Closed-pocket restart discovery now selects and carries the persisted `step_index`; the
+  regression fixture returns only columns named by the SQL query and uses a distinct index so
+  omitting the column fails the assertion.
+- Added a restart regression that commits the durable recovery row, simulates interruption before
+  K4 initiate signing, then resumes and verifies one signing and one broadcast.
+- TDD evidence: before the query fix, the recovery test passed the fallback plan's index `4`
+  instead of the persisted index `7`.
+- `fnm exec --using=22.22.0 pnpm --filter @czar/server exec vitest run
+  test/payer/pocket-recovery.test.ts test/payer/pullback.test.ts` — 2 files passed, 29 tests
+  passed after the fix.
+- `fnm exec --using=22.22.0 pnpm --filter @czar/server typecheck` — passed.
+- `fnm exec --using=22.22.0 pnpm lint` — passed (`oxlint --deny-warnings` and `oxfmt --check`).
+- `git diff --check` — passed.
+- No new Codex review was requested: the existing code review remains running on the older
+  `a23f05c` head. The designated reviewer will inspect this follow-up diff.
 - `fnm exec --using=22.22.0 pnpm --filter @czar/server exec vitest run test/payer/pullback-scheduler.test.ts test/payer/pullback.test.ts test/payer/pocket.test.ts test/payer/runtime.test.ts test/payer/indexer-pocket.test.ts test/payer/pocket-recovery.test.ts test/main.test.ts` — 7 files passed, 51 tests passed.
 - `fnm exec --using=22.22.0 pnpm -r typecheck` — passed for all 14 of 15 workspace projects included by the command.
 - `fnm exec --using=22.22.0 pnpm lint` — passed (`oxlint --deny-warnings` and `oxfmt --check`).
