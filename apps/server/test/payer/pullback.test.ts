@@ -16,9 +16,13 @@ import { appendExecutionPhase, getExecutionTrace } from "#src/payer/executions";
 import { makeObjectiveSubmission, seedDevice, TEST_USER_ID } from "#test/fixtures";
 import { executePullback } from "#src/payer/pullback";
 import { loadConfig } from "@czar/config";
+import { keccak256 } from "viem";
 
 const getPool = setupDatabase();
 const PLAN_ID = "pln_01K7ZT9P4N5Q6R7S8T9V0W1X2Y";
+const SLOW_POCKET = "0x0000000000000000000000000000000000000002" as const;
+const SLOW_VAULT = "0x0000000000000000000000000000000000000001" as const;
+const SLOW_USDC = "0x3600000000000000000000000000000000000000" as const;
 
 beforeAll(async () => {
   await seedDevice(getPool());
@@ -1174,19 +1178,38 @@ describe("pullback values", () => {
     let head = 100n;
     let initiated = false;
     let withdrawn = false;
+    let withdrawingBalance = 0n;
     let usdc = 0n;
     const chain = {
       getBlockNumber: vi.fn(async () => head),
       withdrawalBlock: vi.fn(async () => (initiated ? 200n : 0n)),
+      withdrawingBalance: vi.fn(async () => withdrawingBalance),
       pocketUsdcBalance: vi.fn(async () => usdc),
-      sendPocketTransaction: vi.fn(async (_transaction: string, kind: string) => {
-        if (kind === "pullback.slow.initiate") initiated = true;
+      transactionReceipt: vi.fn(async () => ({
+        status: "success" as const,
+        blockNumber: 200n,
+        logs: [
+          {
+            address: SLOW_USDC,
+            from: SLOW_POCKET,
+            to: SLOW_VAULT,
+            value: 825_000n,
+            logIndex: 0,
+          },
+        ],
+      })),
+      sendPocketTransaction: vi.fn(async (transaction: `0x${string}`, kind: string) => {
+        if (kind === "pullback.slow.initiate") {
+          initiated = true;
+          withdrawingBalance = 825_000n;
+        }
         if (kind === "pullback.slow.withdraw") {
           withdrawn = true;
           usdc = 825_000n;
+          withdrawingBalance = 0n;
         }
         if (kind === "pocket-return:usdc") usdc = 0n;
-        return `${kind}-tx`;
+        return keccak256(transaction);
       }),
     };
     const dependencies = {
@@ -1200,7 +1223,9 @@ describe("pullback values", () => {
       planId: PLAN_ID,
       stepIndex: 0,
       envelopeRef: "eip155:5042002:0x0000000000000000000000000000000000000001:1",
-      pocket: "0x0000000000000000000000000000000000000002",
+      pocket: SLOW_POCKET,
+      vault: SLOW_VAULT,
+      usdc: SLOW_USDC,
       apiUnavailableSince: new Date("2026-10-20T00:00:00Z"),
       value: 825_000n,
     } as const;
@@ -1230,7 +1255,9 @@ describe("pullback values", () => {
       chain: {
         getBlockNumber: vi.fn(async () => 100n),
         withdrawalBlock: vi.fn(async () => 200n),
+        withdrawingBalance: vi.fn(async () => 1n),
         pocketUsdcBalance: vi.fn(async () => 0n),
+        transactionReceipt: vi.fn(async () => null),
         sendPocketTransaction,
       },
       now: () => new Date("2026-10-22T00:00:00Z"),
@@ -1239,7 +1266,9 @@ describe("pullback values", () => {
       planId: PLAN_ID,
       stepIndex: 0,
       envelopeRef: "eip155:5042002:0x0000000000000000000000000000000000000001:1",
-      pocket: "0x0000000000000000000000000000000000000002",
+      pocket: SLOW_POCKET,
+      vault: SLOW_VAULT,
+      usdc: SLOW_USDC,
       apiUnavailableSince: new Date("2026-10-20T00:00:00Z"),
       value: 825_000n,
     } as const;
@@ -1250,7 +1279,7 @@ describe("pullback values", () => {
     expect(sign).not.toHaveBeenCalled();
     expect(sendPocketTransaction).not.toHaveBeenCalled();
     const phases = await getExecutionTrace(getPool(), PLAN_ID, 0, 0);
-    expect(phases.map((phase) => phase.phase)).toContain("pullback.slow.initiated");
+    expect(phases).toEqual([]);
   });
 
   it.each([
@@ -1270,7 +1299,9 @@ describe("pullback values", () => {
       chain: {
         getBlockNumber: vi.fn(async () => 100n),
         withdrawalBlock: vi.fn(async () => 0n),
+        withdrawingBalance: vi.fn(async () => 0n),
         pocketUsdcBalance: vi.fn(async () => 0n),
+        transactionReceipt: vi.fn(async () => null),
         sendPocketTransaction,
       },
       now: () => new Date("2026-10-22T00:00:00Z"),
@@ -1279,7 +1310,9 @@ describe("pullback values", () => {
       planId: PLAN_ID,
       stepIndex: 0,
       envelopeRef: "eip155:5042002:0x0000000000000000000000000000000000000001:1",
-      pocket: "0x0000000000000000000000000000000000000002",
+      pocket: SLOW_POCKET,
+      vault: SLOW_VAULT,
+      usdc: SLOW_USDC,
       apiUnavailableSince: new Date("2026-10-20T00:00:00Z"),
       value: 825_000n,
     } as const;
@@ -1295,15 +1328,20 @@ describe("pullback values", () => {
   it("returns Closed-pocket dust to the vault without an owner manual-return prompt", async () => {
     let head = 100n;
     let withdrawalBlock = 0n;
+    let withdrawingBalance = 0n;
     let usdc = 0n;
-    const sendPocketTransaction = vi.fn(async (_transaction: string, kind: string) => {
-      if (kind === "pullback.slow.initiate") withdrawalBlock = 200n;
+    const sendPocketTransaction = vi.fn(async (transaction: `0x${string}`, kind: string) => {
+      if (kind === "pullback.slow.initiate") {
+        withdrawalBlock = 200n;
+        withdrawingBalance = 8_000n;
+      }
       if (kind === "pullback.slow.withdraw") {
         usdc = 5_000n;
+        withdrawingBalance = 0n;
         head = 200n;
       }
       if (kind === "pocket-return:usdc") usdc = 0n;
-      return `${kind}-tx`;
+      return keccak256(transaction);
     });
     const dependencies = {
       pool: getPool(),
@@ -1312,7 +1350,21 @@ describe("pullback values", () => {
       chain: {
         getBlockNumber: vi.fn(async () => head),
         withdrawalBlock: vi.fn(async () => withdrawalBlock),
+        withdrawingBalance: vi.fn(async () => withdrawingBalance),
         pocketUsdcBalance: vi.fn(async () => usdc),
+        transactionReceipt: vi.fn(async () => ({
+          status: "success" as const,
+          blockNumber: 200n,
+          logs: [
+            {
+              address: SLOW_USDC,
+              from: SLOW_POCKET,
+              to: SLOW_VAULT,
+              value: 5_000n,
+              logIndex: 0,
+            },
+          ],
+        })),
         sendPocketTransaction,
       },
       now: () => new Date("2026-10-22T00:00:00Z"),
@@ -1321,7 +1373,9 @@ describe("pullback values", () => {
       planId: PLAN_ID,
       stepIndex: 0,
       envelopeRef: "eip155:5042002:0x0000000000000000000000000000000000000001:1",
-      pocket: "0x0000000000000000000000000000000000000002",
+      pocket: SLOW_POCKET,
+      vault: SLOW_VAULT,
+      usdc: SLOW_USDC,
       apiUnavailableSince: new Date("2026-10-21T23:59:00Z"),
       value: 8_000n,
       trigger: "closed-dust" as const,
@@ -1344,5 +1398,58 @@ describe("pullback values", () => {
       amount: "5000",
     });
     expect(sendPocketTransaction).toHaveBeenLastCalledWith("0x1234", "pocket-return:usdc");
+  });
+
+  it("writes the closed-pocket recovery row before signing its first initiate", async () => {
+    const now = new Date("2026-10-22T00:00:00Z");
+    const sign = vi.fn(async () => {
+      const row = await getPool().query(
+        `SELECT state,closed_pocket,attempt FROM payer_pullback_gateway_failures
+         WHERE plan_id=$1 AND step_index=0`,
+        [PLAN_ID],
+      );
+      expect(row.rows[0]).toMatchObject({ state: "pending", closed_pocket: true, attempt: 3 });
+      return { signedTransaction: "0x1234" as const };
+    });
+    const send = vi.fn(async (transaction: `0x${string}`) => keccak256(transaction));
+
+    await expect(
+      executeSlowPullbackFallback(
+        {
+          planId: PLAN_ID,
+          stepIndex: 0,
+          envelopeRef: "eip155:5042002:0x0000000000000000000000000000000000000001:1",
+          pocket: "0x0000000000000000000000000000000000000002",
+          vault: "0x0000000000000000000000000000000000000001",
+          usdc: "0x3600000000000000000000000000000000000000",
+          apiUnavailableSince: now,
+          value: 8_000n,
+          trigger: "closed-dust",
+          closedPocketRecovery: true,
+          attempt: 3,
+        },
+        {
+          pool: getPool(),
+          config: loadConfig(),
+          signer: { sign },
+          chain: {
+            getBlockNumber: async () => 100n,
+            withdrawalBlock: async () => 0n,
+            withdrawingBalance: async () => 0n,
+            pocketUsdcBalance: async () => 0n,
+            transactionReceipt: async () => null,
+            sendPocketTransaction: send,
+          },
+          now: () => now,
+        },
+      ),
+    ).resolves.toMatchObject({ state: "waiting-withdrawal" });
+    expect(sign).toHaveBeenCalledOnce();
+    expect(send).toHaveBeenCalledOnce();
+    const row = await getPool().query(
+      "SELECT initiate_tx FROM payer_pullback_gateway_failures WHERE plan_id=$1 AND step_index=0",
+      [PLAN_ID],
+    );
+    expect(row.rows[0]?.initiate_tx).toBe(keccak256("0x1234"));
   });
 });

@@ -68,8 +68,54 @@ export function createPocketRecoveryOperations(
       },
     },
     async runClosedPocketRecovery() {
-      const pockets = await reader.closedPocketsWithBalance();
-      for (const pocket of pockets) {
+      const pending = await input.pool.query<{
+        readonly plan_id: string;
+        readonly pocket: Address;
+        readonly vault_address: Address | null;
+        readonly step_index: number;
+        readonly envelope_ref: string;
+        readonly unavailable_since: Date;
+        readonly value: string | null;
+        readonly attempt: number | null;
+      }>(
+        `SELECT plan_id,pocket,vault_address,envelope_ref,unavailable_since,value,attempt
+         FROM payer_pullback_gateway_failures
+         WHERE state='pending' AND closed_pocket=true
+         ORDER BY unavailable_since,plan_id,step_index`,
+      );
+      const recovered = new Set<string>();
+      for (const row of pending.rows) {
+        recovered.add(row.pocket.toLowerCase());
+        try {
+          if (!row.vault_address) throw new Error("Open slow-pullback row has no vault address.");
+          const context = await readPocketPlanContext(input.pool, row.pocket);
+          if (
+            context.planId !== row.plan_id ||
+            context.vault.toLowerCase() !== row.vault_address.toLowerCase() ||
+            context.envelopeRef !== row.envelope_ref
+          )
+            throw new Error("Open slow-pullback row does not match its persisted pocket context.");
+          const result = await runClosedSlowReturn(
+            input,
+            context,
+            row.pocket,
+            BigInt(row.value ?? "0"),
+            row.unavailable_since,
+            row.attempt ?? 0,
+            row.step_index,
+          );
+          if (result === "waiting") continue;
+        } catch {
+          input.logger.error("closed_pocket_recovery_failed", {
+            rule: "closed-pocket-recovery",
+            state: "error",
+          });
+        }
+      }
+      const discovered = await reader.closedPocketsWithBalance();
+      for (const pocket of discovered) {
+        if (recovered.has(pocket.pocket.toLowerCase())) continue;
+        recovered.add(pocket.pocket.toLowerCase());
         try {
           await recoverClosedPocket(input, reader, pocket.pocket, pocket.vault, false);
         } catch {
@@ -79,7 +125,7 @@ export function createPocketRecoveryOperations(
           });
         }
       }
-      return pockets.length;
+      return recovered.size;
     },
     async recoverLateGatewayBalance({ vault, pocket }) {
       const result = await recoverClosedPocket(input, reader, pocket, vault, true);
@@ -127,6 +173,9 @@ async function runClosedSlowReturn(
   context: PocketPlanContext,
   pocket: Address,
   observedBalance: bigint,
+  apiUnavailableSince: Date = input.now(),
+  attempt?: number,
+  stepIndex?: number,
 ): Promise<"done" | "waiting"> {
   const chain = createPullbackChainAdapter(
     input.publicClient,
@@ -137,13 +186,16 @@ async function runClosedSlowReturn(
   const result = await executeSlowPullbackFallback(
     {
       planId: context.planId,
-      stepIndex: firstGatewayStepIndex(context.plan),
+      stepIndex: stepIndex ?? firstGatewayStepIndex(context.plan),
       envelopeRef: context.envelopeRef,
       pocket,
-      apiUnavailableSince: input.now(),
+      vault: context.vault,
+      usdc: input.config.get("chain.usdcAddress") as Address,
+      apiUnavailableSince,
       value: observedBalance,
       trigger: "closed-dust",
       closedPocketRecovery: true,
+      ...(attempt === undefined ? {} : { attempt }),
     },
     { pool: input.pool, config: input.config, signer: input.signer, chain, now: input.now },
   );

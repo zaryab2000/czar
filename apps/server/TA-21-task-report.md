@@ -2,7 +2,7 @@
 
 ## Status
 
-Implemented the Lane 2 halt-drain and late-pocket recovery composition for the local server path, and connected API-down slow withdrawal to the indexer's persisted Gateway balance projection. Confirmed in-scope review findings to date are fixed. One canonical query gap remains an architect decision blocker; the PR is not ready for merge until that ruling is resolved. This report records development checks only; it does not claim Arc Anvil or live Gateway acceptance.
+Implemented the Lane 2 halt-drain and late-pocket recovery composition for the local server path, including the accepted SCR-144 slow-path restart behavior. PR #91 remains open. SCR-144 publication PR #94 must merge before the final rebase/review handoff. This report records development checks only; it does not claim Arc Anvil or live Gateway acceptance.
 
 ## Behavior
 
@@ -11,7 +11,10 @@ Implemented the Lane 2 halt-drain and late-pocket recovery composition for the l
 - Halt draining discovers funded pockets through the indexer projection, runs the existing pullback flow, retries individual failures, and lets the event source retry a failed drain. The database-backed event source discovers user vaults at startup and polls for already halted and newly created vaults. The composition test supplies deployment metadata and verifies the vault event watcher is registered.
 - Closed-pocket recovery reads the indexed Gateway balance. It uses the recovery pullback when balance exceeds fee and safety headroom, and the slow withdrawal plus pocket return for dust or an existing withdrawal. It does not use `writeOffPocket` for a closed pocket and does not retire a key while balances remain.
 - The API-down scheduler uses `pocket_balances.gatewayAvailableAtomic` from the indexer, including a stale but timestamped last-good observation as specified by SCR-141. A missing observation or failed read records `pullback.gateway-figure-missing`; an observed zero balance records `pullback.gateway-balance-empty`. Both wait without cancelling or signing. Stale/failing balance observations are persisted with their first observed outage time, allowing the configured API-down fallback even when no pullback request exists yet. A healthy observation clears only an unlinked balance-outage row. The signer remains authoritative for age, observation, pending-withdrawal, and spend-after-observation checks.
-- Slow-withdrawal continuation now bypasses the balance gate once its durable transaction trace shows initiation, withdrawal, or return in progress.
+- Slow-withdrawal continuation re-derives each next action from fresh `withdrawingBalance`, `withdrawalBlock`, EOA USDC, and transaction receipt reads. Execution phases are retained as transaction history, not treated as authoritative chain state.
+- The recovery pass scans open closed-pocket rows in `payer_pullback_gateway_failures` before the indexer closed-pocket query, so a restart can resume after the indexer no longer reports the pocket. New closed-pocket recovery writes its durable row before requesting a K4 signature.
+- Slow-path transaction hashes are persisted before broadcast. Recovery reuses the exact stored signed transaction when its receipt is not yet available. A return becomes terminal only when the mined receipt contains exactly one USDC `Transfer(pocket, vault)` and fresh chain reads show zero EOA USDC and zero Gateway withdrawing balance; block, log index, and amount are stored with the transaction hash.
+- Migration `0015-scr-144-slow-pullback-resume.sql` adds the slow-path transaction/receipt fields, the single-open-closed-row-per-pocket constraint, and SCR-144's final state set: `pending`, `manual-return-required`, `recorded`, `expired`, `returned-to-vault`.
 - Closed-pocket pullbacks and slow-return cycles use a new durable attempt only after the prior cycle is confirmed/returned; retries resume the existing attempt.
 - Gateway failures during closed-pocket recovery persist the selected attempt and closed-pocket status. The outage scheduler resumes that attempt through pocket-return, then records `returned-to-vault` instead of requesting owner manual-return.
 - A new closed-pocket outage after a prior return reopens the durable failure row with the new attempt and outage time; the previous return transaction remains in `step_executions`.
@@ -26,30 +29,39 @@ Implemented the Lane 2 halt-drain and late-pocket recovery composition for the l
 - `apps/server/src/payer/pocket-recovery.ts`
 - `apps/server/src/payer/pocket.ts`
 - `apps/server/src/payer/pullback-scheduler.ts`
+- `apps/server/src/payer/pullback-chain-adapter.ts`
 - `apps/server/src/payer/pullback.ts`
 - `apps/server/src/payer/runtime.ts`
 - `apps/server/migrations/0013-pullback-balance-outage.sql`
 - `apps/server/migrations/0014-pullback-closed-recovery.sql`
+- `apps/server/migrations/0015-scr-144-slow-pullback-resume.sql`
 - `apps/server/test/payer/indexer-pocket.test.ts`
 - `apps/server/test/main.test.ts`
 - `apps/server/test/payer/pocket-recovery.test.ts`
 - `apps/server/test/payer/pocket.test.ts`
 - `apps/server/test/payer/pullback-scheduler.test.ts`
+- `apps/server/test/payer/pullback-chain-adapter.test.ts`
 - `apps/server/test/payer/pullback.test.ts`
 - `apps/server/test/payer/runtime.test.ts`
 
 ## Focused checks
 
+- `fnm exec --using=22.22.0 pnpm --filter @czar/server exec vitest run test/payer/pullback-chain-adapter.test.ts test/payer/pullback-scheduler.test.ts test/payer/pullback.test.ts test/payer/pocket-recovery.test.ts` — 4 files passed, 39 tests passed, including the three SCR-144 restart/write-ahead regressions.
+- TDD evidence: before the scheduler discovery fix, the first SCR-144 restart test failed because the recovery pass returned `0` rows instead of processing the pending closed-pocket row.
+- `fnm exec --using=22.22.0 pnpm --filter @czar/server typecheck` — passed.
+- `fnm exec --using=22.22.0 pnpm lint` — passed (`oxlint --deny-warnings` and `oxfmt --check`).
+- `git diff --check` — passed.
 - `fnm exec --using=22.22.0 pnpm --filter @czar/server exec vitest run test/payer/pullback-scheduler.test.ts test/payer/pullback.test.ts test/payer/pocket.test.ts test/payer/runtime.test.ts test/payer/indexer-pocket.test.ts test/payer/pocket-recovery.test.ts test/main.test.ts` — 7 files passed, 51 tests passed.
 - `fnm exec --using=22.22.0 pnpm -r typecheck` — passed for all 14 of 15 workspace projects included by the command.
 - `fnm exec --using=22.22.0 pnpm lint` — passed (`oxlint --deny-warnings` and `oxfmt --check`).
 - `git diff --check` — passed.
 
-## Draft SCR for architect ruling — closed-pocket EOA return discovery
+## Accepted SCR-144 and remaining integration dependencies
 
-**Decision needed:** amend CZ-19 §5.4 so a closed pocket remains discoverable after Gateway `withdraw` has moved USDC from Gateway into the pocket EOA. SCR-127 §1 includes EOA USDC in the closed-pocket polling scope, but its §2 `closedPocketsWithBalance()` predicate selects only positive Gateway available or withdrawing balances. Once both Gateway values are zero, the query omits the pocket even when EOA USDC is waiting for `pocket-return`. A restart or poll between withdrawal and return can therefore strand that amount.
-
-**Recommended minimum:** Lane 1's indexer query includes closed pockets when EOA USDC is positive and returns that observed EOA balance with the existing Gateway fields; Lane 2 continues the already-recorded slow-return execution from that row. This aligns the query with SCR-127 §1 and avoids inventing a second server-owned discovery API. Lane 1 owns the producer (`apps/indexer/src/api/store.ts` / query response); Lane 2 owns the consumer (`apps/server/src/payer/pocket-recovery.ts`). Acceptance should cover a closed dust withdrawal that moves USDC to the pocket EOA, a server restart before return, and successful return without another slow-withdraw initiation. No code for this unapproved query change is included here.
+- SCR-144's Lane 2 slow-path ordering is implemented on PR #91. Its specification publication remains open as PR #94; merge that PR, then merge fresh `origin/build-v1` into this branch before final review.
+- Lane 1 TA-22a still owns adding `logIndex` to the canonical `manualReturnsForVault` projection. Lane 2 now stores `(return_block, return_log_index, returned_amount)` from the mined USDC receipt; it does not change indexer code.
+- Migration `0015` extends the final pullback state constraint. Coordinate its number and state-set with TA-22b before merging; no TA-22b PR is currently open.
+- The existing run-2 code review is still reported running against older commit `a23f05c`; the paired security review completed on that old commit and its finding was fixed in earlier commits. No current-head hosted review is claimed.
 
 ## References and open dependencies
 

@@ -18,6 +18,7 @@ interface PendingFallback {
   readonly envelope_ref: string;
   readonly pocket: Address;
   readonly unavailable_since: Date;
+  readonly value: string | null;
   readonly pullback_id: string | null;
   readonly vault_address: Address | null;
   readonly gateway_minter: Address | null;
@@ -43,10 +44,10 @@ export async function runPendingPullbackFallbacks(
       Number(dependencies.config.get("payer.pullbackApiDownHours")) * MILLISECONDS_PER_HOUR,
   );
   const rows = await dependencies.pool.query<PendingFallback>(
-    `SELECT plan_id,step_index,envelope_ref,pocket,unavailable_since,
+    `SELECT plan_id,step_index,envelope_ref,pocket,unavailable_since,value,
             pullback_id,vault_address,gateway_minter,attempt,closed_pocket
      FROM payer_pullback_gateway_failures
-     WHERE state='pending' AND unavailable_since <= $1
+     WHERE state='pending' AND (closed_pocket OR unavailable_since <= $1)
      ORDER BY unavailable_since,plan_id,step_index`,
     [cutoff],
   );
@@ -60,10 +61,11 @@ async function processFallback(
 ): Promise<void> {
   const attempt = row.attempt ?? 0;
   const trace = await getExecutionTrace(dependencies.pool, row.plan_id, row.step_index, attempt);
-  const withdrawalStarted = hasSlowWithdrawalProgress(trace.map((entry) => entry.phase));
-  const balance = withdrawalStarted ? null : await readFallbackBalance(row, dependencies);
-  if (!withdrawalStarted && balance === null) return;
-  if (!withdrawalStarted) {
+  const slowPathStarted =
+    row.closed_pocket || hasSlowWithdrawalProgress(trace.map((entry) => entry.phase));
+  const balance = slowPathStarted ? null : await readFallbackBalance(row, dependencies);
+  if (!slowPathStarted && balance === null) return;
+  if (!slowPathStarted) {
     const pullback = pendingPullbackInput(row);
     if (pullback) await dependencies.cancelPendingPullback(pullback);
   }
@@ -73,11 +75,13 @@ async function processFallback(
       stepIndex: row.step_index,
       envelopeRef: row.envelope_ref,
       pocket: row.pocket,
+      vault: requiredAddress(row.vault_address, "vault"),
+      usdc: dependencies.config.get("chain.usdcAddress") as Address,
       apiUnavailableSince: row.unavailable_since,
-      value: balance?.gatewayAvailableAtomic ?? 0n,
+      value: balance?.gatewayAvailableAtomic ?? BigInt(row.value ?? "0"),
       attempt,
       closedPocketRecovery: row.closed_pocket,
-      trigger: "api-down",
+      trigger: row.closed_pocket ? "closed-dust" : "api-down",
     },
     dependencies,
   );
@@ -95,6 +99,11 @@ async function processFallback(
       [row.plan_id, row.step_index],
     );
   }
+}
+
+function requiredAddress(value: Address | null, name: string): Address {
+  if (!value) throw new Error(`Pending slow pullback has no ${name} address.`);
+  return value;
 }
 
 function hasSlowWithdrawalProgress(phases: readonly string[]): boolean {
