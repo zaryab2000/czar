@@ -13,6 +13,7 @@ import type { Config } from "@czar/config";
 import {
   PAYEE_KIND,
   buildTree,
+  categoryHash,
   payeeLeaf,
   paymentRefHash,
   verifyProof,
@@ -87,6 +88,7 @@ import { createJobChainAdapter } from "#src/payer/job-chain-adapter";
 import { createDatabaseVaultEventSource } from "#src/payer/database-vault-event-source";
 import { createPullbackChainAdapter } from "#src/payer/pullback-chain-adapter";
 import { createIndexerPocketReader } from "#src/payer/indexer-pocket";
+import { lowerAutoLimitsAfterFreeze } from "#src/payer/freeze-autolimit";
 import {
   createPocketRecoveryOperations,
   type PocketRecoveryOperations,
@@ -430,7 +432,7 @@ function startProductionPayerRuntime(
   const pocketHalt = options.pocketHalt ?? pocketRecovery?.halt;
   const vaultEvents = options.vaultEvents ?? createDatabaseVaultEventSource(options);
   if (!pocketHalt)
-    options.logger.error("payer_halt_monitor_disabled", {
+    options.logger.error("payer_pocket_drain_disabled", {
       rule: "missing_gateway_deployment_context",
       state: "disabled",
     });
@@ -446,6 +448,7 @@ function startProductionPayerRuntime(
     options.appReadOptions.indexerUrl,
     Number(options.config.get("fetch.timeoutMs")),
   );
+  const lowerAutoLimits = createFreezeAutoLimitLowerer(options, signer);
   const runRecoveryPass = async () => {
     await pocketRecovery?.runClosedPocketRecovery();
     await runManualReturnRecovery({
@@ -504,7 +507,9 @@ function startProductionPayerRuntime(
     });
   };
   return startPayerRuntime({
-    ...(pocketHalt ? { events: vaultEvents, pocketHalt } : {}),
+    events: vaultEvents,
+    ...(pocketHalt ? { pocketHalt } : {}),
+    lowerAutoLimits,
     fallbackPollSeconds: Number(options.config.get("payer.pullbackFallbackPollSeconds")),
     runFallbacks: () => runPullbackFallbacks(options, signer, fallbackChain, pocketReader),
     recoveryPollSeconds: Number(options.config.get("payer.gatewayRecoveryPollSeconds")),
@@ -512,6 +517,45 @@ function startProductionPayerRuntime(
     onError: (operation) =>
       options.logger.error("payer_runtime_failure", { rule: operation, state: "error" }),
   });
+}
+
+function createFreezeAutoLimitLowerer(
+  options: ServerMainOptions,
+  signer: ServerSigner,
+): (vault: Address) => Promise<void> {
+  const categories = new Set(Object.values(options.config.get("planner.categoryByCapability")));
+  const categoryIds = [...categories].map((category) => categoryHash(category));
+  return (vault) =>
+    lowerAutoLimitsAfterFreeze(vault, {
+      categoryIds,
+      async getAutoLimit(targetVault, categoryId) {
+        const limits = await getLimits({
+          client: options.publicClient,
+          vault: targetVault,
+          categoryId,
+        });
+        return limits.autoLimit;
+      },
+      async lowerAutoLimit(targetVault, categoryId) {
+        const signed = await signer.sign("cz-15", {
+          keyId: "K3",
+          kind: "vault-call",
+          payload: {
+            vault: targetVault,
+            selector: "lowerAutoLimit",
+            args: { categoryId, newLimit: "0" },
+          },
+        });
+        if (!("signedTransaction" in signed))
+          throw new Error("K3 did not return a signed lowerAutoLimit transaction.");
+        const hash = await options.publicClient.sendRawTransaction({
+          serializedTransaction: signed.signedTransaction,
+        });
+        const receipt = await options.publicClient.waitForTransactionReceipt({ hash });
+        if (receipt.status !== "success") throw new Error("lowerAutoLimit transaction reverted.");
+      },
+      logger: options.logger,
+    });
 }
 
 async function writeOffManualReturn(

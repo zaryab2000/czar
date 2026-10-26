@@ -85,4 +85,78 @@ describe("payer runtime wiring", () => {
     expect(onError).toHaveBeenCalledWith("halt-drain", expect.any(Error));
     runtime.stop();
   });
+
+  it("lowers category auto limits after Frozen but not GuardianPaused", async () => {
+    const listeners: ((event: { name: string; vault: `0x${string}` }) => Promise<void>)[] = [];
+    const lowerAutoLimits = vi.fn(async () => undefined);
+    const runtime = startPayerRuntime({
+      events: {
+        subscribe(listener) {
+          listeners.push(listener);
+          return () => undefined;
+        },
+      },
+      pocketHalt: { listFundedPockets: async () => [], pullback: async () => undefined },
+      lowerAutoLimits,
+    });
+    const vault = "0x0000000000000000000000000000000000000001";
+    await listeners[0]?.({ name: "GuardianPaused", vault });
+    await listeners[0]?.({ name: "Frozen", vault });
+    expect(lowerAutoLimits).toHaveBeenCalledOnce();
+    expect(lowerAutoLimits).toHaveBeenCalledWith(vault);
+    runtime.stop();
+  });
+
+  it("propagates auto-limit lowering failure for event-source retry", async () => {
+    let listener: ((event: { name: string; vault: `0x${string}` }) => Promise<void>) | undefined;
+    const onError = vi.fn();
+    const runtime = startPayerRuntime({
+      events: {
+        subscribe(next) {
+          listener = next;
+          return () => undefined;
+        },
+      },
+      pocketHalt: { listFundedPockets: async () => [], pullback: async () => undefined },
+      lowerAutoLimits: async () => {
+        throw new Error("temporary signer refusal");
+      },
+      onError,
+    });
+    await expect(
+      listener?.({ name: "Frozen", vault: "0x0000000000000000000000000000000000000001" }),
+    ).rejects.toThrow("temporary signer refusal");
+    expect(onError).toHaveBeenCalledWith("freeze-auto-limit", expect.any(Error));
+    runtime.stop();
+  });
+
+  it("shares one in-flight freeze operation for duplicate events", async () => {
+    let listener: ((event: { name: string; vault: `0x${string}` }) => Promise<void>) | undefined;
+    let completeLowering: (() => void) | undefined;
+    const lowerAutoLimits = vi.fn(
+      () => new Promise<void>((resolve) => (completeLowering = resolve)),
+    );
+    const listFundedPockets = vi.fn(async () => []);
+    const runtime = startPayerRuntime({
+      events: {
+        subscribe(next) {
+          listener = next;
+          return () => undefined;
+        },
+      },
+      pocketHalt: { listFundedPockets, pullback: async () => undefined },
+      lowerAutoLimits,
+    });
+    const event = {
+      name: "Frozen",
+      vault: "0x0000000000000000000000000000000000000001" as const,
+    };
+    const first = listener?.(event);
+    const second = listener?.(event);
+    await vi.waitFor(() => expect(lowerAutoLimits).toHaveBeenCalledOnce());
+    expect(listFundedPockets).toHaveBeenCalledOnce();
+    completeLowering?.();
+    await Promise.all([first, second]);
+    runtime.stop();
+  });
 });

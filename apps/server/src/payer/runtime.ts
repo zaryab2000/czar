@@ -13,12 +13,13 @@ export interface VaultHaltEventSource {
 export interface PayerRuntimeOptions {
   readonly events?: VaultHaltEventSource;
   readonly pocketHalt?: PocketHaltDependencies;
+  readonly lowerAutoLimits?: (vault: Address) => Promise<void>;
   readonly fallbackPollSeconds?: number;
   readonly runFallbacks?: () => Promise<unknown>;
   readonly recoveryPollSeconds?: number;
   readonly runClosedRecovery?: () => Promise<unknown>;
   readonly onError?: (
-    operation: "halt-drain" | "pullback-fallback" | "closed-pocket-recovery",
+    operation: "halt-drain" | "freeze-auto-limit" | "pullback-fallback" | "closed-pocket-recovery",
     error: unknown,
   ) => void;
   readonly drain?: typeof drainPocketsAfterHalt;
@@ -56,20 +57,48 @@ function scheduleClosedRecovery(
 
 function subscribeHaltEvents(options: PayerRuntimeOptions): (() => void) | undefined {
   if (!options.events) return undefined;
-  if (!options.pocketHalt) throw new Error("Vault halt event source requires pocket drain ports.");
+  if (!options.pocketHalt && !options.lowerAutoLimits)
+    throw new Error("Vault halt event source requires a halt action.");
   const drain = options.drain ?? drainPocketsAfterHalt;
+  const inFlight = new Map<string, Promise<void>>();
   return options.events.subscribe(async (event) => {
     if (event.name !== "Frozen" && event.name !== "GuardianPaused") return;
+    const key = `${event.name}:${event.vault.toLowerCase()}`;
+    const previous = inFlight.get(key);
+    if (previous) return previous;
+    const handling = handleHaltEvent(event, options, drain);
+    inFlight.set(key, handling);
+    try {
+      await handling;
+    } finally {
+      inFlight.delete(key);
+    }
+  });
+}
+
+async function handleHaltEvent(
+  event: VaultHaltEvent,
+  options: PayerRuntimeOptions,
+  drain: NonNullable<PayerRuntimeOptions["drain"]>,
+): Promise<void> {
+  if (options.pocketHalt) {
     try {
       await drain(
-        { vault: event.vault, event: event.name },
-        options.pocketHalt as PocketHaltDependencies,
+        { vault: event.vault, event: event.name as "Frozen" | "GuardianPaused" },
+        options.pocketHalt,
       );
     } catch (error) {
       options.onError?.("halt-drain", error);
       throw error;
     }
-  });
+  }
+  if (event.name !== "Frozen" || !options.lowerAutoLimits) return;
+  try {
+    await options.lowerAutoLimits(event.vault);
+  } catch (error) {
+    options.onError?.("freeze-auto-limit", error);
+    throw error;
+  }
 }
 
 function scheduleFallbacks(
