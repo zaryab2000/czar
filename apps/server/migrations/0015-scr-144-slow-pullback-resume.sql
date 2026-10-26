@@ -15,4 +15,4 @@ ALTER TABLE payer_pullback_gateway_failures
 
 CREATE UNIQUE INDEX payer_pullback_one_open_closed_pocket
   ON payer_pullback_gateway_failures (lower(pocket))
-  WHERE closed_pocket AND state = 'pending';
+  WHERE closed_pocket AND state IN ('pending', 'manual-return-required');
