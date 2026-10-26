@@ -1,6 +1,14 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { czarVaultAbi, czarVaultFactoryAbi, getLimits } from "@czar/vault-client";
-import { keccak256, type Address, type Hex, type PublicClient, type WalletClient } from "viem";
+import {
+  decodeEventLog,
+  keccak256,
+  parseAbi,
+  type Address,
+  type Hex,
+  type PublicClient,
+  type WalletClient,
+} from "viem";
 import type { Config } from "@czar/config";
 import {
   PAYEE_KIND,
@@ -69,6 +77,7 @@ import { createViemVaultDirectChain } from "#src/payer/viem-chain";
 import {
   cancelExpiredPullback,
   executePullback,
+  writeOffOverdueManualReturn,
   type CancelPullbackInput,
   type PullbackInput,
 } from "#src/payer/pullback";
@@ -85,6 +94,8 @@ import {
 import {
   runManualReturnRecovery,
   runPendingPullbackFallbacks,
+  type ManualReturnReceiptPosition,
+  type ManualReturnRow,
   type ManualReturnWriteOffCandidate,
   type PullbackFallbackSchedulerDependencies,
 } from "#src/payer/pullback-scheduler";
@@ -145,6 +156,9 @@ export type ServerSigner = Pick<Signer, "sign" | "createPocketKey" | "keyAddress
 
 // ICzarVault.PocketState: None, Registered, Funded, Draining, Closed.
 const POCKET_STATE_CLOSED = 4n;
+const usdcTransferAbi = parseAbi([
+  "event Transfer(address indexed from,address indexed to,uint256 value)",
+]);
 
 export interface ServerMain {
   readonly app: ReturnType<typeof createApp>;
@@ -438,6 +452,7 @@ function startProductionPayerRuntime(
       pool: options.pool,
       config: options.config,
       manualReturnsForVault: (vault) => pocketReader.manualReturnsForVault(vault),
+      recoverReturnPosition: (row) => recoverManualReturnPosition(options, row),
       isPocketClosed: async (vault, pocket) => {
         const record = await options.publicClient.readContract({
           address: vault,
@@ -447,8 +462,13 @@ function startProductionPayerRuntime(
         });
         return BigInt(record.state) === POCKET_STATE_CLOSED;
       },
+      onRowError: () =>
+        options.logger.error("manual_return_reconciliation_failure", {
+          rule: "receipt-position-unavailable",
+          state: "retry",
+        }),
       now: options.clock.now,
-      writeOffManualReturn: (row) => writeOffManualReturn(options, signer, row, pocketReader),
+      writeOffManualReturn: (row) => writeOffManualReturn(options, signer, row),
     });
   };
   return startPayerRuntime({
@@ -466,36 +486,17 @@ async function writeOffManualReturn(
   options: ServerMainOptions,
   signer: ServerSigner,
   row: ManualReturnWriteOffCandidate,
-  pocketReader: ReturnType<typeof createIndexerPocketReader>,
 ): Promise<unknown> {
   if (!row.vault_address) throw new Error("Manual-return write-off row has no vault address.");
-  if (options.gatewayDomain === undefined)
-    throw new Error("Manual-return write-off requires the configured Gateway domain.");
-  if (!row.gateway_minter)
-    throw new Error("Manual-return write-off row has no GatewayMinter address.");
-  const pockets = await pocketReader.fundedPocketsForVault(row.vault_address);
-  const pocket = pockets.find((candidate) => sameAddress(candidate.pocket, row.pocket));
-  if (!pocket)
-    throw new Error("Manual-return write-off pocket is absent from the live projection.");
-  const balance = await pocketReader.pocketBalance(row.pocket);
-  return executePullback(
+  const gatewayMinter = row.gateway_minter ?? options.gatewayMinter;
+  return writeOffOverdueManualReturn(
     {
       planId: row.plan_id,
       stepIndex: row.step_index,
+      attempt: row.attempt ?? 0,
       envelopeRef: row.envelope_ref,
       vault: row.vault_address,
       pocket: row.pocket,
-      gatewayWallet: options.config.get("chain.gatewayWalletAddress") as Address,
-      gatewayMinter: row.gateway_minter,
-      usdc: options.config.get("chain.usdcAddress") as Address,
-      gatewayDomain: options.gatewayDomain,
-      outstanding: pocket.outstanding,
-      pending: pocket.pendingPullback,
-      availableBalance: balance.gatewayAvailableAtomic,
-      availableBalanceObservedAt: balance.apiObservedAt,
-      apiConsecutiveFailures: balance.apiConsecutiveFailures,
-      head: await options.publicClient.getBlockNumber(),
-      attempt: row.attempt ?? 0,
     },
     {
       pool: options.pool,
@@ -505,22 +506,65 @@ async function writeOffManualReturn(
         client: options.publicClient,
         pool: options.pool,
         vault: row.vault_address,
-        gatewayMinter: row.gateway_minter,
+        ...(gatewayMinter ? { gatewayMinter } : {}),
       }),
-      safeFetch: options.safeFetch,
-      gatewayTransferUrl: requireGatewayTransferUrl(options.gatewayTransferUrl),
       now: options.clock.now,
     },
   );
 }
 
-function requireGatewayTransferUrl(value: string | undefined): string {
-  if (!value) throw new Error("Gateway transfer URL is required for manual-return recovery.");
-  return value;
+async function recoverManualReturnPosition(
+  options: ServerMainOptions,
+  row: ManualReturnRow,
+): Promise<ManualReturnReceiptPosition | null> {
+  const vault = row.vault_address;
+  if (vault === null) return null;
+  const txHash = row.return_tx ?? (await slowReturnTransactionHash(options.pool, row));
+  if (!txHash || !/^0x[\da-fA-F]{64}$/.test(txHash)) return null;
+  const receipt = await options.publicClient.getTransactionReceipt({ hash: txHash as Hex });
+  if (receipt.status !== "success") return null;
+  const usdc = (options.config.get("chain.usdcAddress") as Address).toLowerCase();
+  const matching = receipt.logs.flatMap((log) => {
+    if (log.address.toLowerCase() !== usdc) return [];
+    try {
+      const decoded = decodeEventLog({
+        abi: usdcTransferAbi,
+        eventName: "Transfer",
+        data: log.data,
+        topics: log.topics,
+      });
+      if (
+        decoded.args.from.toLowerCase() === row.pocket.toLowerCase() &&
+        decoded.args.to.toLowerCase() === vault.toLowerCase() &&
+        decoded.args.value > 0n
+      )
+        return [{ amount: decoded.args.value, logIndex: log.logIndex }];
+      return [];
+    } catch {
+      return [];
+    }
+  });
+  if (matching.length !== 1) return null;
+  const transfer = matching[0];
+  if (!transfer) return null;
+  return {
+    txHash: receipt.transactionHash,
+    amount: transfer.amount.toString(),
+    block: receipt.blockNumber.toString(),
+    logIndex: transfer.logIndex,
+  };
 }
 
-function sameAddress(first: Address, second: Address): boolean {
-  return first.toLowerCase() === second.toLowerCase();
+async function slowReturnTransactionHash(pool: Pool, row: ManualReturnRow): Promise<string | null> {
+  const trace = await pool.query<{ readonly payload: Record<string, unknown> }>(
+    `SELECT payload FROM step_executions
+     WHERE plan_id=$1 AND step_index=$2 AND attempt=$3
+       AND phase='pullback.slow.returned'
+     ORDER BY execution_id DESC LIMIT 1`,
+    [row.plan_id, row.step_index, row.attempt ?? 0],
+  );
+  const hash = trace.rows[0]?.payload["txHash"];
+  return typeof hash === "string" ? hash : null;
 }
 
 async function runPullbackFallbacks(

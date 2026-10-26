@@ -8,6 +8,7 @@ import {
   cancelExpiredPullback,
   calculatePullbackValue,
   executeSlowPullbackFallback,
+  writeOffOverdueManualReturn,
   pullbackMaxBlockHeight,
   PULLBACK_CANCEL_DELAY_BLOCKS,
 } from "#src/payer/pullback";
@@ -813,6 +814,63 @@ describe("pullback values", () => {
       state: "written-off",
     });
     expect(writeOffPocket).toHaveBeenCalledOnce();
+    const row = await getPool().query<{ state: string }>(
+      "SELECT state FROM payer_pullback_gateway_failures WHERE plan_id=$1",
+      [PLAN_ID],
+    );
+    expect(row.rows[0]?.state).toBe("expired");
+  });
+
+  it("writes off an overdue manual return without Gateway balance reads", async () => {
+    const now = new Date("2026-10-25T00:00:00.000Z");
+    await getPool().query(
+      `INSERT INTO payer_pullback_gateway_failures
+         (plan_id,step_index,envelope_ref,pocket,value,unavailable_since,state,attempt,
+          closed_pocket,pullback_id,vault_address,gateway_minter,return_tx,return_block,
+          return_log_index,returned_amount,manual_return_required_at)
+       VALUES($1,0,$2,$3,100,$4,'manual-return-required',0,false,NULL,$5,$6,$7,50,5,100,$8)`,
+      [
+        PLAN_ID,
+        "eip155:5042002:0xvault:1",
+        SLOW_POCKET,
+        now,
+        SLOW_VAULT,
+        "0x0000000000000000000000000000000000000004",
+        `0x${"33".repeat(32)}`,
+        new Date(now.getTime() - 72 * 60 * 60 * 1000),
+      ],
+    );
+    const signer = {
+      sign: vi.fn(async () => ({ signedTransaction: "0x1234" as const })),
+    };
+    const writeOffPocket = vi.fn(async () => "write-off-tx");
+    const result = await writeOffOverdueManualReturn(
+      {
+        planId: PLAN_ID,
+        stepIndex: 0,
+        attempt: 0,
+        envelopeRef: "eip155:5042002:0xvault:1",
+        vault: SLOW_VAULT,
+        pocket: SLOW_POCKET,
+      },
+      {
+        pool: getPool(),
+        config: loadConfig(),
+        signer,
+        chain: {
+          pocketWriteOffStatus: vi.fn(async () => ({
+            state: "funded" as const,
+            pendingPullback: 0n,
+          })),
+          writeOffPocket,
+        },
+        now: () => now,
+      },
+    );
+
+    expect(result).toBe("written-off");
+    expect(writeOffPocket).toHaveBeenCalledWith(SLOW_POCKET, "0x1234");
+    expect(signer.sign).toHaveBeenCalledOnce();
     const row = await getPool().query<{ state: string }>(
       "SELECT state FROM payer_pullback_gateway_failures WHERE plan_id=$1",
       [PLAN_ID],

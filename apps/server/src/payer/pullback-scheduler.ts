@@ -36,13 +36,22 @@ export interface PullbackFallbackSchedulerDependencies {
   readonly now: () => Date;
 }
 
-interface ManualReturnRow {
+export interface ManualReturnRow {
   readonly plan_id: string;
   readonly step_index: number;
+  readonly attempt: number | null;
   readonly pocket: Address;
   readonly vault_address: Address | null;
+  readonly return_tx: string | null;
   readonly return_block: string | null;
   readonly return_log_index: number | null;
+}
+
+export interface ManualReturnReceiptPosition {
+  readonly txHash: `0x${string}`;
+  readonly amount: string;
+  readonly block: string;
+  readonly logIndex: number;
 }
 
 export interface ManualReturnWriteOffCandidate {
@@ -70,6 +79,10 @@ export interface ManualReturnReconciliationDependencies {
   readonly pool: Pool;
   readonly manualReturnsForVault: (vault: Address) => Promise<readonly ManualReturnProjection[]>;
   readonly isPocketClosed: (vault: Address, pocket: Address) => Promise<boolean>;
+  readonly recoverReturnPosition: (
+    row: ManualReturnRow,
+  ) => Promise<ManualReturnReceiptPosition | null>;
+  readonly onRowError: (row: ManualReturnRow, error: unknown) => void;
   readonly now: () => Date;
 }
 
@@ -102,7 +115,7 @@ export async function reconcileManualReturns(
   dependencies: ManualReturnReconciliationDependencies,
 ): Promise<number> {
   const result = await dependencies.pool.query<ManualReturnRow>(
-    `SELECT plan_id,step_index,pocket,vault_address,return_block,return_log_index
+    `SELECT plan_id,step_index,attempt,pocket,vault_address,return_tx,return_block,return_log_index
      FROM payer_pullback_gateway_failures
      WHERE state='manual-return-required' AND closed_pocket=false
      ORDER BY plan_id,step_index`,
@@ -110,21 +123,23 @@ export async function reconcileManualReturns(
   const eventsByVault = new Map<string, readonly ManualReturnProjection[]>();
   let changed = 0;
   for (const row of result.rows) {
-    if (row.vault_address === null)
-      throw new Error(`Manual-return row lacks its vault address: ${row.plan_id}.`);
-    if (row.return_block === null || row.return_log_index === null)
-      throw new Error(`Manual-return row lacks its mined return position: ${row.plan_id}.`);
-    const key = row.vault_address.toLowerCase();
-    let events = eventsByVault.get(key);
-    if (!events) {
-      events = await dependencies.manualReturnsForVault(row.vault_address);
-      eventsByVault.set(key, events);
-    }
-    const matching = events.find((event) => isAfterReturn(event, row));
-    if (matching) {
-      changed += await markManualReturnRecorded(row, matching, dependencies);
-    } else if (await dependencies.isPocketClosed(row.vault_address, row.pocket)) {
-      changed += await markManualReturnExpired(row, dependencies);
+    try {
+      const positioned = await ensureReturnPosition(row, dependencies);
+      if (!positioned || positioned.vault_address === null) continue;
+      const key = positioned.vault_address.toLowerCase();
+      let events = eventsByVault.get(key);
+      if (!events) {
+        events = await dependencies.manualReturnsForVault(positioned.vault_address);
+        eventsByVault.set(key, events);
+      }
+      const matching = events.find((event) => isAfterReturn(event, positioned));
+      if (matching) {
+        changed += await markManualReturnRecorded(positioned, matching, dependencies);
+      } else if (await dependencies.isPocketClosed(positioned.vault_address, positioned.pocket)) {
+        changed += await markManualReturnExpired(positioned, dependencies);
+      }
+    } catch (error) {
+      dependencies.onRowError(row, error);
     }
   }
   return changed;
@@ -143,11 +158,46 @@ export async function runManualReturnRecovery(
     `SELECT plan_id,step_index,envelope_ref,pocket,vault_address,gateway_minter,attempt
      FROM payer_pullback_gateway_failures
      WHERE state='manual-return-required' AND manual_return_required_at <= $1
+       AND return_block IS NOT NULL AND return_log_index IS NOT NULL
      ORDER BY manual_return_required_at,plan_id,step_index`,
     [cutoff],
   );
   for (const row of overdue.rows) await dependencies.writeOffManualReturn(row);
   return updated + overdue.rows.length;
+}
+
+async function ensureReturnPosition(
+  row: ManualReturnRow,
+  dependencies: ManualReturnReconciliationDependencies,
+): Promise<ManualReturnRow | null> {
+  if (row.vault_address === null)
+    throw new Error(`Manual-return row lacks its vault address: ${row.plan_id}.`);
+  if (row.return_block !== null && row.return_log_index !== null) return row;
+  const position = await dependencies.recoverReturnPosition(row);
+  if (!position)
+    throw new Error(`Manual-return receipt position is not yet recoverable: ${row.plan_id}.`);
+  const result = await dependencies.pool.query(
+    `UPDATE payer_pullback_gateway_failures
+     SET return_tx=COALESCE(return_tx,$3),return_block=$4,return_log_index=$5,
+         returned_amount=COALESCE(returned_amount,$6)
+     WHERE plan_id=$1 AND step_index=$2 AND state='manual-return-required'
+       AND (return_block IS NULL OR return_log_index IS NULL)`,
+    [
+      row.plan_id,
+      row.step_index,
+      position.txHash,
+      position.block,
+      position.logIndex,
+      position.amount,
+    ],
+  );
+  if (result.rowCount !== 1) return null;
+  return {
+    ...row,
+    return_tx: position.txHash,
+    return_block: position.block,
+    return_log_index: position.logIndex,
+  };
 }
 
 /** Lists manual returns belonging to objectives owned by the supplied user. */

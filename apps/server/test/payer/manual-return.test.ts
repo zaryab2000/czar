@@ -105,6 +105,96 @@ beforeEach(async () => {
 });
 
 describe("manual return reconciliation", () => {
+  it("recovers legacy return receipt coordinates before event matching", async () => {
+    await getPool().query(
+      `UPDATE payer_pullback_gateway_failures
+       SET attempt=0,return_tx=NULL,return_block=NULL,return_log_index=NULL,returned_amount=NULL
+       WHERE plan_id=$1`,
+      [PLAN_ID],
+    );
+    const recoverReturnPosition = vi.fn(async () => ({
+      txHash: `0x${"66".repeat(32)}` as `0x${string}`,
+      amount: "8000",
+      block: "50",
+      logIndex: 5,
+    }));
+    await reconcileManualReturns({
+      pool: getPool(),
+      manualReturnsForVault: async () => [
+        {
+          pocket: POCKET,
+          credit: "7000",
+          txHash: `0x${"44".repeat(32)}`,
+          block: "50",
+          logIndex: 6,
+        },
+      ],
+      recoverReturnPosition,
+      isPocketClosed: async () => false,
+      onRowError: vi.fn(),
+      now: () => NOW,
+    });
+
+    const row = await getPool().query<{
+      state: string;
+      return_tx: string;
+      return_block: string;
+      return_log_index: number;
+      returned_amount: string;
+    }>(
+      `SELECT state,return_tx,return_block,return_log_index,returned_amount
+       FROM payer_pullback_gateway_failures WHERE plan_id=$1`,
+      [PLAN_ID],
+    );
+    expect(recoverReturnPosition).toHaveBeenCalledOnce();
+    expect(row.rows[0]).toEqual({
+      state: "recorded",
+      return_tx: `0x${"66".repeat(32)}`,
+      return_block: "50",
+      return_log_index: 5,
+      returned_amount: "8000",
+    });
+  });
+
+  it("continues reconciling when a legacy receipt is not yet recoverable", async () => {
+    await getPool().query(
+      `UPDATE payer_pullback_gateway_failures
+       SET attempt=0,return_tx=NULL,return_block=NULL,return_log_index=NULL
+       WHERE plan_id=$1`,
+      [PLAN_ID],
+    );
+    const onRowError = vi.fn();
+    await reconcileManualReturns({
+      pool: getPool(),
+      manualReturnsForVault: async () => [
+        {
+          pocket: "0x0000000000000000000000000000000000000003",
+          credit: "7000",
+          txHash: `0x${"44".repeat(32)}`,
+          block: "50",
+          logIndex: 6,
+        },
+      ],
+      recoverReturnPosition: async () => {
+        throw new Error("receipt not indexed yet");
+      },
+      isPocketClosed: async () => false,
+      onRowError,
+      now: () => NOW,
+    });
+
+    const rows = await getPool().query<{ plan_id: string; state: string }>(
+      `SELECT plan_id,state FROM payer_pullback_gateway_failures
+       WHERE plan_id=ANY($1::text[]) ORDER BY plan_id`,
+      [[PLAN_ID, OTHER_PLAN_ID]],
+    );
+    expect(onRowError).toHaveBeenCalledOnce();
+    expect(rows.rows).toEqual([
+      { plan_id: PLAN_ID, state: "manual-return-required" },
+      { plan_id: OTHER_PLAN_ID, state: "recorded" },
+    ]);
+  });
+
   it("records only a matching event ordered after the return transfer", async () => {
     await reconcileManualReturns({
       pool: getPool(),
@@ -117,7 +207,9 @@ describe("manual return reconciliation", () => {
           logIndex: 6,
         },
       ],
+      recoverReturnPosition: async () => null,
       isPocketClosed: async () => false,
+      onRowError: vi.fn(),
       now: () => NOW,
     });
 
@@ -151,7 +243,9 @@ describe("manual return reconciliation", () => {
           logIndex: 4,
         },
       ],
+      recoverReturnPosition: async () => null,
       isPocketClosed: async () => false,
+      onRowError: vi.fn(),
       now: () => NOW,
     });
 
@@ -167,11 +261,13 @@ describe("manual return reconciliation", () => {
     await reconcileManualReturns({
       pool: getPool(),
       manualReturnsForVault: async () => [],
+      recoverReturnPosition: async () => null,
       isPocketClosed: async (vault, pocket) => {
         closedPocketRead = true;
         expect(vault).toBe(VAULT);
         return pocket.toLowerCase() === POCKET.toLowerCase();
       },
+      onRowError: vi.fn(),
       now: () => NOW,
     });
 
@@ -203,7 +299,9 @@ describe("manual return reconciliation", () => {
       pool: getPool(),
       config: loadConfig({ envFile: { "payer.manualReturnHoldHours": 72 } }),
       manualReturnsForVault: async () => [],
+      recoverReturnPosition: async () => null,
       isPocketClosed: async () => false,
+      onRowError: vi.fn(),
       writeOffManualReturn,
       now: () => now,
     };

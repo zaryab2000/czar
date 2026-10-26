@@ -17,13 +17,22 @@ evidence only; it does not claim an owner UserOp or testnet acceptance.
   when `(block, logIndex)` is after the return receipt position. The matching
   event's credited amount and transaction are stored. If the pocket is closed
   before a matching event, the row becomes `expired`.
+- Legacy rows without receipt coordinates recover the return transaction from
+  the persisted slow-return execution phase, verify its successful USDC
+  `Transfer(pocket, vault)` receipt, and persist the position before matching.
+  An unresolved row is logged and retried without aborting other rows; it is
+  excluded from overdue write-off until its return position is known.
 - The payer recovery timer runs reconciliation and retries eligible write-offs
-  after `payer.manualReturnHoldHours`. The write-off path uses the existing
-  pullback executor and live indexed/chain inputs. The hold is also checked at
-  the direct pullback and pocket-close write-off entry points.
+  after `payer.manualReturnHoldHours`. The overdue path reads on-chain pocket
+  state and pending pullback before writing off under the executor lease. It
+  does not wait for a healthy Gateway API observation. The hold is also checked
+  at the direct pullback and pocket-close write-off entry points.
 - `listManualReturnsForUser` scopes pending, recorded, and expired rows through
   the owning objective's `user_id`, returning the fields required by the
   canonical `ManualReturn` response.
+- The PR-open review findings are addressed: the bounded write-off no longer
+  depends on Gateway API freshness, and missing legacy receipt coordinates are
+  recovered per row without blocking other rows.
 
 ## Files changed
 
@@ -43,7 +52,7 @@ evidence only; it does not claim an owner UserOp or testnet acceptance.
 
 - `docker compose -f apps/server/test/compose.yaml up -d` — started the pinned
   Postgres 16.15 test service on `127.0.0.1:15432`; container reported healthy.
-- `fnm exec --using=22.22.0 pnpm --filter @czar/server exec vitest run test/payer/manual-return.test.ts test/payer/pullback.test.ts test/payer/pocket.test.ts test/payer/indexer-pocket.test.ts test/payer/pullback-scheduler.test.ts test/main.test.ts` — 6 files passed, 58 tests passed.
+- `fnm exec --using=22.22.0 pnpm --filter @czar/server exec vitest run test/payer/manual-return.test.ts test/payer/pullback.test.ts test/payer/pocket.test.ts test/payer/indexer-pocket.test.ts test/payer/pullback-scheduler.test.ts test/main.test.ts` — 6 files passed, 61 tests passed.
 - `fnm exec --using=22.22.0 pnpm -r typecheck` — passed for all 14 workspace projects selected by pnpm.
 - `fnm exec --using=22.22.0 pnpm lint` — passed (`oxlint --deny-warnings`; formatting check passed for 442 files).
 - `git diff --check` — passed.
