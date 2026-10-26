@@ -433,16 +433,51 @@ describe("vault-call (K3)", () => {
     expect(t.alerts[0]).toContain("apiObservedAt=none");
   });
 
-  it("denies the exception if the shared signer alert port is absent", async () => {
-    const t = await harness({ withoutAlert: true });
+  it("keeps the signature and logs when the shared signer alert port is absent", async () => {
+    const logs: { event: string; fields: Readonly<Record<string, unknown>> | undefined }[] = [];
+    const t = await harness({
+      withoutAlert: true,
+      logger: {
+        error: (event, fields) => logs.push({ event, fields }),
+      },
+    });
     t.state.balances = { ...t.state.balances, gatewayApiFresh: false };
     t.state.overdueManualReturnFacts = { ...validOverdueManualReturnFacts };
 
-    await expectDenied(
-      t,
+    await expect(
       t.signer.sign("cz-15", vaultCall("writeOffPocket", { pocket: t.pocket })),
-      "gateway-balance-stale",
-    );
+    ).resolves.toHaveProperty("signedTransaction");
+    expect(t.audit.rows.at(-1)).toMatchObject({
+      outcome: "signed",
+      rule: "writeoff-manual-return-overdue",
+    });
+    expect(logs).toEqual([
+      {
+        event: "signer_alert_delivery_failed",
+        fields: { rule: "writeoff-overdue-stale-gateway" },
+      },
+    ]);
+  });
+
+  it("keeps the signature when logging an alert delivery failure throws", async () => {
+    const t = await harness({
+      withoutAlert: true,
+      logger: {
+        error: () => {
+          throw new Error("logger unavailable");
+        },
+      },
+    });
+    t.state.balances = { ...t.state.balances, gatewayApiFresh: false };
+    t.state.overdueManualReturnFacts = { ...validOverdueManualReturnFacts };
+
+    await expect(
+      t.signer.sign("cz-15", vaultCall("writeOffPocket", { pocket: t.pocket })),
+    ).resolves.toHaveProperty("signedTransaction");
+    expect(t.audit.rows.at(-1)).toMatchObject({
+      outcome: "signed",
+      rule: "writeoff-manual-return-overdue",
+    });
   });
 
   it("denies the stale-Gateway exception when any SCR-145 evidence predicate fails", async () => {

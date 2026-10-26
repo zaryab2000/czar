@@ -221,12 +221,6 @@ export function createSigner(options: SignerOptions): Signer {
 
       const decision = await decide(ctx, kind, parsed);
       purpose = decision.purpose;
-      if (
-        decision.type === "transaction" &&
-        decision.alert !== undefined &&
-        options.alert === undefined
-      )
-        throw new Denied("gateway-balance-stale");
       takeRateSlot(keyId, keyRef);
 
       if (decision.type === "digest") {
@@ -275,11 +269,19 @@ export function createSigner(options: SignerOptions): Signer {
         const message =
           `${decision.alert.name} vault=${decision.alert.vault} pocket=${decision.alert.pocket} ` +
           `apiObservedAt=${observedAt} digest=${digest}`;
+        let alertDeliveryFailed = options.alert === undefined;
         if (options.alert !== undefined) {
           try {
             await options.alert(message);
           } catch {
+            alertDeliveryFailed = true;
+          }
+        }
+        if (alertDeliveryFailed) {
+          try {
             logger.error("signer_alert_delivery_failed", { rule: decision.alert.name });
+          } catch {
+            // The signed audit row is durable even if alert diagnostics fail.
           }
         }
       }
