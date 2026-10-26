@@ -8,6 +8,7 @@ if [ "$(arc-cast chain-id --rpc-url "$RPC_URL")" != "5042002" ]; then
 	exit 1
 fi
 MANIFEST="$ROOT/deployments/arc-local.json"
+KEYS_FILE="$ROOT/deployments/local-keys.json"
 if [ -s "$MANIFEST" ]; then
 	FACTORY="$(
 		node --input-type=module - "$MANIFEST" <<'NODE'
@@ -22,10 +23,6 @@ NODE
 		exit 0
 	fi
 fi
-
-KEYS_FILE="$(mktemp "$ROOT/deployments/.arc-local-addresses.XXXXXX")"
-KEYS_PATH="../deployments/${KEYS_FILE##*/}"
-trap 'rm -f "$KEYS_FILE"' EXIT
 
 SENDER="$(arc-cast rpc eth_accounts --rpc-url "$RPC_URL" | node -e '
   let input = "";
@@ -42,24 +39,45 @@ SENDER="$(arc-cast rpc eth_accounts --rpc-url "$RPC_URL" | node -e '
   });
 ')"
 
-node --input-type=module - "$KEYS_FILE" "$SENDER" <<'NODE'
-import { writeFile } from "node:fs/promises";
+node --input-type=module - "$KEYS_FILE" <<'NODE'
+import { readFile } from "node:fs/promises";
 
-const [path, address] = process.argv.slice(2);
-if (path === undefined || address === undefined) throw new Error("missing deploy input");
-const publicDefaults = {
-  K3: { address },
-  K5: { address },
-  K7: { address },
-  K6: { address },
-  K20: { address },
-};
-await writeFile(path, JSON.stringify(publicDefaults), { mode: 0o600 });
+const [path] = process.argv.slice(2);
+if (path === undefined) throw new Error("missing local signer key manifest path");
+const manifest = JSON.parse(await readFile(path, "utf8"));
+if (manifest.network !== "arc-local" || manifest.chainId !== 5042002) {
+  throw new Error("local signer key manifest must target Arc local chain 5042002");
+}
+for (const role of ["K3", "K5", "K6", "K7", "K20"]) {
+  const entry = manifest[role];
+  if (
+    typeof entry?.address !== "string" ||
+    !/^0x[0-9a-fA-F]{40}$/.test(entry.address) ||
+    entry.ref !== role
+  ) {
+    throw new Error(`local signer key manifest has invalid ${role} address/ref`);
+  }
+}
 NODE
+
+for ROLE in K3 K5 K6 K7 K20; do
+	ADDRESS="$(
+		node --input-type=module - "$KEYS_FILE" "$ROLE" <<'NODE'
+import { readFile } from "node:fs/promises";
+const [path, role] = process.argv.slice(2);
+const manifest = JSON.parse(await readFile(path, "utf8"));
+process.stdout.write(manifest[role].address);
+NODE
+	)"
+	if [ "${ADDRESS,,}" != "${SENDER,,}" ]; then
+		TX="$(node -e 'process.stdout.write(JSON.stringify({from: process.argv[1], to: process.argv[2], value: "0xDE0B6B3A7640000"}))' "$SENDER" "$ADDRESS")"
+		arc-cast rpc eth_sendTransaction "$TX" --rpc-url "$RPC_URL" >/dev/null
+	fi
+done
 
 cd "$ROOT/contracts"
 ARC_FORGE=arc-forge script/deploy.sh \
 	"$RPC_URL" \
-	"$KEYS_PATH" \
+	"../deployments/local-keys.json" \
 	../deployments/arc-local.json \
 	--broadcast --unlocked --sender "$SENDER"
