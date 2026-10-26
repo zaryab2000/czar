@@ -3,11 +3,10 @@
 ## Development status
 
 Lane 2 persistence, event reconciliation, scheduled recovery, and the
-user-scoped query helper are implemented. The 72-hour hold is enforced, but
-completion after that hold is blocked when Gateway balance data is stale; the
-conflicting signer and server requirements need an architect ruling. This is
-development evidence only; it does not claim an owner UserOp or testnet
-acceptance.
+user-scoped query helper are implemented. SCR-145 is accepted in PR #97 and
+defines the stale-Gateway behavior; its signer change remains a separate Lane 1
+implementation. This is development evidence only; it does not claim an owner
+UserOp or testnet acceptance.
 
 ## Behavior
 
@@ -59,26 +58,26 @@ acceptance.
 
 - `docker compose -f apps/server/test/compose.yaml up -d` — started the pinned
   Postgres 16.15 test service on `127.0.0.1:15432`; container reported healthy.
-- `fnm exec --using=22.22.0 pnpm --filter @czar/server exec vitest run test/payer/manual-return.test.ts test/payer/pullback.test.ts test/payer/pocket.test.ts test/payer/indexer-pocket.test.ts test/payer/pullback-scheduler.test.ts test/main.test.ts` — 6 files passed, 62 tests passed.
+- `fnm exec --using=22.22.0 pnpm --filter @czar/server exec vitest run test/payer/manual-return.test.ts test/payer/pullback.test.ts test/payer/pocket.test.ts test/payer/indexer-pocket.test.ts test/payer/pullback-scheduler.test.ts test/main.test.ts` — 6 files passed, 63 tests passed.
 - `fnm exec --using=22.22.0 pnpm -r typecheck` — passed for all 14 workspace projects selected by pnpm.
 - `fnm exec --using=22.22.0 pnpm lint` — passed (`oxlint --deny-warnings`; formatting check passed for 442 files).
 - `git diff --check` — passed.
 
-## Review blocker requiring a ruling
+## Cross-lane merge order and implementation split
 
-- **T-125 write-off after the owner hold:** SCR-133 requires the payer to write
-  off the pocket after `payer.manualReturnHoldHours`; SCR-127 requires K3 to
-  refuse `writeOffPocket` when the Gateway balance observation is stale or
-  unavailable. The current Lane 2 path cannot satisfy both during a prolonged
-  Gateway outage. The signer is Lane 1 owned and was not changed. The architect
-  must decide whether the 72-hour write-off is conditional on a fresh
-  at-most-dust observation or whether SCR-127 should define a narrow post-hold
-  exception and its trusted proof. Until then, do not mark manual-return
-  recovery complete or merge this PR.
+- **T-125 stale-Gateway write-off:** SCR-145 is accepted in PR #97. It specifies
+  that signer denial leaves the row `manual-return-required` and retries at
+  `payer.gatewayRecoveryPollSeconds`; the row becomes `expired` only after a
+  mined write-off, while an earlier owner credit becomes `recorded`. The
+  Lane 1 signer exception and tests remain a separate implementation. PR #96
+  may merge after #97, without waiting for that signer implementation.
 - The two latest-head code-review findings were fixed: per-candidate write-off
   errors no longer abort the pass, and closure reconciliation checks chain
   logs before expiring against a lagging indexer projection. Both have focused
   test coverage. No additional Codex review was requested.
+- The SCR-145 Lane 2 regression test drives a signer denial through
+  `writeOffOverdueManualReturn`, verifies the row stays pending, and verifies a
+  second retry at the configured recovery interval.
 
 ## Cross-lane handoff and open items
 
@@ -89,10 +88,9 @@ acceptance.
   owner submit `recordManualReturn` as a UserOp. This PR does not add a public
   route or let server keys perform the owner action. Lane 5 can use
   `listManualReturnsForUser` for its user-scoped data source.
-- No SCR file was added. The signer/server policy conflict above needs an
-  explicit ruling. The storage, state transitions, hold duration, and public
-  contract are otherwise specified by SCR-133 and the canonical OpenAPI
-  contract.
+- No SCR file was added. SCR-145 is in PR #97; merge it before PR #96. The
+  storage, state transitions, hold duration, and public contract are otherwise
+  specified by SCR-133 and the canonical OpenAPI contract.
 
 ## Deferred validation
 

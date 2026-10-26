@@ -1,9 +1,12 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadConfig } from "@czar/config";
+import { startPayerRuntime } from "#src/payer/runtime";
+import { writeOffOverdueManualReturn } from "#src/payer/pullback";
 import {
   listManualReturnsForUser,
   reconcileManualReturns,
   runManualReturnRecovery,
+  type ManualReturnWriteOffCandidate,
 } from "#src/payer/pullback-scheduler";
 import { setupDatabase } from "#test/db";
 import { makeObjectiveSubmission, seedDevice, TEST_USER_ID } from "#test/fixtures";
@@ -17,6 +20,8 @@ const OTHER_PLAN_ID = "pln_01K7ZT9P4N5Q6R7S8T9V0W1X2Z";
 const POCKET = "0x0000000000000000000000000000000000000001" as const;
 const VAULT = "0x0000000000000000000000000000000000000002" as const;
 const NOW = new Date("2026-10-26T00:00:00.000Z");
+const MILLISECONDS_PER_HOUR = 3_600_000;
+const MILLISECONDS_PER_SECOND = 1_000;
 
 beforeAll(async () => {
   const pool = getPool();
@@ -364,5 +369,89 @@ describe("manual return reconciliation", () => {
     expect(writeOffManualReturn).toHaveBeenLastCalledWith(
       expect.objectContaining({ plan_id: OTHER_PLAN_ID }),
     );
+  });
+
+  it("retries signer-denied write-off at the configured recovery interval", async () => {
+    const config = loadConfig();
+    const recoveryPollSeconds = Number(config.get("payer.gatewayRecoveryPollSeconds"));
+    const holdMs = Number(config.get("payer.manualReturnHoldHours")) * MILLISECONDS_PER_HOUR;
+    const now = new Date(NOW.getTime() + holdMs);
+    const onWriteOffError = vi.fn();
+    const signer = {
+      sign: vi.fn(async () => {
+        throw new Error("kms_denied: gateway-balance-stale");
+      }),
+    };
+    const writeOffPocket = vi.fn(async () => "write-off-tx");
+    const writeOffManualReturn = vi.fn((row: ManualReturnWriteOffCandidate) => {
+      if (row.vault_address === null) throw new Error("Missing vault for test row.");
+      return writeOffOverdueManualReturn(
+        {
+          planId: row.plan_id,
+          stepIndex: row.step_index,
+          attempt: row.attempt ?? 0,
+          envelopeRef: row.envelope_ref,
+          vault: row.vault_address,
+          pocket: row.pocket,
+        },
+        {
+          pool: getPool(),
+          config,
+          signer,
+          chain: {
+            pocketWriteOffStatus: async () => ({ state: "funded", pendingPullback: 0n }),
+            writeOffPocket,
+          },
+          now: () => now,
+        },
+      );
+    });
+    const reconcile = () =>
+      runManualReturnRecovery({
+        pool: getPool(),
+        config,
+        manualReturnsForVault: async () => [],
+        manualReturnsAfterClosure: async () => [],
+        recoverReturnPosition: async () => null,
+        isPocketClosed: async () => false,
+        onRowError: vi.fn(),
+        writeOffManualReturn,
+        onWriteOffError,
+        now: () => now,
+      });
+    const recoveryPass = vi.fn(reconcile);
+
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const runtime = startPayerRuntime({
+      recoveryPollSeconds,
+      runClosedRecovery: recoveryPass,
+    });
+    try {
+      await vi.advanceTimersByTimeAsync(recoveryPollSeconds * MILLISECONDS_PER_SECOND);
+      expect(recoveryPass).toHaveBeenCalledOnce();
+      await vi.waitFor(() => expect(writeOffManualReturn).toHaveBeenCalledOnce());
+      expect(onWriteOffError).toHaveBeenCalledOnce();
+      expect(signer.sign).toHaveBeenCalledOnce();
+      expect(writeOffPocket).not.toHaveBeenCalled();
+      const firstState = await getPool().query<{ state: string }>(
+        `SELECT state FROM payer_pullback_gateway_failures WHERE plan_id=$1`,
+        [OTHER_PLAN_ID],
+      );
+      expect(firstState.rows[0]?.state).toBe("manual-return-required");
+
+      await vi.advanceTimersByTimeAsync(recoveryPollSeconds * MILLISECONDS_PER_SECOND);
+      expect(recoveryPass).toHaveBeenCalledTimes(2);
+      await vi.waitFor(() => expect(writeOffManualReturn).toHaveBeenCalledTimes(2));
+      expect(signer.sign).toHaveBeenCalledTimes(2);
+      expect(onWriteOffError).toHaveBeenCalledTimes(2);
+      const retriedState = await getPool().query<{ state: string }>(
+        `SELECT state FROM payer_pullback_gateway_failures WHERE plan_id=$1`,
+        [OTHER_PLAN_ID],
+      );
+      expect(retriedState.rows[0]?.state).toBe("manual-return-required");
+    } finally {
+      runtime.stop();
+      vi.useRealTimers();
+    }
   });
 });
