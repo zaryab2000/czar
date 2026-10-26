@@ -1813,6 +1813,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 3500,
   },
   {
+    "key": "routing.jobEnabled",
+    "source": "default",
+    "unit": "",
+    "value": false,
+  },
+  {
     "key": "routing.jobThresholdAtomic",
     "source": "default",
     "unit": "atomic",

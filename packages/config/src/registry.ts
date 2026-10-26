@@ -3452,4 +3452,13 @@ export const PARAMETERS = [
       "Gateway pocket route stays off until the SCR-127 pocket safety chain (TA-20, TA-21) merges; enabled only by a later SCR (SCR-141)",
     source: "docs/specs/04-components/server/server-planning-and-payment.md:243",
   },
+  {
+    key: "routing.jobEnabled",
+    type: "boolean",
+    default: false,
+    unit: "",
+    reason:
+      "ERC-8183 job route stays off until the T-055 evaluator handoff and the CZ-15 job-result builder merge; enabled only by a later SCR (SCR-143)",
+    source: "docs/specs/04-components/server/server-planning-and-payment.md:242",
+  },
 ] as const satisfies readonly ParameterSpec[];
