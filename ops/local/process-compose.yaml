@@ -127,6 +127,18 @@ processes:
       initial_delay_seconds: 5
       period_seconds: 3
       timeout_seconds: 2
+  merchant-k10-ready:
+    command: node --disable-warning=ExperimentalWarning --experimental-strip-types ops/local/check-signer-k10.ts
+    working_dir: ${CZAR_ROOT}
+    environment:
+      CZAR_LOCAL_CONFIG: env/local.toml
+    depends_on:
+      postgres:
+        condition: process_healthy
+      server:
+        condition: process_healthy
+      signer:
+        condition: process_healthy
   merchants:
     command: pnpm --filter @czar/merchants start:local
     working_dir: ${CZAR_ROOT}
@@ -136,6 +148,14 @@ processes:
     depends_on:
       circle-standins:
         condition: process_healthy
+      postgres:
+        condition: process_healthy
+      server:
+        condition: process_healthy
+      signer:
+        condition: process_healthy
+      merchant-k10-ready:
+        condition: process_completed_successfully
     readiness_probe:
       http_get:
         host: 127.0.0.1
