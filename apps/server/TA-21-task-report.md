@@ -69,6 +69,32 @@ Implemented the Lane 2 halt-drain and late-pocket recovery composition for the l
 - `git diff --check` — passed.
 - No new Codex review was requested: the existing code review remains running on the older
   `a23f05c` head. The designated reviewer will inspect this follow-up diff.
+
+## Validation after SCR-144 and PR #93 merges into `build-v1`
+
+- Merged SCR-144 at `dabfb3836de5119feeab9c8c40f4fa138cdfd5d1`, then PR #93 at
+  `d9660c9ae1b310b4ac5591271a7966e5910171ad`, from `origin/build-v1` without conflicts or
+  rewriting published commits.
+- `fnm exec --using=22.22.0 pnpm --filter @czar/server exec vitest run
+  test/payer/pullback-chain-adapter.test.ts test/payer/pullback-scheduler.test.ts
+  test/payer/pullback.test.ts test/payer/pocket-recovery.test.ts` — 4 files passed, 40 tests
+  passed. This includes the write-before-sign interruption and both slow-withdrawal/return
+  resume cases.
+- `fnm exec --using=22.22.0 pnpm --filter @czar/server test` — not green: 55 files passed, 4
+  failed (3 failed tests and the Arc receipt suite setup), 343 tests passed, 3 failed, 2 skipped.
+  The `boundary.test.ts` timeout passed when rerun alone (8 tests), consistent with resource
+  contention during the full run. `app-reads.test.ts` still fails `/v1/me` with 503 when rerun
+  alone; its fixture points to RPC port 8549 without starting a chain or mocking RPC calls.
+  `job-routes.test.ts` still fails because its local server exits; inspection shows the child
+  environment omits `CZAR_INDEXER_URL`, which `local-main.ts` requires. The Arc receipt suite
+  failed while running `script/deploy.sh` against its test RPC; Arc acceptance remains deferred
+  and is not claimed as passing.
+- `fnm exec --using=22.22.0 pnpm --filter @czar/server typecheck` — passed.
+- `fnm exec --using=22.22.0 pnpm lint` — passed (`oxlint --deny-warnings` and `oxfmt --check`).
+- `git diff --check` — passed.
+- The report's earlier pass statement for the full server suite does not apply to this merged
+  head. PR #93 changes only local process composition files and does not affect these server test
+  results; no unrelated tests were changed.
 - `fnm exec --using=22.22.0 pnpm --filter @czar/server exec vitest run test/payer/pullback-scheduler.test.ts test/payer/pullback.test.ts test/payer/pocket.test.ts test/payer/runtime.test.ts test/payer/indexer-pocket.test.ts test/payer/pocket-recovery.test.ts test/main.test.ts` — 7 files passed, 51 tests passed.
 - `fnm exec --using=22.22.0 pnpm -r typecheck` — passed for all 14 of 15 workspace projects included by the command.
 - `fnm exec --using=22.22.0 pnpm lint` — passed (`oxlint --deny-warnings` and `oxfmt --check`).
@@ -76,7 +102,8 @@ Implemented the Lane 2 halt-drain and late-pocket recovery composition for the l
 
 ## Accepted SCR-144 and remaining integration dependencies
 
-- SCR-144's Lane 2 slow-path ordering is implemented on PR #91. Its specification publication remains open as PR #94; merge that PR, then merge fresh `origin/build-v1` into this branch before final review.
+- SCR-144's Lane 2 slow-path ordering is implemented on PR #91, and its specification was
+  published by merged PR #94. The latest `origin/build-v1` base, including PR #93, is merged here.
 - Lane 1 TA-22a still owns adding `logIndex` to the canonical `manualReturnsForVault` projection. Lane 2 now stores `(return_block, return_log_index, returned_amount)` from the mined USDC receipt; it does not change indexer code.
 - Migration `0015` extends the final pullback state constraint. Coordinate its number and state-set with TA-22b before merging; no TA-22b PR is currently open.
 - The existing run-2 code review is still reported running against older commit `a23f05c`; the paired security review completed on that old commit and its finding was fixed in earlier commits. No current-head hosted review is claimed.
@@ -91,4 +118,4 @@ Implemented the Lane 2 halt-drain and late-pocket recovery composition for the l
 
 - NOT RUN: Arc Anvil pocket/pullback acceptance, crash/restart matrix, and transaction-level halt-drain scenarios. These were deferred by the assignment.
 - NOT RUN: live Gateway or testnet validation; D92 remains in force.
-- NOT RUN: full server test suite; only the focused payer/composition regression tests above were run.
+- Full server suite was run but did not pass; see the exact command, counts, and isolated failures above.
