@@ -11,7 +11,7 @@ import {
   type Hash32,
 } from "@czar/hashing";
 import type { Logger } from "@czar/logging";
-import type { AcceptanceReport, StepResult } from "@czar/schemas";
+import type { AcceptanceReport, StepError, StepResult } from "@czar/schemas";
 import type { Signer } from "@czar/signer";
 import type { SafeFetch } from "@czar/x402";
 import type { Pool } from "pg";
@@ -83,7 +83,7 @@ import {
 } from "#src/payer/pullback-scheduler";
 import { startPayerDispatcher, type DispatchStepRequest } from "#src/payer/dispatcher";
 import { completeObjective } from "#src/objectives/completion";
-import { appendExecutionPhase, getExecutionTrace } from "#src/payer/executions";
+import { appendExecutionPhase, getExecutionTrace, markStepFailed } from "#src/payer/executions";
 import {
   createIndexerGatewayStatus,
   createIndexerSettlement,
@@ -709,7 +709,23 @@ async function runJobStep(
   dispatch: DispatchStepRequest,
   envelopeId: bigint,
   acceptedDependencies: Awaited<ReturnType<typeof readAcceptedDependencies>>,
-): Promise<"done" | "failed" | "pending"> {
+): Promise<"failed" | "pending"> {
+  if (!options.config.get("routing.jobEnabled")) {
+    const stepError: StepError = {
+      schemaVersion: "1.0",
+      code: "unsupported-offer",
+      message: "ERC-8183 job payments are disabled.",
+      retryable: false,
+    };
+    await markStepFailed(options.pool, {
+      planId: dispatch.planId,
+      stepIndex: dispatch.step.stepIndex,
+      attempt: 0,
+      errorCode: stepError.code,
+      stepError,
+    });
+    return "failed";
+  }
   const step = dispatch.step;
   if (!step.serviceId || !dispatch.plan.taskSpec)
     throw new Error("Job step is missing its registered service or TaskSpec.");
@@ -778,8 +794,15 @@ async function runJobStep(
       ...(options.jobEvaluator ? { evaluator: options.jobEvaluator } : {}),
     },
   );
-  if (result.state === "Completed") return "done";
-  if (["Rejected", "Expired", "Released"].includes(result.state)) return "failed";
+  return jobStepOutcome(result.state, options.logger);
+}
+
+export function jobStepOutcome(state: string, logger: Logger): "failed" | "pending" {
+  if (state === "Completed") {
+    logger.error("job-result-missing", { rule: "job-result-missing", state });
+    return "pending";
+  }
+  if (["Rejected", "Expired", "Released"].includes(state)) return "failed";
   return "pending";
 }
 

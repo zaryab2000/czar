@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Config } from "@czar/config";
-import type { Plan, Step } from "@czar/schemas";
+import { validateSchema, type Plan, type Step } from "@czar/schemas";
 import type { Pool } from "pg";
 import {
   acquireExecutorLease,
@@ -189,6 +189,11 @@ async function runSteps(
       dispatchLease,
     });
     if (outcome === "pending") return;
+    if (isPaidStep(step) && outcome === "done") {
+      if (!(await paidStepIsAtomicallyComplete(dependencies.pool, envelope.planId, step))) return;
+      states.set(step.stepIndex, "done");
+      continue;
+    }
     await dependencies.pool.query("UPDATE steps SET state=$3 WHERE plan_id=$1 AND step_index=$2", [
       envelope.planId,
       step.stepIndex,
@@ -199,6 +204,31 @@ async function runSteps(
   }
   if ([...states.values()].every((state) => state === "done" || state === "failed"))
     await dependencies.complete(envelope);
+}
+
+async function paidStepIsAtomicallyComplete(
+  pool: Pool,
+  planId: string,
+  step: Step,
+): Promise<boolean> {
+  const state = await pool.query<{ state: string }>(
+    "SELECT state FROM steps WHERE plan_id=$1 AND step_index=$2",
+    [planId, step.stepIndex],
+  );
+  if (state.rows[0]?.state !== "done") return false;
+  const phases = await pool.query<{ payload: Record<string, unknown> }>(
+    `SELECT payload FROM step_executions
+     WHERE plan_id=$1 AND step_index=$2 AND phase='step.result'`,
+    [planId, step.stepIndex],
+  );
+  return (
+    phases.rows.length > 0 &&
+    phases.rows.every((row) => validateSchema("step-result", row.payload["stepResult"]))
+  );
+}
+
+function isPaidStep(step: Step): boolean {
+  return ["x402-exact", "gateway-nano", "erc8183-job"].includes(step.kind);
 }
 
 function dependencyOrder(steps: readonly Step[]): Step[] {

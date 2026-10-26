@@ -1,4 +1,5 @@
 import type { Pool } from "pg";
+import { validateSchema, type StepError, type StepResult } from "@czar/schemas";
 
 export interface ExecutionPhase {
   readonly planId: string;
@@ -131,18 +132,45 @@ export async function releaseExecutorLease(
   ]);
 }
 
-export async function markStepDone(
+export async function markStepDoneWithResults(
   pool: Pool,
   input: {
     readonly planId: string;
     readonly stepIndex: number;
     readonly attempt: number;
     readonly callsUsed: number;
+    readonly results: readonly {
+      readonly index: number;
+      readonly subjectIndex?: number;
+      readonly stepResult: StepResult;
+    }[];
   },
 ): Promise<void> {
+  if (input.results.length === 0)
+    throw new RangeError("Cannot complete a paid step without a StepResult.");
+  for (const result of input.results) {
+    if (!validateSchema("step-result", result.stepResult))
+      throw new TypeError("Cannot complete a paid step with an invalid StepResult.");
+  }
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    for (const result of input.results) {
+      await client.query(
+        `INSERT INTO step_executions (plan_id,step_index,attempt,phase,payload)
+         VALUES ($1,$2,$3,'step.result',$4::jsonb)`,
+        [
+          input.planId,
+          input.stepIndex,
+          input.attempt,
+          JSON.stringify({
+            index: result.index,
+            ...(result.subjectIndex === undefined ? {} : { subjectIndex: result.subjectIndex }),
+            stepResult: result.stepResult,
+          }),
+        ],
+      );
+    }
     const updated = await client.query(
       "UPDATE steps SET state='done',calls_used=GREATEST(calls_used,$3) WHERE plan_id=$1 AND step_index=$2",
       [input.planId, input.stepIndex, input.callsUsed],
@@ -174,8 +202,11 @@ export async function markStepFailed(
     readonly stepIndex: number;
     readonly attempt: number;
     readonly errorCode: string;
+    readonly stepError?: StepError;
   },
 ): Promise<void> {
+  if (input.stepError && !validateSchema("step-error", input.stepError))
+    throw new TypeError("Cannot persist an invalid StepError.");
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -191,7 +222,10 @@ export async function markStepFailed(
         input.planId,
         input.stepIndex,
         input.attempt,
-        JSON.stringify({ errorCode: input.errorCode }),
+        JSON.stringify({
+          errorCode: input.errorCode,
+          ...(input.stepError ? { stepError: input.stepError } : {}),
+        }),
       ],
     );
     await client.query("COMMIT");

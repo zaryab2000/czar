@@ -10,7 +10,13 @@ import {
   verifyProof,
   type Hash32,
 } from "@czar/hashing";
-import type { PaymentRef, Plan, Step } from "@czar/schemas";
+import {
+  validateSchema,
+  type PaymentRef,
+  type Plan,
+  type Step,
+  type StepResult,
+} from "@czar/schemas";
 import type { Signer } from "@czar/signer";
 import {
   buildExactPaymentPayload,
@@ -30,7 +36,7 @@ import {
   acquireExecutorLease,
   appendExecutionPhase,
   getExecutionTrace,
-  markStepDone,
+  markStepDoneWithResults,
   markStepFailed,
   markStepHandedOff,
   releaseExecutorLease,
@@ -569,6 +575,11 @@ async function settleAndFinalize(
     }
   }
   const results: unknown[] = [];
+  const completedResults: {
+    index: number;
+    subjectIndex?: number;
+    stepResult: StepResult;
+  }[] = [];
   const authorized: number[] = [];
   let receiptPending = false;
   for (const entry of completed) {
@@ -630,21 +641,33 @@ async function settleAndFinalize(
       },
     };
     const priorResult = trace.findLast(
-      (row) => row.phase === "step.result" && row.payload["index"] === entry.index,
+      (row) =>
+        (row.phase === "step.result" || row.phase === "step.result.prepared") &&
+        row.payload["index"] === entry.index,
     );
     if (priorResult && !Object.hasOwn(priorResult.payload, "stepResult"))
       throw new Error("Stored step result cannot be recovered safely.");
-    const stepResult = priorResult
+    const candidate = priorResult
       ? priorResult.payload["stepResult"]
       : await dependencies.boundary(context);
+    if (!validateSchema("step-result", candidate))
+      throw new TypeError("Boundary returned an invalid StepResult for the paid call.");
+    const stepResult = candidate as StepResult;
     results.push(stepResult);
+    const call = input.step.callInputs?.find(
+      (callCandidate) => callCandidate.callIndex === entry.index,
+    );
+    completedResults.push({
+      index: entry.index,
+      ...(call?.subjectIndex === undefined ? {} : { subjectIndex: call.subjectIndex }),
+      stepResult,
+    });
     if (!priorResult) {
-      const call = input.step.callInputs?.find((candidate) => candidate.callIndex === entry.index);
       await appendExecutionPhase(dependencies.pool, {
         planId: input.planId,
         stepIndex: input.step.stepIndex,
         attempt,
-        phase: "step.result",
+        phase: "step.result.prepared",
         payload: {
           index: entry.index,
           ...(call?.subjectIndex === undefined ? {} : { subjectIndex: call.subjectIndex }),
@@ -703,11 +726,12 @@ async function settleAndFinalize(
     return { state: "failed", errorCode: "unpaid-index" };
   }
   if (receiptPending) return { state: "pending", stepResults: results };
-  await markStepDone(dependencies.pool, {
+  await markStepDoneWithResults(dependencies.pool, {
     planId: input.planId,
     stepIndex: input.step.stepIndex,
     attempt,
     callsUsed: callsUsedBefore + authorized.length,
+    results: completedResults,
   });
   return { state: "done", stepResults: results };
 }

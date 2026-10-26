@@ -29,6 +29,16 @@ rewriting commits. The current implementation is on `codex/t122-dispatcher-compl
   journaled `closeEnvelope` transaction, then atomically stores the result, updates
   the objective, and inserts the completion outbox event. Repeated completion does
   not duplicate the close or result.
+- SCR-143 is implemented for Track A's job-route guard: when
+  `routing.jobEnabled` is false, job steps persist a schema-valid
+  `unsupported-offer` StepError and fail before reading the escrow or opening a job.
+  Escrow `Completed` remains pending and emits `job-result-missing` until the
+  later Lane 2 job-result builder exists.
+- Paid x402 steps persist schema-validated `step.result` phases and set their state
+  to `done` in one transaction. The dispatcher will not mark a paid step done
+  unless its stored state is already done and all persisted results validate.
+  Results are journaled as `step.result.prepared` while receipt storage is pending,
+  allowing retries without exposing them to dependent steps prematurely.
 - The local composition test starts `createLocalServerMain` with an executing plan
   and confirms the started dispatcher persists the unpaid step handoff.
 
@@ -82,25 +92,17 @@ rewriting commits. The current implementation is on `codex/t122-dispatcher-compl
    Lane 5 implements the existing authenticated route and uses `markStepDone` only
    for matching `handed_off` steps; Lane 4 submits the specified assembly status.
    No new wire shape is needed. The dispatcher now leaves a handed-off step waiting.
-3. **Lane 3 evaluator — completed job result and deliverable cleanup.** T-055 is
-   still a Lane 3 task. The current tree has no durable evaluator decision producer
-   for completed jobs. `job.ts` returns the on-chain `Completed` state, `main.ts`
-   marks the step done, but only the vault-direct path persists `step.result`; the
-   completion service therefore has no delivered result for a successful job-only
-   objective and downstream steps cannot consume its fields. T-054's
-   `purgeUnmatchedJobDeliverables` helper also has no authoritative matched
-   `contentHash` and decision-time input. The T-055 producer must persist its
-   AcceptanceReport/decision and matched upload identity/time; Lane 2 then needs an
-   approved consumer mapping that result to a `StepResult` and persists it before
-   the dispatcher marks the job step done. Do not add a parallel evaluator or infer
-   a match from an upload. This is an unresolved P1 cross-lane handoff, not completed
-   job-result integration.
-   **Decision requested:** should Lane 3 T-055 persist a validated `StepResult` using
-   the existing schema and `step.result` journal phase after matching a job
-   deliverable, or should Lane 2 consume T-055's durable AcceptanceReport and matched
-   upload identity to produce that result? The requirements define the evaluator
-   report and matched deliverable but do not assign this result-production handoff.
-   Until decided and implemented, completed jobs cannot safely mark their steps done.
+3. **Lane 3 evaluator / future Lane 2 job-result builder.** SCR-143 was accepted
+   and merged in PR #88. It assigns T-055 the durable acceptance decision and
+   matched `deliverableHash`, and assigns Lane 2's later Track B job-result builder
+   the work of loading matched bytes, applying §5.6, validating `StepResult`, and
+   atomically persisting `step.result` with `done`. This PR follows the fail-closed
+   behavior: completed jobs remain pending and alert `job-result-missing`, and
+   `routing.jobEnabled` defaults false so dispatch rejects the path before opening
+   a job. T-055 and the later result builder remain dependencies for enabling jobs.
+   T-054 deliverable cleanup also remains blocked on T-055's durable decision time
+   and matched-content identity; no separate evaluator store or guessed match was
+   introduced.
 4. **Receipt canonicalization decision.** The 02/SL schemas say
    `requirements_hash_seen` is the hash of the received 402 but do not bind whether
    the hash input is raw header/body bytes or the normalized parsed
@@ -144,9 +146,10 @@ it. The automated review cap is exhausted, so this newest fix batch has not rece
 hosted review. The round 3 security review was still running on `6c09f30` at report
 update time. It has since completed with no security findings on `6c09f30`. The
 automated review cap is exhausted, and `7f327b9` has no hosted code or security
-review. The completed-job result P1 remains open as a cross-lane dependency; PR
-readiness is held pending the T-055 producer/consumer decision and designated
-review of the latest receipt-binding fix.
+review. SCR-143 resolves the job-route behavior for this PR: job dispatch is off
+by default and Completed remains pending until the future result builder lands.
+The latest guard/invariant fix batch has local validation only and needs the
+designated reviewer to inspect the current PR head; no fourth bot run is available.
 
 ## Deferred validation — D94
 
@@ -154,3 +157,17 @@ See [`reports/ta09-deferred-validation.md`](../../reports/ta09-deferred-validati
 No Arc Anvil acceptance, process-level paid-flow run, crash/restart matrix, live
 Gateway, hosted model, testnet, funding, or deployment scenario was run in this
 development phase. These are not reported as passing.
+
+## SCR-143 guard follow-up
+
+PR #88 merged into `build-v1` at `6c53c3f`. This branch merged the updated
+`origin/build-v1` before implementing the accepted decisions. Focused regression
+checks: `test/main-dispatch.test.ts`, `test/payer/vault-direct.test.ts`, and
+`test/payer/dispatcher.test.ts` — **3 files, 16 tests passed**. Tests cover disabled
+job dispatch without an escrow read, Completed remaining pending with an alert,
+dispatcher refusal to mark paid work done without a valid result, and transaction
+rollback when the result/state write fails. `pnpm -r typecheck` passed for all 14
+projects with typecheck scripts; `pnpm lint` passed with no warnings and formatting
+clean across 432 files. No fourth automated review was requested because the PR's
+three-run review budget is exhausted. The follow-up is awaiting designated manual
+review at the latest PR head; hosted reviews for that head are not complete.

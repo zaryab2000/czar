@@ -1,5 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { dispatchExecutingObjectives, type DispatcherDependencies } from "#src/payer/dispatcher";
+import { markStepDoneWithResults } from "#src/payer/executions";
 import { setupDatabase } from "#test/db";
 import { makeObjectiveSubmission, seedDevice, TEST_USER_ID } from "#test/fixtures";
 
@@ -62,6 +63,14 @@ describe("payer dispatcher", () => {
       isGuardianPaused: async () => false,
       runStep: async ({ step }) => {
         order.push(step.stepIndex);
+        if (step.stepIndex === 0)
+          await markStepDoneWithResults(getPool(), {
+            planId: PLAN,
+            stepIndex: 0,
+            attempt: 0,
+            callsUsed: 1,
+            results: [{ index: 0, stepResult: validStepResult() }],
+          });
         return "done";
       },
       complete,
@@ -71,6 +80,28 @@ describe("payer dispatcher", () => {
     });
     expect(order).toEqual([0, 1]);
     expect(complete).toHaveBeenCalledOnce();
+  });
+
+  it("does not mark a paid step done without a valid persisted result", async () => {
+    const complete = vi.fn();
+    await dispatchExecutingObjectives({
+      pool: getPool(),
+      config: { get: () => 60 } as never,
+      now: () => new Date("2026-10-25T12:00:00Z"),
+      isFrozen: async () => false,
+      isGuardianPaused: async () => false,
+      runStep: async () => "done",
+      complete,
+      onError: (error) => {
+        throw error;
+      },
+    });
+    const result = await getPool().query<{ state: string }>(
+      "SELECT state FROM steps WHERE plan_id=$1 AND step_index=0",
+      [PLAN],
+    );
+    expect(result.rows[0]?.state).toBe("queued");
+    expect(complete).not.toHaveBeenCalled();
   });
 
   it("does not enter a step when the vault is frozen", async () => {
@@ -211,12 +242,20 @@ describe("payer dispatcher", () => {
       now,
       isFrozen: async () => false,
       isGuardianPaused: async () => false,
-      runStep: async () => {
+      runStep: async ({ step }) => {
         const lease = await getPool().query<{ expires_at: Date }>(
           "SELECT expires_at FROM executor_leases WHERE envelope_ref=$1",
           [ENVELOPE],
         );
         observedExpiry.push(lease.rows[0]!.expires_at);
+        if (step.stepIndex === 0)
+          await markStepDoneWithResults(getPool(), {
+            planId: PLAN,
+            stepIndex: 0,
+            attempt: 0,
+            callsUsed: 1,
+            results: [{ index: 0, stepResult: validStepResult() }],
+          });
         return "done";
       },
       complete: vi.fn(),
@@ -264,3 +303,19 @@ describe("payer dispatcher", () => {
     ).toMatchObject({ rowCount: 0 });
   });
 });
+
+function validStepResult() {
+  return {
+    schemaVersion: "1.0" as const,
+    stepIndex: 0,
+    status: "delivered" as const,
+    source: {
+      origin: "https://merchant.test",
+      payTo: "0x0000000000000000000000000000000000000001",
+      paymentRefHash: HASH,
+    },
+    fields: [],
+    flags: [],
+    bodyCommit: HASH,
+  };
+}
