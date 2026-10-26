@@ -56,6 +56,7 @@ function makePlanner(
     readonly capabilities?: readonly string[];
     readonly subjects?: number;
     readonly gatewayEnabled?: boolean;
+    readonly jobEnabled?: boolean;
     readonly proberOffers?: readonly PaymentRequirements[];
     readonly hasAgent?: boolean;
     readonly service?: PlannerService;
@@ -75,7 +76,10 @@ function makePlanner(
     subjects: Array.from({ length: options.subjects ?? 1 }, (_, i) => ({ label: `Subject ${i}` })),
   };
   const config = loadConfig({
-    envFile: options.gatewayEnabled ? { "routing.gatewayEnabled": true } : {},
+    envFile: {
+      ...(options.gatewayEnabled ? { "routing.gatewayEnabled": true } : {}),
+      ...(options.jobEnabled ? { "routing.jobEnabled": true } : {}),
+    },
   });
   const planner = createPlanner({
     config,
@@ -342,7 +346,14 @@ describe("planner fallback", () => {
         },
       },
     };
-    const built = await makePlanner({ service: jobService, capabilities: ["price-lookup"] });
+    await expect(
+      makePlanner({ service: jobService, capabilities: ["price-lookup"] }),
+    ).resolves.toBeNull();
+    const built = await makePlanner({
+      service: jobService,
+      capabilities: ["price-lookup"],
+      jobEnabled: true,
+    });
     expect(built?.plan.steps[0]).toMatchObject({
       kind: "erc8183-job",
       contextNotice: "task-description-only",

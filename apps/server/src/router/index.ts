@@ -22,6 +22,7 @@ export interface RoutingParams {
   };
   readonly gatewayFeeAtomic: bigint;
   readonly gatewayEnabled: boolean;
+  readonly jobEnabled: boolean;
   readonly maxFeeRatioBps: bigint;
   readonly jobThresholdAtomic: bigint;
   readonly maxGasPriceWei: bigint;
@@ -82,6 +83,7 @@ export function routingParamsFromConfig(config: Config = loadConfig()): RoutingP
     },
     gatewayFeeAtomic: configBigInt(config.get("routing.gatewayFeeAtomic")),
     gatewayEnabled: config.get("routing.gatewayEnabled") as boolean,
+    jobEnabled: config.get("routing.jobEnabled") as boolean,
     maxFeeRatioBps: configBigInt(config.get("routing.maxFeeRatioBps")),
     jobThresholdAtomic: configBigInt(config.get("routing.jobThresholdAtomic")),
     maxGasPriceWei: configBigInt(config.get("routing.maxGasPriceWei")),
@@ -149,12 +151,17 @@ export function route(input: RouterInput): RouteResult {
   if (input.step.kind === "local" || input.step.kind === "agent-assist")
     return input.step as UnpaidStep;
   const calls = callsCovered(input.expectedCalls, input.merchantCallsPerSecond);
-  if (input.supplierIsAgent)
-    return { kind: "erc8183-job", routingReason: "specialist-agent", calls };
-  if (input.needsAcceptanceBeforePayment)
-    return { kind: "erc8183-job", routingReason: "acceptance-before-payment", calls };
-  if (input.unitAmount >= input.params.jobThresholdAtomic)
-    return { kind: "erc8183-job", routingReason: "above-job-threshold", calls };
+  const jobReason = input.supplierIsAgent
+    ? "specialist-agent"
+    : input.needsAcceptanceBeforePayment
+      ? "acceptance-before-payment"
+      : input.unitAmount >= input.params.jobThresholdAtomic
+        ? "above-job-threshold"
+        : undefined;
+  if (jobReason !== undefined) {
+    if (!input.params.jobEnabled) return skipped("no-usable-offer");
+    return { kind: "erc8183-job", routingReason: jobReason, calls };
+  }
 
   const offers = usableOffers(input.offers, input.planNetwork);
   if (calls === 0) return skipped("fee-exceeds-payment");
