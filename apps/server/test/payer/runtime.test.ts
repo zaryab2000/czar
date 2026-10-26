@@ -9,7 +9,7 @@ describe("payer runtime wiring", () => {
     const source: VaultHaltEventSource = {
       subscribe: (listener) => {
         listeners.push(listener);
-        return () => undefined;
+        return Object.assign(() => undefined, { ready: Promise.resolve() });
       },
     };
     const pocket = "0x0000000000000000000000000000000000000001" as const;
@@ -61,7 +61,7 @@ describe("payer runtime wiring", () => {
     const source: VaultHaltEventSource = {
       subscribe: (next) => {
         listener = next;
-        return () => undefined;
+        return Object.assign(() => undefined, { ready: Promise.resolve() });
       },
     };
     const onError = vi.fn();
@@ -97,7 +97,7 @@ describe("payer runtime wiring", () => {
       events: {
         subscribe(next) {
           listener = next;
-          return () => undefined;
+          return Object.assign(() => undefined, { ready: Promise.resolve() });
         },
       },
       pocketHalt: {
@@ -128,7 +128,7 @@ describe("payer runtime wiring", () => {
       events: {
         subscribe(listener) {
           listeners.push(listener);
-          return () => undefined;
+          return Object.assign(() => undefined, { ready: Promise.resolve() });
         },
       },
       pocketHalt: { listFundedPockets: async () => [], pullback: async () => undefined },
@@ -149,7 +149,7 @@ describe("payer runtime wiring", () => {
       events: {
         subscribe(next) {
           listener = next;
-          return () => undefined;
+          return Object.assign(() => undefined, { ready: Promise.resolve() });
         },
       },
       pocketHalt: { listFundedPockets: async () => [], pullback: async () => undefined },
@@ -176,7 +176,7 @@ describe("payer runtime wiring", () => {
       events: {
         subscribe(next) {
           listener = next;
-          return () => undefined;
+          return Object.assign(() => undefined, { ready: Promise.resolve() });
         },
       },
       pocketHalt: { listFundedPockets, pullback: async () => undefined },

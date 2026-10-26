@@ -28,8 +28,8 @@ describe("createVaultEventSource", () => {
       loadConfig({ envFile: { "payer.vaultEventPollMs": 2_500 } }),
     );
 
-    source.subscribe(vi.fn(async () => undefined));
-    await flushPromises();
+    const subscription = source.subscribe(vi.fn(async () => undefined));
+    await subscription.ready;
 
     expect(watchContractEvent).toHaveBeenCalledTimes(4);
     expect(watchContractEvent).toHaveBeenCalledWith(
@@ -71,7 +71,7 @@ describe("createVaultEventSource", () => {
     const source = createVaultEventSource(client, VAULT);
     const listener = vi.fn(async () => undefined);
     const unsubscribe = source.subscribe(listener);
-    await flushPromises();
+    await unsubscribe.ready;
     const frozen = watchContractEvent.mock.calls.find(
       ([request]) => request["eventName"] === "Frozen",
     )?.[0];
@@ -114,8 +114,4 @@ function mockClient(watchContractEvent: ReturnType<typeof vi.fn>): PublicClient 
     readContract: vi.fn(async () => FACTORY),
     watchContractEvent,
   } as unknown as PublicClient;
-}
-
-async function flushPromises(): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 0));
 }

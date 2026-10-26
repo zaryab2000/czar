@@ -15,21 +15,24 @@ interface PendingFreezeEvent {
   readonly transaction_hash: Hex;
 }
 
-export async function hasPendingFrozenEvent(
-  pool: Pool,
-  vault: Address,
-  chainHead: bigint,
-): Promise<boolean> {
+export async function hasPendingFrozenEvent(pool: Pool, vault: Address): Promise<boolean> {
   const result = await pool.query<{ pending: boolean }>(
     `SELECT EXISTS (
        SELECT 1 FROM payer_freeze_autolimit_events WHERE vault=$1 AND processed_at IS NULL
-     ) OR COALESCE(
-       (SELECT last_scanned_block FROM payer_freeze_autolimit_cursors WHERE vault=$1),
-       -1::numeric
-     ) < $2::numeric AS pending`,
-    [vault, chainHead.toString()],
+     ) AS pending`,
+    [vault],
   );
   return result.rows[0]?.pending ?? false;
+}
+
+export async function freezeHandlingPending(
+  client: PublicClient,
+  pool: Pool,
+  vault: Address,
+  maxBlockRange: bigint,
+): Promise<boolean> {
+  await scanFrozenEvents(client, pool, vault, maxBlockRange);
+  return hasPendingFrozenEvent(pool, vault);
 }
 
 export async function scanFrozenEvents(
@@ -144,7 +147,8 @@ async function persistFrozenEventPage(
     for (const event of events) await queueFrozenEvent(connection, vault, event);
     await connection.query(
       `INSERT INTO payer_freeze_autolimit_cursors(vault,last_scanned_block) VALUES($1,$2)
-       ON CONFLICT(vault) DO UPDATE SET last_scanned_block=EXCLUDED.last_scanned_block`,
+       ON CONFLICT(vault) DO UPDATE SET last_scanned_block=
+         GREATEST(payer_freeze_autolimit_cursors.last_scanned_block, EXCLUDED.last_scanned_block)`,
       [vault, toBlock.toString()],
     );
     await connection.query("COMMIT");

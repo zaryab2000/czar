@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  freezeHandlingPending,
   hasPendingFrozenEvent,
   scanFrozenEvents,
   processPendingFrozenEvents,
@@ -74,16 +75,25 @@ function fakeStore() {
 }
 
 describe("durable Frozen event work", () => {
+  it("catches up a normal scan gap without forcing approval", async () => {
+    const store = fakeStore();
+    const client = {
+      getBlockNumber: vi.fn(async () => 40n),
+      getContractEvents: vi.fn(async () => []),
+    };
+    await expect(freezeHandlingPending(client as never, store.pool, VAULT, 9_999n)).resolves.toBe(
+      false,
+    );
+    expect(store.cursor()).toBe("40");
+  });
+
   it("reports queued Frozen lowering as pending for its vault", async () => {
     const query = vi.fn(async (_statement: string, values: unknown[]) => {
-      expect(values).toEqual([VAULT, "50"]);
+      expect(values).toEqual([VAULT]);
       return { rows: [{ pending: true }] };
     });
-    expect(await hasPendingFrozenEvent({ query } as never, VAULT, 50n)).toBe(true);
-    expect(query).toHaveBeenCalledWith(expect.stringContaining("payer_freeze_autolimit_cursors"), [
-      VAULT,
-      "50",
-    ]);
+    expect(await hasPendingFrozenEvent({ query } as never, VAULT)).toBe(true);
+    expect(query).toHaveBeenCalledWith(expect.stringContaining("processed_at IS NULL"), [VAULT]);
   });
 
   it("retries an unfinished lowering after Unfrozen without requiring frozen state", async () => {

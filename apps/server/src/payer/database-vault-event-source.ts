@@ -4,7 +4,11 @@ import { czarVaultAbi, czarVaultFactoryAbi } from "@czar/vault-client";
 import { isAddress, type Address, type PublicClient } from "viem";
 import type { Pool } from "pg";
 import { createVaultEventSource } from "#src/payer/vault-event-source";
-import type { VaultHaltEvent, VaultHaltEventSource } from "#src/payer/runtime";
+import type {
+  VaultHaltEvent,
+  VaultHaltEventSource,
+  VaultHaltEventSubscription,
+} from "#src/payer/runtime";
 import {
   processPendingFrozenEvents,
   queueFrozenEvent,
@@ -59,9 +63,10 @@ export function createDatabaseVaultEventSource(
           logSourceError(input.logger, "halt_drain_failed");
         }
       };
-      const scan = async () => {
+      const scan = async (initial = false) => {
         if (stopped || scanning) return;
         scanning = true;
+        const failures: unknown[] = [];
         try {
           const rows = await input.pool.query<{ vault: string }>(
             "SELECT DISTINCT vault FROM users WHERE vault IS NOT NULL ORDER BY vault",
@@ -69,6 +74,7 @@ export function createDatabaseVaultEventSource(
           for (const row of rows.rows) {
             if (!isAddress(row.vault)) {
               logSourceError(input.logger, "invalid_address");
+              failures.push(new TypeError("Stored user vault is not a valid address."));
               continue;
             }
             const vault = row.vault;
@@ -84,36 +90,58 @@ export function createDatabaseVaultEventSource(
                 unsubscribe.push(source.subscribe(emit));
                 retryVaults.add(vault);
               }
+            } catch (error) {
+              retryVaults.add(vault);
+              logSourceError(input.logger, "reconcile_failed");
+              failures.push(error);
+            }
+            try {
               await scanFrozenEvents(
                 input.publicClient,
                 input.pool,
                 vault,
                 BigInt(Number(input.config.get("indexer.getLogsBlockRange"))),
               );
-              await runFrozenEvents(input.pool, vault, undefined, listener, frozenEventRuns);
-              if (!retryVaults.has(vault)) continue;
-              retryVaults.delete(vault);
-              await reconcileHalt(input.publicClient, vault, emit);
-            } catch {
+            } catch (error) {
               retryVaults.add(vault);
               logSourceError(input.logger, "reconcile_failed");
+              failures.push(error);
+            }
+            try {
+              await runFrozenEvents(input.pool, vault, undefined, listener, frozenEventRuns);
+            } catch {
+              retryVaults.add(vault);
+              logSourceError(input.logger, "halt_drain_failed");
+            }
+            if (!retryVaults.has(vault)) continue;
+            retryVaults.delete(vault);
+            try {
+              await reconcileHalt(input.publicClient, vault, emit);
+            } catch (error) {
+              retryVaults.add(vault);
+              logSourceError(input.logger, "reconcile_failed");
+              failures.push(error);
             }
           }
-        } catch {
+        } catch (error) {
           logSourceError(input.logger, "scan_failed");
+          failures.push(error);
         } finally {
           scanning = false;
         }
+        if (initial && failures.length > 0)
+          throw new AggregateError(failures, "Initial vault event synchronization failed.");
       };
       const interval = Number(input.config.get("payer.vaultEventPollMs"));
       const timer = setInterval(() => void scan(), interval);
       timer.unref();
-      void scan();
-      return () => {
+      const ready = scan(true);
+      const stop = () => {
         stopped = true;
         clearInterval(timer);
-        for (const stop of unsubscribe) stop();
+        for (const unsubscribeListener of unsubscribe) unsubscribeListener();
       };
+      return Object.assign(stop, { ready }) as VaultHaltEventSubscription;
     },
   };
 }

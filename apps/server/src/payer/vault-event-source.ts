@@ -2,7 +2,11 @@ import { loadConfig, type Config } from "@czar/config";
 import { createLogger, type Logger } from "@czar/logging";
 import { czarVaultAbi, czarVaultFactoryAbi } from "@czar/vault-client";
 import type { Address, Hex, PublicClient } from "viem";
-import type { VaultHaltEvent, VaultHaltEventSource } from "#src/payer/runtime";
+import type {
+  VaultHaltEvent,
+  VaultHaltEventSource,
+  VaultHaltEventSubscription,
+} from "#src/payer/runtime";
 
 export function createVaultEventSource(
   client: PublicClient,
@@ -15,7 +19,7 @@ export function createVaultEventSource(
     subscribe(listener) {
       let stopped = false;
       const unsubscribe: (() => void)[] = [];
-      void watchEvents(
+      const ready = watchEvents(
         client,
         vaultAddress,
         pollingInterval,
@@ -28,10 +32,11 @@ export function createVaultEventSource(
           state: "error",
         }),
       );
-      return () => {
+      const stop = () => {
         stopped = true;
-        for (const stop of unsubscribe) stop();
+        for (const unsubscribeListener of unsubscribe) unsubscribeListener();
       };
+      return Object.assign(stop, { ready }) as VaultHaltEventSubscription;
     },
   };
 }

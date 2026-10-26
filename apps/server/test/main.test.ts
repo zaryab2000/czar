@@ -60,6 +60,7 @@ describe("server composition root", () => {
       modelClient: { complete: vi.fn() },
       publicClient: {
         getBlockNumber: vi.fn(async () => 0n),
+        getContractEvents: vi.fn(async () => []),
         readContract: vi.fn(async ({ functionName }: { functionName: string }) =>
           functionName === "factory" ? factory : false,
         ),

@@ -10,8 +10,10 @@ export interface VaultHaltEvent {
 }
 
 export interface VaultHaltEventSource {
-  subscribe(listener: (event: VaultHaltEvent) => Promise<void>): () => void;
+  subscribe(listener: (event: VaultHaltEvent) => Promise<void>): VaultHaltEventSubscription;
 }
+
+export type VaultHaltEventSubscription = (() => void) & { readonly ready: Promise<void> };
 
 export interface PayerRuntimeOptions {
   readonly events?: VaultHaltEventSource;
@@ -28,11 +30,15 @@ export interface PayerRuntimeOptions {
   readonly drain?: typeof drainPocketsAfterHalt;
 }
 
-export function startPayerRuntime(options: PayerRuntimeOptions): { stop(): void } {
+export function startPayerRuntime(options: PayerRuntimeOptions): {
+  readonly ready: Promise<void>;
+  stop(): void;
+} {
   const unsubscribe = subscribeHaltEvents(options);
   const timer = scheduleFallbacks(options);
   const recoveryTimer = scheduleClosedRecovery(options);
   return {
+    ready: unsubscribe?.ready ?? Promise.resolve(),
     stop() {
       unsubscribe?.();
       if (timer) clearInterval(timer);
@@ -58,7 +64,7 @@ function scheduleClosedRecovery(
   return timer;
 }
 
-function subscribeHaltEvents(options: PayerRuntimeOptions): (() => void) | undefined {
+function subscribeHaltEvents(options: PayerRuntimeOptions): VaultHaltEventSubscription | undefined {
   if (!options.events) return undefined;
   if (!options.pocketHalt && !options.lowerAutoLimits)
     throw new Error("Vault halt event source requires a halt action.");

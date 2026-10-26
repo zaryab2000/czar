@@ -10,6 +10,41 @@ const FACTORY = "0x0000000000000000000000000000000000000003" as const;
 afterEach(() => vi.useRealTimers());
 
 describe("database vault event source", () => {
+  it("replays queued Frozen work even when a later historical scan fails", async () => {
+    vi.useFakeTimers();
+    const { pool } = fakePool(() => [VAULT_ONE]);
+    const client = {
+      readContract: vi.fn(async ({ functionName }: { functionName: string }) => {
+        if (functionName === "factory") return FACTORY;
+        if (functionName === "guardianPaused") return false;
+        throw new Error(`unexpected ${functionName}`);
+      }),
+      watchContractEvent: vi.fn(() => vi.fn()),
+      getBlockNumber: vi.fn().mockResolvedValueOnce(20n).mockResolvedValue(40n),
+      getContractEvents: vi
+        .fn()
+        .mockResolvedValueOnce([freezeLog(5n)])
+        .mockRejectedValue(new Error("historical RPC unavailable")),
+    };
+    const source = createDatabaseVaultEventSource({
+      pool,
+      publicClient: client as never,
+      config: loadConfig({ envFile: { "payer.vaultEventPollMs": 1000 } }),
+      logger: { error: vi.fn() } as never,
+    });
+    const listener = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("temporary lowering failure"))
+      .mockResolvedValue(undefined);
+    const subscription = source.subscribe(listener);
+
+    await subscription.ready;
+    expect(listener).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(1000);
+    await vi.waitFor(() => expect(listener).toHaveBeenCalledTimes(2));
+    subscription();
+  });
+
   it("discovers vaults linked after startup and reconciles existing halt state", async () => {
     vi.useFakeTimers();
     let vaults: Address[] = [VAULT_ONE];
@@ -39,6 +74,7 @@ describe("database vault event source", () => {
       if (attempts === 1) throw new Error("temporary drain failure");
     });
     const stop = source.subscribe(listener);
+    await stop.ready;
 
     await vi.waitFor(() => expect(watchContractEvent).toHaveBeenCalledTimes(4));
     expect(listener).toHaveBeenCalledWith(
@@ -77,6 +113,7 @@ describe("database vault event source", () => {
     });
     const listener = vi.fn(async () => undefined);
     const stop = source.subscribe(listener);
+    await stop.ready;
     await vi.waitFor(() => expect(watchContractEvent).toHaveBeenCalledTimes(4));
 
     const unfreeze = watchContractEvent.mock.calls.find(
