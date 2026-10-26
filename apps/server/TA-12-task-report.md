@@ -85,10 +85,16 @@ reads the zero limit and skips signing again.
 - `fnm exec --using=22.22.0 pnpm --filter @czar/server exec vitest run test/payer/freeze-events.test.ts test/payer/database-vault-event-source.test.ts test/payer/runtime.test.ts test/payer/freeze-autolimit.test.ts test/payer/dispatcher.test.ts test/payer/vault-event-source.test.ts test/main.test.ts test/migrate.test.ts`
   — passed after the latest review fixes: 8 files, 37 tests (includes
   `test/payer/vault-event-source.test.ts`).
+- After syncing `build-v1` through PR #98 merge `c9664b7`,
+  `fnm exec --using=22.22.0 pnpm --filter @czar/server exec vitest run test/payer/freeze-events.test.ts test/payer/database-vault-event-source.test.ts test/payer/runtime.test.ts test/payer/freeze-autolimit.test.ts test/payer/dispatcher.test.ts test/payer/vault-event-source.test.ts test/main.test.ts test/migrate.test.ts test/payer/manual-return.test.ts test/payer/pullback-scheduler.test.ts test/app-manual-returns.test.ts`
+  passed: 11 files, 58 tests, including the manual-return and pullback
+  scheduler regressions changed by that merge.
 - `fnm exec --using=22.22.0 pnpm -r typecheck` — passed across all 14 workspace
   projects with typecheck scripts after the review fixes.
 - `fnm exec --using=22.22.0 pnpm lint` — passed after the review fixes.
 - `git diff --check` — passed after the review fixes.
+- `fnm exec --using=22.22.0 pnpm -r typecheck` and `fnm exec --using=22.22.0 pnpm lint`
+  — both passed again after merging PR #98.
 - `fnm exec --using=22.22.0 pnpm --filter @czar/server test` — run on the
   initial implementation commit `30579ff`; not green: 58 files passed, 3 failed;
   364 passed, 2 failed, 2 skipped. The two non-Arc
