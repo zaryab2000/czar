@@ -9,6 +9,7 @@ import {
   TEST_USER_ID,
 } from "#test/fixtures";
 import { testSigner } from "#test/payer/test-signer";
+import { localTemplateProfile } from "#src/acceptance/profile";
 import { createLocalServerMain } from "#src/local-main";
 import { createPlannerPocketKeySource, createPlannerProfileSource } from "#src/main";
 
@@ -23,7 +24,7 @@ describe("server composition root", () => {
     const profiles = createPlannerProfileSource({ profileIdFor } as never);
     expect(profiles.profileIdFor("data-json.search")).toBe(profileIdFor("data-json"));
     expect(profiles.profileIdFor("data-json.extract")).toBe(profileIdFor("data-json"));
-    expect(() => profiles.profileIdFor("local")).toThrow("local-template-v1 profile ID");
+    expect(profiles.profileIdFor("local")).toBe(localTemplateProfile().profile_id);
 
     const address = "0x0000000000000000000000000000000000000005" as const;
     const createPocketKey = vi.fn(async (_caller: string) => address);

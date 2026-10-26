@@ -28,7 +28,7 @@ export interface PaymentReceiptDependencies {
   readonly pool: Pool;
   readonly config: Config;
   readonly signer: Pick<Signer, "sign">;
-  readonly settlement: { isSettled(vault: string, paymentHash: string): Promise<boolean> };
+  readonly settlement: { isSettled(payment: PaymentRef): Promise<boolean> };
   readonly now: () => Date;
 }
 
@@ -47,8 +47,7 @@ export async function createPaymentReceipt(
   const paymentHash = paymentRefHash(input.payment);
   const stored = await readStoredReceipt(dependencies.pool, input, paymentHash);
   if (stored) return stored;
-  if (!(await dependencies.settlement.isSettled(String(input.payment.payer), paymentHash)))
-    return null;
+  if (!(await dependencies.settlement.isSettled(input.payment))) return null;
   const payment = { ...input.payment } as PaymentRef;
   const createdAt = dependencies.now();
   const receiptData = receiptFields(input, payment, paymentHash, createdAt);

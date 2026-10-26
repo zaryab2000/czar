@@ -1,20 +1,28 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { getLimits } from "@czar/vault-client";
+import { czarVaultAbi, czarVaultFactoryAbi, getLimits } from "@czar/vault-client";
 import { keccak256, type Address, type Hex, type PublicClient, type WalletClient } from "viem";
 import type { Config } from "@czar/config";
-import { paymentRefHash } from "@czar/hashing";
+import {
+  PAYEE_KIND,
+  buildTree,
+  payeeLeaf,
+  paymentRefHash,
+  verifyProof,
+  type Hash32,
+} from "@czar/hashing";
 import type { Logger } from "@czar/logging";
-import type { AcceptanceReport, StepResult } from "@czar/schemas";
+import type { AcceptanceReport, StepError, StepResult } from "@czar/schemas";
 import type { Signer } from "@czar/signer";
 import type { SafeFetch } from "@czar/x402";
 import type { Pool } from "pg";
 import { createAcceptanceChecker } from "#src/acceptance/index";
+import { localTemplateProfile } from "#src/acceptance/profile";
 import type { AcceptancePorts } from "#src/acceptance/types";
 import { runBoundary } from "#src/boundary/index";
 import { createApp } from "#src/app";
 import { createFileObjectStore, type ObjectStore } from "#src/object-store";
 import type { AppReadOptions } from "#src/app/reads";
-import type { Plan, SubjectsRevision } from "@czar/schemas";
+import type { Plan, SubjectsRevision, TaskSpec } from "@czar/schemas";
 import type { PairDependencies } from "#src/devices/pair";
 import { migrate } from "#src/db/migrate";
 import {
@@ -35,6 +43,7 @@ import {
   type PaymentReceiptInput,
   type PaymentReceiptDependencies,
 } from "#src/evidence/receipts";
+import { createReceiptInputFromTrace } from "#src/evidence/receipt-input";
 import { computePromptHash, type ModelClient } from "#src/models/proxy";
 import {
   executeVaultDirectStep,
@@ -56,6 +65,7 @@ import {
   type PocketPreparationInput,
 } from "#src/payer/pocket";
 import { createPocketPreparationChain } from "#src/payer/pocket-chain";
+import { createViemVaultDirectChain } from "#src/payer/viem-chain";
 import {
   cancelExpiredPullback,
   executePullback,
@@ -71,6 +81,14 @@ import {
   runPendingPullbackFallbacks,
   type PullbackFallbackSchedulerDependencies,
 } from "#src/payer/pullback-scheduler";
+import { startPayerDispatcher, type DispatchStepRequest } from "#src/payer/dispatcher";
+import { completeObjective } from "#src/objectives/completion";
+import { appendExecutionPhase, getExecutionTrace, markStepFailed } from "#src/payer/executions";
+import {
+  createIndexerGatewayStatus,
+  createIndexerSettlement,
+  verifyX402Transfer,
+} from "#src/evidence/indexer-settlement";
 
 export interface ServerMainOptions extends PairDependencies {
   readonly pool: Pool;
@@ -176,6 +194,32 @@ export async function createServerMain(options: ServerMainOptions): Promise<Serv
     recordReceipt,
   );
   const workers = startPlannerWorkers(options, plannerOperations);
+  const dispatcher = startPayerDispatcher({
+    pool: options.pool,
+    config: options.config,
+    now: options.clock.now,
+    isFrozen: (vault) => readVaultPauseState(options, vault),
+    isGuardianPaused: (vault) => readGuardianPauseState(options, vault),
+    runStep: (input) =>
+      runDispatchedStep(options, signerClient, payerDependencies, selection, input),
+    complete: (input) =>
+      completeObjective(
+        { ...input, envelopeId: parseEnvelopeId(input.envelopeRef, input.vault) },
+        {
+          pool: options.pool,
+          config: options.config,
+          signer: signerClient,
+          chain: completionChain(options),
+          now: options.clock.now,
+          random: options.random,
+        },
+      ).then(() => undefined),
+    onError: () =>
+      options.logger.error("payer_dispatch_failure", {
+        rule: "payer-dispatcher",
+        state: "error",
+      }),
+  });
   const app = createServerApp(options, objects, plannerOperations);
   return {
     app,
@@ -186,6 +230,7 @@ export async function createServerMain(options: ServerMainOptions): Promise<Serv
     executeJobStep: (input) => executeJobStepForMain(options, signerClient, input),
     async close() {
       await workers.stop();
+      await dispatcher.stop();
       payerRuntime.stop();
     },
   };
@@ -520,6 +565,418 @@ function executeJobStepForMain(
   });
 }
 
+async function runDispatchedStep(
+  options: ServerMainOptions,
+  signer: ServerSigner,
+  payerDependencies: ReturnType<typeof createPayerDependencies>,
+  selection: RegisteredSelection,
+  dispatch: DispatchStepRequest,
+): Promise<"done" | "failed" | "handed_off" | "pending"> {
+  const envelopeId = parseEnvelopeId(dispatch.envelopeRef, dispatch.vault);
+  const acceptedDependencies = await readAcceptedDependencies(options.pool, dispatch);
+  if (
+    dispatch.step.kind === "local" ||
+    dispatch.step.kind === "agent-assist" ||
+    dispatch.step.kind === "x402-exact"
+  ) {
+    const result = await executeVaultDirectStep(
+      {
+        planId: dispatch.planId,
+        envelopeRef: dispatch.envelopeRef,
+        envelopeId,
+        envelopeExpiresAt: new Date(dispatch.plan.expiresAt),
+        vault: dispatch.vault,
+        plan: dispatch.plan,
+        step: dispatch.step,
+        userId: dispatch.userId,
+        deviceId: dispatch.deviceId,
+        acceptedDependencies,
+        workerId: dispatch.workerId,
+        dispatchLease: dispatch.dispatchLease,
+      },
+      {
+        ...payerDependencies,
+        chain:
+          options.chainForVault?.(dispatch.vault) ??
+          options.chain ??
+          createViemVaultDirectChain({
+            client: options.publicClient,
+            vault: dispatch.vault,
+            usdc: options.config.get("chain.usdcAddress") as Address,
+          }),
+      },
+    );
+    return result.state;
+  }
+  if (dispatch.step.kind === "gateway-nano")
+    return runGatewayStep(options, signer, dispatch, envelopeId, acceptedDependencies);
+  if (dispatch.step.kind === "erc8183-job")
+    return runJobStep(options, signer, selection, dispatch, envelopeId, acceptedDependencies);
+  return "failed";
+}
+
+async function runGatewayStep(
+  options: ServerMainOptions,
+  signer: ServerSigner,
+  dispatch: DispatchStepRequest,
+  envelopeId: bigint,
+  acceptedDependencies: Awaited<ReturnType<typeof readAcceptedDependencies>>,
+): Promise<"done" | "failed" | "pending"> {
+  if (!dispatch.plan.pocket) throw new Error("Gateway plan has no approved pocket key.");
+  const gatewayStatus =
+    options.gatewayStatus ??
+    createIndexerGatewayStatus(
+      options.appReadOptions.indexerUrl,
+      dispatch.vault,
+      Number(options.config.get("api.pageMaxLimit")),
+      Number(options.config.get("fetch.timeoutMs")),
+    );
+  await executePocketPreparation(
+    {
+      planId: dispatch.planId,
+      envelopeRef: dispatch.envelopeRef,
+      envelopeId,
+      vault: dispatch.vault,
+      plan: dispatch.plan,
+      workerId: dispatch.workerId,
+      dispatchLease: dispatch.dispatchLease,
+    },
+    {
+      pool: options.pool,
+      config: options.config,
+      signer,
+      chain: createPocketPreparationChain({
+        client: options.publicClient,
+        vault: dispatch.vault,
+        usdc: options.config.get("chain.usdcAddress") as Address,
+        gatewayWallet: options.config.get("chain.gatewayWalletAddress") as Address,
+      }),
+      now: options.clock.now,
+    },
+  );
+  await payGatewaySteps(
+    {
+      planId: dispatch.planId,
+      envelopeRef: dispatch.envelopeRef,
+      plan: dispatch.plan,
+      pocket: dispatch.plan.pocket as Address,
+      steps: [dispatch.step],
+      acceptedDependencies,
+      dispatchLease: dispatch.dispatchLease,
+    },
+    {
+      pool: options.pool,
+      config: options.config,
+      signer,
+      safeFetch: options.safeFetch,
+      now: options.clock.now,
+      gatewayStatus,
+    },
+  );
+  const skipped = (
+    await getExecutionTrace(options.pool, dispatch.planId, dispatch.step.stepIndex, 0)
+  ).filter((row) => row.phase === "pocket.dependency-missing").length;
+  const latestStatuses = await refreshGatewayStatuses(
+    {
+      planId: dispatch.planId,
+      envelopeRef: dispatch.envelopeRef,
+      plan: dispatch.plan,
+      pocket: dispatch.plan.pocket as Address,
+      steps: [dispatch.step],
+      acceptedDependencies,
+      dispatchLease: dispatch.dispatchLease,
+    },
+    {
+      pool: options.pool,
+      config: options.config,
+      signer,
+      safeFetch: options.safeFetch,
+      now: options.clock.now,
+      gatewayStatus,
+    },
+  );
+  if (latestStatuses.includes("failed")) return "failed";
+  if (latestStatuses.includes("pending")) return "pending";
+  return latestStatuses.length + skipped >= (dispatch.step.callInputs?.length ?? 0)
+    ? "done"
+    : "pending";
+}
+
+async function runJobStep(
+  options: ServerMainOptions,
+  signer: ServerSigner,
+  selection: RegisteredSelection,
+  dispatch: DispatchStepRequest,
+  envelopeId: bigint,
+  acceptedDependencies: Awaited<ReturnType<typeof readAcceptedDependencies>>,
+): Promise<"failed" | "pending"> {
+  if (!options.config.get("routing.jobEnabled")) {
+    const stepError: StepError = {
+      schemaVersion: "1.0",
+      code: "unsupported-offer",
+      message: "ERC-8183 job payments are disabled.",
+      retryable: false,
+    };
+    await markStepFailed(options.pool, {
+      planId: dispatch.planId,
+      stepIndex: dispatch.step.stepIndex,
+      attempt: 0,
+      errorCode: stepError.code,
+      stepError,
+    });
+    return "failed";
+  }
+  const step = dispatch.step;
+  if (!step.serviceId || !dispatch.plan.taskSpec)
+    throw new Error("Job step is missing its registered service or TaskSpec.");
+  const callInputs = resolveJobInputs(step, acceptedDependencies);
+  if (!callInputs) return "failed";
+  const jobEscrow = await options.publicClient.readContract({
+    address: dispatch.vault,
+    abi: czarVaultAbi,
+    functionName: "jobEscrow",
+  });
+  const outputSchema = await selection.outputSchema.forService(step.serviceId);
+  const expectedKeys = stringList(outputSchema?.["required"]);
+  const result = await executeJobStep(
+    {
+      planId: dispatch.planId,
+      envelopeRef: dispatch.envelopeRef,
+      envelopeId,
+      vault: dispatch.vault,
+      stepIndex: step.stepIndex,
+      provider: requireAddress(step.payee, "job provider"),
+      alternates: (step.alternates ?? []).map((address) =>
+        requireAddress(address, "job alternate"),
+      ),
+      stepCap: BigInt(step.stepCap),
+      proof: payeeProof(
+        dispatch.plan,
+        requireAddress(step.payee, "job provider"),
+        PAYEE_KIND.ERC8183_PROVIDER,
+        step,
+      ),
+      alternateProofsByProvider: alternateJobProofs(dispatch.plan, step),
+      planHash: dispatch.plan.planHash,
+      network: dispatch.plan.network,
+      jobEscrow,
+      acceptanceProfileId: step.acceptanceProfileId,
+      capability: step.capability,
+      callInputs,
+      taskSpec: dispatch.plan.taskSpec as TaskSpec,
+      deliverable: {
+        mimeType: "application/json",
+        ...(expectedKeys.length ? { expectedKeys } : {}),
+        ...(outputSchema ? { schema: outputSchema } : {}),
+      },
+      targetBudget: step.stepCap,
+      evaluator: await signer.keyAddress("cz-16", "K7"),
+      envelopeExpiresAt: new Date(dispatch.plan.expiresAt),
+      workerId: dispatch.workerId,
+      dispatchLease: dispatch.dispatchLease,
+    },
+    {
+      pool: options.pool,
+      config: options.config,
+      signer,
+      chain: createJobChainAdapter({
+        client: options.publicClient,
+        pool: options.pool,
+        config: options.config,
+        vault: dispatch.vault,
+        jobEscrow,
+        usdc: options.config.get("chain.usdcAddress") as Address,
+        now: options.clock.now,
+      }),
+      vault: dispatch.vault,
+      now: options.clock.now,
+      randomSalt: () => `0x${randomBytes(32).toString("hex")}` as `0x${string}`,
+      ...(options.jobEvaluator ? { evaluator: options.jobEvaluator } : {}),
+    },
+  );
+  return jobStepOutcome(result.state, options.logger);
+}
+
+export function jobStepOutcome(state: string, logger: Logger): "failed" | "pending" {
+  if (state === "Completed") {
+    logger.error("job-result-missing", { rule: "job-result-missing", state });
+    return "pending";
+  }
+  if (["Rejected", "Expired", "Released"].includes(state)) return "failed";
+  return "pending";
+}
+
+async function readAcceptedDependencies(
+  pool: Pool,
+  dispatch: DispatchStepRequest,
+): Promise<NonNullable<VaultDirectInput["acceptedDependencies"]>> {
+  const result = await pool.query<{
+    step_index: number;
+    payload: { subjectIndex?: number; stepResult?: StepResult };
+  }>(
+    `SELECT step_index,payload FROM step_executions
+     WHERE plan_id=$1 AND phase='step.result' ORDER BY execution_id`,
+    [dispatch.planId],
+  );
+  return result.rows
+    .filter((row) => dispatch.step.dependsOn?.includes(row.step_index))
+    .flatMap((row) => {
+      const stepResult = row.payload.stepResult;
+      if (!stepResult) return [];
+      return [
+        {
+          stepIndex: row.step_index,
+          ...(row.payload.subjectIndex === undefined
+            ? {}
+            : { subjectIndex: row.payload.subjectIndex }),
+          accepted: stepResult.status === "delivered",
+          fields: stepResult.fields,
+        },
+      ];
+    });
+}
+
+function resolveJobInputs(
+  step: DispatchStepRequest["step"],
+  dependencies: NonNullable<VaultDirectInput["acceptedDependencies"]>,
+): readonly Readonly<Record<string, string | number | boolean>>[] | null {
+  const calls = step.callInputs ?? [];
+  const resolved: Readonly<Record<string, string | number | boolean>>[] = [];
+  for (const call of calls) {
+    const input: Record<string, string | number | boolean> = {};
+    for (const [key, value] of Object.entries(call.input)) {
+      if (typeof value !== "string") {
+        if (typeof value !== "number" && typeof value !== "boolean") return null;
+        input[key] = value;
+        continue;
+      }
+      const match = /^\{\{dep\.(\d+)\.([\w-]+)\}\}$/.exec(value);
+      if (!match) {
+        input[key] = value;
+        continue;
+      }
+      const fields = dependencies.find(
+        (entry) =>
+          entry.accepted &&
+          entry.stepIndex === Number(match[1]) &&
+          entry.subjectIndex === call.subjectIndex,
+      )?.fields;
+      const field = fields?.find((entry) => entry.name === match[2] && entry.value.trim());
+      if (!field) return null;
+      input[key] = field.value;
+    }
+    resolved.push(input);
+  }
+  return resolved;
+}
+
+function payeeProof(
+  plan: Plan,
+  payeeValue: string,
+  kind: number,
+  step: DispatchStepRequest["step"],
+): readonly Hash32[] {
+  const payee = requireAddress(payeeValue, "approved payee");
+  const leaves = plan.payeeLeaves.map((item) =>
+    payeeLeaf(item.payee as Address, item.kind, item.stepIndex, BigInt(item.stepCap)),
+  );
+  const tree = buildTree(leaves);
+  const leaf = payeeLeaf(payee, kind, step.stepIndex, BigInt(step.stepCap));
+  if (
+    tree.root.toLowerCase() !== plan.payeeRoot.toLowerCase() ||
+    !verifyProof(tree.proof(leaf), tree.root, leaf)
+  )
+    throw new Error("Approved plan payee proof does not match payeeRoot.");
+  return tree.proof(leaf);
+}
+
+function alternateJobProofs(
+  plan: Plan,
+  step: DispatchStepRequest["step"],
+): Readonly<Record<string, readonly Hash32[]>> {
+  return Object.fromEntries(
+    (step.alternates ?? []).map((address) => [
+      address,
+      payeeProof(plan, address, PAYEE_KIND.ERC8183_PROVIDER, step),
+    ]),
+  );
+}
+
+function requireAddress(value: string | undefined, label: string): Address {
+  if (value === undefined || !/^0x[\da-fA-F]{40}$/.test(value))
+    throw new TypeError(`Approved ${label} is not an EVM address.`);
+  return value as Address;
+}
+
+function stringList(value: unknown): string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string") ? value : [];
+}
+
+function parseEnvelopeId(envelopeRef: string, vault: Address): bigint {
+  const parts = envelopeRef.split(":");
+  const envelopeVault = parts[2];
+  const id = parts[3];
+  if (
+    parts.length !== 4 ||
+    envelopeVault?.toLowerCase() !== vault.toLowerCase() ||
+    !id ||
+    !/^(0|[1-9]\d*)$/.test(id)
+  )
+    throw new TypeError("Executing objective has a malformed or mismatched envelopeRef.");
+  return BigInt(id);
+}
+
+async function readVaultPauseState(options: ServerMainOptions, vault: Address): Promise<boolean> {
+  return options.publicClient.readContract({
+    address: vault,
+    abi: czarVaultAbi,
+    functionName: "frozen",
+  });
+}
+
+async function readGuardianPauseState(
+  options: ServerMainOptions,
+  vault: Address,
+): Promise<boolean> {
+  const factory = await options.publicClient.readContract({
+    address: vault,
+    abi: czarVaultAbi,
+    functionName: "factory",
+  });
+  return options.publicClient.readContract({
+    address: factory,
+    abi: czarVaultFactoryAbi,
+    functionName: "guardianPaused",
+  });
+}
+
+function completionChain(options: ServerMainOptions) {
+  return {
+    async readEnvelope(vault: Address, envelopeId: bigint) {
+      const value = await options.publicClient.readContract({
+        address: vault,
+        abi: czarVaultAbi,
+        functionName: "getEnvelope",
+        args: [envelopeId],
+      });
+      return {
+        state: Number(value.state) === 2 ? ("Closed" as const) : ("Open" as const),
+        openReservations: BigInt(value.openReservations),
+        openPockets: BigInt(value.openPockets),
+        openJobs: BigInt(value.openJobs),
+      };
+    },
+    async closeEnvelope(input: { vault: Address; envelopeId: bigint; transaction: Hex }) {
+      const hash = await options.publicClient.sendRawTransaction({
+        serializedTransaction: input.transaction,
+      });
+      const receipt = await options.publicClient.waitForTransactionReceipt({ hash });
+      if (receipt.status !== "success") throw new Error(`closeEnvelope reverted: ${hash}`);
+      return hash;
+    },
+  };
+}
+
 function createPayerBoundary(
   options: ServerMainOptions,
   acceptancePorts: AcceptancePorts,
@@ -582,6 +1039,17 @@ function createPayerBoundary(
         acceptance,
       },
     );
+    await appendExecutionPhase(options.pool, {
+      planId: input.planId,
+      stepIndex: input.step.stepIndex,
+      attempt: context.attempt,
+      phase: "acceptance.result",
+      payload: {
+        index: context.index,
+        reportHash: result.acceptance.report.reportHash,
+        obsId: result.acceptance.report.obs_id,
+      },
+    });
     return (
       result.result ?? quarantinedStepResult(context, source, bodyCommit, result.acceptance.report)
     );
@@ -589,27 +1057,62 @@ function createPayerBoundary(
 }
 
 function createReceiptBuilder(options: ServerMainOptions, signer: Pick<Signer, "sign">) {
-  return async (context: SettledReceiptContext): Promise<void> => {
-    if (!options.settlement || !options.receiptInput)
-      throw new Error("Receipt settlement and trace adapters are not configured (TA-09).");
-    const reports = await options.pool.query<{ report_hash: string }>(
-      `SELECT report_hash FROM acceptance_reports
-       WHERE envelope_ref=$1 AND step_index=$2 AND body_ref=$3
-       ORDER BY created_at DESC LIMIT 1`,
-      [context.input.envelopeRef, context.input.step.stepIndex, context.bodyRef],
+  return async (context: SettledReceiptContext): Promise<boolean> => {
+    const acceptance = await options.pool.query<{ report_hash: string; obs_id: string }>(
+      `SELECT payload->>'reportHash' AS report_hash,payload->>'obsId' AS obs_id
+       FROM step_executions
+       WHERE plan_id=$1 AND step_index=$2 AND attempt=$3 AND phase='acceptance.result'
+         AND payload->>'index'=$4
+       ORDER BY execution_id DESC LIMIT 1`,
+      [context.input.planId, context.input.step.stepIndex, context.attempt, String(context.index)],
     );
-    const input = options.receiptInput(
-      context,
-      context.stepResult,
-      reports.rows.map((row) => row.report_hash),
+    const acceptanceRef = acceptance.rows[0];
+    if (!acceptanceRef)
+      throw new Error("Acceptance report identity is missing for the settled call.");
+    const reports = await options.pool.query<{
+      report_hash: string;
+      obs_id: string;
+      checks: AcceptanceReport["checks"];
+    }>(
+      `SELECT report_hash,obs_id,checks FROM acceptance_reports
+       WHERE report_hash=$1 AND obs_id=$2 AND envelope_ref=$3 AND step_index=$4 AND body_ref=$5`,
+      [
+        acceptanceRef.report_hash,
+        acceptanceRef.obs_id,
+        context.input.envelopeRef,
+        context.input.step.stepIndex,
+        context.bodyRef,
+      ],
     );
-    await createPaymentReceipt(input, {
+    const reportHashes = reports.rows.map((row) => row.report_hash);
+    const input = options.receiptInput
+      ? options.receiptInput(context, context.stepResult, reportHashes)
+      : createReceiptInputFromTrace(
+          context,
+          await getExecutionTrace(
+            options.pool,
+            context.input.planId,
+            context.input.step.stepIndex,
+            context.attempt,
+          ),
+          reports.rows,
+        );
+    const settlement =
+      options.settlement ??
+      createIndexerSettlement(
+        options.appReadOptions.indexerUrl,
+        Number(options.config.get("api.pageMaxLimit")),
+        Number(options.config.get("fetch.timeoutMs")),
+        (payment) => verifyX402Transfer(options.publicClient, payment),
+      );
+    const receipt = await createPaymentReceipt(input, {
       pool: options.pool,
       config: options.config,
       signer,
-      settlement: options.settlement,
+      settlement,
       now: options.clock.now,
     });
+    return receipt !== null;
   };
 }
 
@@ -661,17 +1164,10 @@ export function createPlannerProfileSource(
     profileIdFor(taskClass) {
       if (taskClass === "data-json.search" || taskClass === "data-json.extract")
         return acceptance.profileIdFor("data-json");
-      if (taskClass === "local") throw new LocalTemplateProfileUnavailableError();
+      if (taskClass === "local") return localTemplateProfile().profile_id;
       return acceptance.profileIdFor(taskClass);
     },
   };
-}
-
-export class LocalTemplateProfileUnavailableError extends Error {
-  constructor() {
-    super("The local-template-v1 profile ID must be supplied by Lane 3 acceptance/profile.ts.");
-    this.name = "LocalTemplateProfileUnavailableError";
-  }
 }
 
 export function createPlannerPocketKeySource(

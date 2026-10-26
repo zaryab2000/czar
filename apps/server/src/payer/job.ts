@@ -19,6 +19,7 @@ import {
   getExecutionTrace,
   releaseExecutorLease,
   startExecutorLeaseRenewal,
+  type ExecutorLeaseGuard,
   type ExecutionPhaseRow,
 } from "#src/payer/executions";
 
@@ -90,6 +91,7 @@ export interface JobExecutionInput {
   readonly envelopeExpiresAt: Date;
   readonly attempt?: number;
   readonly workerId?: string;
+  readonly dispatchLease?: ExecutorLeaseGuard;
 }
 
 export interface JobChainView {
@@ -255,6 +257,8 @@ export async function executeJobStep(
   dependencies: JobExecutionDependencies,
 ): Promise<JobExecutionResult> {
   const attempt = input.attempt ?? 0;
+  if (input.dispatchLease)
+    return executeJobProviders(input, dependencies, attempt, input.dispatchLease.assertHeld);
   const workerId = input.workerId ?? `job-${process.pid}-${randomUUID()}`;
   const leaseSeconds = Number(dependencies.config.get("payer.leaseSeconds"));
   const leased = await acquireExecutorLease(

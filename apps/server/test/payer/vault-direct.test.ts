@@ -9,6 +9,7 @@ import { buildTree, PAYEE_KIND, payeeLeaf } from "@czar/hashing";
 import { buildPaymentRequired, encodeBase64Json, encodePaymentRequired } from "@czar/x402";
 import type { SignRequest, SignResult } from "@czar/signer";
 import { setupDatabase } from "#test/db";
+import { markStepDoneWithResults } from "#src/payer/executions";
 import { makeObjectiveSubmission, seedDevice, TEST_USER_ID } from "#test/fixtures";
 
 const getPool = setupDatabase();
@@ -20,6 +21,7 @@ const HASH = `0x${"01".repeat(32)}`;
 
 beforeAll(async () => seedDevice(getPool()));
 beforeEach(async () => {
+  await getPool().query("DELETE FROM executor_leases");
   await getPool().query("DELETE FROM step_executions");
   await getPool().query("DELETE FROM steps");
   await getPool().query("DELETE FROM plans");
@@ -107,6 +109,112 @@ describe("vault-direct executor", () => {
     expect(reserve).not.toHaveBeenCalled();
     expect(sign).not.toHaveBeenCalled();
     expect(safeFetch).not.toHaveBeenCalled();
+  });
+
+  it("keeps the dispatcher lease while running an unpaid step", async () => {
+    const envelopeRef = "eip155:5042002:0x0000000000000000000000000000000000000001:1";
+    await getPool().query(
+      "INSERT INTO executor_leases (envelope_ref,worker_id,expires_at) VALUES ($1,$2,$3)",
+      [envelopeRef, "dispatch-worker", new Date(Date.now() + 60_000)],
+    );
+    await expect(
+      executeVaultDirectStep(
+        {
+          planId: PLAN_ID,
+          envelopeRef,
+          envelopeId: 1n,
+          envelopeExpiresAt: new Date("2026-10-22T00:00:00Z"),
+          vault: VAULT,
+          plan: {} as never,
+          step: {
+            stepIndex: 0,
+            stepId: "stp_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
+            kind: "local",
+            capability: "table-fill",
+            unitAmount: "0",
+            expectedCalls: 0,
+            stepCap: "0",
+            routingReason: "below-pocket-threshold",
+            acceptanceProfileId: "prof_00000000000000000000000000000000",
+          },
+          userId: "usr_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
+          deviceId: "dev_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
+          dispatchLease: { assertHeld: vi.fn() },
+        },
+        {
+          pool: getPool(),
+          config: loadConfig(),
+          signer: { sign: vi.fn() },
+          chain: {} as never,
+          safeFetch: vi.fn(),
+          now: () => new Date("2026-10-21T00:00:00Z"),
+          boundary: vi.fn(),
+          recordReceipt: vi.fn(async () => true),
+          objects: { put: vi.fn(), get: vi.fn() },
+        },
+      ),
+    ).resolves.toMatchObject({ state: "handed_off" });
+    const lease = await getPool().query<{ worker_id: string }>(
+      "SELECT worker_id FROM executor_leases WHERE envelope_ref=$1",
+      [envelopeRef],
+    );
+    expect(lease.rows[0]?.worker_id).toBe("dispatch-worker");
+  });
+
+  it("rolls back the result when the paid-step done write fails", async () => {
+    const stepResult = {
+      schemaVersion: "1.0" as const,
+      stepIndex: 0,
+      status: "delivered" as const,
+      source: { origin: "https://merchant.test", payTo: PAYEE, paymentRefHash: HASH },
+      fields: [],
+      flags: [],
+      bodyCommit: HASH,
+    };
+    await expect(
+      markStepDoneWithResults(getPool(), {
+        planId: PLAN_ID,
+        stepIndex: 0,
+        attempt: 0,
+        callsUsed: 1,
+        results: [{ index: 0, stepResult: { ...stepResult, status: "invalid" } as never }],
+      }),
+    ).rejects.toThrow("invalid StepResult");
+    await expect(
+      getPool().query("SELECT state FROM steps WHERE plan_id=$1 AND step_index=0", [PLAN_ID]),
+    ).resolves.toMatchObject({ rows: [{ state: "queued" }] });
+    await getPool().query(`CREATE FUNCTION fail_step_done() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.state = 'done' THEN RAISE EXCEPTION 'simulated state write failure'; END IF;
+        RETURN NEW;
+      END;
+    $$`);
+    await getPool().query(
+      "CREATE TRIGGER fail_step_done BEFORE UPDATE ON steps FOR EACH ROW EXECUTE FUNCTION fail_step_done()",
+    );
+    try {
+      await expect(
+        markStepDoneWithResults(getPool(), {
+          planId: PLAN_ID,
+          stepIndex: 0,
+          attempt: 0,
+          callsUsed: 1,
+          results: [{ index: 0, stepResult }],
+        }),
+      ).rejects.toThrow("simulated state write failure");
+      await expect(
+        getPool().query("SELECT state FROM steps WHERE plan_id=$1 AND step_index=0", [PLAN_ID]),
+      ).resolves.toMatchObject({ rows: [{ state: "queued" }] });
+      await expect(
+        getPool().query(
+          "SELECT execution_id FROM step_executions WHERE plan_id=$1 AND step_index=0 AND phase='step.result'",
+          [PLAN_ID],
+        ),
+      ).resolves.toMatchObject({ rows: [] });
+    } finally {
+      await getPool().query("DROP TRIGGER fail_step_done ON steps");
+      await getPool().query("DROP FUNCTION fail_step_done()");
+    }
   });
 
   it("recovers sent phases with the same authorization and payment header", async () => {
@@ -200,6 +308,17 @@ describe("vault-direct executor", () => {
         url: "http://127.0.0.1:4021/data?q=one",
         headers: { "payment-required": encodePaymentRequired(offer) },
         body: new Uint8Array(),
+      })
+      .mockResolvedValue({
+        status: 200,
+        url: "http://127.0.0.1:4021/data?q=one",
+        headers: {
+          "payment-response": encodeBase64Json({
+            errorReason: "settlement_pending",
+            transaction: HASH,
+          }),
+        },
+        body: new TextEncoder().encode('{"price":"ok"}'),
       });
     let failFirstAuthorizationSign = true;
     let successfulAuthorizationSignatures = 0;
@@ -288,8 +407,18 @@ describe("vault-direct executor", () => {
       deviceId: "dev_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
     };
     let current = new Date("2026-10-21T00:00:00Z");
-    const boundary = vi.fn(async () => ({ accepted: true }));
-    const recordReceipt = vi.fn(async (_input: SettledReceiptContext) => undefined);
+    const stepResult = {
+      schemaVersion: "1.0" as const,
+      stepIndex: 0,
+      status: "delivered" as const,
+      source: { origin: "http://127.0.0.1:4021", payTo: PAYEE, paymentRefHash: HASH },
+      fields: [],
+      flags: [],
+      bodyCommit: HASH,
+    };
+    const boundary = vi.fn(async () => stepResult);
+    let receiptAvailable = false;
+    const recordReceipt = vi.fn(async (_input: SettledReceiptContext) => receiptAvailable);
     const dependencies = {
       pool: getPool(),
       config: loadConfig(),
@@ -342,7 +471,10 @@ describe("vault-direct executor", () => {
     );
     const result = await executeVaultDirectStep(input, dependencies);
 
-    expect(result).toMatchObject({ state: "done", stepResults: [{ accepted: true }] });
+    expect(result).toMatchObject({ state: "pending", stepResults: [stepResult] });
+    await expect(
+      getPool().query("SELECT state FROM steps WHERE plan_id=$1 AND step_index=0", [PLAN_ID]),
+    ).resolves.toMatchObject({ rows: [{ state: "queued" }] });
     expect(chain.reserve).toHaveBeenCalledTimes(2);
     expect(
       sign.mock.calls.filter(
@@ -358,7 +490,7 @@ describe("vault-direct executor", () => {
       signedTransaction: "0x1234",
     });
     expect(chain.finalize).toHaveBeenCalledTimes(2);
-    expect(boundary).toHaveBeenCalledTimes(2);
+    expect(boundary).toHaveBeenCalledOnce();
     expect(recordReceipt).toHaveBeenCalledTimes(2);
     expect(recordReceipt.mock.calls[0]?.[0].paymentRef).toMatchObject({
       rail: "x402-exact",
@@ -379,9 +511,22 @@ describe("vault-direct executor", () => {
     await getPool().query("UPDATE steps SET calls_used=0 WHERE plan_id=$1 AND step_index=0", [
       PLAN_ID,
     ]);
-    await executeVaultDirectStep(input, dependencies);
+    receiptAvailable = true;
+    await expect(executeVaultDirectStep(input, dependencies)).resolves.toMatchObject({
+      state: "done",
+      stepResults: [stepResult],
+    });
     expect(chain.settle).toHaveBeenCalledTimes(1);
     expect(successfulAuthorizationSignatures).toBe(1);
     expect(chain.finalize).toHaveBeenCalledTimes(3);
+    await expect(
+      getPool().query("SELECT state FROM steps WHERE plan_id=$1 AND step_index=0", [PLAN_ID]),
+    ).resolves.toMatchObject({ rows: [{ state: "done" }] });
+    await expect(
+      getPool().query(
+        "SELECT payload FROM step_executions WHERE plan_id=$1 AND step_index=0 AND phase='step.result'",
+        [PLAN_ID],
+      ),
+    ).resolves.toMatchObject({ rows: [{ payload: { stepResult } }] });
   });
 });

@@ -13,6 +13,8 @@ import {
   planHash,
   profileId,
   reportHash,
+  slRequestCommit,
+  slResponseCommit,
   shapeHash,
   soulVersionCommit,
   soulVersionHash,
@@ -45,6 +47,25 @@ describe("named hashes (02 §5.2)", () => {
     hourlyBand: "40-80",
     taskSpecHash: taskSpecHash(taskSpec),
   };
+
+  it("canonicalizes SL request commits and excludes payment headers", () => {
+    const first = slRequestCommit({
+      method: "get",
+      url: "https://merchant.test/search?z=2&a=1",
+      headers: { Accept: "application/json", "Payment-Signature": "secret" },
+      body: new Uint8Array(),
+    });
+    const reordered = slRequestCommit({
+      method: "GET",
+      url: "https://merchant.test/search?a=1&z=2",
+      headers: { accept: "application/json", authorization: "excluded" },
+      body: new Uint8Array(),
+    });
+    expect(first).toBe(reordered);
+    expect(slResponseCommit(200, "application/json", new TextEncoder().encode("{}"))).not.toBe(
+      slResponseCommit(201, "application/json", new TextEncoder().encode("{}")),
+    );
+  });
 
   it("taskSpecHash nests the complete TaskSpec", () => {
     expect(taskSpecHash(taskSpec)).toBe(

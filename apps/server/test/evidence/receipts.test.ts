@@ -19,16 +19,20 @@ describe("settled payment receipts", () => {
     const input = receiptInput("settled");
     const signer = await testSigner();
     const sign = vi.fn((caller: string, request: SignRequest) => signer.sign(caller, request));
+    const isSettled = vi.fn(
+      async (payment: typeof input.payment) => payment.nonce === input.payment.nonce,
+    );
 
     await createPaymentReceipt(input, {
       pool: getPool(),
       config: loadConfig(),
       signer: { sign },
-      settlement: { isSettled: async () => true },
+      settlement: { isSettled },
       now: () => new Date("2026-10-21T00:00:00Z"),
     });
 
     expect(sign).toHaveBeenCalledOnce();
+    expect(isSettled).toHaveBeenCalledExactlyOnceWith(input.payment);
     const [caller, request] = sign.mock.calls[0]!;
     expect(caller).toBe("cz-15");
     expect(request.kind).toBe("sl-receipt");

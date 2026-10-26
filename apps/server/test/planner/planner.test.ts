@@ -9,7 +9,8 @@ import {
   recomputePlanHash,
 } from "#src/planner/index";
 import { createSafeProber } from "#src/planner/probe";
-import { LocalTemplateProfileUnavailableError, createPlannerProfileSource } from "#src/main";
+import { createPlannerProfileSource } from "#src/main";
+import { localTemplateProfile } from "#src/acceptance/profile";
 import { route, routingParamsFromConfig, cVd, pocketWorthIt } from "#src/router/index";
 import type { PlannerPorts } from "#src/planner/ports";
 import type { PlannerService } from "#src/planner/ports";
@@ -156,7 +157,7 @@ function makePlanner(
 }
 
 describe("planner fallback", () => {
-  it("fails closed with a named error when a local-step profile is unavailable", async () => {
+  it("uses the registered local-template-v1 profile for unpaid local steps", async () => {
     const profileSource = createPlannerProfileSource({
       profileIdFor(taskClass: string) {
         if (taskClass !== "data-json") throw new RangeError(`Unsupported ${taskClass}`);
@@ -166,9 +167,8 @@ describe("planner fallback", () => {
 
     await expect(
       makePlanner({ capabilities: ["table-build"], profileSource }),
-    ).rejects.toMatchObject({
-      name: LocalTemplateProfileUnavailableError.name,
-      message: expect.stringContaining("Lane 3 acceptance/profile.ts"),
+    ).resolves.toMatchObject({
+      plan: { steps: [{ acceptanceProfileId: localTemplateProfile().profile_id }] },
     });
   });
 
