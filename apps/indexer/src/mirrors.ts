@@ -69,6 +69,28 @@ export type PullbackMirror = {
 export const mirrorKey = (vault: Address, id: bigint | Address | Hex): string =>
   `${vault.toLowerCase()}:${String(id).toLowerCase()}`;
 
+export function manualReturnMirror(input: {
+  vault: Address;
+  pocket: Address;
+  credit: bigint;
+  txHash: Hex;
+  logIndex: number;
+  block: bigint;
+}) {
+  const { vault, pocket, credit, txHash, logIndex, block } = input;
+  const normalizedVault = vault.toLowerCase();
+  const normalizedTxHash = txHash.toLowerCase();
+  return {
+    id: `${normalizedVault}:${normalizedTxHash}:${logIndex}`,
+    vault: normalizedVault,
+    pocket: pocket.toLowerCase(),
+    credit: credit.toString(),
+    txHash: normalizedTxHash,
+    logIndex,
+    block,
+  };
+}
+
 export function safeNumber(value: bigint): number {
   const number = Number(value);
   if (!Number.isSafeInteger(number))

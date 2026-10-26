@@ -67,6 +67,15 @@ export function encodeSetCategoryLimits(
   });
 }
 
+/** Encodes the vault owner's record of a manual pocket return. */
+export function encodeRecordManualReturn(pocket: Address, amount: bigint): Hex {
+  return encodeFunctionData({
+    abi: czarVaultAbi,
+    functionName: "recordManualReturn",
+    args: [pocket, amount],
+  });
+}
+
 /** Encodes the owner P-256 key and WebAuthn RP ID hash into the vault. */
 export function encodeSetPasskey(qx: Hex, qy: Hex, rpIdHash: Hex): Hex {
   if (size(qx) !== 32 || size(qy) !== 32 || size(rpIdHash) !== 32) {

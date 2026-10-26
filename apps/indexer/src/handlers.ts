@@ -5,6 +5,7 @@ import {
   authorizations,
   indexedEvents,
   jobs,
+  manualReturns,
   pockets,
   pullbacks as pullbackRows,
   reservations,
@@ -23,6 +24,7 @@ import {
   jobMirror,
   jobState,
   mirrorKey,
+  manualReturnMirror,
   pocketMirror,
   reservationMirror,
   safeNumber,
@@ -545,6 +547,19 @@ ponder.on("CzarVault:PocketClosed", async ({ event, context }) => {
 ponder.on("CzarVault:ManualReturnRecorded", async ({ event, context }) => {
   const info = meta(event);
   await record(context, info, "ManualReturnRecorded");
+  await context.db
+    .insert(manualReturns)
+    .values(
+      manualReturnMirror({
+        vault: info.vault,
+        pocket: event.args.pocket,
+        credit: event.args.amount,
+        txHash: info.tx,
+        logIndex: info.logIndex,
+        block: info.block,
+      }),
+    )
+    .onConflictDoNothing();
   await refreshPocket(context, info, event.args.pocket);
 });
 
