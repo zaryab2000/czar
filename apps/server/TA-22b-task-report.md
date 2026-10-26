@@ -74,7 +74,11 @@ UserOp or testnet acceptance.
 - The two latest-head code-review findings were fixed: per-candidate write-off
   errors no longer abort the pass, and closure reconciliation checks chain
   logs before expiring against a lagging indexer projection. Both have focused
-  test coverage. No additional Codex review was requested.
+  test coverage. Code/security review run 3 completed on `88d5c96`, and Lane 4
+  found no new blocker in that source delta. The current head `4a39917` adds the
+  SCR-145 retry regression test and report update; it still needs Lane 4
+  pre-review. The Codex review cap is reached, and no further Codex run should
+  be requested.
 - The SCR-145 Lane 2 regression test drives a signer denial through
   `writeOffOverdueManualReturn`, verifies the row stays pending, and verifies a
   second retry at the configured recovery interval.
