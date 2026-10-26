@@ -119,7 +119,7 @@ stateDiagram-v2
 | `pocketBalance(pocket)` (SCR-127) | CZ-15, CZ-27 signer | the `pocket_balances` row plus `apiAgeSeconds` and `chainAgeBlocks` computed at read time |
 | `fundedPocketsForVault(vault)` (SCR-127) | CZ-15 halt drain | the vault's pockets in `Registered`, `DelegateReady`, `Funded` or `Draining`, each with `envelopeRef`, `outstanding`, `pendingPullback` (CZ-15 maps pocket → plan through its own `plan_pocket_keys`) |
 | `closedPocketsWithBalance()` (SCR-127) | CZ-15 late-funds recovery | `Closed` pockets still in poll scope with `gatewayAvailableAtomic > 0` or `gatewayWithdrawingAtomic > 0` |
-| `manualReturnsForVault(vault)` (SCR-133) | CZ-15 | `ManualReturnRecorded` events of the vault's pockets as `{pocket, credit, txHash, block}` |
+| `manualReturnsForVault(vault)` (SCR-133) | CZ-15 | `ManualReturnRecorded` events of the vault's pockets as `{pocket, credit, txHash, block, logIndex}`, ordered by `(block, logIndex)` (SCR-144) |
 
 Response contracts (SCR-119, 2026-10-21). These are internal indexer → server responses, not public API shapes; no `@czar/schemas` type is added for them:
 
@@ -900,3 +900,4 @@ Postgres 16 (pgvector only in Phase 2, C1-13), `@czar/x402` for probes, `@x402/e
 | 2026-10-25 | SCR-141 | CZ-19 internal `closedZeroSince` and the closed-pocket quiet-period rule (adds `pendingBatch`). |
 | 2026-10-25 | SCR-142 | Canonical `local-template-v1` profile and producer; internal `pollEndedAt` ends closed-pocket polling durably. |
 | 2026-10-26 | SCR-143 | `acceptance_decisions.deliverableHash`; evaluator never writes `StepResult`; matched upload retained until CZ-15 persists it. |
+| 2026-10-26 | SCR-144 | `manualReturnsForVault` returns `logIndex`. |
