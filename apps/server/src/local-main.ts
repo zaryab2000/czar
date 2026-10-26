@@ -128,6 +128,8 @@ export async function startLocalServer() {
       objects: createFileObjectStore(objectStorePath),
       rpcUrl,
       factoryAddress: deployment.CzarVaultFactory,
+      gatewayMinter: deployment.gatewayMinter,
+      gatewayDomain: deployment.gatewayDomain,
       indexerUrl,
       clock: { now: () => new Date() },
       random: { bytes: (size) => randomBytes(size) },

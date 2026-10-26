@@ -77,6 +77,11 @@ import { executeJobStep, type JobExecutionInput } from "#src/payer/job";
 import { createJobChainAdapter } from "#src/payer/job-chain-adapter";
 import { createDatabaseVaultEventSource } from "#src/payer/database-vault-event-source";
 import { createPullbackChainAdapter } from "#src/payer/pullback-chain-adapter";
+import { createIndexerPocketReader } from "#src/payer/indexer-pocket";
+import {
+  createPocketRecoveryOperations,
+  type PocketRecoveryOperations,
+} from "#src/payer/pocket-recovery";
 import {
   runPendingPullbackFallbacks,
   type PullbackFallbackSchedulerDependencies,
@@ -115,6 +120,8 @@ export interface ServerMainOptions extends PairDependencies {
   ) => PaymentReceiptInput;
   readonly appReadOptions: AppReadOptions;
   readonly gatewayTransferUrl?: string;
+  readonly gatewayMinter?: Address;
+  readonly gatewayDomain?: number;
   readonly jobEvaluator?: {
     reject(input: {
       readonly jobKey: `0x${string}`;
@@ -185,7 +192,8 @@ export async function createServerMain(options: ServerMainOptions): Promise<Serv
     selection,
     signerClient,
   );
-  const payerRuntime = startProductionPayerRuntime(options, signerClient);
+  const pocketRecovery = createDefaultPocketRecovery(options, signerClient);
+  const payerRuntime = startProductionPayerRuntime(options, signerClient, pocketRecovery);
   const payerDependencies = createPayerDependencies(
     options,
     signerClient,
@@ -225,7 +233,7 @@ export async function createServerMain(options: ServerMainOptions): Promise<Serv
     app,
     acceptance,
     ...createVaultDirectOperations(options, payerDependencies),
-    ...createPocketOperations(options, signerClient),
+    ...createPocketOperations(options, signerClient, pocketRecovery),
     ...createPullbackOperations(options, signerClient),
     executeJobStep: (input) => executeJobStepForMain(options, signerClient, input),
     async close() {
@@ -372,13 +380,39 @@ function createPayerDependencies(
   };
 }
 
-function startProductionPayerRuntime(options: ServerMainOptions, signer: ServerSigner) {
-  const vaultEvents =
-    options.vaultEvents ??
-    (options.pocketHalt ? createDatabaseVaultEventSource(options) : undefined);
-  if (!options.vaultEvents && !options.pocketHalt)
+function createDefaultPocketRecovery(
+  options: ServerMainOptions,
+  signer: ServerSigner,
+): PocketRecoveryOperations | undefined {
+  if (options.gatewayDomain === undefined || !options.gatewayMinter) return undefined;
+  return createPocketRecoveryOperations({
+    pool: options.pool,
+    config: options.config,
+    logger: options.logger,
+    signer,
+    publicClient: options.publicClient,
+    walletClient: options.walletClient,
+    safeFetch: options.safeFetch,
+    indexerUrl: options.appReadOptions.indexerUrl,
+    gatewayMinter: options.gatewayMinter,
+    gatewayDomain: options.gatewayDomain,
+    ...(options.gatewayTransferUrl === undefined
+      ? {}
+      : { gatewayTransferUrl: options.gatewayTransferUrl }),
+    now: options.clock.now,
+  });
+}
+
+function startProductionPayerRuntime(
+  options: ServerMainOptions,
+  signer: ServerSigner,
+  pocketRecovery?: PocketRecoveryOperations,
+) {
+  const pocketHalt = options.pocketHalt ?? pocketRecovery?.halt;
+  const vaultEvents = options.vaultEvents ?? createDatabaseVaultEventSource(options);
+  if (!pocketHalt)
     options.logger.error("payer_halt_monitor_disabled", {
-      rule: "missing_pocket_halt_dependencies",
+      rule: "missing_gateway_deployment_context",
       state: "disabled",
     });
   const fallbackChain =
@@ -389,11 +423,20 @@ function startProductionPayerRuntime(options: ServerMainOptions, signer: ServerS
       options.config.get("chain.gatewayWalletAddress") as Address,
       { config: options.config, logger: options.logger },
     );
+  const pocketReader = createIndexerPocketReader(
+    options.appReadOptions.indexerUrl,
+    Number(options.config.get("fetch.timeoutMs")),
+  );
   return startPayerRuntime({
-    ...(vaultEvents ? { events: vaultEvents } : {}),
-    ...(options.pocketHalt ? { pocketHalt: options.pocketHalt } : {}),
+    ...(pocketHalt ? { events: vaultEvents, pocketHalt } : {}),
     fallbackPollSeconds: Number(options.config.get("payer.pullbackFallbackPollSeconds")),
-    runFallbacks: () => runPullbackFallbacks(options, signer, fallbackChain),
+    runFallbacks: () => runPullbackFallbacks(options, signer, fallbackChain, pocketReader),
+    ...(pocketRecovery
+      ? {
+          recoveryPollSeconds: Number(options.config.get("payer.gatewayRecoveryPollSeconds")),
+          runClosedRecovery: pocketRecovery.runClosedPocketRecovery,
+        }
+      : {}),
     onError: (operation) =>
       options.logger.error("payer_runtime_failure", { rule: operation, state: "error" }),
   });
@@ -403,6 +446,7 @@ async function runPullbackFallbacks(
   options: ServerMainOptions,
   signer: ServerSigner,
   fallbackChain: PullbackFallbackSchedulerDependencies["chain"],
+  pocketReader: ReturnType<typeof createIndexerPocketReader>,
 ) {
   return runPendingPullbackFallbacks({
     pool: options.pool,
@@ -410,6 +454,7 @@ async function runPullbackFallbacks(
     signer,
     cancelPendingPullback: (input) => cancelFallbackPullback(options, signer, input),
     chain: fallbackChain,
+    readGatewayBalance: (pocket) => pocketReader.pocketBalance(pocket),
     now: options.clock.now,
   });
 }
@@ -453,7 +498,11 @@ function createVaultDirectOperations(
   };
 }
 
-function createPocketOperations(options: ServerMainOptions, signer: ServerSigner) {
+function createPocketOperations(
+  options: ServerMainOptions,
+  signer: ServerSigner,
+  pocketRecovery?: PocketRecoveryOperations,
+) {
   return {
     executePocketPreparation(input: PocketPreparationInput) {
       return executePocketPreparation(input, {
@@ -496,6 +545,9 @@ function createPocketOperations(options: ServerMainOptions, signer: ServerSigner
           retirePocketKey: signer.retirePocketKey.bind(signer),
         },
         chain,
+        ...(pocketRecovery?.recoverLateGatewayBalance
+          ? { recoverLateGatewayBalance: pocketRecovery.recoverLateGatewayBalance }
+          : {}),
       });
     },
   };

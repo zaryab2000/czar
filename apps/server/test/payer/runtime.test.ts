@@ -44,6 +44,18 @@ describe("payer runtime wiring", () => {
     runtime.stop();
   });
 
+  it("runs closed-pocket recovery on its separate configured interval", async () => {
+    vi.useFakeTimers();
+    const runClosedRecovery = vi.fn(async () => undefined);
+    const runtime = startPayerRuntime({
+      recoveryPollSeconds: 60,
+      runClosedRecovery,
+    });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(runClosedRecovery).toHaveBeenCalledOnce();
+    runtime.stop();
+  });
+
   it("propagates a failed halt drain after logging so its source can retry", async () => {
     let listener: ((event: { name: string; vault: `0x${string}` }) => Promise<void>) | undefined;
     const source: VaultHaltEventSource = {

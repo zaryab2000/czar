@@ -59,6 +59,10 @@ export interface PocketCloseInput {
 export interface PocketCloseDependencies {
   readonly pool: Pool;
   readonly signer: Pick<Signer, "sign" | "retirePocketKey">;
+  readonly recoverLateGatewayBalance?: (input: {
+    readonly vault: Address;
+    readonly pocket: Address;
+  }) => Promise<void>;
   readonly chain: {
     isClosed(pocket: Address): Promise<boolean>;
     hasPendingPullback(pocket: Address): Promise<boolean>;
@@ -139,7 +143,13 @@ export async function sweepAndRetirePocketKey(
   }
   const sweptNative = await sweepPocketBalance(input, dependencies, "native");
   await sweepPocketBalance(input, dependencies, "usdc");
-  const balances = await dependencies.chain.pocketBalances(input.pocket);
+  let balances = await dependencies.chain.pocketBalances(input.pocket);
+  if (balances.gateway > 0n) {
+    if (!dependencies.recoverLateGatewayBalance)
+      throw new Error("Late Gateway balance recovery is not configured for this pocket.");
+    await dependencies.recoverLateGatewayBalance({ vault: input.vault, pocket: input.pocket });
+    balances = await dependencies.chain.pocketBalances(input.pocket);
+  }
   if (balances.native !== 0n || balances.usdc !== 0n || balances.gateway !== 0n)
     throw new Error("Pocket key cannot retire while a balance remains.");
   await dependencies.signer.retirePocketKey("cz-15", input.pocket);
