@@ -226,10 +226,14 @@ describe("pocket keys (K4, RV-004)", () => {
       t.state.balances = {
         gatewayApi: 0n,
         gatewayAvailable: 0n,
+        gatewayApiObservedAt: null,
         gatewayWithdrawing: 0n,
+        withdrawalBlock: 0n,
+        currentBlock: 0n,
         usdc: 0n,
         native: 0n,
         pendingPullback: false,
+        gatewayApiFresh: true,
         ...change,
       };
       await expect(t.signer.retirePocketKey("cz-15", t.pocket)).rejects.toMatchObject({
@@ -239,10 +243,14 @@ describe("pocket keys (K4, RV-004)", () => {
     t.state.balances = {
       gatewayApi: 0n,
       gatewayAvailable: 0n,
+      gatewayApiObservedAt: null,
       gatewayWithdrawing: 0n,
+      withdrawalBlock: 0n,
+      currentBlock: 0n,
       usdc: 0n,
       native: 499n,
       pendingPullback: false,
+      gatewayApiFresh: true,
     };
     t.state.pocket = {
       ...(t.state.pocket as NonNullable<typeof t.state.pocket>),
@@ -250,6 +258,14 @@ describe("pocket keys (K4, RV-004)", () => {
     };
     await expect(t.signer.retirePocketKey("cz-15", t.pocket)).rejects.toMatchObject({
       rule: "pocket-balance-not-zero",
+    });
+  });
+
+  it("refuses pocket-key retirement when the Gateway API figure is stale", async () => {
+    const t = await harness();
+    t.state.balances = { ...t.state.balances, gatewayApiFresh: false };
+    await expect(t.signer.retirePocketKey("cz-15", t.pocket)).rejects.toMatchObject({
+      rule: "gateway-balance-stale",
     });
   });
 

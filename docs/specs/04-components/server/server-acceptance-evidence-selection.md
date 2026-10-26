@@ -307,6 +307,7 @@ stateDiagram-v2
 | 6 | After the tx: CZ-15 `syncJob(jobKey)` mirrors the state into the vault; CZ-17 gets the `report` row | 03 `czar-vault.md` §5.5 |
 
 - `optParams` is always empty; the `reason` is only the hash (p1-E7: calldata is public).
+- **Handoff (SCR-143):** the evaluator never writes `StepResult` or step state. It records the matched upload's `contentHash` as `acceptance_decisions.deliverableHash`; CZ-15 builds the `StepResult` from those bytes after `Completed`. The matched `payer_job_deliverables` row and its body are kept until that `StepResult` is persisted.
 - Idempotency: one decision per `jobKey`, recorded in `acceptance_decisions` before the tx is sent; on restart the evaluator re-reads `getJob` (or `jobs`) and, if the status is already `Completed`/`Rejected`, records the decision as observed instead of sending again. A tx that reverts `WrongStatus` is treated as "already decided by someone else" and reconciled from events.
 
 #### 5.6 Conflict of interest
@@ -322,7 +323,7 @@ Czar judges work it planned and paid for. Mitigations in Phase 1, all visible:
 | Table | Fields |
 |---|---|
 | `acceptance_reports` | `reportHash` PK, `envelopeRef`, `stepIndex`, `jobKey?`, `obsId`, `profileId`, `methodVersion`, `decision`, `checks` (JSON), `flags`, `createdAt`, `bodyRef` |
-| `acceptance_decisions` | `jobKey` PK, `decision`, `reportHash`, `txHash?`, `state` (`Pending`, `Sent`, `Confirmed`, `Observed`) |
+| `acceptance_decisions` | `jobKey` PK, `decision`, `reportHash`, `deliverableHash?` (SCR-143: `contentHash` of the matched upload, required for `complete`), `txHash?`, `state` (`Pending`, `Sent`, `Confirmed`, `Observed`) |
 | `profiles` | `profileId` PK, `taskClass`, `version`, `json`, `codeHash` |
 
 #### 5.8 Parameters
@@ -898,3 +899,4 @@ Postgres 16 (pgvector only in Phase 2, C1-13), `@czar/x402` for probes, `@x402/e
 | 2026-10-25 | SCR-138 | CZ-18 interim snapshot keeps every registered service with its probe state (failed or every reduced offer with asset, scheme, network and payment-flag booleans); offer rule and USDC asset in the policy descriptor; normative eligibility rule. |
 | 2026-10-25 | SCR-141 | CZ-19 internal `closedZeroSince` and the closed-pocket quiet-period rule (adds `pendingBatch`). |
 | 2026-10-25 | SCR-142 | Canonical `local-template-v1` profile and producer; internal `pollEndedAt` ends closed-pocket polling durably. |
+| 2026-10-26 | SCR-143 | `acceptance_decisions.deliverableHash`; evaluator never writes `StepResult`; matched upload retained until CZ-15 persists it. |

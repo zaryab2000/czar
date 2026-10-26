@@ -12,11 +12,13 @@ import {
   anchors,
   authorizations,
   haltFlags,
+  indexedEvents,
   envelopes,
   escrowJobs,
   gatewayTransfers,
   jobs,
   pockets,
+  pocketBalances,
   pullbacks,
   reservations,
   vaults,
@@ -185,6 +187,106 @@ beforeEach(async () => {
 });
 
 describe("T-034 query store (SQL)", () => {
+  it("serves pocket balance ages, funded pockets and Closed pockets with balances", async () => {
+    const fundedRef = await seedEnvelope(VAULT, 1n);
+    await seedEnvelope(VAULT, 2n);
+    const recordPocket = async (envelopeId: bigint, address: Address, state: number) => {
+      const mirror = pocketMirror({
+        vault: VAULT,
+        pocket: address,
+        view: {
+          envelopeId,
+          state,
+          funded: 1000n,
+          gasGranted: 1n,
+          outstanding: 500n,
+          pendingPullback: state === 4 ? 0n : 100n,
+        },
+        pullbacks: [],
+        delegateReady: state === 1,
+      });
+      await db.insert(pockets).values({
+        id: `${lower(VAULT)}:${lower(address)}`,
+        vault: lower(VAULT),
+        envelopeId,
+        pocket: lower(address),
+        mirror,
+      });
+    };
+    await recordPocket(1n, POCKET, 1);
+    const closedPocket = "0x00000000000000000000000000000000000c2a25" as Address;
+    await recordPocket(2n, closedPocket, 4);
+    const observedAt = new Date().toISOString();
+    await db.insert(pocketBalances).values([
+      {
+        pocket: lower(POCKET),
+        vault: lower(VAULT),
+        gatewayAvailableAtomic: "750",
+        gatewayPendingBatchAtomic: "25",
+        gatewayWithdrawingAtomic: "0",
+        withdrawalBlock: 0n,
+        pocketUsdcAtomic: "0",
+        apiObservedAt: observedAt,
+        chainObservedBlock: 100n,
+        apiConsecutiveFailures: 0,
+        apiLastError: null,
+        closedZeroSince: null,
+        pollEndedAt: null,
+      },
+      {
+        pocket: lower(closedPocket),
+        vault: lower(VAULT),
+        gatewayAvailableAtomic: "1",
+        gatewayPendingBatchAtomic: "0",
+        gatewayWithdrawingAtomic: "0",
+        withdrawalBlock: 0n,
+        pocketUsdcAtomic: "0",
+        apiObservedAt: observedAt,
+        chainObservedBlock: 100n,
+        apiConsecutiveFailures: 0,
+        apiLastError: null,
+        closedZeroSince: null,
+        pollEndedAt: null,
+      },
+    ]);
+    await db.insert(indexedEvents).values({
+      id: "head-event",
+      emitter: lower(VAULT),
+      name: "PocketFunded",
+      block: 120n,
+    });
+    const app = createIndexerApi(createQueryStore(db), loadConfig());
+
+    const balanceResponse = await app.request(`/pocket-balances/${lower(POCKET)}`);
+    expect(balanceResponse.status).toBe(200);
+    const balanceBody = await balanceResponse.json();
+    expect(balanceBody).toMatchObject({
+      pocket: lower(POCKET),
+      gatewayAvailableAtomic: "750",
+      gatewayPendingBatchAtomic: "25",
+      apiAgeSeconds: expect.any(Number),
+      chainAgeBlocks: "20",
+      slowWithdrawalOpen: false,
+    });
+    expect(balanceBody).not.toHaveProperty("closedZeroSince");
+    expect(balanceBody).not.toHaveProperty("pocketUsdcAtomic");
+    expect(balanceBody).not.toHaveProperty("pollEndedAt");
+    const fundedResponse = await app.request(`/pockets/funded?vault=${lower(VAULT)}`);
+    expect(await fundedResponse.json()).toMatchObject({
+      items: [{ envelopeRef: fundedRef, outstanding: "500", pendingPullback: "100" }],
+    });
+    const closedResponse = await app.request("/pockets/closed-with-balance");
+    const closedBody = await closedResponse.json();
+    expect(closedBody).toMatchObject({
+      items: [{ pocket: lower(closedPocket), pocketRecord: { state: "Closed" } }],
+    });
+    const closedItems = (closedBody as { items: Array<{ balance: Record<string, unknown> }> })
+      .items;
+    expect(closedItems[0]?.balance).not.toHaveProperty("closedZeroSince");
+    expect(closedItems[0]?.balance).not.toHaveProperty("pocketUsdcAtomic");
+    expect(closedItems[0]?.balance).not.toHaveProperty("pollEndedAt");
+  });
+
   it("finds a vault by its owner and pages envelopes by vault", async () => {
     await db.insert(vaults).values({
       id: lower(VAULT),

@@ -818,6 +818,7 @@
 - **Outputs:** the started composition root in `apps/server/src/local-main.ts`; planner loop; opening watcher; dispatcher; completion; optional model client.
 - **Acceptance tests:** started-root composition order; planner reclaim without a duplicate outbox row; opening watcher match, late match, timeout and expiry; dispatcher order, lease and resume; completion idempotent, `closeEnvelope` only after every reservation is `Final`, every pocket `Closed` and every job terminal, all-quarantined → `failed` with `result-quarantined`. The SCR-126 §2 started-root run on `arc-anvil` is part of T-050a.
 - **SCR-141 (2026-10-25, Lane 2):** CZ-14 `V` is computed inside planning from the plan's own Gateway-offer paid steps; remove the external `gatewayVolumeAtomic(objectiveId)` dependency; respect `routing.gatewayEnabled` (default `false`: no `gateway-nano` route in Track A; a Gateway-only offer is `unsupported-offer`). Tests: `V` sums only Gateway-offer paid steps; Gateway-only offer with the key `false`; existing CZ-14 table tests pass with the key `true`.
+- **SCR-143 (2026-10-26, Lane 2):** PR #86 (TA-09) Guard A (job step `failed` `unsupported-offer` before `openJob` while `routing.jobEnabled` is false), Guard B (`Completed` never maps to `done` without the SCR-143 result order; `pending` + `job-result-missing`), and the paid-step `done` invariant, with tests. Follow-up before T-050a: the planner respects `routing.jobEnabled`. Track B: the job-result builder (CZ-15 §5.4 step 5 order) after T-055.
 
 ### T-123 Interim Czar-registered selection (SCR-131)
 - **Milestone / group / who:** M3 / M3-c / agent. **Size:** M. **Deps:** T-041, T-042. **Owner:** Lane 3.
@@ -911,6 +912,7 @@
 - **Job-path review (2026-10-20):** evaluator step 1a (H1, N6): decide only for vault jobs `Funded`/`Submitted` with matching budget; reject unfunded submits. Tests: a legitimate job after `syncJob` (vault `Submitted`) is evaluated; an unfunded submit is rejected and never completed.
 - **D87 (2026-10-20):** push-model lookup by `contentHash` and `decisionCutoff` (N5); fee and implementation check before `complete` (M2); timing rule (M4); freeze rule (M3). Tests: upload A, submit hash(A), upload B → A matched (N4); no upload by the cutoff → reject mined before `expiredAt`; fees raised after funding → reject; freeze with one funded and one submitted job → refund now, hold, then complete on unfreeze.
 - **H6 (2026-10-20):** artifact deliverables decided by the profile with flags recorded.
+- **SCR-143 (2026-10-26, Lane 3, Track B):** record `acceptance_decisions.deliverableHash` (required for `complete`) before the tx; never write `StepResult` or step state; keep the matched upload until CZ-15 persists the `StepResult`. Tests: decision row precedes the tx; restart resumes the same decision; matched upload not purged early.
 
 ### T-056 Acceptance profiles complete: requirement check, D55 inconclusive rule, report vocabulary
 - **Milestone / group / who:** M4 / M4-a / agent. **Size:** M. **Deps:** T-047.

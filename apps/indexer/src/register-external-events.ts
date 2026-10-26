@@ -5,11 +5,14 @@ import {
   anchors,
   authorizations,
   dependencyState,
+  envelopes,
   externalEvents,
   escrowJobs,
   gatewayTransfers,
+  alerts,
   haltFlags,
   pockets,
+  pocketBalances,
   pullbacks,
   vaults,
 } from "ponder:schema";
@@ -29,6 +32,12 @@ import { normalizeTransferAmount } from "#src/amounts";
 import { externalEventId, pocketDelegateState } from "#src/external-events";
 import { EXTERNAL_ADDRESSES } from "#src/external-events";
 import { pollGatewayTransfers } from "#src/gateway-poller";
+import {
+  isPocketStale,
+  advanceGatewayApiFailures,
+  pollPocketBalance,
+  type PocketBalanceRow,
+} from "#src/gateway-balances";
 import { createAlertReporter } from "#src/alerts/reporter";
 import { haltPaths, type PinnedProxy } from "#src/alerts/rules";
 
@@ -71,12 +80,35 @@ for (const address of payoutAddresses) {
   }
 }
 const normalizedPayoutAddresses = payoutAddresses.map((address) => address.toLowerCase());
+const deploymentPath =
+  process.env["CZAR_INDEXER_DEPLOYMENT_PATH"] ??
+  new URL("../../../deployments/arc-testnet.json", import.meta.url).pathname;
+const deployment = JSON.parse(readFileSync(deploymentPath, "utf8")) as {
+  gatewayWallet?: string;
+  usdc?: string;
+  gatewayDomain?: number;
+};
+if (
+  !deployment.gatewayWallet ||
+  !/^0x[\da-fA-F]{40}$/.test(deployment.gatewayWallet) ||
+  !deployment.usdc ||
+  !/^0x[\da-fA-F]{40}$/.test(deployment.usdc) ||
+  !Number.isSafeInteger(deployment.gatewayDomain) ||
+  (deployment.gatewayDomain ?? -1) < 0
+) {
+  throw new Error(
+    `Invalid GatewayWallet, USDC or Gateway domain in deployment manifest: ${deploymentPath}`,
+  );
+}
+const gatewayWallet = deployment.gatewayWallet as Address;
+const gatewayUsdc = deployment.usdc as Address;
+const gatewayDomain = deployment.gatewayDomain as number;
 const logger = createLogger({ service: "indexer", component: "CZ-19" });
 const reportAlert = createAlertReporter(logger);
 const MS_PER_SECOND = 1000;
 let lastGatewayPollMs = 0;
 let gatewayPollInFlight = false;
-let consecutiveGatewayErrors = 0;
+let consecutiveGatewayApiErrors = 0;
 
 function jsonValue(value: unknown): unknown {
   if (typeof value === "bigint") return value.toString();
@@ -98,6 +130,30 @@ async function save(context: Context, event: Event, name: string, payload: unkno
       payload: jsonValue(payload),
     })
     .onConflictDoNothing();
+}
+
+async function updateAlert(
+  context: Context,
+  rule: "pocket-stale" | "gateway-poll-failing",
+  subject: string,
+  active: boolean,
+  now: number,
+  details: Record<string, unknown>,
+): Promise<void> {
+  const id = `${rule}:${subject}`;
+  const previous = await context.db.find(alerts, { id });
+  await context.db
+    .insert(alerts)
+    .values({
+      id,
+      rule,
+      subject,
+      active,
+      firstSeenAt: previous?.firstSeenAt ?? new Date(now).toISOString(),
+      updatedAt: new Date(now).toISOString(),
+      details,
+    })
+    .onConflictDoUpdate({ active, updatedAt: new Date(now).toISOString(), details });
 }
 
 /** True when the address is a Czar vault, a Czar pocket or a configured merchant payout address.
@@ -408,11 +464,118 @@ ponder.on("GatewayPoll:block", async ({ context }) => {
     const pocketAddresses = new Set(
       pocketRows.map((row) => (row.mirror as PocketRecord).pocket.toLowerCase()),
     );
+    const currentTime = Date.now();
+    const apiOutcomes: { apiError: boolean; chainError: boolean }[] = [];
+    const pollAddresses = new Set<string>();
+    for (const row of pocketRows) {
+      const mirror = row.mirror as PocketRecord;
+      const address = mirror.pocket.toLowerCase();
+      const savedBalance = await context.db.find(pocketBalances, { pocket: address });
+      let observed: { apiError: boolean; chainError: boolean; row: PocketBalanceRow };
+      if (savedBalance !== null && savedBalance.pollEndedAt !== null) {
+        observed = {
+          apiError: false,
+          chainError: false,
+          row: savedBalance as PocketBalanceRow,
+        };
+      } else {
+        observed = await pollPocketBalance(
+          {
+            pocket: mirror.pocket as Address,
+            vault: mirror.vault as Address,
+            state: mirror.state,
+            domain: gatewayDomain,
+            gatewayWallet,
+            usdc: gatewayUsdc,
+            apiBase: config.get("chain.gatewayApiBaseUrl") as string,
+            timeoutMs: config.get("fetch.timeoutMs") as number,
+            quietMs: (config.get("indexer.closedPocketQuietHours") as number) * 3_600_000,
+            apiMaxAgeMs: (config.get("indexer.gatewayBalanceMaxAgeSeconds") as number) * 1000,
+          },
+          {
+            fetch,
+            chain: context.client as never,
+            now: () => currentTime,
+            store: {
+              find: async (lookupAddress) => {
+                const found = await context.db.find(pocketBalances, { pocket: lookupAddress });
+                return found as PocketBalanceRow | null;
+              },
+              async save(balance) {
+                await context.db
+                  .insert(pocketBalances)
+                  .values(balance)
+                  .onConflictDoUpdate({ ...balance });
+              },
+            },
+          },
+        );
+        apiOutcomes.push({ apiError: observed.apiError, chainError: observed.chainError });
+      }
+      if (observed.row.pollEndedAt === null) pollAddresses.add(address);
+      const envelope =
+        mirror.state === "Funded" || mirror.state === "Draining"
+          ? await context.db.find(envelopes, {
+              id: mirrorKey(mirror.vault as Address, BigInt(mirror.envelopeId)),
+            })
+          : undefined;
+      const envelopeMirror = envelope?.mirror as
+        | { state?: string; lastEventBlock?: number }
+        | undefined;
+      let envelopeClosedAt: number | null = null;
+      if (envelopeMirror?.state === "Closed" && typeof envelopeMirror.lastEventBlock === "number") {
+        try {
+          const block = await context.client.getBlock({
+            blockNumber: BigInt(envelopeMirror.lastEventBlock),
+          });
+          envelopeClosedAt = Number(block.timestamp) * MS_PER_SECOND;
+        } catch {
+          logger.warn("pocket_stale_close_block_unavailable", {
+            pocket: mirror.pocket.toLowerCase(),
+            block: envelopeMirror.lastEventBlock,
+          });
+        }
+      }
+      const stale = isPocketStale({
+        pocketState: mirror.state,
+        envelopeState: envelopeMirror?.state ?? null,
+        envelopeClosedAt,
+        now: currentTime,
+        staleMs: (config.get("indexer.pocketStaleHours") as number) * 3_600_000,
+      });
+      const eligibleForStaleAlert = mirror.state === "Funded" || mirror.state === "Draining";
+      const alertInputsAvailable =
+        !eligibleForStaleAlert ||
+        (typeof envelopeMirror?.state === "string" &&
+          (envelopeMirror.state !== "Closed" || envelopeClosedAt !== null));
+      if (alertInputsAvailable) {
+        await updateAlert(
+          context,
+          "pocket-stale",
+          mirror.pocket.toLowerCase(),
+          stale,
+          currentTime,
+          {
+            pocketState: mirror.state,
+            envelopeState: envelopeMirror?.state ?? null,
+            envelopeClosedAt,
+          },
+        );
+      }
+    }
     const targets = [
       ...pocketRows
         .filter((row) => {
           const state = (row.mirror as PocketRecord).state;
-          return state === "Funded" || state === "Draining";
+          const address = (row.mirror as PocketRecord).pocket.toLowerCase();
+          return (
+            pollAddresses.has(address) &&
+            (state === "Registered" ||
+              state === "DelegateReady" ||
+              state === "Funded" ||
+              state === "Draining" ||
+              state === "Closed")
+          );
         })
         .map((row) => ({
           kind: "pocket" as const,
@@ -443,15 +606,18 @@ ponder.on("GatewayPoll:block", async ({ context }) => {
           apiBase: config.get("chain.gatewayApiBaseUrl") as string,
         },
       );
-      if (outcome.error) {
-        consecutiveGatewayErrors += 1;
-        if (consecutiveGatewayErrors > (config.get("indexer.gatewayPollFailMax") as number)) {
-          logger.error("gateway_poll_failing");
-        }
-      } else {
-        consecutiveGatewayErrors = 0;
-      }
+      apiOutcomes.push({ apiError: outcome.error, chainError: false });
     }
+    consecutiveGatewayApiErrors = advanceGatewayApiFailures(
+      consecutiveGatewayApiErrors,
+      apiOutcomes,
+    );
+    const pollFailing =
+      consecutiveGatewayApiErrors > (config.get("indexer.gatewayPollFailMax") as number);
+    await updateAlert(context, "gateway-poll-failing", "global", pollFailing, currentTime, {
+      consecutiveErrors: consecutiveGatewayApiErrors,
+    });
+    if (pollFailing) logger.error("gateway_poll_failing");
   } finally {
     gatewayPollInFlight = false;
   }

@@ -81,6 +81,7 @@ export interface PolicyContext {
   /** Unix seconds. */
   readonly now: () => number;
   readonly freezeStateMaxAgeSec: number;
+  readonly gatewayWriteOffMaxAtomic: bigint;
   /** Addresses of the server keys, for checks that name them (K7 evaluator, K8 publisher, gas targets). */
   readonly keyAddress: (key: "K3" | "K7" | "K8") => Address;
   readonly merchantKeyAddress: (service: string) => Address;
@@ -304,6 +305,11 @@ async function vaultCall(ctx: PolicyContext, req: Req): Promise<Decision> {
       const view = await ctx.projection.pocket(pocket);
       if (view === undefined || !eq(view.vault, vault)) deny("unknown-pocket");
       if ((view as NonNullable<typeof view>).slowWithdrawalOpen) deny("slow-withdrawal-open");
+      if ((view as NonNullable<typeof view>).pendingPullback > 0n) deny("pending-pullback");
+      const balances = await ctx.projection.pocketBalances(pocket);
+      if (!balances.gatewayApiFresh) deny("gateway-balance-stale");
+      if (balances.gatewayAvailable > ctx.gatewayWriteOffMaxAtomic)
+        deny("gateway-balance-not-dust");
       break;
     }
     default:
@@ -656,8 +662,35 @@ async function pocketReturn(ctx: PolicyContext, req: Req): Promise<Decision> {
 
 async function pocketSlowWithdraw(ctx: PolicyContext, req: Req): Promise<Decision> {
   const pocket = req.pocket as Address;
-  await activePocket(ctx, pocket);
-  if (!(await ctx.projection.slowWithdrawAllowed(pocket))) deny("slow-withdraw-not-allowed");
+  const view = await activePocket(ctx, pocket);
+  if (req.step === "withdraw") {
+    const balances = await ctx.projection.pocketBalances(pocket);
+    if (balances.gatewayWithdrawing === 0n) deny("slow-withdrawal-not-open");
+    if (balances.currentBlock < balances.withdrawalBlock) deny("slow-withdraw-not-allowed");
+  } else {
+    const trigger = await ctx.projection.slowWithdrawTrigger(pocket);
+    if (trigger === null) deny("slow-withdraw-not-allowed");
+    const balances = await ctx.projection.pocketBalances(pocket);
+    if (view.slowWithdrawalOpen) deny("slow-withdrawal-open");
+    const value = req.value as bigint | undefined;
+    if (value === undefined) deny("shape");
+    if (balances.gatewayApiObservedAt === null) deny("gateway-figure-missing");
+    if (trigger === "api-down" && balances.gatewayAvailable <= 0n)
+      deny("slow-withdraw-not-allowed");
+    if (!balances.gatewayApiFresh) {
+      if (value !== balances.gatewayAvailable) deny("slow-withdraw-value-mismatch");
+    } else if (value !== balances.gatewayAvailable) {
+      deny("slow-withdraw-value-mismatch");
+    }
+    if (
+      trigger === "api-down" &&
+      (await ctx.projection.pocketSpendAfterObservation(
+        pocket,
+        balances.gatewayApiObservedAt as number,
+      ))
+    )
+      deny("pocket-spend-after-observation");
+  }
   const data =
     req.step === "initiate"
       ? encodeFunctionData({
