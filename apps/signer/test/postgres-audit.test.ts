@@ -34,4 +34,35 @@ describe("PostgreSQL signer audit", () => {
     ]);
     expect(call?.values.join(" ")).not.toContain("payload");
   });
+
+  it("stores the transaction digest and overdue rule in the signed audit row", async () => {
+    let values: readonly unknown[] | undefined;
+    const audit = postgresAudit({
+      async query(_sql, queryValues) {
+        values = queryValues;
+      },
+    });
+    const digest = `0x${"ab".repeat(32)}`;
+
+    await audit.write({
+      at: 1_760_800_000_000,
+      caller: "cz-15",
+      keyRef: "K3",
+      kind: "vault-call",
+      digest: digest as NonNullable<AuditRow["digest"]>,
+      purpose: {},
+      outcome: "signed",
+      rule: "writeoff-manual-return-overdue",
+    });
+
+    expect(JSON.parse(values?.[2] as string)).toEqual([
+      {
+        keyRef: "K3",
+        purpose: {},
+        digest,
+        rule: "writeoff-manual-return-overdue",
+      },
+    ]);
+    expect(values?.[3]).toBe("signed");
+  });
 });

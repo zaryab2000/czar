@@ -2,7 +2,14 @@ import type { Address, Hash32 } from "@czar/hashing";
 import type { PaymentRef } from "@czar/schemas";
 import type { Config } from "@czar/config";
 import { czarVaultAbi, czarVaultFactoryAbi } from "@czar/vault-client";
-import { keccak256, parseAbi, stringToHex, type PublicClient } from "viem";
+import {
+  decodeEventLog,
+  keccak256,
+  parseAbi,
+  stringToHex,
+  type Hash,
+  type PublicClient,
+} from "viem";
 import type { AuditQueryExecutor } from "./postgres-audit.ts";
 import type {
   AutonomyView,
@@ -12,6 +19,7 @@ import type {
   PocketBalances,
   PocketView,
   Projection,
+  OverdueManualReturnFacts,
   PullbackView,
   ReservationView,
   StoredPlan,
@@ -21,7 +29,7 @@ type SqlRows = { readonly rows: readonly Record<string, unknown>[] };
 type Sql = (query: string, values?: unknown[]) => Promise<SqlRows>;
 type ChainClient = Pick<
   PublicClient,
-  "getBlock" | "getBlockNumber" | "getBalance" | "readContract"
+  "getBlock" | "getBlockNumber" | "getBalance" | "getTransactionReceipt" | "readContract"
 >;
 type ProjectionInput = {
   readonly config: Config;
@@ -39,6 +47,9 @@ const GATEWAY_ABI = parseAbi([
   "function withdrawalBlock(address token, address depositor) view returns (uint256)",
 ]);
 const USDC_BALANCE_ABI = parseAbi(["function balanceOf(address account) view returns (uint256)"]);
+const USDC_TRANSFER_ABI = parseAbi([
+  "event Transfer(address indexed from, address indexed to, uint256 value)",
+]);
 
 /** Production T-040 projection backed by the existing indexer and server Postgres tables. */
 export function createPostgresProjection(input: ProjectionInput): Projection {
@@ -176,6 +187,7 @@ function indexerProjection(
   | "nanoSpent"
   | "slowWithdrawTrigger"
   | "pocketSpendAfterObservation"
+  | "overdueManualReturnFacts"
 > {
   return {
     envelope: (vault, id) => readEnvelope(sql, vault, id),
@@ -190,7 +202,165 @@ function indexerProjection(
     slowWithdrawTrigger: (address) => slowWithdrawTrigger(input, sql, address),
     pocketSpendAfterObservation: (pocket, observedAt) =>
       pocketSpendAfterObservation(input, sql, pocket, observedAt),
+    overdueManualReturnFacts: (pocket, vault, now) =>
+      overdueManualReturnFacts(input, sql, pocket, vault, now),
   };
+}
+
+async function overdueManualReturnFacts(
+  input: ProjectionInput,
+  sql: Sql,
+  pocket: Address,
+  vault: Address,
+  now: number,
+): Promise<OverdueManualReturnFacts> {
+  const [pocketRecord, rowResult, balances, slowWithdrawAudited, pocketReturnAudited] =
+    await Promise.all([
+      input.chain.readContract({
+        address: vault,
+        abi: VAULT,
+        functionName: "getPocket",
+        args: [pocket],
+      }),
+      sql(
+        `SELECT state, closed_pocket, return_tx, return_block::text AS return_block,
+                return_log_index, returned_amount::text AS returned_amount
+         FROM payer_pullback_gateway_failures
+         WHERE lower(pocket)=lower($1) AND lower(vault_address)=lower($2)
+         ORDER BY manual_return_required_at DESC NULLS LAST LIMIT 1`,
+        [pocket, vault],
+      ),
+      pocketBalances(input, sql, pocket),
+      hasPocketAudit(sql, pocket, "pocket-slow-withdraw"),
+      hasPocketAudit(sql, pocket, "pocket-return"),
+    ]);
+  const pocketStateValid = pocketRecord.state === 2 || pocketRecord.state === 3;
+  const pendingPullbackZero = pocketRecord.pendingPullback === 0n;
+  const envelope = await input.chain.readContract({
+    address: vault,
+    abi: VAULT,
+    functionName: "getEnvelope",
+    args: [pocketRecord.envelopeId],
+  });
+  const row = rowResult.rows[0];
+  const rowValid = isManualReturnRow(row);
+  if (!rowValid) {
+    return {
+      pocketStateValid,
+      envelopeOpen: envelope.state === 1,
+      pendingPullbackZero,
+      gatewayWithdrawingZero: balances.gatewayWithdrawing === 0n,
+      pocketUsdcZero: balances.usdc === 0n,
+      slowWithdrawAudited,
+      pocketReturnAudited,
+      manualReturnRowValid: false,
+      returnReceiptValid: false,
+      returnOverdue: false,
+      manualReturnRecordedAfter: false,
+    };
+  }
+  const receipt = await manualReturnReceipt(input, sql, pocket, vault, row, now);
+  return {
+    pocketStateValid,
+    envelopeOpen: envelope.state === 1,
+    pendingPullbackZero,
+    gatewayWithdrawingZero: balances.gatewayWithdrawing === 0n,
+    pocketUsdcZero: balances.usdc === 0n,
+    slowWithdrawAudited,
+    pocketReturnAudited,
+    manualReturnRowValid: true,
+    returnReceiptValid: receipt.valid,
+    returnOverdue: receipt.overdue,
+    manualReturnRecordedAfter: receipt.recordedAfter,
+  };
+}
+
+async function hasPocketAudit(sql: Sql, pocket: Address, kind: string): Promise<boolean> {
+  const keyRef = `K4:${pocket}`;
+  const result = await sql(
+    `SELECT 1 FROM audit
+     WHERE action=$1 AND outcome='signed'
+       AND EXISTS (
+         SELECT 1 FROM jsonb_array_elements(object_ids) AS ids
+         WHERE lower(ids->>'keyRef')=lower($2)
+       )
+     LIMIT 1`,
+    [`signer:${kind}`, keyRef],
+  );
+  return result.rows.length > 0;
+}
+
+function isManualReturnRow(
+  row: Record<string, unknown> | undefined,
+): row is Record<string, unknown> {
+  if (row === undefined || typeof row["return_tx"] !== "string") return false;
+  const returnBlock = String(row["return_block"] ?? "");
+  const returnedAmount = String(row["returned_amount"] ?? "");
+  const logIndex = Number(row["return_log_index"]);
+  return (
+    row["state"] === "manual-return-required" &&
+    row["closed_pocket"] === false &&
+    /^0x[0-9a-fA-F]{64}$/.test(row["return_tx"]) &&
+    /^[0-9]+$/.test(returnBlock) &&
+    Number.isSafeInteger(logIndex) &&
+    logIndex >= 0 &&
+    /^[1-9][0-9]*$/.test(returnedAmount)
+  );
+}
+
+async function manualReturnReceipt(
+  input: ProjectionInput,
+  sql: Sql,
+  pocket: Address,
+  vault: Address,
+  row: Record<string, unknown>,
+  now: number,
+): Promise<{ valid: boolean; overdue: boolean; recordedAfter: boolean }> {
+  try {
+    const txHash = String(row["return_tx"]) as Hash;
+    const receipt = await input.chain.getTransactionReceipt({ hash: txHash });
+    const transfer = receipt.logs.find((log) => {
+      if (log.address.toLowerCase() !== String(input.config.get("chain.usdcAddress")).toLowerCase())
+        return false;
+      try {
+        const event = decodeEventLog({
+          abi: USDC_TRANSFER_ABI,
+          data: log.data,
+          topics: log.topics,
+        });
+        return (
+          event.args.from.toLowerCase() === pocket.toLowerCase() &&
+          event.args.to.toLowerCase() === vault.toLowerCase() &&
+          event.args.value === BigInt(String(row["returned_amount"]))
+        );
+      } catch {
+        return false;
+      }
+    });
+    const block = await input.chain.getBlock({ blockNumber: receipt.blockNumber });
+    const blockNumber = BigInt(String(row["return_block"]));
+    const logIndex = Number(row["return_log_index"]);
+    const valid =
+      receipt.status === "success" &&
+      receipt.blockNumber === blockNumber &&
+      transfer !== undefined &&
+      transfer.logIndex === logIndex;
+    const holdSeconds = Number(input.config.get("payer.manualReturnHoldHours")) * 3600;
+    const overdue = valid && Number(block.timestamp) <= now - holdSeconds;
+    const events = await sql(
+      `SELECT block::text AS block, log_index FROM manual_returns
+       WHERE lower(vault)=lower($1) AND lower(pocket)=lower($2)`,
+      [vault, pocket],
+    );
+    const recordedAfter = events.rows.some((event) => {
+      const eventBlock = BigInt(String(event["block"]));
+      const eventLogIndex = Number(event["log_index"]);
+      return eventBlock > blockNumber || (eventBlock === blockNumber && eventLogIndex > logIndex);
+    });
+    return { valid, overdue, recordedAfter };
+  } catch {
+    return { valid: false, overdue: false, recordedAfter: false };
+  }
 }
 
 async function readEnvelope(

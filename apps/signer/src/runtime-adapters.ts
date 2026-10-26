@@ -2,6 +2,7 @@ import { defineChain, type Address, type Hex, type PublicClient } from "viem";
 import type { KeyId } from "./kinds.ts";
 import type { SignerProcessOptions } from "./main.ts";
 import type { TransactionPreparer } from "./service.ts";
+import type { SignerAlertPort } from "./service.ts";
 import type { GasRefillOptions } from "./gas-refill.ts";
 import type { AuditQueryExecutor } from "./postgres-audit.ts";
 
@@ -61,8 +62,7 @@ export function createRpcGasRefillAdapters(input: {
     PublicClient,
     "getBalance" | "sendRawTransaction" | "waitForTransactionReceipt"
   >;
-  readonly alert: (message: string) => Promise<void>;
-}): Omit<GasRefillOptions, "config" | "signer" | "keyAddress"> {
+}): Omit<GasRefillOptions, "config" | "signer" | "keyAddress" | "alert"> {
   return {
     getNativeBalance: (address) => input.client.getBalance({ address }),
     async submitTransaction(transaction: Hex) {
@@ -70,7 +70,6 @@ export function createRpcGasRefillAdapters(input: {
       const receipt = await input.client.waitForTransactionReceipt({ hash });
       if (receipt.status !== "success") throw new Error(`refill transaction ${hash} reverted`);
     },
-    alert: input.alert,
   };
 }
 
@@ -87,11 +86,12 @@ export function createLocalSignerAdapters(input: {
     | "waitForTransactionReceipt"
   >;
   readonly chainId: number;
-  readonly alert: (message: string) => Promise<void>;
-}): Pick<SignerProcessOptions, "auditExecutor" | "prepareTransaction" | "refill"> {
+  readonly alert: SignerAlertPort;
+}): Pick<SignerProcessOptions, "auditExecutor" | "prepareTransaction" | "refill" | "alert"> {
   return {
     auditExecutor: input.postgres,
     prepareTransaction: createRpcTransactionPreparer(input),
     refill: createRpcGasRefillAdapters(input),
+    alert: input.alert,
   };
 }

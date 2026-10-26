@@ -43,7 +43,7 @@ import {
   type VaultFunctionName,
 } from "./abi.ts";
 import type { Kind } from "./kinds.ts";
-import type { Projection } from "./projection.ts";
+import type { OverdueManualReturnFacts, Projection } from "./projection.ts";
 import type { PaymentRef } from "@czar/schemas";
 import { coerceArgs, type ShapeError } from "./requests.ts";
 
@@ -112,7 +112,17 @@ export type Decision =
       readonly data: Hex;
       readonly value: bigint;
       readonly purpose: PurposeIds;
+      readonly rule?: "writeoff-manual-return-overdue";
+      readonly alert?: WriteOffAlert;
     };
+
+/** Public, non-sensitive context for the stale-Gateway write-off alert. */
+export interface WriteOffAlert {
+  readonly name: "writeoff-overdue-stale-gateway";
+  readonly vault: Address;
+  readonly pocket: Address;
+  readonly apiObservedAt: number | null;
+}
 
 /** Parsed request fields (requests.ts); each kind uses a subset. */
 type Req = {
@@ -232,6 +242,8 @@ async function vaultCall(ctx: PolicyContext, req: Req): Promise<Decision> {
   }
   const { data, values } = encoded;
   const purpose: PurposeIds = {};
+  let rule: "writeoff-manual-return-overdue" | undefined;
+  let alert: WriteOffAlert | undefined;
 
   switch (name) {
     case "openEnvelope": {
@@ -307,15 +319,51 @@ async function vaultCall(ctx: PolicyContext, req: Req): Promise<Decision> {
       if ((view as NonNullable<typeof view>).slowWithdrawalOpen) deny("slow-withdrawal-open");
       if ((view as NonNullable<typeof view>).pendingPullback > 0n) deny("pending-pullback");
       const balances = await ctx.projection.pocketBalances(pocket);
-      if (!balances.gatewayApiFresh) deny("gateway-balance-stale");
-      if (balances.gatewayAvailable > ctx.gatewayWriteOffMaxAtomic)
+      if (balances.gatewayApiFresh && balances.gatewayAvailable > ctx.gatewayWriteOffMaxAtomic)
         deny("gateway-balance-not-dust");
+      if (!balances.gatewayApiFresh) {
+        const readFacts = ctx.projection.overdueManualReturnFacts;
+        if (readFacts === undefined) throw new Denied("gateway-balance-stale");
+        const facts = await readFacts(pocket, vault, ctx.now());
+        if (!allOverdueManualReturnFacts(facts)) deny("gateway-balance-stale");
+        rule = "writeoff-manual-return-overdue";
+        alert = {
+          name: "writeoff-overdue-stale-gateway",
+          vault,
+          pocket,
+          apiObservedAt: balances.gatewayApiObservedAt,
+        };
+      }
       break;
     }
     default:
       break;
   }
-  return { type: "transaction", to: vault, data, value: 0n, purpose };
+  return {
+    type: "transaction",
+    to: vault,
+    data,
+    value: 0n,
+    purpose,
+    ...(rule === undefined ? {} : { rule }),
+    ...(alert === undefined ? {} : { alert }),
+  };
+}
+
+function allOverdueManualReturnFacts(facts: OverdueManualReturnFacts): boolean {
+  return (
+    facts.pocketStateValid &&
+    facts.envelopeOpen &&
+    facts.pendingPullbackZero &&
+    facts.gatewayWithdrawingZero &&
+    facts.pocketUsdcZero &&
+    facts.slowWithdrawAudited &&
+    facts.pocketReturnAudited &&
+    facts.manualReturnRowValid &&
+    facts.returnReceiptValid &&
+    facts.returnOverdue &&
+    !facts.manualReturnRecordedAfter
+  );
 }
 
 async function usdc3009(ctx: PolicyContext, req: Req): Promise<Decision> {

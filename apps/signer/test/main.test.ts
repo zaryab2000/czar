@@ -30,6 +30,7 @@ describe("signer process bootstrap", () => {
       prepareTransaction: async () => {
         throw new Error("unexpected transaction preparation");
       },
+      alert: async () => undefined,
       auditExecutor: { async query() {} },
       keychainOpen: async (service, account) => {
         opened.push(`${service}:${account}`);
@@ -40,7 +41,6 @@ describe("signer process bootstrap", () => {
       refill: {
         getNativeBalance: async () => 10_000_000n,
         submitTransaction: async () => undefined,
-        alert: async () => undefined,
       },
     });
 
@@ -90,5 +90,18 @@ function emptyProjection(): Projection {
     nativeBalance: async () => 0n,
     slowWithdrawTrigger: async () => null,
     pocketSpendAfterObservation: async () => false,
+    overdueManualReturnFacts: async () => ({
+      pocketStateValid: false,
+      envelopeOpen: false,
+      pendingPullbackZero: false,
+      gatewayWithdrawingZero: false,
+      pocketUsdcZero: false,
+      slowWithdrawAudited: false,
+      pocketReturnAudited: false,
+      manualReturnRowValid: false,
+      returnReceiptValid: false,
+      returnOverdue: false,
+      manualReturnRecordedAfter: true,
+    }),
   };
 }
