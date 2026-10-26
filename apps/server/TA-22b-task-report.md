@@ -2,9 +2,12 @@
 
 ## Development status
 
-Lane 2 persistence, event reconciliation, scheduled recovery, user-scoped query
-helper, and the 72-hour write-off hold are implemented. This is development
-evidence only; it does not claim an owner UserOp or testnet acceptance.
+Lane 2 persistence, event reconciliation, scheduled recovery, and the
+user-scoped query helper are implemented. The 72-hour hold is enforced, but
+completion after that hold is blocked when Gateway balance data is stale; the
+conflicting signer and server requirements need an architect ruling. This is
+development evidence only; it does not claim an owner UserOp or testnet
+acceptance.
 
 ## Behavior
 
@@ -14,9 +17,10 @@ evidence only; it does not claim an owner UserOp or testnet acceptance.
 - Slow-path completion persists the mined USDC return receipt position and
   starts the owner hold. Reconciliation reads the Lane 1
   `manualReturnsForVault(vault)` projection and matches the same pocket only
-  when `(block, logIndex)` is after the return receipt position. The matching
-  event's credited amount and transaction are stored. If the pocket is closed
-  before a matching event, the row becomes `expired`.
+  when `(block, logIndex)` is after the return receipt position. If a pocket is
+  closed while the indexer has not caught up, the server reads the vault's
+  `ManualReturnRecorded` logs from the return block before expiring the row.
+  The matching event's credited amount and transaction are stored.
 - Legacy rows without receipt coordinates recover the return transaction from
   the persisted slow-return execution phase, verify its successful USDC
   `Transfer(pocket, vault)` receipt, and persist the position before matching.
@@ -24,15 +28,18 @@ evidence only; it does not claim an owner UserOp or testnet acceptance.
   excluded from overdue write-off until its return position is known.
 - The payer recovery timer runs reconciliation and retries eligible write-offs
   after `payer.manualReturnHoldHours`. The overdue path reads on-chain pocket
-  state and pending pullback before writing off under the executor lease. It
-  does not wait for a healthy Gateway API observation. The hold is also checked
-  at the direct pullback and pocket-close write-off entry points.
+  state and pending pullback before attempting write-off under the executor
+  lease. The signer still requires a fresh Gateway API balance observation, so
+  an outage can block the attempt; this policy conflict is recorded below. The
+  hold is also checked at the direct pullback and pocket-close write-off entry
+  points.
 - `listManualReturnsForUser` scopes pending, recorded, and expired rows through
   the owning objective's `user_id`, returning the fields required by the
   canonical `ManualReturn` response.
-- The PR-open review findings are addressed: the bounded write-off no longer
-  depends on Gateway API freshness, and missing legacy receipt coordinates are
-  recovered per row without blocking other rows.
+- Review fixes at `a91bd5e` isolated legacy-row recovery failures and used
+  on-chain manual-return events before expiry. The latest code review also
+  found that one overdue write-off failure could stop later candidates;
+  failures are now reported per row and later candidates continue.
 
 ## Files changed
 
@@ -52,10 +59,26 @@ evidence only; it does not claim an owner UserOp or testnet acceptance.
 
 - `docker compose -f apps/server/test/compose.yaml up -d` — started the pinned
   Postgres 16.15 test service on `127.0.0.1:15432`; container reported healthy.
-- `fnm exec --using=22.22.0 pnpm --filter @czar/server exec vitest run test/payer/manual-return.test.ts test/payer/pullback.test.ts test/payer/pocket.test.ts test/payer/indexer-pocket.test.ts test/payer/pullback-scheduler.test.ts test/main.test.ts` — 6 files passed, 61 tests passed.
+- `fnm exec --using=22.22.0 pnpm --filter @czar/server exec vitest run test/payer/manual-return.test.ts test/payer/pullback.test.ts test/payer/pocket.test.ts test/payer/indexer-pocket.test.ts test/payer/pullback-scheduler.test.ts test/main.test.ts` — 6 files passed, 62 tests passed.
 - `fnm exec --using=22.22.0 pnpm -r typecheck` — passed for all 14 workspace projects selected by pnpm.
 - `fnm exec --using=22.22.0 pnpm lint` — passed (`oxlint --deny-warnings`; formatting check passed for 442 files).
 - `git diff --check` — passed.
+
+## Review blocker requiring a ruling
+
+- **T-125 write-off after the owner hold:** SCR-133 requires the payer to write
+  off the pocket after `payer.manualReturnHoldHours`; SCR-127 requires K3 to
+  refuse `writeOffPocket` when the Gateway balance observation is stale or
+  unavailable. The current Lane 2 path cannot satisfy both during a prolonged
+  Gateway outage. The signer is Lane 1 owned and was not changed. The architect
+  must decide whether the 72-hour write-off is conditional on a fresh
+  at-most-dust observation or whether SCR-127 should define a narrow post-hold
+  exception and its trusted proof. Until then, do not mark manual-return
+  recovery complete or merge this PR.
+- The two latest-head code-review findings were fixed: per-candidate write-off
+  errors no longer abort the pass, and closure reconciliation checks chain
+  logs before expiring against a lagging indexer projection. Both have focused
+  test coverage. No additional Codex review was requested.
 
 ## Cross-lane handoff and open items
 
@@ -66,8 +89,10 @@ evidence only; it does not claim an owner UserOp or testnet acceptance.
   owner submit `recordManualReturn` as a UserOp. This PR does not add a public
   route or let server keys perform the owner action. Lane 5 can use
   `listManualReturnsForUser` for its user-scoped data source.
-- No new SCR was needed; the storage, state transitions, hold duration, and
-  public contract are specified by SCR-133 and the canonical OpenAPI contract.
+- No SCR file was added. The signer/server policy conflict above needs an
+  explicit ruling. The storage, state transitions, hold duration, and public
+  contract are otherwise specified by SCR-133 and the canonical OpenAPI
+  contract.
 
 ## Deferred validation
 

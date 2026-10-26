@@ -129,6 +129,7 @@ describe("manual return reconciliation", () => {
           logIndex: 6,
         },
       ],
+      manualReturnsAfterClosure: async () => [],
       recoverReturnPosition,
       isPocketClosed: async () => false,
       onRowError: vi.fn(),
@@ -175,6 +176,7 @@ describe("manual return reconciliation", () => {
           logIndex: 6,
         },
       ],
+      manualReturnsAfterClosure: async () => [],
       recoverReturnPosition: async () => {
         throw new Error("receipt not indexed yet");
       },
@@ -207,6 +209,7 @@ describe("manual return reconciliation", () => {
           logIndex: 6,
         },
       ],
+      manualReturnsAfterClosure: async () => [],
       recoverReturnPosition: async () => null,
       isPocketClosed: async () => false,
       onRowError: vi.fn(),
@@ -243,6 +246,7 @@ describe("manual return reconciliation", () => {
           logIndex: 4,
         },
       ],
+      manualReturnsAfterClosure: async () => [],
       recoverReturnPosition: async () => null,
       isPocketClosed: async () => false,
       onRowError: vi.fn(),
@@ -261,6 +265,7 @@ describe("manual return reconciliation", () => {
     await reconcileManualReturns({
       pool: getPool(),
       manualReturnsForVault: async () => [],
+      manualReturnsAfterClosure: async () => [],
       recoverReturnPosition: async () => null,
       isPocketClosed: async (vault, pocket) => {
         closedPocketRead = true;
@@ -279,6 +284,36 @@ describe("manual return reconciliation", () => {
     expect(row.rows[0]?.state).toBe("expired");
   });
 
+  it("uses chain events before expiring when indexer lags behind pocket closure", async () => {
+    const chainEvent = {
+      pocket: POCKET,
+      credit: "8000",
+      txHash: `0x${"77".repeat(32)}` as `0x${string}`,
+      block: "51",
+      logIndex: 2,
+    };
+    await reconcileManualReturns({
+      pool: getPool(),
+      manualReturnsForVault: async () => [],
+      manualReturnsAfterClosure: async (vault, pocket, fromBlock) => {
+        expect(vault).toBe(VAULT);
+        expect(pocket).toBe(POCKET);
+        expect(fromBlock).toBe(50n);
+        return [chainEvent];
+      },
+      recoverReturnPosition: async () => null,
+      isPocketClosed: async () => true,
+      onRowError: vi.fn(),
+      now: () => NOW,
+    });
+
+    const row = await getPool().query<{ state: string; recorded_tx: string | null }>(
+      `SELECT state,recorded_tx FROM payer_pullback_gateway_failures WHERE plan_id=$1`,
+      [PLAN_ID],
+    );
+    expect(row.rows[0]).toEqual({ state: "recorded", recorded_tx: chainEvent.txHash });
+  });
+
   it("returns manual-return rows only to the objective's owning user", async () => {
     const firstUserRows = await listManualReturnsForUser(getPool(), TEST_USER_ID);
     const secondUserRows = await listManualReturnsForUser(getPool(), OTHER_USER_ID);
@@ -294,24 +329,39 @@ describe("manual return reconciliation", () => {
 
   it("starts write-off only when the configured hold has elapsed", async () => {
     const now = new Date(NOW);
-    const writeOffManualReturn = vi.fn(async () => undefined);
+    await getPool().query(
+      `UPDATE payer_pullback_gateway_failures SET manual_return_required_at=$2
+       WHERE plan_id=$1`,
+      [PLAN_ID, NOW],
+    );
+    const writeOffManualReturn = vi.fn(async (row: { plan_id: string }) => {
+      if (row.plan_id === PLAN_ID) throw new Error("signer refused write-off");
+    });
+    const onWriteOffError = vi.fn();
     const dependencies = {
       pool: getPool(),
       config: loadConfig({ envFile: { "payer.manualReturnHoldHours": 72 } }),
       manualReturnsForVault: async () => [],
+      manualReturnsAfterClosure: async () => [],
       recoverReturnPosition: async () => null,
       isPocketClosed: async () => false,
       onRowError: vi.fn(),
       writeOffManualReturn,
+      onWriteOffError,
       now: () => now,
     };
 
     await expect(runManualReturnRecovery(dependencies)).resolves.toBe(0);
     expect(writeOffManualReturn).not.toHaveBeenCalled();
     now.setTime(now.getTime() + 72 * 60 * 60 * 1000);
-    await expect(runManualReturnRecovery(dependencies)).resolves.toBe(1);
-    expect(writeOffManualReturn).toHaveBeenCalledOnce();
-    expect(writeOffManualReturn).toHaveBeenCalledWith(
+    await expect(runManualReturnRecovery(dependencies)).resolves.toBe(2);
+    expect(writeOffManualReturn).toHaveBeenCalledTimes(2);
+    expect(onWriteOffError).toHaveBeenCalledOnce();
+    expect(onWriteOffError).toHaveBeenCalledWith(
+      expect.objectContaining({ plan_id: PLAN_ID }),
+      expect.any(Error),
+    );
+    expect(writeOffManualReturn).toHaveBeenLastCalledWith(
       expect.objectContaining({ plan_id: OTHER_PLAN_ID }),
     );
   });

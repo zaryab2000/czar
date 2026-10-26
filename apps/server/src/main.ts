@@ -452,6 +452,33 @@ function startProductionPayerRuntime(
       pool: options.pool,
       config: options.config,
       manualReturnsForVault: (vault) => pocketReader.manualReturnsForVault(vault),
+      manualReturnsAfterClosure: async (vault, pocket, fromBlock) => {
+        const events = await options.publicClient.getContractEvents({
+          address: vault,
+          abi: czarVaultAbi,
+          eventName: "ManualReturnRecorded",
+          args: { pocket },
+          fromBlock,
+        });
+        return events.flatMap((event) => {
+          if (
+            event.args.amount === undefined ||
+            event.blockNumber === null ||
+            event.logIndex === null ||
+            event.transactionHash === null
+          )
+            return [];
+          return [
+            {
+              pocket,
+              credit: event.args.amount.toString(),
+              block: event.blockNumber.toString(),
+              logIndex: event.logIndex,
+              txHash: event.transactionHash,
+            },
+          ];
+        });
+      },
       recoverReturnPosition: (row) => recoverManualReturnPosition(options, row),
       isPocketClosed: async (vault, pocket) => {
         const record = await options.publicClient.readContract({
@@ -465,6 +492,11 @@ function startProductionPayerRuntime(
       onRowError: () =>
         options.logger.error("manual_return_reconciliation_failure", {
           rule: "receipt-position-unavailable",
+          state: "retry",
+        }),
+      onWriteOffError: () =>
+        options.logger.error("manual_return_writeoff_failure", {
+          rule: "writeoff-retry",
           state: "retry",
         }),
       now: options.clock.now,

@@ -78,6 +78,11 @@ export interface ManualReturnSummary {
 export interface ManualReturnReconciliationDependencies {
   readonly pool: Pool;
   readonly manualReturnsForVault: (vault: Address) => Promise<readonly ManualReturnProjection[]>;
+  readonly manualReturnsAfterClosure: (
+    vault: Address,
+    pocket: Address,
+    fromBlock: bigint,
+  ) => Promise<readonly ManualReturnProjection[]>;
   readonly isPocketClosed: (vault: Address, pocket: Address) => Promise<boolean>;
   readonly recoverReturnPosition: (
     row: ManualReturnRow,
@@ -89,6 +94,7 @@ export interface ManualReturnReconciliationDependencies {
 export interface ManualReturnRecoveryDependencies extends ManualReturnReconciliationDependencies {
   readonly config: Config;
   readonly writeOffManualReturn: (row: ManualReturnWriteOffCandidate) => Promise<unknown>;
+  readonly onWriteOffError: (row: ManualReturnWriteOffCandidate, error: unknown) => void;
 }
 
 export async function runPendingPullbackFallbacks(
@@ -136,7 +142,15 @@ export async function reconcileManualReturns(
       if (matching) {
         changed += await markManualReturnRecorded(positioned, matching, dependencies);
       } else if (await dependencies.isPocketClosed(positioned.vault_address, positioned.pocket)) {
-        changed += await markManualReturnExpired(positioned, dependencies);
+        const chainEvents = await dependencies.manualReturnsAfterClosure(
+          positioned.vault_address,
+          positioned.pocket,
+          BigInt(positioned.return_block ?? "0"),
+        );
+        const chainMatch = chainEvents.find((event) => isAfterReturn(event, positioned));
+        changed += chainMatch
+          ? await markManualReturnRecorded(positioned, chainMatch, dependencies)
+          : await markManualReturnExpired(positioned, dependencies);
       }
     } catch (error) {
       dependencies.onRowError(row, error);
@@ -162,7 +176,13 @@ export async function runManualReturnRecovery(
      ORDER BY manual_return_required_at,plan_id,step_index`,
     [cutoff],
   );
-  for (const row of overdue.rows) await dependencies.writeOffManualReturn(row);
+  for (const row of overdue.rows) {
+    try {
+      await dependencies.writeOffManualReturn(row);
+    } catch (error) {
+      dependencies.onWriteOffError(row, error);
+    }
+  }
   return updated + overdue.rows.length;
 }
 
