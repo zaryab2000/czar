@@ -42,8 +42,8 @@ export async function hasPendingFrozenEventAtCurrentHead(
 ): Promise<boolean> {
   const head = await client.getBlockNumber();
   await advanceFrozenScanTarget(pool, [vault], head);
-  let caughtUp = false;
-  while (!caughtUp) caughtUp = await scanFrozenEvents(client, pool, vault, maxBlockRange, head);
+  // Keep request work to one page; the background scan resumes any remaining backlog.
+  await scanFrozenEvents(client, pool, vault, maxBlockRange, head);
   return hasPendingFrozenEvent(pool, vault);
 }
 

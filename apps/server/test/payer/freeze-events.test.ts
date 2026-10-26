@@ -183,17 +183,15 @@ describe("durable Frozen event work", () => {
     expect(await hasPendingFrozenEvent(store.pool, VAULT)).toBe(false);
   });
 
-  it("catches the requested vault up to the decision head snapshot", async () => {
+  it("leaves a deep backlog pending after one page for background resume", async () => {
     const store = fakeStore();
     store.setScan("10", "10");
-    let latestHead = 35n;
     const pages: { fromBlock: bigint; toBlock: bigint }[] = [];
     const client = {
-      getBlockNumber: vi.fn(async () => latestHead),
+      getBlockNumber: vi.fn(async () => 35n),
       getContractEvents: vi.fn(
         async ({ fromBlock, toBlock }: { fromBlock: bigint; toBlock: bigint }) => {
           pages.push({ fromBlock, toBlock });
-          latestHead += 10n;
           return [];
         },
       ),
@@ -201,13 +199,18 @@ describe("durable Frozen event work", () => {
 
     await expect(
       hasPendingFrozenEventAtCurrentHead(client as never, store.pool, VAULT, 10n),
-    ).resolves.toBe(false);
+    ).resolves.toBe(true);
     expect(client.getBlockNumber).toHaveBeenCalledTimes(1);
-    expect(pages).toEqual([
-      { fromBlock: 11n, toBlock: 20n },
-      { fromBlock: 21n, toBlock: 30n },
-      { fromBlock: 31n, toBlock: 35n },
-    ]);
+    expect(pages).toEqual([{ fromBlock: 11n, toBlock: 20n }]);
+    expect(store.cursor()).toBe("20");
+
+    await scanFrozenEvents(client as never, store.pool, VAULT, 10n, 35n);
+    expect(store.cursor()).toBe("30");
+    expect(await hasPendingFrozenEvent(store.pool, VAULT)).toBe(true);
+
+    await expect(
+      hasPendingFrozenEventAtCurrentHead(client as never, store.pool, VAULT, 10n),
+    ).resolves.toBe(false);
     expect(store.cursor()).toBe("35");
   });
 

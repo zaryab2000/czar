@@ -289,11 +289,53 @@ describe("database vault event source", () => {
     expect(ready).toBe(true);
     expect(pageRequests).toHaveLength(6);
     expect(pageRequests.at(-1)?.toBlock).toBe(20n);
+    subscription();
+  });
+
+  it("catches a requested vault up despite background rotation on a growing chain", async () => {
+    vi.useFakeTimers();
+    const store = fakePool(() => [VAULT_ONE, VAULT_TWO]);
+    let head = 5n;
+    const pageRequests: { address: Address; fromBlock: bigint; toBlock: bigint }[] = [];
+    const client = {
+      readContract: vi.fn(async ({ functionName }: { functionName: string }) => {
+        if (functionName === "factory") return FACTORY;
+        if (functionName === "guardianPaused") return false;
+        throw new Error(`unexpected ${functionName}`);
+      }),
+      watchContractEvent: vi.fn(() => vi.fn()),
+      getBlockNumber: vi.fn(async () => head++),
+      getContractEvents: vi.fn(
+        async (request: { address: Address; fromBlock: bigint; toBlock: bigint }) => {
+          pageRequests.push(request);
+          return [];
+        },
+      ),
+    };
+    const subscription = createDatabaseVaultEventSource({
+      pool: store.pool,
+      publicClient: client as never,
+      config: loadConfig({
+        envFile: {
+          "payer.vaultEventPollMs": 1000,
+          "indexer.getLogsBlockRange": 10,
+        },
+      }),
+      logger: { error: vi.fn() } as never,
+    }).subscribe(vi.fn(async () => undefined));
+
+    await vi.waitFor(() => expect(pageRequests).toHaveLength(1));
+    expect(pageRequests[0]?.address).toBe(VAULT_ONE);
+    await vi.advanceTimersByTimeAsync(1000);
+    await vi.waitFor(() => expect(pageRequests).toHaveLength(2));
+    await subscription.ready;
+    expect(pageRequests[1]?.address).toBe(VAULT_TWO);
+
     await expect(
       hasPendingFrozenEventAtCurrentHead(client as never, store.pool, VAULT_ONE, 10n),
     ).resolves.toBe(false);
-    expect(pageRequests.slice(6).at(-1)?.toBlock).toBe(80n);
-    expect(store.targets().get(VAULT_ONE)).toBe("80");
+    expect(pageRequests.at(-1)).toMatchObject({ address: VAULT_ONE, fromBlock: 6n, toBlock: 7n });
+    expect(store.targets().get(VAULT_ONE)).toBe("7");
     subscription();
   });
 });
