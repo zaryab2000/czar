@@ -78,6 +78,7 @@ export interface PullbackInput extends Omit<
   readonly pending: bigint;
   readonly availableBalance: bigint;
   readonly availableBalanceObservedAt: Date | null;
+  readonly apiConsecutiveFailures: number;
   readonly closedPocket?: boolean;
   readonly head: bigint;
   readonly attempt?: number;
@@ -138,6 +139,7 @@ export interface SlowPullbackInput {
   readonly apiUnavailableSince: Date;
   readonly value: bigint;
   readonly trigger?: "api-down" | "closed-dust";
+  readonly closedPocketRecovery?: boolean;
   readonly attempt?: number;
   readonly workerId?: string;
 }
@@ -187,7 +189,7 @@ export async function executeSlowPullbackFallback(
     dependencies.now().getTime() - input.apiUnavailableSince.getTime() < delayMs
   )
     throw new Error("Gateway API downtime has not reached the slow-withdraw threshold.");
-  const attempt = input.attempt ?? 0;
+  const initialAttempt = input.attempt ?? 0;
   const workerId = input.workerId ?? `pullback-slow-${process.pid}-${randomUUID()}`;
   const ttl = Number(dependencies.config.get("payer.leaseSeconds"));
   const leased = await acquireExecutorLease(
@@ -206,6 +208,14 @@ export async function executeSlowPullbackFallback(
     dependencies.now,
   );
   try {
+    const attempt = input.closedPocketRecovery
+      ? await nextClosedPocketRecoveryAttempt(
+          dependencies.pool,
+          input.planId,
+          input.stepIndex,
+          initialAttempt,
+        )
+      : initialAttempt;
     return await runSlowPullback(input, dependencies, attempt, renewal.assertHeld);
   } finally {
     await renewal.stop();
@@ -407,7 +417,7 @@ export async function executePullback(
   | { readonly state: "waiting"; readonly reason: "closed-pocket-dust" }
 > {
   const workerId = input.workerId ?? `pullback-${process.pid}-${randomUUID()}`;
-  const attempt = input.attempt ?? 0;
+  const initialAttempt = input.attempt ?? 0;
   const leaseSeconds = Number(dependencies.config.get("payer.leaseSeconds"));
   const leased = await acquireExecutorLease(
     dependencies.pool,
@@ -425,11 +435,41 @@ export async function executePullback(
     dependencies.now,
   );
   try {
+    const attempt = input.closedPocket
+      ? await nextClosedPocketAttempt(input, dependencies.pool, initialAttempt)
+      : initialAttempt;
     return await runPullback(input, dependencies, attempt, renewal.assertHeld);
   } finally {
     await renewal.stop();
     await releaseExecutorLease(dependencies.pool, input.envelopeRef, workerId);
   }
+}
+
+async function nextClosedPocketAttempt(
+  input: PullbackInput,
+  pool: Pool,
+  minimumAttempt: number,
+): Promise<number> {
+  return nextClosedPocketRecoveryAttempt(pool, input.planId, input.stepIndex, minimumAttempt);
+}
+
+export async function nextClosedPocketRecoveryAttempt(
+  pool: Pool,
+  planId: string,
+  stepIndex: number,
+  minimumAttempt: number,
+): Promise<number> {
+  const result = await pool.query<{ attempt: number; phase: string }>(
+    `SELECT attempt,phase FROM step_executions
+     WHERE plan_id=$1 AND step_index=$2 AND phase LIKE 'pullback.%'
+     ORDER BY execution_id DESC LIMIT 1`,
+    [planId, stepIndex],
+  );
+  const latest = result.rows[0];
+  if (!latest) return minimumAttempt;
+  const terminal =
+    latest.phase === "pullback.confirmed" || latest.phase === "pullback.slow.returned";
+  return Math.max(minimumAttempt, latest.attempt + Number(terminal));
 }
 
 export async function cancelExpiredPullback(
@@ -533,8 +573,10 @@ async function runPullback(
       ageSeconds: gatewayBalanceAgeSeconds(input, dependencies.now()),
       pocket: input.pocket,
     });
+    await recordGatewayBalanceOutage(input, dependencies, attempt);
     return { state: "waiting", reason: "gateway-balance-stale" };
   }
+  await clearGatewayBalanceOutage(input, dependencies);
   const configuredMaxFee = BigInt(Number(dependencies.config.get("payer.pullbackMaxFeeAtomic")));
   if (configuredMaxFee > (await dependencies.chain.maxPullbackFee()))
     throw new Error("Configured pullback max fee exceeds the vault maxPullbackFee.");
@@ -610,6 +652,11 @@ async function runPullback(
       pullbackId: pullback.pullbackId.toString(),
       txHash,
     });
+  } else if (confirmed?.state === "Confirmed" && !savedConfirm) {
+    await writePullbackPhase(dependencies, input, attempt, "pullback.confirmed", {
+      pullbackId: pullback.pullbackId.toString(),
+      recovered: true,
+    });
   }
   await dependencies.pool.query(
     "DELETE FROM payer_pullback_gateway_failures WHERE plan_id=$1 AND step_index=$2",
@@ -626,7 +673,43 @@ function hasFreshGatewayBalance(input: PullbackInput, dependencies: PullbackDepe
   const ageSeconds = gatewayBalanceAgeSeconds(input, dependencies.now());
   return (
     ageSeconds >= 0 &&
-    ageSeconds <= Number(dependencies.config.get("indexer.gatewayBalanceMaxAgeSeconds"))
+    ageSeconds <= Number(dependencies.config.get("indexer.gatewayBalanceMaxAgeSeconds")) &&
+    input.apiConsecutiveFailures === 0
+  );
+}
+
+async function recordGatewayBalanceOutage(
+  input: PullbackInput,
+  dependencies: PullbackDependencies,
+  attempt: number,
+): Promise<void> {
+  await dependencies.pool.query(
+    `INSERT INTO payer_pullback_gateway_failures
+       (plan_id,step_index,envelope_ref,pocket,value,unavailable_since,state,
+        pullback_id,vault_address,gateway_minter,attempt)
+     VALUES ($1,$2,$3,$4,NULL,$5,'pending',NULL,$6,$7,$8)
+     ON CONFLICT (plan_id,step_index) DO NOTHING`,
+    [
+      input.planId,
+      input.stepIndex,
+      input.envelopeRef,
+      input.pocket,
+      dependencies.now(),
+      input.vault,
+      input.gatewayMinter,
+      attempt,
+    ],
+  );
+}
+
+async function clearGatewayBalanceOutage(
+  input: PullbackInput,
+  dependencies: PullbackDependencies,
+): Promise<void> {
+  await dependencies.pool.query(
+    `DELETE FROM payer_pullback_gateway_failures
+     WHERE plan_id=$1 AND step_index=$2 AND pullback_id IS NULL AND state='pending'`,
+    [input.planId, input.stepIndex],
   );
 }
 
@@ -826,7 +909,10 @@ async function recordGatewayPullbackFailure(
        (plan_id,step_index,envelope_ref,pocket,value,unavailable_since,state,
         pullback_id,vault_address,gateway_minter,attempt)
      VALUES ($1,$2,$3,$4,$5,$6,'pending',$7,$8,$9,$10)
-     ON CONFLICT (plan_id,step_index) DO NOTHING`,
+     ON CONFLICT (plan_id,step_index) DO UPDATE SET
+       value=EXCLUDED.value,pullback_id=EXCLUDED.pullback_id,
+       vault_address=EXCLUDED.vault_address,gateway_minter=EXCLUDED.gateway_minter,
+       attempt=EXCLUDED.attempt`,
     [
       input.planId,
       input.stepIndex,

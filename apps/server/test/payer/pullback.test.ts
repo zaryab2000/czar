@@ -67,6 +67,7 @@ describe("pullback values", () => {
       pending: 0n,
       availableBalance: 850_000n,
       availableBalanceObservedAt: new Date("2026-10-21T23:57:00Z"),
+      apiConsecutiveFailures: 0,
       head: 6_400n,
     };
     const requestPullback = vi.fn(async () => {
@@ -96,6 +97,56 @@ describe("pullback values", () => {
     expect(requestPullback).not.toHaveBeenCalled();
     const phases = await getExecutionTrace(getPool(), PLAN_ID, 0, 0);
     expect(phases.at(-1)?.phase).toBe("pullback.gateway-balance-stale");
+    const outage = await getPool().query(
+      "SELECT value,pullback_id FROM payer_pullback_gateway_failures WHERE plan_id=$1",
+      [PLAN_ID],
+    );
+    expect(outage.rows).toEqual([{ value: null, pullback_id: null }]);
+  });
+
+  it("waits when a recent Gateway balance has consecutive API failures", async () => {
+    const input = {
+      planId: PLAN_ID,
+      stepIndex: 0,
+      envelopeRef: "eip155:5042002:0x0000000000000000000000000000000000000001:1",
+      vault: "0x0000000000000000000000000000000000000001" as const,
+      pocket: "0x0000000000000000000000000000000000000002" as const,
+      gatewayWallet: "0x0000000000000000000000000000000000000003" as const,
+      gatewayMinter: "0x0000000000000000000000000000000000000004" as const,
+      usdc: "0x0000000000000000000000000000000000000005" as const,
+      gatewayDomain: 26,
+      outstanding: 900_000n,
+      pending: 0n,
+      availableBalance: 850_000n,
+      availableBalanceObservedAt: new Date("2026-10-22T00:00:00Z"),
+      apiConsecutiveFailures: 1,
+      head: 6_400n,
+    };
+    const requestPullback = vi.fn();
+    const dependencies = {
+      pool: getPool(),
+      config: loadConfig(),
+      signer: { sign: vi.fn() },
+      chain: {
+        maxPullbackFee: vi.fn(async () => 20_000n),
+        findPendingPullback: vi.fn(async () => undefined),
+        requestPullback,
+      },
+      safeFetch: vi.fn(),
+      gatewayTransferUrl: "http://127.0.0.1:4999/v1/transfer",
+      now: () => new Date("2026-10-22T00:00:00Z"),
+    };
+
+    await expect(executePullback(input, dependencies as never)).resolves.toMatchObject({
+      state: "waiting",
+      reason: "gateway-balance-stale",
+    });
+    expect(requestPullback).not.toHaveBeenCalled();
+    const outage = await getPool().query(
+      "SELECT value,pullback_id FROM payer_pullback_gateway_failures WHERE plan_id=$1",
+      [PLAN_ID],
+    );
+    expect(outage.rows).toEqual([{ value: null, pullback_id: null }]);
   });
 
   it("recovers a Closed pocket from fresh Gateway balance without an outstanding bound", async () => {
@@ -113,6 +164,7 @@ describe("pullback values", () => {
       pending: 0n,
       availableBalance: 80_000n,
       availableBalanceObservedAt: new Date("2026-10-22T00:00:00Z"),
+      apiConsecutiveFailures: 0,
       head: 6_400n,
       closedPocket: true,
     };
@@ -148,6 +200,110 @@ describe("pullback values", () => {
       expect.objectContaining({ value: 70_000n, maxFee: 10_000n }),
     );
     expect(writeOffPocket).not.toHaveBeenCalled();
+  });
+
+  it("starts a new recovery pullback after a confirmed late-funds cycle", async () => {
+    let nextId = 9n;
+    let currentPullback:
+      | {
+          pullbackId: bigint;
+          value: bigint;
+          maxFee: bigint;
+          maxBlockHeight: bigint;
+          salt: `0x${string}`;
+          transferSpecHash: `0x${string}`;
+          state: "Pending" | "Confirmed";
+        }
+      | undefined;
+    let transferUsed = false;
+    const requestPullback = vi.fn(
+      async (request: { value: bigint; maxFee: bigint; maxBlockHeight: bigint }) => {
+        const id = nextId++;
+        transferUsed = false;
+        currentPullback = {
+          pullbackId: id,
+          value: request.value,
+          maxFee: request.maxFee,
+          maxBlockHeight: request.maxBlockHeight,
+          salt: `0x${id.toString(16).padStart(64, "0")}`,
+          transferSpecHash: `0x${id.toString(16).padStart(64, "0")}`,
+          state: "Pending",
+        };
+        return currentPullback;
+      },
+    );
+    const dependencies = {
+      pool: getPool(),
+      config: loadConfig(),
+      signer: {
+        sign: vi.fn(async (_caller: string, request: { kind: string }) =>
+          request.kind === "gateway-burn"
+            ? { signature: "0xbeef" as const, digest: `0x${"ef".repeat(32)}` as const }
+            : { signedTransaction: "0x1234" as const },
+        ),
+      },
+      chain: {
+        maxPullbackFee: vi.fn(async () => 20_000n),
+        findPendingPullback: vi.fn(async () => undefined),
+        requestPullback,
+        isTransferSpecHashUsed: vi.fn(async () => transferUsed),
+        mintAttestation: vi.fn(async () => {
+          transferUsed = true;
+          return "mint-tx";
+        }),
+        confirmPullback: vi.fn(async ({ pullbackId }: { pullbackId: bigint }) => {
+          if (currentPullback?.pullbackId === pullbackId) currentPullback.state = "Confirmed";
+          return "confirm-tx";
+        }),
+        cancelPullback: vi.fn(),
+        readPullback: vi.fn(async (pullbackId: bigint) =>
+          currentPullback?.pullbackId === pullbackId ? currentPullback : undefined,
+        ),
+        getBlockNumber: vi.fn(async () => 6_400n),
+      },
+      safeFetch: vi.fn(async () => ({
+        status: 201,
+        url: "http://127.0.0.1:4999/v1/transfer",
+        headers: {},
+        body: new TextEncoder().encode(
+          JSON.stringify({ transferId: "late", attestation: "0x12", signature: "0x34" }),
+        ),
+      })),
+      gatewayTransferUrl: "http://127.0.0.1:4999/v1/transfer",
+      now: () => new Date("2026-10-22T00:00:00Z"),
+    };
+    const input = {
+      planId: PLAN_ID,
+      stepIndex: 0,
+      envelopeRef: "eip155:5042002:0x0000000000000000000000000000000000000001:1",
+      vault: "0x0000000000000000000000000000000000000001" as const,
+      pocket: "0x0000000000000000000000000000000000000002" as const,
+      gatewayWallet: "0x0000000000000000000000000000000000000003" as const,
+      gatewayMinter: "0x0000000000000000000000000000000000000004" as const,
+      usdc: "0x0000000000000000000000000000000000000005" as const,
+      gatewayDomain: 26,
+      outstanding: 0n,
+      pending: 0n,
+      availableBalance: 100_000n,
+      availableBalanceObservedAt: new Date("2026-10-22T00:00:00Z"),
+      apiConsecutiveFailures: 0,
+      head: 6_400n,
+      closedPocket: true,
+    };
+
+    await expect(executePullback(input, dependencies as never)).resolves.toMatchObject({
+      state: "confirmed",
+      pullbackId: "9",
+    });
+    await expect(
+      executePullback({ ...input, availableBalance: 80_000n }, dependencies as never),
+    ).resolves.toMatchObject({ state: "confirmed", pullbackId: "10" });
+
+    expect(requestPullback).toHaveBeenCalledTimes(2);
+    expect(requestPullback.mock.calls.map(([request]) => request.value)).toEqual([
+      90_000n,
+      70_000n,
+    ]);
   });
 
   it("payer_pocketClose_sweepsGasAndRecoversLateBalance", async () => {
@@ -202,6 +358,7 @@ describe("pullback values", () => {
       pending: 0n,
       availableBalance: 850_000n,
       availableBalanceObservedAt: new Date("2026-10-22T00:00:00Z"),
+      apiConsecutiveFailures: 0,
       head: 6_400n,
     } as const;
     const now = new Date("2026-10-22T00:00:00Z");
@@ -303,6 +460,7 @@ describe("pullback values", () => {
       pending: 0n,
       availableBalance: 0n,
       availableBalanceObservedAt: new Date("2026-10-22T00:00:00Z"),
+      apiConsecutiveFailures: 0,
       head: 6_400n,
     } as const;
     const dependencies = {
@@ -455,6 +613,7 @@ describe("pullback values", () => {
       pending: 0n,
       availableBalance: 850_000n,
       availableBalanceObservedAt: new Date("2026-10-22T00:00:00Z"),
+      apiConsecutiveFailures: 0,
       head: 6_400n,
       attempt: 0,
     } as const;
@@ -505,6 +664,7 @@ describe("pullback values", () => {
       pending: 0n,
       availableBalance: 850_000n,
       availableBalanceObservedAt: new Date("2026-10-22T00:00:00Z"),
+      apiConsecutiveFailures: 0,
       head: 6_400n,
     } as const;
     let requestCount = 0;
@@ -742,6 +902,7 @@ describe("pullback values", () => {
           pending: 0n,
           availableBalance: 850_000n,
           availableBalanceObservedAt: new Date("2026-10-22T00:00:00Z"),
+          apiConsecutiveFailures: 0,
           head: 6_400n,
           attempt: 0,
         },

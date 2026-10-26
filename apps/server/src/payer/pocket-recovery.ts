@@ -49,7 +49,9 @@ export function createPocketRecoveryOperations(
   return {
     halt: {
       listFundedPockets: async (vault) =>
-        (await reader.fundedPocketsForVault(vault)).map((entry) => entry.pocket),
+        (await reader.fundedPocketsForVault(vault))
+          .filter((entry) => entry.state === "Funded" || entry.state === "Draining")
+          .map((entry) => entry.pocket),
       pullback: async (pocket) => {
         const context = await readPocketPlanContext(input.pool, pocket);
         const projection = (await reader.fundedPocketsForVault(context.vault)).find(
@@ -141,6 +143,7 @@ async function runClosedSlowReturn(
       apiUnavailableSince: input.now(),
       value: observedBalance,
       trigger: "closed-dust",
+      closedPocketRecovery: true,
     },
     { pool: input.pool, config: input.config, signer: input.signer, chain, now: input.now },
   );
@@ -176,6 +179,7 @@ async function executeFromBalance(
       pending: accounting.pending,
       availableBalance: balance.gatewayAvailableAtomic,
       availableBalanceObservedAt: balance.apiObservedAt,
+      apiConsecutiveFailures: balance.apiConsecutiveFailures,
       closedPocket: accounting.closedPocket,
       head: await input.publicClient.getBlockNumber(),
     },

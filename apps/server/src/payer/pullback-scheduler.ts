@@ -3,7 +3,7 @@ import type { Signer } from "@czar/signer";
 import type { Address } from "viem";
 import type { Pool } from "pg";
 import type { PocketBalanceSnapshot } from "#src/payer/indexer-pocket";
-import { appendExecutionPhase } from "#src/payer/executions";
+import { appendExecutionPhase, getExecutionTrace } from "#src/payer/executions";
 import {
   executeSlowPullbackFallback,
   type CancelPullbackInput,
@@ -57,10 +57,15 @@ async function processFallback(
   row: PendingFallback,
   dependencies: PullbackFallbackSchedulerDependencies,
 ): Promise<void> {
-  const balance = await readFallbackBalance(row, dependencies);
-  if (balance === null) return;
-  const pullback = pendingPullbackInput(row);
-  await dependencies.cancelPendingPullback(pullback);
+  const attempt = row.attempt ?? 0;
+  const trace = await getExecutionTrace(dependencies.pool, row.plan_id, row.step_index, attempt);
+  const withdrawalStarted = hasSlowWithdrawalProgress(trace.map((entry) => entry.phase));
+  const balance = withdrawalStarted ? null : await readFallbackBalance(row, dependencies);
+  if (!withdrawalStarted && balance === null) return;
+  if (!withdrawalStarted) {
+    const pullback = pendingPullbackInput(row);
+    if (pullback) await dependencies.cancelPendingPullback(pullback);
+  }
   const result = await executeSlowPullbackFallback(
     {
       planId: row.plan_id,
@@ -68,7 +73,8 @@ async function processFallback(
       envelopeRef: row.envelope_ref,
       pocket: row.pocket,
       apiUnavailableSince: row.unavailable_since,
-      value: balance.gatewayAvailableAtomic,
+      value: balance?.gatewayAvailableAtomic ?? 0n,
+      attempt,
       trigger: "api-down",
     },
     dependencies,
@@ -80,6 +86,19 @@ async function processFallback(
       [row.plan_id, row.step_index],
     );
   }
+}
+
+function hasSlowWithdrawalProgress(phases: readonly string[]): boolean {
+  return phases.some((phase) =>
+    [
+      "pullback.slow.initiate.sent",
+      "pullback.slow.initiated",
+      "pullback.slow.withdraw.sent",
+      "pullback.slow.withdrawn",
+      "pullback.slow.return.sent",
+      "pullback.slow.returned",
+    ].includes(phase),
+  );
 }
 
 async function readFallbackBalance(
@@ -117,8 +136,9 @@ async function recordFallbackWait(
   });
 }
 
-function pendingPullbackInput(row: PendingFallback): CancelPullbackInput {
-  if (!row.pullback_id || !row.vault_address || !row.gateway_minter || row.attempt === null)
+function pendingPullbackInput(row: PendingFallback): CancelPullbackInput | null {
+  if (row.pullback_id === null) return null;
+  if (!row.vault_address || !row.gateway_minter || row.attempt === null)
     throw new Error("Pending Gateway fallback is missing its pullback cancellation context.");
   return {
     planId: row.plan_id,

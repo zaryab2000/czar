@@ -4,12 +4,13 @@ export interface PocketBalanceSnapshot {
   readonly gatewayAvailableAtomic: bigint;
   readonly gatewayWithdrawingAtomic: bigint;
   readonly apiObservedAt: Date | null;
+  readonly apiConsecutiveFailures: number;
 }
 
 export interface FundedPocketProjection {
   readonly pocket: Address;
   readonly vault: Address;
-  readonly state: "Funded" | "Draining";
+  readonly state: "Registered" | "DelegateReady" | "Funded" | "Draining";
   readonly outstanding: bigint;
   readonly pendingPullback: bigint;
   readonly envelopeRef: string;
@@ -54,6 +55,7 @@ export function createIndexerPocketReader(
         gatewayAvailableAtomic: parseAtomic(row["gatewayAvailableAtomic"]),
         gatewayWithdrawingAtomic: parseAtomic(row["gatewayWithdrawingAtomic"]),
         apiObservedAt,
+        apiConsecutiveFailures: parseFailureCount(row["apiConsecutiveFailures"]),
       };
     },
     async fundedPocketsForVault(vault) {
@@ -93,7 +95,12 @@ async function requestRecord(
 function parseFundedPocket(value: unknown): FundedPocketProjection {
   const row = requireRecord(value, "funded pocket");
   const state = row["state"];
-  if (state !== "Funded" && state !== "Draining")
+  if (
+    state !== "Registered" &&
+    state !== "DelegateReady" &&
+    state !== "Funded" &&
+    state !== "Draining"
+  )
     throw new Error("Indexer returned a malformed funded pocket state.");
   const envelopeRef = requireString(row["envelopeRef"], "funded pocket envelope reference");
   return {
@@ -128,6 +135,12 @@ function parseAtomic(value: unknown): bigint {
   if (typeof value !== "string" || !/^(0|[1-9]\d*)$/.test(value))
     throw new Error("Indexer returned a malformed pocket balance.");
   return BigInt(value);
+}
+
+function parseFailureCount(value: unknown): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0)
+    throw new Error("Indexer returned a malformed Gateway API failure count.");
+  return value;
 }
 
 function requireString(value: unknown, label: string): string {

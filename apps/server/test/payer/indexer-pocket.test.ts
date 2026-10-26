@@ -9,6 +9,7 @@ describe("indexer pocket reader", () => {
         gatewayAvailableAtomic: "850000",
         gatewayWithdrawingAtomic: "0",
         apiObservedAt: "2026-10-22T00:00:00.000Z",
+        apiConsecutiveFailures: 2,
         apiAgeSeconds: 1,
         slowWithdrawalOpen: false,
       }),
@@ -21,6 +22,7 @@ describe("indexer pocket reader", () => {
       gatewayAvailableAtomic: 850_000n,
       gatewayWithdrawingAtomic: 0n,
       apiObservedAt: new Date("2026-10-22T00:00:00.000Z"),
+      apiConsecutiveFailures: 2,
     });
     expect(fetcher).toHaveBeenCalledWith(
       "http://127.0.0.1:42069/pocket-balances/0x0000000000000000000000000000000000000002",
