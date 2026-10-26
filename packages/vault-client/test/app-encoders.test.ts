@@ -2,6 +2,7 @@ import {
   czarVaultAbi,
   czarVaultFactoryAbi,
   encodeCreateVault,
+  encodeRecordManualReturn,
   encodeSetCategoryLimits,
   encodeSetPasskey,
 } from "@czar/vault-client";
@@ -27,6 +28,16 @@ describe("app owner action encoders", () => {
     });
     expect(decoded.functionName).toBe("setCategoryLimits");
     expect(decoded.args).toEqual([category, 2_000_000n, 1_000_000n]);
+  });
+
+  it("encodes recordManualReturn with the pocket and returned amount", () => {
+    const pocket = "0x0000000000000000000000000000000000000001";
+    const decoded = decodeFunctionData({
+      abi: czarVaultAbi,
+      data: encodeRecordManualReturn(pocket, 700n),
+    });
+    expect(decoded.functionName).toBe("recordManualReturn");
+    expect(decoded.args).toEqual([pocket, 700n]);
   });
 
   it("encodes the P-256 coordinates and RP ID hash for setPasskey", () => {

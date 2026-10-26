@@ -17,6 +17,7 @@ import {
   escrowJobs,
   gatewayTransfers,
   jobs,
+  manualReturns,
   pockets,
   pocketBalances,
   pullbacks,
@@ -187,6 +188,49 @@ beforeEach(async () => {
 });
 
 describe("T-034 query store (SQL)", () => {
+  it("returns manual return credits only for the requested vault", async () => {
+    await db.insert(manualReturns).values([
+      {
+        id: `${lower(VAULT)}:${hash("a")}:1`,
+        vault: lower(VAULT),
+        pocket: lower(POCKET),
+        credit: "700",
+        txHash: hash("a"),
+        logIndex: 1,
+        block: 9n,
+      },
+      {
+        id: `${lower(VAULT)}:${hash("b")}:2`,
+        vault: lower(VAULT),
+        pocket: lower(POCKET),
+        credit: "300",
+        txHash: hash("b"),
+        logIndex: 2,
+        block: 9n,
+      },
+      {
+        id: `${lower(OTHER_VAULT)}:${hash("c")}:0`,
+        vault: lower(OTHER_VAULT),
+        pocket: lower(POCKET),
+        credit: "999",
+        txHash: hash("c"),
+        logIndex: 0,
+        block: 8n,
+      },
+    ]);
+    const app = createIndexerApi(createQueryStore(db), loadConfig());
+    const response = await app.request(`/pockets/manual-returns?vault=${lower(VAULT)}`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      items: [
+        { pocket: lower(POCKET), credit: "700", txHash: hash("a"), block: "9" },
+        { pocket: lower(POCKET), credit: "300", txHash: hash("b"), block: "9" },
+      ],
+    });
+    const invalid = await app.request("/pockets/manual-returns?vault=bad");
+    expect(invalid.status).toBe(400);
+  });
+
   it("serves pocket balance ages, funded pockets and Closed pockets with balances", async () => {
     const fundedRef = await seedEnvelope(VAULT, 1n);
     await seedEnvelope(VAULT, 2n);

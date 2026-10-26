@@ -6,6 +6,7 @@ import {
   envelopeMirror,
   jobMirror,
   jobState,
+  manualReturnMirror,
   pocketMirror,
   reservationMirror,
 } from "@czar/indexer/mirrors";
@@ -173,5 +174,26 @@ describe("vault mirror schema and derived states", () => {
     });
     expect(mirror.state).toBe("Released");
     valid("job-record", mirror);
+  });
+
+  it("projects a ManualReturnRecorded event with vault and chain coordinates", () => {
+    expect(
+      manualReturnMirror({
+        vault,
+        pocket,
+        credit: 700n,
+        txHash: hash,
+        logIndex: 2,
+        block: 9n,
+      }),
+    ).toEqual({
+      id: `${vault.toLowerCase()}:${hash}:${2}`,
+      vault: vault.toLowerCase(),
+      pocket: pocket.toLowerCase(),
+      credit: "700",
+      txHash: hash,
+      logIndex: 2,
+      block: 9n,
+    });
   });
 });

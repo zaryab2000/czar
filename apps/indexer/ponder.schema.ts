@@ -113,6 +113,22 @@ export const pockets = onchainTable(
   }),
 );
 
+export const manualReturns = onchainTable(
+  "manual_returns",
+  (t) => ({
+    id: t.text().primaryKey(),
+    vault: t.text().notNull(),
+    pocket: t.text().notNull(),
+    credit: t.text().notNull(),
+    txHash: t.text().notNull(),
+    logIndex: t.integer().notNull(),
+    block: t.bigint().notNull(),
+  }),
+  (t) => ({
+    vaultBlockIdx: index("manual_returns_vault_block_idx").on(t.vault, t.block, t.logIndex),
+  }),
+);
+
 export const jobs = onchainTable(
   "jobs",
   (t) => ({
