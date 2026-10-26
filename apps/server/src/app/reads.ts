@@ -7,6 +7,7 @@ import type {
   EnvelopeDetail,
   JobRecord,
   LedgerReceipt,
+  ManualReturn,
   Me,
   PaymentRef,
   Plan,
@@ -18,6 +19,7 @@ import type { Pool } from "pg";
 import { USDC_ADDRESS } from "@czar/x402";
 import { problem } from "#src/http/problem";
 import { RequestValidationError } from "#src/http/validate";
+import { listManualReturnsForUser, type ManualReturnSummary } from "#src/payer/pullback-scheduler";
 
 export interface AppReadOptions {
   readonly rpcUrl: string;
@@ -32,6 +34,8 @@ export interface AppReadDependencies {
 }
 
 type ServerContext = Context<any, any, any>;
+const HASH32_PATTERN = /^0x[0-9a-f]{64}$/;
+const AMOUNT6_PATTERN = /^(0|[1-9][0-9]*)$/;
 
 export async function getMeRoute(
   context: ServerContext,
@@ -247,6 +251,48 @@ export async function listReceiptsRoute(
   const response: AppPage<LedgerReceipt> = { items, nextCursor: facts.nextCursor };
   assertExchange("listReceipts", response);
   return context.json(response);
+}
+
+export async function listManualReturnsRoute(
+  context: ServerContext,
+  dependencies: AppReadDependencies,
+): Promise<Response> {
+  const userId = context.get("appUserId") as string | undefined;
+  if (!userId) return problemResponse(context, 401, "validation");
+  const page = parsePage(context, dependencies.config);
+  const offset = decodeManualReturnCursor(page.cursor, userId);
+  if (offset > Number.MAX_SAFE_INTEGER - page.limit) throw new RequestValidationError();
+  const rows = await listManualReturnsForUser(dependencies.pool, userId);
+  const items = rows.slice(offset, offset + page.limit).map(toManualReturn);
+  const hasMore = offset + items.length < rows.length;
+  const response: AppPage<ManualReturn> = {
+    items,
+    nextCursor: hasMore ? encodeManualReturnCursor(userId, offset + items.length) : null,
+  };
+  assertExchange("listManualReturns", response);
+  return context.json(response);
+}
+
+function toManualReturn(row: ManualReturnSummary): ManualReturn {
+  if (!HASH32_PATTERN.test(row.returnTx) || !AMOUNT6_PATTERN.test(row.returnedAmount)) {
+    throw new Error("Manual-return row has invalid amount or transaction data.");
+  }
+  if (row.recordedCredit !== undefined && !AMOUNT6_PATTERN.test(row.recordedCredit)) {
+    throw new Error("Recorded manual return has an invalid credit amount.");
+  }
+  if (row.recordedTx !== undefined && !HASH32_PATTERN.test(row.recordedTx)) {
+    throw new Error("Recorded manual return has an invalid transaction hash.");
+  }
+  return {
+    envelopeRef: row.envelopeRef,
+    vault: row.vault,
+    pocket: row.pocket,
+    returnedAmount: row.returnedAmount,
+    returnTx: row.returnTx as `0x${string}`,
+    state: row.state,
+    ...(row.recordedCredit === undefined ? {} : { recordedCredit: row.recordedCredit }),
+    ...(row.recordedTx === undefined ? {} : { recordedTx: row.recordedTx as `0x${string}` }),
+  };
 }
 
 export async function sumOpenEnvelopePockets(indexerUrl: string, vault: Address): Promise<bigint> {
@@ -489,6 +535,32 @@ function parsePage(
   )
     throw new RequestValidationError();
   return { cursor: query.get("cursor"), limit };
+}
+
+function decodeManualReturnCursor(value: string | null, userId: string): number {
+  if (value === null) return 0;
+  try {
+    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as {
+      userId?: unknown;
+      offset?: unknown;
+    };
+    if (
+      parsed.userId !== userId ||
+      typeof parsed.offset !== "number" ||
+      !Number.isSafeInteger(parsed.offset) ||
+      parsed.offset < 0
+    ) {
+      throw new RequestValidationError();
+    }
+    return parsed.offset;
+  } catch (error) {
+    if (error instanceof RequestValidationError) throw error;
+    throw new RequestValidationError();
+  }
+}
+
+function encodeManualReturnCursor(userId: string, offset: number): string {
+  return Buffer.from(JSON.stringify({ userId, offset })).toString("base64url");
 }
 
 function readOptions(input: AppReadOptions | undefined): AppReadOptions {
