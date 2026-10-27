@@ -23,6 +23,7 @@ describe("result acknowledgement client", () => {
       objectiveId: OBJECTIVE_ID,
       resultAck: ACK,
       keychain,
+      serverOrigin: new URL("http://127.0.0.1:3000"),
       idempotencyKey: IDEMPOTENCY_KEY,
       fetcher: async (url, init) => {
         requestUrl = url;
@@ -32,7 +33,7 @@ describe("result acknowledgement client", () => {
     });
 
     expect(requestUrl?.toString()).toBe(
-      `http://localhost/v1/objectives/${OBJECTIVE_ID}/results/ack`,
+      `http://127.0.0.1:3000/v1/objectives/${OBJECTIVE_ID}/results/ack`,
     );
     expect(requestInit?.method).toBe("POST");
     expect(requestInit?.headers).toMatchObject({
@@ -50,6 +51,7 @@ describe("result acknowledgement client", () => {
         objectiveId: OBJECTIVE_ID,
         resultAck: ACK,
         keychain: memoryKeychain(),
+        serverOrigin: new URL("http://127.0.0.1:3000"),
         fetcher: async () => {
           calls += 1;
           return new Response(null, { status: 204 });
@@ -57,5 +59,19 @@ describe("result acknowledgement client", () => {
       }),
     ).rejects.toThrow(/pair this computer/i);
     expect(calls).toBe(0);
+  });
+
+  it("rejects a server URL that contains a path", async () => {
+    const keychain = memoryKeychain();
+    keychain.set(KEYCHAIN_ACCOUNTS.deviceToken, DEVICE_TOKEN);
+    await expect(
+      ackResult({
+        objectiveId: OBJECTIVE_ID,
+        resultAck: ACK,
+        keychain,
+        serverOrigin: new URL("http://127.0.0.1:3000/api"),
+        fetcher: async () => new Response(null, { status: 204 }),
+      }),
+    ).rejects.toThrow(/origin must be an http\(s\) origin/i);
   });
 });

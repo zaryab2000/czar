@@ -36,13 +36,22 @@ export async function getResult(
   const response: Result = {
     resultId: row.result_id,
     objectiveId: row.objective_id,
-    mimeType: "application/json",
+    mimeType: isJsonBody(row.rendered_body) ? "application/json" : "text/markdown",
     body: row.rendered_body,
     provenance: row.provenance,
     createdAt: row.created_at.toISOString(),
   };
   assertExchange("getResult", undefined, 200, response);
   return response;
+}
+
+function isJsonBody(body: string): boolean {
+  try {
+    JSON.parse(body);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Persists one owner-scoped write-back acknowledgment with idempotent replay handling.

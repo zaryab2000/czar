@@ -3,7 +3,6 @@ import { validateRecordedExchange } from "@czar/api-contract";
 import type { ResultAck } from "@czar/schemas";
 import { KEYCHAIN_ACCOUNTS, type Keychain } from "#src/keychain";
 
-const SERVER_ORIGIN = "http://localhost";
 const OBJECTIVE_ID = /^obj_[0-9A-HJKMNP-TV-Z]{26}$/;
 const DEVICE_TOKEN = /^[A-Za-z0-9_-]{43}$/;
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -14,6 +13,7 @@ export interface AckResultInput {
   readonly objectiveId: string;
   readonly resultAck: ResultAck;
   readonly keychain: Keychain;
+  readonly serverOrigin: URL;
   readonly idempotencyKey?: string;
   readonly fetcher?: ResultAckFetch;
 }
@@ -27,12 +27,13 @@ export async function ackResult(input: AckResultInput): Promise<void> {
   });
   if (!contract.valid) throw new Error("Result acknowledgement does not match the API contract.");
   const token = readDeviceToken(input.keychain);
+  const serverOrigin = validateServerOrigin(input.serverOrigin);
   const idempotencyKey = input.idempotencyKey ?? randomUUID();
   if (!UUID_V4.test(idempotencyKey)) throw new Error("Invalid result acknowledgement key.");
   let response: Response;
   try {
     response = await (input.fetcher ?? defaultFetch)(
-      new URL(`/v1/objectives/${encodeURIComponent(input.objectiveId)}/results/ack`, SERVER_ORIGIN),
+      new URL(`/v1/objectives/${encodeURIComponent(input.objectiveId)}/results/ack`, serverOrigin),
       {
         method: "POST",
         headers: {
@@ -44,11 +45,25 @@ export async function ackResult(input: AckResultInput): Promise<void> {
       },
     );
   } catch {
-    throw new Error("Could not send the result acknowledgement to Czar at localhost.");
+    throw new Error(`Could not send the result acknowledgement to Czar at ${serverOrigin.origin}.`);
   }
   if (response.status !== 204) {
     throw new Error(`Czar did not accept the result acknowledgement (HTTP ${response.status}).`);
   }
+}
+
+function validateServerOrigin(serverOrigin: URL): URL {
+  if (
+    (serverOrigin.protocol !== "http:" && serverOrigin.protocol !== "https:") ||
+    serverOrigin.username ||
+    serverOrigin.password ||
+    serverOrigin.pathname !== "/" ||
+    serverOrigin.search ||
+    serverOrigin.hash
+  ) {
+    throw new Error("The Czar server origin must be an HTTP(S) origin without a path.");
+  }
+  return serverOrigin;
 }
 
 function readDeviceToken(keychain: Keychain): string {

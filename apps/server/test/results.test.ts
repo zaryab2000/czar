@@ -16,11 +16,21 @@ const FOREIGN_USER_ID = "usr_01K7ZT9P4N5Q6R7S8T9V0W1X2Z";
 const FOREIGN_DEVICE_ID = "dev_01K7ZT9P4N5Q6R7S8T9V0W1X2Z";
 const FOREIGN_OBJECTIVE_ID = "obj_01K7ZT9P4N5Q6R7S8T9V0W1X2Z";
 const FOREIGN_RESULT_ID = "res_01K7ZT9P4N5Q6R7S8T9V0W1X2Z";
+const NOTICE_OBJECTIVE_ID = "obj_01K7ZT9P4N5Q6R7S8T9V0W1X2W";
+const NOTICE_RESULT_ID = "res_01K7ZT9P4N5Q6R7S8T9V0W1X2W";
 
 beforeAll(async () => {
   const pool = getPool();
   await seedDevice(pool);
   await insertResult(pool, TEST_USER_ID, TEST_DEVICE_ID, OBJECTIVE_ID, RESULT_ID);
+  await insertResult(
+    pool,
+    TEST_USER_ID,
+    TEST_DEVICE_ID,
+    NOTICE_OBJECTIVE_ID,
+    NOTICE_RESULT_ID,
+    "No content was delivered.",
+  );
   await insertResult(
     pool,
     FOREIGN_USER_ID,
@@ -49,6 +59,19 @@ describe("result routes", () => {
       headers: deviceHeaders(),
     });
     expect(foreign.status).toBe(404);
+  });
+
+  it("labels plain-text completion notices as markdown", async () => {
+    const { app } = createTestContext(getPool());
+    const response = await app.request(`/v1/results/${NOTICE_RESULT_ID}`, {
+      headers: deviceHeaders(),
+    });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      resultId: NOTICE_RESULT_ID,
+      mimeType: "text/markdown",
+      body: "No content was delivered.",
+    });
   });
 
   it("acknowledges only the matching owner result and is idempotent", async () => {
@@ -96,6 +119,7 @@ async function insertResult(
   deviceId: string,
   objectiveId: string,
   resultId: string,
+  renderedBody = JSON.stringify({ result: "untrusted" }),
 ): Promise<void> {
   if (userId !== TEST_USER_ID) {
     await pool.query("INSERT INTO users (user_id) VALUES ($1)", [userId]);
@@ -117,7 +141,7 @@ async function insertResult(
     [
       resultId,
       objectiveId,
-      JSON.stringify({ result: "untrusted" }),
+      renderedBody,
       JSON.stringify([
         {
           stepIndex: 0,
