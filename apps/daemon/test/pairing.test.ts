@@ -12,9 +12,9 @@ const adminUrl = "postgres://postgres@127.0.0.1:15432/postgres";
 const userId = "usr_01K7ZT9P4N5Q6R7S8T9V0W1X2Y";
 const config = loadConfig({
   envFile: {
-    "app.circleClientUrl": "https://example.invalid/circle",
-    "app.circleClientKey": "test-public-key",
-    "app.arcRpcUrl": "https://example.invalid/rpc",
+    "app.circleClientUrl": "http://127.0.0.1:4337",
+    "app.circleClientKey": "e2e-public-client-key",
+    "app.arcRpcUrl": "http://127.0.0.1:8549",
   },
 });
 let admin: Pool;
