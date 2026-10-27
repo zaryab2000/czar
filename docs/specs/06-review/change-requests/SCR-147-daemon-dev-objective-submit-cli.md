@@ -38,14 +38,34 @@ Only existing schemas, hashes and routes are used. Nothing is added to the serve
 - **`soulVersionHash`:** computed with `@czar/hashing` `soulVersionHash` over the daemon's current soul version.
   - If none exists yet, the command creates and stores a seed version: `{version: 0, compiledAt: <first-use time>, sections: {}}`.
   - It reuses that seed for later submissions, so the value is stable.
-- **`redaction`:** from `@czar/redaction` layer 2 over `goal` and the `taskSpec` values. Counts and entity names only.
-  - If layer 2 finds an unmarked hit, the command refuses to send and prints the entity names, not the text.
+- **`redaction` (amended 2026-10-27, follows D84):**
+  - **Layer 1 (secrets)** runs on `goal`, `topic`, every `subjects[].label` and every `fields[]` value. Any hit → refuse before any request is sent, printing the rule names only.
+  - **Layer 2 (personal data)** runs on `goal` only. It treats the `TaskSpec` subject labels and field values as allowed spans, which are never replaced (D84: they are the task). Any other hit in `goal` is replaced with `[[R:P:<ENTITY>#n]]` markers, as in spec 01 §11.2. `redaction.layer2` records the hit count and entity names.
+  - **`TaskSpec` values** are sent unchanged after Layer 1.
+- **Redaction sidecar (amended 2026-10-27):**
+  - The command uses the daemon's existing lazy sidecar helper (`apps/daemon/src/sidecar.ts`), started on demand.
+  - Socket: `czar-redact.sock`, mode 0600, in the daemon socket directory.
+  - Per-call timeout: `redaction.layer2TimeoutMs`. Idle stop: `redaction.sidecarIdleS`. No process-compose service.
+  - If the sidecar can't start or answer, the regex fallback runs and the result is marked forced-review (D45, `redaction.layer2Fallback`). The command then prints the redacted `goal` and asks `Send? [y/N]`.
+  - Without a TTY, or on any answer other than `y`, it exits non-zero **before** any request is sent.
+  - The runbook documents installing the sidecar's `uv` environment.
 - **`objectiveHash`:** computed with `@czar/hashing` `objectiveHash`. The server recomputes it (a mismatch gives `422`).
 
-### After submitting
+### After submitting (amended 2026-10-27)
 - The command prints `objectiveId`.
-- It polls `GET /v1/objectives/{id}` every `daemon.objectivePollSeconds` until the objective reaches `awaiting-approval` or a terminal state. It prints each state change.
-- At `awaiting-approval` it prints the approval URL, `<app origin>/approve/<planId>`.
+- It polls `GET /v1/objectives/{id}` every `daemon.objectivePollSeconds` and prints each `status` change.
+- **Approval URL:** at `awaiting-approval` it prints `<app origin>/approve/<planId>`. `planId` comes from `ObjectiveStatus.planSummary.planId`, which the OpenAPI response already defines.
+  - The server must populate `planSummary` (`planId`, `cap`, `category`, `stepCount`, `spent`) from its `plans` table whenever a plan exists. This is an implementation fix, not a contract change. Owner: Lane 2 (`objectives/`).
+  - `<app origin>` is the config key `app.publicOrigin` if it exists; otherwise the command prints only `planId` and `/approve/<planId>`. It adds no key.
+- **Result write-back (minimal CZ-11 subset, new):** when the status is final and `resultId` is present:
+  1. `GET /v1/results/{resultId}` with the device token.
+  2. Write `<cwd>/.czar/results/<objectiveId>.md` atomically (`.tmp` then rename). Content: `Result.renderedBody` exactly as served, with the header line CZ-11 §5.2 specifies. No rewriting of labelled spans.
+  3. `POST /v1/objectives/{objectiveId}/results/ack` with `{resultId, writtenAt, surface: "claude-code-file"}`, idempotency key = `resultId`.
+     - Retry up to 3 times with backoff on network errors or 5xx. A 4xx stops with the error code printed.
+     - The server scopes both calls to the device's user (OpenAPI `DeviceToken`).
+  4. Print the file path.
+- **`czar result <objectiveId>`** repeats the write-back for an objective already final (idempotent).
+- **No web result view.** CZ-22 keeps merchant text out of the app. The app shows the receipt, envelope and spending; the result content lives in the project file.
 
 ### Logging
 - It follows cross-cutting §4: never the goal, `taskSpec` values or tokens. Only IDs and states.
@@ -60,7 +80,11 @@ Only existing schemas, hashes and routes are used. Nothing is added to the serve
 ## Acceptance (T-126)
 - The submission validates against `objective-submission.schema.json`, and the server accepts it (`objectiveHash` recomputes).
 - With no paired device it exits non-zero, naming `czar pair`.
-- A planted secret in `goal` is refused before sending.
+- A planted secret in `goal` or any `TaskSpec` value is refused before sending.
+- `TaskSpec` subjects and fields survive layer 2 unchanged; other PII in `goal` becomes markers.
+- Sidecar down: no TTY → exit before any request; TTY + `y` → sent with the forced-review flag recorded in local logs (no text).
+- `awaiting-approval` prints the approval path with `planId` from `planSummary`.
+- Write-back writes the file once and acks once; a re-run of `czar result` is idempotent; ack retries on 5xx only.
 - The seed soul version is created once and reused.
 - Polling stops at `awaiting-approval` and at terminal states.
 - Logs contain no goal text.
