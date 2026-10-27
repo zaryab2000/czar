@@ -18,5 +18,8 @@ it exits before sending anything.
 czar objective "Find current prices" --subject Acme --field price
 ```
 
-The command stops at approval and prints the plan ID and `/approve/<planId>` path.
-Result write-back is held for the SCR-147/Result API contract correction.
+At `awaiting-approval`, the command prints the plan ID and `/approve/<planId>` path,
+then keeps polling until a terminal status. When that status has a `resultId`, it
+writes the result in the project's `writeback.dir` (default `.czar/results/`),
+acknowledges it, and prints the file path. `czar result <objectiveId>` resumes
+polling an existing objective or repeats write-back for a final one.
