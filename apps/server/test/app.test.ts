@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { validateRecordedExchange } from "@czar/api-contract";
 import { setupDatabase } from "#test/db";
 import {
@@ -7,12 +7,85 @@ import {
   makeObjectiveSubmission,
   seedDevice,
   seedPairingCode,
+  TEST_DEVICE_ID,
   TEST_TOKEN,
   TEST_USER_ID,
 } from "#test/fixtures";
 
 const getPool = setupDatabase();
 const idempotencyKey = "4f4e8c7d-94a3-4c6a-8f77-6db94f240c0a";
+const TEST_INDEXER_OPTIONS = {
+  rpcUrl: "http://127.0.0.1:8549",
+  factoryAddress: "0x0000000000000000000000000000000000000001" as const,
+  indexerUrl: "http://indexer.test",
+};
+
+afterEach(() => vi.unstubAllGlobals());
+
+async function seedObjectiveWithPlan(input: {
+  objectiveId: string;
+  planId: string;
+  state: string;
+  envelopeRef?: string;
+  userId?: string;
+  deviceId?: string;
+}): Promise<void> {
+  const pool = getPool();
+  const submission = makeObjectiveSubmission(input.objectiveId, {
+    deviceId: input.deviceId ?? TEST_DEVICE_ID,
+  });
+  await pool.query(
+    `INSERT INTO objectives
+     (objective_id,user_id,device_id,submission,objective_hash,state,plan_id,envelope_ref)
+     VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7,$8)`,
+    [
+      input.objectiveId,
+      input.userId ?? TEST_USER_ID,
+      submission.deviceId,
+      JSON.stringify(submission),
+      submission.objectiveHash,
+      input.state,
+      input.planId,
+      input.envelopeRef ?? null,
+    ],
+  );
+  await pool.query(
+    `INSERT INTO plans (plan_id,objective_id,plan,plan_hash,payee_root,state)
+     VALUES ($1,$2,$3::jsonb,$4,$5,'offered')`,
+    [
+      input.planId,
+      input.objectiveId,
+      JSON.stringify({ cap: "2500000", category: "research", steps: [{}, {}] }),
+      `0x${"3".repeat(64)}`,
+      `0x${"4".repeat(64)}`,
+    ],
+  );
+}
+
+function indexedEnvelope(envelopeRef: string, spent: string) {
+  return {
+    schemaVersion: "1.1",
+    envelopeRef,
+    vault: "0x0000000000000000000000000000000000000001",
+    envelopeId: 7,
+    objectiveHash: `0x${"1".repeat(64)}`,
+    planHash: `0x${"2".repeat(64)}`,
+    payeeRoot: `0x${"3".repeat(64)}`,
+    categoryId: `0x${"4".repeat(64)}`,
+    cap: "2500000",
+    maxStepAmount: "1000000",
+    pocketCapBps: 0,
+    expiresAt: 1792800000,
+    approver: "owner",
+    approvalTx: `0x${"5".repeat(64)}`,
+    spent,
+    reserved: "0",
+    pocketOutstanding: "0",
+    jobEscrowed: "0",
+    state: "Open",
+    lastEventBlock: 10,
+  };
+}
 
 describe("CZ-12 daemon routes", () => {
   let context: ReturnType<typeof createTestContext>;
@@ -240,9 +313,22 @@ describe("CZ-12 daemon routes", () => {
       "INSERT INTO devices (device_id,user_id,device_name,platform,token_hash) VALUES ($1,$2,'Other','linux',$3) ON CONFLICT DO NOTHING",
       [foreignDevice, foreignUser, Buffer.alloc(32, 9)],
     );
+    const foreignPlanId = "pln_01K7ZT9P4N5Q6R7S8T9V0W1X2M";
     await pool.query(
-      "INSERT INTO objectives (objective_id,user_id,device_id,submission,objective_hash,state) VALUES ($1,$2,$3,'{}',$4,'received')",
-      [foreignId, foreignUser, foreignDevice, `0x${"2".repeat(64)}`],
+      `INSERT INTO objectives (objective_id,user_id,device_id,submission,objective_hash,state,plan_id)
+       VALUES ($1,$2,$3,'{}',$4,'received',$5)`,
+      [foreignId, foreignUser, foreignDevice, `0x${"2".repeat(64)}`, foreignPlanId],
+    );
+    await pool.query(
+      `INSERT INTO plans (plan_id,objective_id,plan,plan_hash,payee_root,state)
+       VALUES ($1,$2,$3::jsonb,$4,$5,'offered')`,
+      [
+        foreignPlanId,
+        foreignId,
+        JSON.stringify({ cap: "2500000", category: "research", steps: [{}] }),
+        `0x${"8".repeat(64)}`,
+        `0x${"9".repeat(64)}`,
+      ],
     );
     const ownResponse = await context.app.request(`/v1/objectives/${ownedId}`, {
       headers: { Authorization: `Bearer ${TEST_TOKEN}` },
@@ -280,6 +366,170 @@ describe("CZ-12 daemon routes", () => {
       }).valid,
     ).toBe(true);
     expectRateHeaders(response);
+  });
+
+  it("getObjective_includesPlanSummaryWhenAwaitingApproval", async () => {
+    const pool = getPool();
+    const objectiveId = "obj_01K7ZT9P4N5Q6R7S8T9V0W1X2P";
+    const planId = "pln_01K7ZT9P4N5Q6R7S8T9V0W1X2P";
+    const submission = makeObjectiveSubmission(objectiveId);
+    await pool.query(
+      `INSERT INTO objectives (objective_id,user_id,device_id,submission,objective_hash,state,plan_id)
+       VALUES ($1,$2,$3,$4::jsonb,$5,'awaiting-approval',$6)`,
+      [
+        objectiveId,
+        TEST_USER_ID,
+        submission.deviceId,
+        JSON.stringify(submission),
+        submission.objectiveHash,
+        planId,
+      ],
+    );
+    await pool.query(
+      `INSERT INTO plans (plan_id,objective_id,plan,plan_hash,payee_root,state)
+       VALUES ($1,$2,$3::jsonb,$4,$5,'offered')`,
+      [
+        planId,
+        objectiveId,
+        JSON.stringify({ cap: "2500000", category: "research", steps: [{}, {}] }),
+        `0x${"3".repeat(64)}`,
+        `0x${"4".repeat(64)}`,
+      ],
+    );
+
+    const response = await context.app.request(`/v1/objectives/${objectiveId}`, {
+      headers: { Authorization: `Bearer ${TEST_TOKEN}` },
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      objectiveId,
+      status: "awaiting-approval",
+      planSummary: {
+        planId,
+        cap: "2500000",
+        category: "research",
+        stepCount: 2,
+        spent: "0",
+      },
+    });
+  });
+
+  it("getObjective_readsZeroSpentFromIndexerAfterEnvelopeOpened", async () => {
+    const objectiveId = "obj_01K7ZT9P4N5Q6R7S8T9V0W1X2Q";
+    const planId = "pln_01K7ZT9P4N5Q6R7S8T9V0W1X2Q";
+    const envelopeRef = "eip155:5042002:0x0000000000000000000000000000000000000001:7";
+    await seedObjectiveWithPlan({ objectiveId, planId, state: "executing", envelopeRef });
+    const fetchMock = vi.fn(async () =>
+      Response.json({ envelope: indexedEnvelope(envelopeRef, "0") }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const indexerContext = createTestContext(getPool(), {
+      appReadOptions: TEST_INDEXER_OPTIONS,
+    });
+
+    const response = await indexerContext.app.request(`/v1/objectives/${objectiveId}`, {
+      headers: { Authorization: `Bearer ${TEST_TOKEN}` },
+    });
+    const body = (await response.json()) as Record<string, any>;
+
+    expect(response.status).toBe(200);
+    expect(body["planSummary"]).toMatchObject({
+      planId,
+      cap: "2500000",
+      category: "research",
+      stepCount: 2,
+      spent: "0",
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("getObjective_readsExactSettledSpentFromIndexer", async () => {
+    const objectiveId = "obj_01K7ZT9P4N5Q6R7S8T9V0W1X2S";
+    const planId = "pln_01K7ZT9P4N5Q6R7S8T9V0W1X2S";
+    const envelopeRef = "eip155:5042002:0x0000000000000000000000000000000000000001:8";
+    await seedObjectiveWithPlan({ objectiveId, planId, state: "delivered", envelopeRef });
+    const fetchMock = vi.fn(async () =>
+      Response.json({ envelope: indexedEnvelope(envelopeRef, "7654321") }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const indexerContext = createTestContext(getPool(), {
+      appReadOptions: TEST_INDEXER_OPTIONS,
+    });
+
+    const response = await indexerContext.app.request(`/v1/objectives/${objectiveId}`, {
+      headers: { Authorization: `Bearer ${TEST_TOKEN}` },
+    });
+    const body = (await response.json()) as Record<string, any>;
+
+    expect(response.status).toBe(200);
+    expect((body["planSummary"] as Record<string, unknown>)["spent"]).toBe("7654321");
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("getObjective_omitsSpentWhenIndexerReadFails", async () => {
+    const pool = getPool();
+    const objectiveId = "obj_01K7ZT9P4N5Q6R7S8T9V0W1X2N";
+    const planId = "pln_01K7ZT9P4N5Q6R7S8T9V0W1X2N";
+    const envelopeRef = "eip155:5042002:0x0000000000000000000000000000000000000001:9";
+    const submission = makeObjectiveSubmission(objectiveId);
+    await pool.query(
+      `INSERT INTO objectives
+       (objective_id,user_id,device_id,submission,objective_hash,state,plan_id,envelope_ref)
+       VALUES ($1,$2,$3,$4::jsonb,$5,'delivered',$6,$7)`,
+      [
+        objectiveId,
+        TEST_USER_ID,
+        submission.deviceId,
+        JSON.stringify(submission),
+        submission.objectiveHash,
+        planId,
+        envelopeRef,
+      ],
+    );
+    await pool.query(
+      `INSERT INTO plans (plan_id,objective_id,plan,plan_hash,payee_root,state)
+       VALUES ($1,$2,$3::jsonb,$4,$5,'approved')`,
+      [
+        planId,
+        objectiveId,
+        JSON.stringify({ cap: "2500000", category: "research", steps: [{}] }),
+        `0x${"5".repeat(64)}`,
+        `0x${"6".repeat(64)}`,
+      ],
+    );
+    await pool.query(
+      `INSERT INTO evidence_receipts
+       (obs_id,envelope_ref,step_index,reservation_id,authorization_index,payment_ref_hash,receipt,created_at)
+       VALUES ($1,$2,0,1,0,$3,$4::jsonb,$5)`,
+      [
+        `obs_${"a".repeat(32)}`,
+        envelopeRef,
+        `0x${"7".repeat(64)}`,
+        JSON.stringify({ payment: { rail: "x402-exact", amount: "125000" } }),
+        new Date("2026-10-27T00:00:00.000Z"),
+      ],
+    );
+
+    const fetchMock = vi.fn(async () => {
+      throw new Error("Indexer unavailable");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const indexerContext = createTestContext(pool, {
+      appReadOptions: TEST_INDEXER_OPTIONS,
+    });
+    const response = await indexerContext.app.request(`/v1/objectives/${objectiveId}`, {
+      headers: { Authorization: `Bearer ${TEST_TOKEN}` },
+    });
+    const body = (await response.json()) as Record<string, unknown>;
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      status: "delivered",
+      planSummary: { planId, cap: "2500000", category: "research", stepCount: 1 },
+    });
+    expect(body["planSummary"]).not.toHaveProperty("spent");
+    expect(indexerContext.logLines.join("\n")).toContain("objective_spent_lookup_unavailable");
   });
 
   it("auth_unknownRevokedAndForeignDevice", async () => {
