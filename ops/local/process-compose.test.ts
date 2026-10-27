@@ -52,6 +52,9 @@ describe("local process composition", () => {
     expect(forkComposition).toContain("pnpm --filter @czar/web exec node e2e/mock-bundler.mjs");
     expect(forkComposition).toContain("CZAR_ARC_RPC_URL=http://127.0.0.1:8545");
     expect(forkComposition).toContain("CZAR_MOCK_BUNDLER_PORT=4337");
+    expect(forkComposition).toContain(
+      "CZAR_MOCK_BUNDLER_CORS_ORIGINS=http://localhost:3001,http://localhost:3100",
+    );
     expect(forkComposition).toContain("CZAR_SERVER_URL=http://127.0.0.1:3000");
     expect(forkComposition).toContain("port: 3001");
   });
