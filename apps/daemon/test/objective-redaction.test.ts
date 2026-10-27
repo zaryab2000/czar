@@ -10,6 +10,27 @@ const options = () =>
   );
 
 describe("manual objective redaction", () => {
+  it("protects TaskSpec spans that also appear in the goal", async () => {
+    const input = parseObjectiveOptions(
+      ["Find Acme prices for Ada", "--subject", "Acme", "--field", "prices"],
+      ["web-search"],
+    );
+    const client: Layer2Client = {
+      async redact(text) {
+        expect(text).not.toContain("Acme");
+        expect(text).not.toContain("prices");
+        return {
+          text: text.replace("Ada", "[[R:P:PERSON#1]]"),
+          entities: [{ type: "PERSON", count: 1 }],
+          forcedReview: false,
+        };
+      },
+    };
+    const result = await redactObjectiveInput(input, client);
+    expect(result.options.goal).toBe("Find Acme prices for [[R:P:PERSON#1]]");
+    expect(result.layer2).toEqual({ hits: 1, entities: ["PERSON"] });
+  });
+
   it("redacts the goal and preserves TaskSpec values after layer 1", async () => {
     const seen: string[] = [];
     const client: Layer2Client = {
@@ -42,13 +63,13 @@ describe("manual objective redaction", () => {
     await expect(redactObjectiveInput(options(), client)).rejects.toThrow(/Entities: PERSON/);
   });
 
-  it("refuses fallback review before submission", async () => {
+  it("marks a fallback result for mandatory review", async () => {
     const client: Layer2Client = {
       async redact(text) {
         return { text, entities: [], forcedReview: true };
       },
     };
-    await expect(redactObjectiveInput(options(), client)).rejects.toThrow(/requires review/);
+    expect((await redactObjectiveInput(options(), client)).forcedReview).toBe(true);
   });
 
   it("refuses a planted secret before any layer-2 call", async () => {

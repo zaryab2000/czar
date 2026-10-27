@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -16,6 +16,149 @@ const cleanLayer2: Layer2Client = {
 };
 
 describe("manual objective command", () => {
+  it("writes a quarantined failure result before acknowledging it", async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), "czar-objective-command-"));
+    const db = openMemoryDatabase(join(projectRoot, "memory.db"), key);
+    const resultId = "res_01K7ZT9P4N5Q6R7S8T9V0W1X2Y";
+    let objectiveId = "";
+    let acknowledged = false;
+    try {
+      await runManualObjective(
+        parseObjectiveOptions(
+          ["Find prices", "--subject", "Acme", "--field", "price"],
+          ["web-search"],
+        ),
+        {
+          database: db,
+          deviceId: "dev_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
+          deviceToken: "opaque-token",
+          layer2: cleanLayer2,
+          pollSeconds: 5,
+          projectRoot,
+          print: () => undefined,
+          acknowledge: async () => {
+            acknowledged = true;
+          },
+          fetcher: async (url, init) => {
+            if (init.method === "POST") {
+              objectiveId = (JSON.parse(String(init.body)) as { objectiveId: string }).objectiveId;
+              return Response.json({ objectiveId, status: "received", updatedAt }, { status: 202 });
+            }
+            if (url.pathname.startsWith("/v1/results/")) {
+              return Response.json({
+                resultId,
+                objectiveId,
+                mimeType: "text/markdown",
+                body: "Result quarantined.\n",
+                provenance: [],
+                createdAt: updatedAt,
+              });
+            }
+            return Response.json({ objectiveId, status: "failed", resultId, updatedAt });
+          },
+        },
+      );
+      const file = readFileSync(join(projectRoot, ".czar", "results", `${objectiveId}.md`), "utf8");
+      expect(file).toContain("Result quarantined.\n");
+      expect(acknowledged).toBe(true);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refuses fallback without a review decision before any request", async () => {
+    const db = openMemoryDatabase(
+      join(mkdtempSync(join(tmpdir(), "czar-objective-command-")), "memory.db"),
+      key,
+    );
+    let calls = 0;
+    try {
+      await expect(
+        runManualObjective(
+          parseObjectiveOptions(
+            ["Find Ada prices", "--subject", "Acme", "--field", "price"],
+            ["web-search"],
+          ),
+          {
+            database: db,
+            deviceId: "dev_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
+            deviceToken: "opaque-token",
+            layer2: {
+              async redact(text) {
+                return { text, entities: [], forcedReview: true };
+              },
+            },
+            pollSeconds: 5,
+            print: () => undefined,
+            fetcher: async () => {
+              calls += 1;
+              throw new Error("unexpected request");
+            },
+          },
+        ),
+      ).rejects.toThrow(/review declined/);
+      expect(calls).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("submits a reviewed fallback and records its forced-review flag", async () => {
+    const db = openMemoryDatabase(
+      join(mkdtempSync(join(tmpdir(), "czar-objective-command-")), "memory.db"),
+      key,
+    );
+    let reviewed = "";
+    let requests = 0;
+    try {
+      await runManualObjective(
+        parseObjectiveOptions(
+          ["Find Ada prices", "--subject", "Acme", "--field", "price"],
+          ["web-search"],
+        ),
+        {
+          database: db,
+          deviceId: "dev_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
+          deviceToken: "opaque-token",
+          layer2: {
+            async redact(text) {
+              return { text, entities: [], forcedReview: true };
+            },
+          },
+          pollSeconds: 5,
+          confirmFallback: async (goal) => {
+            reviewed = goal;
+            return true;
+          },
+          print: () => undefined,
+          fetcher: async (_url, init) => {
+            requests += 1;
+            const id =
+              init.method === "POST"
+                ? (JSON.parse(String(init.body)) as { objectiveId: string }).objectiveId
+                : _url.pathname.split("/").at(-1);
+            return Response.json(
+              {
+                objectiveId: id,
+                status: init.method === "POST" ? "received" : "failed",
+                updatedAt,
+              },
+              { status: init.method === "POST" ? 202 : 200 },
+            );
+          },
+        },
+      );
+      expect(reviewed).toContain("Find Ada");
+      expect(requests).toBe(2);
+      const row = db.prepare("SELECT summary_counts_json FROM audit_local").get() as {
+        summary_counts_json: string;
+      };
+      expect(JSON.parse(row.summary_counts_json)).toEqual({ forcedReview: 1 });
+    } finally {
+      db.close();
+    }
+  });
+
   it("submits, prints only the ID and states, then stops at terminal state", async () => {
     const db = openMemoryDatabase(
       join(mkdtempSync(join(tmpdir(), "czar-objective-command-")), "memory.db"),

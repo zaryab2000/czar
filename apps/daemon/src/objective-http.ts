@@ -10,6 +10,7 @@ export interface ObjectiveStatus {
   readonly objectiveId: string;
   readonly status: string;
   readonly planSummary?: { readonly planId?: string };
+  readonly resultId?: string;
 }
 
 /** Submits one validated objective with the paired device's bearer token. */
@@ -63,12 +64,15 @@ export async function pollManualObjective(input: {
   let previous = "";
   for (;;) {
     const status = await getStatus(input.objectiveId, input.token, fetcher);
-    if (status.status !== previous) input.print(`${status.objectiveId}: ${status.status}`);
+    const changed = status.status !== previous;
+    if (changed) input.print(`${status.objectiveId}: ${status.status}`);
     previous = status.status;
-    if (status.status === "awaiting-approval") {
+    if (status.status === "awaiting-approval" && changed) {
       const planId = status.planSummary?.planId;
-      if (planId) input.print(`${SERVER_ORIGIN}/approve/${planId}`);
-      else input.print("Approval link unavailable: objective status has no plan ID.");
+      if (planId) {
+        input.print(`Plan: ${planId}`);
+        input.print(`/approve/${planId}`);
+      } else input.print("Approval link unavailable: objective status has no plan ID.");
       return status;
     }
     if (TERMINAL.has(status.status)) return status;
@@ -76,7 +80,7 @@ export async function pollManualObjective(input: {
   }
 }
 
-async function getStatus(
+export async function getStatus(
   objectiveId: string,
   token: string,
   fetcher: ObjectiveFetch,

@@ -4,6 +4,7 @@ import type { ObjectiveOptions } from "#src/objective-options";
 export interface RedactedObjective {
   readonly options: ObjectiveOptions;
   readonly layer2: { readonly hits: number; readonly entities: string[] };
+  readonly forcedReview: boolean;
 }
 
 /** Scans every user text value before a manual objective can leave the Mac. */
@@ -26,9 +27,28 @@ export async function redactObjectiveInput(
       throw new Error("Objective text contains a redaction marker; objective was not sent.");
     }
   }
-  const result = await client.redact(options.goal, { language: "en" });
-  if (result.forcedReview) {
-    throw new Error("Redaction requires review; objective was not sent.");
+  const protectedValues = [
+    ...options.taskSpec.subjects.map((subject) => subject.label),
+    ...options.taskSpec.fields,
+  ].filter((value) => value.length > 0);
+  const spans = [...new Set(protectedValues)].toSorted((a, b) => b.length - a.length);
+  let protectedGoal = options.goal;
+  const replacements = spans.flatMap((value, index) => {
+    if (!protectedGoal.includes(value)) return [];
+    const token = `CZARPROTECTEDSPAN${index}Q`;
+    if (options.goal.includes(token)) {
+      throw new Error("Objective text conflicts with a protected span marker.");
+    }
+    protectedGoal = protectedGoal.replaceAll(value, token);
+    return [{ token, value }];
+  });
+  const result = await client.redact(protectedGoal, { language: "en" });
+  let redactedGoal = result.text;
+  for (const { token, value } of replacements) {
+    if (!redactedGoal.includes(token)) {
+      throw new Error("Protected task text was altered by redaction; objective was not sent.");
+    }
+    redactedGoal = redactedGoal.replaceAll(token, value);
   }
   const markerCounts = new Map<string, number>();
   for (const marker of parseMarkers(result.text)) {
@@ -41,10 +61,11 @@ export async function redactObjectiveInput(
     throw new Error(`Unmarked personal data detected; objective was not sent. Entities: ${names}`);
   }
   return {
-    options: { ...options, goal: result.text },
+    options: { ...options, goal: redactedGoal },
     layer2: {
       hits: result.entities.reduce((sum, entity) => sum + entity.count, 0),
       entities: result.entities.map((entity) => entity.type).toSorted(),
     },
+    forcedReview: result.forcedReview,
   };
 }

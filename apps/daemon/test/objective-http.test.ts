@@ -13,6 +13,7 @@ const body = buildObjectiveSubmission({
       ["web-search"],
     ),
     layer2: { hits: 0, entities: [] },
+    forcedReview: false,
   },
   objectiveId,
   deviceId: "dev_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
@@ -80,7 +81,8 @@ describe("manual objective HTTP flow", () => {
       `${objectiveId}: received`,
       `${objectiveId}: planning`,
       `${objectiveId}: awaiting-approval`,
-      `http://localhost/approve/${planId}`,
+      `Plan: ${planId}`,
+      `/approve/${planId}`,
     ]);
   });
 

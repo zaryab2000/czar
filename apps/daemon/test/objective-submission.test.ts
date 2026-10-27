@@ -15,7 +15,7 @@ describe("manual objective submission", () => {
       ["web-search"],
     );
     const submission = buildObjectiveSubmission({
-      redacted: { options, layer2: { hits: 0, entities: [] } },
+      redacted: { options, layer2: { hits: 0, entities: [] }, forcedReview: false },
       objectiveId,
       deviceId,
       soulVersionHash,
@@ -45,7 +45,7 @@ describe("manual objective submission", () => {
     );
     expect(() =>
       buildObjectiveSubmission({
-        redacted: { options, layer2: { hits: 0, entities: [] } },
+        redacted: { options, layer2: { hits: 0, entities: [] }, forcedReview: false },
         objectiveId,
         deviceId: "invalid",
         soulVersionHash,
