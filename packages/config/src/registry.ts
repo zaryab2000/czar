@@ -3470,4 +3470,13 @@ export const PARAMETERS = [
       "ERC-8183 job route stays off until the T-055 evaluator handoff and the CZ-15 job-result builder merge; enabled only by a later SCR (SCR-143)",
     source: "docs/specs/04-components/server/server-planning-and-payment.md:242",
   },
+  {
+    key: "daemon.objectivePollSeconds",
+    type: "integer",
+    default: 5,
+    unit: "s",
+    reason:
+      "czar objective polls the objective state for a human at the terminal; one GET per 5 s is negligible (SCR-147)",
+    source: "docs/specs/05-build-plan/phase-1-tasks.md:1036",
+  },
 ] as const satisfies readonly ParameterSpec[];
