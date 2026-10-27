@@ -4,7 +4,12 @@ import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { apiContracts, validateRecordedExchange } from "@czar/api-contract";
 import type { Config } from "@czar/config";
 import type { Logger } from "@czar/logging";
-import { assertNoLocalOnly, LocalOnlyFieldError, SchemaValidationError } from "@czar/schemas";
+import {
+  assertNoLocalOnly,
+  LocalOnlyFieldError,
+  SchemaValidationError,
+  validateEnvelope,
+} from "@czar/schemas";
 import type { ObjectiveSubmission, ResultAck } from "@czar/schemas";
 import type { Plan, SubjectsRevision } from "@czar/schemas";
 import type { Pool } from "pg";
@@ -699,18 +704,95 @@ async function getRoute(context: ServerContext, deps: AppDependencies): Promise<
   if (!auth.principal) return problemResponse(context, 401, auth.code ?? "validation");
   const objectiveId = parseObjectiveId(context.req.param("objectiveId") ?? "");
   const found = await deps.pool.query(
-    "SELECT objective_id,state,updated_at FROM objectives WHERE objective_id=$1 AND device_id=$2",
+    `SELECT o.objective_id,o.state,o.updated_at,o.envelope_ref,
+            p.plan_id,p.plan->>'cap' AS plan_cap,
+            p.plan->>'category' AS plan_category,
+            jsonb_array_length(p.plan->'steps') AS plan_step_count
+     FROM objectives o LEFT JOIN plans p ON p.plan_id=o.plan_id
+     WHERE o.objective_id=$1 AND o.device_id=$2`,
     [objectiveId, auth.principal.deviceId],
   );
   if (!found.rowCount) return problemResponse(context, 404, "validation");
-  const row = found.rows[0] as { objective_id: string; state: string; updated_at: Date };
+  const row = found.rows[0] as {
+    objective_id: string;
+    state: string;
+    updated_at: Date;
+    envelope_ref: string | null;
+    plan_id: string | null;
+    plan_cap: string | null;
+    plan_category: string | null;
+    plan_step_count: number | null;
+  };
+  const planId = row.plan_id;
+  const planSummary = planId
+    ? await objectivePlanSummary({ ...row, plan_id: planId }, deps)
+    : undefined;
   const response = {
     objectiveId: row.objective_id,
     status: row.state,
+    ...(planSummary ? { planSummary } : {}),
     updatedAt: row.updated_at.toISOString(),
   };
   assertExchange("getObjective", undefined, 200, response);
   return jsonResponse(context, 200, response);
+}
+
+async function objectivePlanSummary(
+  row: {
+    plan_id: string;
+    plan_cap: string | null;
+    plan_category: string | null;
+    plan_step_count: number | null;
+    envelope_ref: string | null;
+  },
+  dependencies: AppDependencies,
+) {
+  if (row.plan_cap === null || row.plan_category === null || row.plan_step_count === null) {
+    throw new Error(`Stored plan ${row.plan_id} is missing summary fields.`);
+  }
+  const spent = row.envelope_ref ? await readEnvelopeSpent(row.envelope_ref, dependencies) : "0";
+  return {
+    planId: row.plan_id,
+    cap: row.plan_cap,
+    category: row.plan_category,
+    stepCount: row.plan_step_count,
+    ...(spent === undefined ? {} : { spent }),
+  };
+}
+
+async function readEnvelopeSpent(
+  envelopeRef: string,
+  dependencies: AppDependencies,
+): Promise<string | undefined> {
+  const indexerUrl = dependencies.appReadOptions?.indexerUrl;
+  if (!indexerUrl) {
+    dependencies.logger.warn("objective_spent_lookup_unavailable", {
+      rule: "objective-spent-indexer",
+      state: "indexer-unavailable",
+    });
+    return undefined;
+  }
+  try {
+    const response = await fetch(
+      new URL(`/envelopes/${encodeURIComponent(envelopeRef)}`, indexerUrl),
+      { signal: AbortSignal.timeout(Number(dependencies.config.get("fetch.timeoutMs"))) },
+    );
+    if (!response.ok) throw new Error(`Indexer returned ${response.status}.`);
+    const body = (await response.json()) as { envelope?: unknown };
+    if (!body.envelope || !validateEnvelope(body.envelope)) {
+      throw new Error("Indexer returned an invalid envelope.");
+    }
+    if (body.envelope.envelopeRef !== envelopeRef) {
+      throw new Error("Indexer returned a different envelope.");
+    }
+    return body.envelope.spent;
+  } catch {
+    dependencies.logger.warn("objective_spent_lookup_unavailable", {
+      rule: "objective-spent-indexer",
+      state: "indexer-unavailable",
+    });
+    return undefined;
+  }
 }
 
 async function readJson(
