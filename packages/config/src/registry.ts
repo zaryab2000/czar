@@ -3461,4 +3461,24 @@ export const PARAMETERS = [
       "ERC-8183 job route stays off until the T-055 evaluator handoff and the CZ-15 job-result builder merge; enabled only by a later SCR (SCR-143)",
     source: "docs/specs/04-components/server/server-planning-and-payment.md:242",
   },
+  {
+    key: "daemon.objectivePollSeconds",
+    type: "integer",
+    default: 5,
+    unit: "s",
+    reason:
+      "czar objective polls the objective state for a human at the terminal; one GET per 5 s is negligible (SCR-147)",
+    source: "docs/specs/05-build-plan/phase-1-tasks.md:1036",
+  },
+  {
+    key: "daemon.serverOrigin",
+    type: "string",
+    default: null,
+    unit: "url",
+    reason:
+      "origin of the Czar server for daemon commands that contact it; https, or loopback only with the local overlay (SCR-149)",
+    source:
+      "docs/specs/06-review/change-requests/SCR-149-daemon-server-origin-and-result-polling.md:16",
+    noDefault: true,
+  },
 ] as const satisfies readonly ParameterSpec[];

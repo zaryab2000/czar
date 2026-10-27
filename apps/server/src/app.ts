@@ -4,8 +4,13 @@ import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { apiContracts, validateRecordedExchange } from "@czar/api-contract";
 import type { Config } from "@czar/config";
 import type { Logger } from "@czar/logging";
-import { assertNoLocalOnly, LocalOnlyFieldError, SchemaValidationError } from "@czar/schemas";
-import type { ObjectiveSubmission } from "@czar/schemas";
+import {
+  assertNoLocalOnly,
+  LocalOnlyFieldError,
+  SchemaValidationError,
+  validateEnvelope,
+} from "@czar/schemas";
+import type { ObjectiveSubmission, ResultAck } from "@czar/schemas";
 import type { Plan, SubjectsRevision } from "@czar/schemas";
 import type { Pool } from "pg";
 import { appSessionVerifier, authenticateDevice, digest, type Principal } from "#src/http/auth";
@@ -13,6 +18,7 @@ import {
   parseIdempotencyKey,
   parseObjectiveId,
   parseObjectiveListParams,
+  parseResultId,
   RequestValidationError,
 } from "#src/http/validate";
 import { problem, type CzarCode } from "#src/http/problem";
@@ -46,6 +52,7 @@ import {
   type AppReadOptions,
 } from "#src/app/reads";
 import { getAppWalletConfigRoute, resolveAppWalletConfig } from "#src/app/wallet-config";
+import { acknowledgeResult, getResult } from "#src/results/service";
 
 export interface AppDependencies extends PairDependencies {
   logger: Logger;
@@ -164,6 +171,52 @@ export function createApp(dependencies: AppDependencies): Hono {
   app.post("/v1/models/complete", (context) => modelRoute(context, dependencies));
   app.get("/v1/objectives", (context) => listRoute(context, dependencies));
   app.get("/v1/objectives/:objectiveId", (context) => getRoute(context, dependencies));
+  app.get("/v1/results/:resultId", async (context) => {
+    const auth = await authenticateDevice(context, dependencies.pool);
+    const rate = await applyRateLimit(
+      dependencies.pool,
+      dependencies.config,
+      dependencies.clock.now(),
+      "daemon",
+      auth.principal?.deviceId ?? auth.digest,
+    );
+    setRateHeaders(context, rate);
+    if (!rate.allowed) return problemResponse(context, 429, "rate-limited", true);
+    if (!auth.principal) return problemResponse(context, 401, auth.code ?? "validation");
+    const resultId = parseResultId(context.req.param("resultId") ?? "");
+    const result = await getResult(dependencies.pool, auth.principal.userId, resultId);
+    if (!result) return problemResponse(context, 404, "validation");
+    assertResponseContract("getResult", 200, result);
+    return jsonResponse(context, 200, result);
+  });
+  app.post("/v1/objectives/:objectiveId/results/ack", async (context) => {
+    const auth = await authenticateDevice(context, dependencies.pool);
+    const rate = await applyRateLimit(
+      dependencies.pool,
+      dependencies.config,
+      dependencies.clock.now(),
+      "daemon",
+      auth.principal?.deviceId ?? auth.digest,
+    );
+    setRateHeaders(context, rate);
+    if (!rate.allowed) return problemResponse(context, 429, "rate-limited", true);
+    if (!auth.principal) return problemResponse(context, 401, auth.code ?? "validation");
+    const objectiveId = parseObjectiveId(context.req.param("objectiveId") ?? "");
+    const raw = await readJson(context, "ackResult");
+    const outcome = await acknowledgeResult(dependencies.pool, dependencies.config, {
+      userId: auth.principal.userId,
+      objectiveId,
+      body: raw.value as ResultAck,
+      rawBody: raw.bytes,
+      key: parseIdempotencyKey(context.req.header("Idempotency-Key")),
+      now: dependencies.clock.now(),
+    });
+    if (outcome === "not-found") return problemResponse(context, 404, "validation");
+    if (outcome === "idempotency-conflict")
+      return problemResponse(context, 409, "idempotency-conflict");
+    if (outcome === "replay-invalid") return problemResponse(context, 409, "replay-not-stored");
+    return context.body(null, 204);
+  });
   app.get("/v1/jobs/:jobKey/brief", (context) => jobBriefRoute(context, dependencies));
   app.post("/v1/jobs/:jobKey/deliverable", (context) => jobDeliverableRoute(context, dependencies));
   app.get("/v1/app/wallet-config", (context) => getAppWalletConfigRoute(context, walletConfig));
@@ -651,18 +704,95 @@ async function getRoute(context: ServerContext, deps: AppDependencies): Promise<
   if (!auth.principal) return problemResponse(context, 401, auth.code ?? "validation");
   const objectiveId = parseObjectiveId(context.req.param("objectiveId") ?? "");
   const found = await deps.pool.query(
-    "SELECT objective_id,state,updated_at FROM objectives WHERE objective_id=$1 AND device_id=$2",
+    `SELECT o.objective_id,o.state,o.updated_at,o.envelope_ref,
+            p.plan_id,p.plan->>'cap' AS plan_cap,
+            p.plan->>'category' AS plan_category,
+            jsonb_array_length(p.plan->'steps') AS plan_step_count
+     FROM objectives o LEFT JOIN plans p ON p.plan_id=o.plan_id
+     WHERE o.objective_id=$1 AND o.device_id=$2`,
     [objectiveId, auth.principal.deviceId],
   );
   if (!found.rowCount) return problemResponse(context, 404, "validation");
-  const row = found.rows[0] as { objective_id: string; state: string; updated_at: Date };
+  const row = found.rows[0] as {
+    objective_id: string;
+    state: string;
+    updated_at: Date;
+    envelope_ref: string | null;
+    plan_id: string | null;
+    plan_cap: string | null;
+    plan_category: string | null;
+    plan_step_count: number | null;
+  };
+  const planId = row.plan_id;
+  const planSummary = planId
+    ? await objectivePlanSummary({ ...row, plan_id: planId }, deps)
+    : undefined;
   const response = {
     objectiveId: row.objective_id,
     status: row.state,
+    ...(planSummary ? { planSummary } : {}),
     updatedAt: row.updated_at.toISOString(),
   };
   assertExchange("getObjective", undefined, 200, response);
   return jsonResponse(context, 200, response);
+}
+
+async function objectivePlanSummary(
+  row: {
+    plan_id: string;
+    plan_cap: string | null;
+    plan_category: string | null;
+    plan_step_count: number | null;
+    envelope_ref: string | null;
+  },
+  dependencies: AppDependencies,
+) {
+  if (row.plan_cap === null || row.plan_category === null || row.plan_step_count === null) {
+    throw new Error(`Stored plan ${row.plan_id} is missing summary fields.`);
+  }
+  const spent = row.envelope_ref ? await readEnvelopeSpent(row.envelope_ref, dependencies) : "0";
+  return {
+    planId: row.plan_id,
+    cap: row.plan_cap,
+    category: row.plan_category,
+    stepCount: row.plan_step_count,
+    ...(spent === undefined ? {} : { spent }),
+  };
+}
+
+async function readEnvelopeSpent(
+  envelopeRef: string,
+  dependencies: AppDependencies,
+): Promise<string | undefined> {
+  const indexerUrl = dependencies.appReadOptions?.indexerUrl;
+  if (!indexerUrl) {
+    dependencies.logger.warn("objective_spent_lookup_unavailable", {
+      rule: "objective-spent-indexer",
+      state: "indexer-unavailable",
+    });
+    return undefined;
+  }
+  try {
+    const response = await fetch(
+      new URL(`/envelopes/${encodeURIComponent(envelopeRef)}`, indexerUrl),
+      { signal: AbortSignal.timeout(Number(dependencies.config.get("fetch.timeoutMs"))) },
+    );
+    if (!response.ok) throw new Error(`Indexer returned ${response.status}.`);
+    const body = (await response.json()) as { envelope?: unknown };
+    if (!body.envelope || !validateEnvelope(body.envelope)) {
+      throw new Error("Indexer returned an invalid envelope.");
+    }
+    if (body.envelope.envelopeRef !== envelopeRef) {
+      throw new Error("Indexer returned a different envelope.");
+    }
+    return body.envelope.spent;
+  } catch {
+    dependencies.logger.warn("objective_spent_lookup_unavailable", {
+      rule: "objective-spent-indexer",
+      state: "indexer-unavailable",
+    });
+    return undefined;
+  }
 }
 
 async function readJson(
@@ -796,9 +926,11 @@ function operationFor(path: string, method: string): string {
   if (method === "GET" && path === "/v1/devices") return "listDevices";
   if (method === "POST" && /^\/v1\/devices\/[^/]+\/revoke$/.test(path)) return "revokeDevice";
   if (method === "POST" && path === "/v1/objectives") return "submitObjective";
+  if (method === "POST" && /^\/v1\/objectives\/[^/]+\/results\/ack$/.test(path)) return "ackResult";
   if (method === "POST" && path === "/v1/models/complete") return "completeModelCall";
   if (method === "GET" && path === "/v1/objectives") return "listObjectives";
   if (method === "GET" && path.startsWith("/v1/objectives/")) return "getObjective";
+  if (method === "GET" && /^\/v1\/results\/[^/]+$/.test(path)) return "getResult";
   if (method === "GET" && /^\/v1\/jobs\/[^/]+\/brief$/.test(path)) return "getJobBrief";
   if (method === "POST" && /^\/v1\/jobs\/[^/]+\/deliverable$/.test(path))
     return "uploadJobDeliverable";
