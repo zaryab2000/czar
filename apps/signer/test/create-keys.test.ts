@@ -51,6 +51,7 @@ async function localDeployFixture(manifest: unknown) {
   await writeFile(join(root, "deployments/local-keys.json"), JSON.stringify(manifest));
   const arcCast = `#!/bin/sh
 set -eu
+if [ "$1" = rpc ] && [ "$2" = anvil_nodeInfo ]; then [ "$4" = http://127.0.0.1:8545 ] || exit 1; printf '{}'; exit 0; fi
 if [ "$1" = chain-id ]; then [ "$3" = http://127.0.0.1:8545 ] || exit 1; printf '5042002'; exit 0; fi
 if [ "$1" = rpc ] && [ "$2" = eth_accounts ]; then [ "$4" = http://127.0.0.1:8545 ] || exit 1; printf '["${LOCAL_UNLOCKED_ACCOUNT}"]'; exit 0; fi
 if [ "$1" = rpc ] && [ "$2" = eth_sendTransaction ]; then [ "$5" = http://127.0.0.1:8545 ] || exit 1; printf '%s\\n' "$3" >> "$FUND_LOG"; exit 0; fi

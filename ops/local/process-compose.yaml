@@ -13,10 +13,12 @@ processes:
       period_seconds: 2
       timeout_seconds: 2
   circle-standins:
-    command: node --disable-warning=ExperimentalWarning --experimental-strip-types ops/local/circle-standins/server.ts
+    command: >-
+      pnpm --filter @czar/server exec node --disable-warning=ExperimentalWarning
+      --experimental-strip-types ../../ops/local/circle-standins/server.ts
     working_dir: .
     environment:
-      - CZAR_LOCAL_CONFIG=env/local.toml
+      - CZAR_LOCAL_CONFIG=../../env/local.toml
       - CZAR_ARC_RPC_URL=http://127.0.0.1:8545
       - CZAR_STANDIN_BIND_ADDRESS=127.0.0.1
       - CZAR_STANDIN_PORT=4999
@@ -124,10 +126,12 @@ processes:
       period_seconds: 3
       timeout_seconds: 2
   merchant-k10-ready:
-    command: node --disable-warning=ExperimentalWarning --experimental-strip-types ops/local/check-signer-k10.ts
+    command: >-
+      pnpm --filter @czar/signer exec node --disable-warning=ExperimentalWarning
+      --experimental-strip-types scripts/check-signer-k10.ts
     working_dir: .
     environment:
-      - CZAR_LOCAL_CONFIG=env/local.toml
+      - CZAR_LOCAL_CONFIG=../../env/local.toml
     depends_on:
       postgres:
         condition: process_healthy
