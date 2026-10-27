@@ -386,6 +386,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 262144,
   },
   {
+    "key": "daemon.objectivePollSeconds",
+    "source": "default",
+    "unit": "s",
+    "value": 5,
+  },
+  {
     "key": "daemon.outboxMaxRows",
     "source": "default",
     "unit": "count",

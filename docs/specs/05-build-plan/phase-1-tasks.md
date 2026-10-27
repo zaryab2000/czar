@@ -1033,6 +1033,12 @@
 - **Acceptance tests:** exact decimal conversion and malformed handling; stale figure denies write-off, retirement and slow withdraw but not `pocket-return`; dust at or below the fee allows write-off; `Closed` pockets polled until every balance reads zero for `indexer.closedPocketQuietHours`; `nanoSpent` counts non-failed transfers. Live `/v1/balances` behaviour is G0-05.
 - **SCR-141 (2026-10-25):** internal `closedZeroSince` and the quiet-period rule (`pendingBatch` included; failed reads neither set nor reset); signer `pocket-slow-withdraw` `initiate` under trigger (a) with the last good figure and denials `gateway-figure-missing`, `slow-withdraw-value-mismatch`, `pocket-spend-after-observation`; `withdraw` without an API figure. Tests for each denial, fresh vs. last-good amount, and a `gateway-nano` signature inside the window.
 
+### T-126 Daemon `czar objective` submit command (SCR-147)
+- **Milestone / group / who:** M3 / M3-d / agent. **Size:** S. **Deps:** T-060, T-061 (pairing). **Owner:** Lane 4.
+- **Spec refs:** SCR-147; `S02/data-and-protocol.md` §4.4, §5.2, §9.2; `S04/shared/cross-cutting.md` §4.
+- **Outputs:** the `czar objective` command in `apps/daemon`; `daemon.objectivePollSeconds` (`@czar/config`).
+- **Acceptance tests:** as SCR-147 "Acceptance (T-126)".
+
 ### T-125 Owner manual return (SCR-133)
 - **Milestone / group / who:** M4 / M4-b / agent. **Size:** M. **Deps:** T-124, T-053. **Owners:** Lane 1 (`encodeRecordManualReturn`, indexer `manual_returns` and query), Lane 2 (migration, reconciliation, write-off hold), Lane 5 (`listManualReturns`, Envelope section, Home notice).
 - **Spec refs:** CZ-15 §5.3 as amended by SCR-133; CZ-19 §5.4 `manualReturnsForVault`; CZ-22 §4, §5.1, §12; `S02/api/openapi.yaml` `listManualReturns`; `S03/czar-vault.md` `recordManualReturn`.
