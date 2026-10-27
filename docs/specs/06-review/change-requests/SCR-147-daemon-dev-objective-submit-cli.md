@@ -59,7 +59,7 @@ Only existing schemas, hashes and routes are used. Nothing is added to the serve
   - `<app origin>` is the config key `app.publicOrigin` if it exists; otherwise the command prints only `planId` and `/approve/<planId>`. It adds no key.
 - **Result write-back (minimal CZ-11 subset, new):** when the status is final and `resultId` is present:
   1. `GET /v1/results/{resultId}` with the device token.
-  2. Write `<cwd>/.czar/results/<objectiveId>.md` atomically (`.tmp` then rename). Content: `Result.renderedBody` exactly as served, with the header line CZ-11 §5.2 specifies. No rewriting of labelled spans.
+  2. Write `<cwd>/.czar/results/<objectiveId>.<md|json>` atomically (`.tmp` then rename). Content: `Result.body` exactly as served (OpenAPI `Result`; `rendered_body` is only the database column name), with the header line CZ-11 §5.2 specifies. No rewriting of labelled spans. The file name follows `Result.mimeType`: `<objectiveId>.md` for `text/markdown`, `<objectiveId>.json` for `application/json` (CZ-11 naming).
   3. `POST /v1/objectives/{objectiveId}/results/ack` with `{resultId, writtenAt, surface: "claude-code-file"}`, idempotency key = `resultId`.
      - Retry up to 3 times with backoff on network errors or 5xx. A 4xx stops with the error code printed.
      - The server scopes both calls to the device's user (OpenAPI `DeviceToken`).
@@ -92,3 +92,8 @@ Only existing schemas, hashes and routes are used. Nothing is added to the serve
 
 ## Decision
 - Architect ruling under Zaryab's delegation. Recorded by his merge.
+
+## Erratum (2026-10-27)
+- "`Result.renderedBody`" was wrong. The API field is `Result.body` (OpenAPI is canonical); `rendered_body` is the server database column behind it.
+- The write-back file extension follows `Result.mimeType` (`.md` or `.json`).
+- No other change.
