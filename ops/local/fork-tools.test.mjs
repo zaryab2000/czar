@@ -128,6 +128,13 @@ test("binds the fork to loopback with the verified Arc block pin", () => {
   ]);
 });
 
+test("checks the Circle SDK factory address used by the wallet integration", () => {
+  assert.equal(
+    FORK_CODE_ADDRESSES.circleModularWalletsFactory,
+    "0x0000000DF7E6c9Dc387cAFc5eCBfa6c3a6179AdD",
+  );
+});
+
 test("parses exact decimal amounts without floating-point conversion", () => {
   assert.equal(parseAmount("1.25", 6), 1_250_000n);
   assert.equal(parseAmount("10", 18), 10n * 10n ** 18n);

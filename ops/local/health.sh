@@ -106,7 +106,7 @@ check_external_contract_code() {
 	node --input-type=module <<'NODE'
 const addresses = [
   "0x0000000071727De22E5E9d8BAf0edAc6f37da032",
-  "0xf61023061ed45fa9eAC4D2670649cE1FD37ce536",
+  "0x0000000DF7E6c9Dc387cAFc5eCBfa6c3a6179AdD",
   "0x3600000000000000000000000000000000000000",
 ];
 let id = 0;
@@ -125,7 +125,7 @@ try {
     });
     const payload = await response.json();
     if (!response.ok || payload.error || typeof payload.result !== "string" || payload.result === "0x") {
-      throw new Error(`missing EntryPoint, MSCA factory, or USDC code at ${address}`);
+      throw new Error(`missing EntryPoint, Circle SDK factory, or USDC code at ${address}`);
     }
   }
 } catch (error) {

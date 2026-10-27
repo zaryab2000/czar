@@ -8,7 +8,7 @@ export const FORK_CHAIN_ID = 5042002;
 export const FORK_BLOCK_OFFSET = 100n;
 export const FORK_CODE_ADDRESSES = Object.freeze({
   entryPoint: "0x0000000071727De22E5E9d8BAf0edAc6f37da032",
-  smartAccountFactory: "0xf61023061ed45fa9eAC4D2670649cE1FD37ce536",
+  circleModularWalletsFactory: "0x0000000DF7E6c9Dc387cAFc5eCBfa6c3a6179AdD",
   usdc: "0x3600000000000000000000000000000000000000",
 });
 
