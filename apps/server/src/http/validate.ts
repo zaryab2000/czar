@@ -20,6 +20,9 @@ const statusSchema = resolveReference("#/components/schemas/ObjectiveStatusValue
 const objectivePathParameter = resolveReference(
   "#/paths/~1v1~1objectives~1{objectiveId}/get/parameters/0",
 ) as SchemaParameter;
+const resultPathParameter = resolveReference(
+  "#/paths/~1v1~1results~1{resultId}/get/parameters/0",
+) as SchemaParameter;
 
 export const PAGE_LIMIT_MIN = limitParameter.schema?.minimum ?? 1;
 export const PAGE_LIMIT_MAX = limitParameter.schema?.maximum ?? 200;
@@ -27,6 +30,7 @@ export const PAGE_LIMIT_DEFAULT = limitParameter.schema?.default ?? 50;
 export const CURSOR_MAX_LENGTH = cursorParameter.schema?.maxLength ?? 512;
 export const OBJECTIVE_STATUS_VALUES = statusSchema.enum;
 export const OBJECTIVE_ID_PATTERN = objectivePathParameter.schema?.pattern ?? "";
+export const RESULT_ID_PATTERN = resultPathParameter.schema?.pattern ?? "";
 export const UUID_V4_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -50,6 +54,14 @@ export function parseIdempotencyKey(value: string | undefined): string {
 
 export function parseObjectiveId(value: string): string {
   if (!OBJECTIVE_ID_PATTERN || !new RegExp(OBJECTIVE_ID_PATTERN).test(value)) {
+    throw new RequestValidationError();
+  }
+  return value;
+}
+
+/** Validates a result identifier using the canonical OpenAPI path schema. */
+export function parseResultId(value: string): string {
+  if (!RESULT_ID_PATTERN || !new RegExp(RESULT_ID_PATTERN).test(value)) {
     throw new RequestValidationError();
   }
   return value;

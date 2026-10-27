@@ -10,7 +10,7 @@ import {
   SchemaValidationError,
   validateEnvelope,
 } from "@czar/schemas";
-import type { ObjectiveSubmission } from "@czar/schemas";
+import type { ObjectiveSubmission, ResultAck } from "@czar/schemas";
 import type { Plan, SubjectsRevision } from "@czar/schemas";
 import type { Pool } from "pg";
 import { appSessionVerifier, authenticateDevice, digest, type Principal } from "#src/http/auth";
@@ -18,6 +18,7 @@ import {
   parseIdempotencyKey,
   parseObjectiveId,
   parseObjectiveListParams,
+  parseResultId,
   RequestValidationError,
 } from "#src/http/validate";
 import { problem, type CzarCode } from "#src/http/problem";
@@ -51,6 +52,7 @@ import {
   type AppReadOptions,
 } from "#src/app/reads";
 import { getAppWalletConfigRoute, resolveAppWalletConfig } from "#src/app/wallet-config";
+import { acknowledgeResult, getResult } from "#src/results/service";
 
 export interface AppDependencies extends PairDependencies {
   logger: Logger;
@@ -169,6 +171,52 @@ export function createApp(dependencies: AppDependencies): Hono {
   app.post("/v1/models/complete", (context) => modelRoute(context, dependencies));
   app.get("/v1/objectives", (context) => listRoute(context, dependencies));
   app.get("/v1/objectives/:objectiveId", (context) => getRoute(context, dependencies));
+  app.get("/v1/results/:resultId", async (context) => {
+    const auth = await authenticateDevice(context, dependencies.pool);
+    const rate = await applyRateLimit(
+      dependencies.pool,
+      dependencies.config,
+      dependencies.clock.now(),
+      "daemon",
+      auth.principal?.deviceId ?? auth.digest,
+    );
+    setRateHeaders(context, rate);
+    if (!rate.allowed) return problemResponse(context, 429, "rate-limited", true);
+    if (!auth.principal) return problemResponse(context, 401, auth.code ?? "validation");
+    const resultId = parseResultId(context.req.param("resultId") ?? "");
+    const result = await getResult(dependencies.pool, auth.principal.userId, resultId);
+    if (!result) return problemResponse(context, 404, "validation");
+    assertResponseContract("getResult", 200, result);
+    return jsonResponse(context, 200, result);
+  });
+  app.post("/v1/objectives/:objectiveId/results/ack", async (context) => {
+    const auth = await authenticateDevice(context, dependencies.pool);
+    const rate = await applyRateLimit(
+      dependencies.pool,
+      dependencies.config,
+      dependencies.clock.now(),
+      "daemon",
+      auth.principal?.deviceId ?? auth.digest,
+    );
+    setRateHeaders(context, rate);
+    if (!rate.allowed) return problemResponse(context, 429, "rate-limited", true);
+    if (!auth.principal) return problemResponse(context, 401, auth.code ?? "validation");
+    const objectiveId = parseObjectiveId(context.req.param("objectiveId") ?? "");
+    const raw = await readJson(context, "ackResult");
+    const outcome = await acknowledgeResult(dependencies.pool, dependencies.config, {
+      userId: auth.principal.userId,
+      objectiveId,
+      body: raw.value as ResultAck,
+      rawBody: raw.bytes,
+      key: parseIdempotencyKey(context.req.header("Idempotency-Key")),
+      now: dependencies.clock.now(),
+    });
+    if (outcome === "not-found") return problemResponse(context, 404, "validation");
+    if (outcome === "idempotency-conflict")
+      return problemResponse(context, 409, "idempotency-conflict");
+    if (outcome === "replay-invalid") return problemResponse(context, 409, "replay-not-stored");
+    return context.body(null, 204);
+  });
   app.get("/v1/jobs/:jobKey/brief", (context) => jobBriefRoute(context, dependencies));
   app.post("/v1/jobs/:jobKey/deliverable", (context) => jobDeliverableRoute(context, dependencies));
   app.get("/v1/app/wallet-config", (context) => getAppWalletConfigRoute(context, walletConfig));
@@ -878,9 +926,11 @@ function operationFor(path: string, method: string): string {
   if (method === "GET" && path === "/v1/devices") return "listDevices";
   if (method === "POST" && /^\/v1\/devices\/[^/]+\/revoke$/.test(path)) return "revokeDevice";
   if (method === "POST" && path === "/v1/objectives") return "submitObjective";
+  if (method === "POST" && /^\/v1\/objectives\/[^/]+\/results\/ack$/.test(path)) return "ackResult";
   if (method === "POST" && path === "/v1/models/complete") return "completeModelCall";
   if (method === "GET" && path === "/v1/objectives") return "listObjectives";
   if (method === "GET" && path.startsWith("/v1/objectives/")) return "getObjective";
+  if (method === "GET" && /^\/v1\/results\/[^/]+$/.test(path)) return "getResult";
   if (method === "GET" && /^\/v1\/jobs\/[^/]+\/brief$/.test(path)) return "getJobBrief";
   if (method === "POST" && /^\/v1\/jobs\/[^/]+\/deliverable$/.test(path))
     return "uploadJobDeliverable";
