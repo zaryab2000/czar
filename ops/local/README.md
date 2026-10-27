@@ -60,7 +60,7 @@ blindly. Never commit `deployments/local-keys.json` or keystore contents.
 For the clean chain, start the existing stack from the repository root:
 
 ```sh
-process-compose -f ops/local/process-compose.yaml up
+fnm exec --using=22.22.0 process-compose -f ops/local/process-compose.yaml up
 ```
 
 For the browser journey, start the fork overlay with the base process graph from the
@@ -69,7 +69,8 @@ stand-ins, indexer, signer, server, merchant, mock bundler, and web app. Keep th
 terminal open while using the browser:
 
 ```sh
-process-compose -f ops/local/process-compose.yaml -f ops/local/process-compose.fork.yaml up
+fnm exec --using=22.22.0 process-compose \
+  -f ops/local/process-compose.yaml -f ops/local/process-compose.fork.yaml up
 ```
 
 The fork launcher checks Arc testnet chain ID, pins the first run at latest block minus
@@ -87,15 +88,18 @@ not copy full addresses into committed reports. Supply an existing fork USDC hol
 with at least 10 USDC for the vault transfer. Each command applies a fixed amount:
 
 ```sh
-node ops/local/fund-fork.mjs --owner-native '<owner-smart-account-address>'
-node ops/local/fund-fork.mjs --service-native K3 --address '<K3-address>'
-node ops/local/fund-fork.mjs --service-native K5 --address '<K5-address>'
-node ops/local/fund-fork.mjs --service-native K6 --address '<K6-address>'
-node ops/local/fund-fork.mjs --service-native K7 --address '<K7-address>'
-node ops/local/fund-fork.mjs --service-native K20 --address '<K20-address>'
-node ops/local/fund-fork.mjs --service-native relayer --address '<relayer-address>'
-node ops/local/fund-fork.mjs --service-native K10:czar-search --address '<K10-address>'
-node ops/local/fund-fork.mjs --vault-usdc '<vault-address>' --usdc-holder '<holder-address>'
+fnm exec --using=22.22.0 node ops/local/fund-fork.mjs --owner-native '<owner-smart-account-address>'
+fnm exec --using=22.22.0 node ops/local/fund-fork.mjs --service-native K3 --address '<K3-address>'
+fnm exec --using=22.22.0 node ops/local/fund-fork.mjs --service-native K5 --address '<K5-address>'
+fnm exec --using=22.22.0 node ops/local/fund-fork.mjs --service-native K6 --address '<K6-address>'
+fnm exec --using=22.22.0 node ops/local/fund-fork.mjs --service-native K7 --address '<K7-address>'
+fnm exec --using=22.22.0 node ops/local/fund-fork.mjs --service-native K20 --address '<K20-address>'
+fnm exec --using=22.22.0 node ops/local/fund-fork.mjs --service-native relayer \
+  --address '<relayer-address>'
+fnm exec --using=22.22.0 node ops/local/fund-fork.mjs --service-native K10:czar-search \
+  --address '<K10-address>'
+fnm exec --using=22.22.0 node ops/local/fund-fork.mjs --vault-usdc '<vault-address>' \
+  --usdc-holder '<holder-address>'
 ```
 
 The owner receives 1 native unit before vault creation, each service key receives
@@ -103,7 +107,7 @@ The owner receives 1 native unit before vault creation, each service key receive
 Run the health gate after deployment and before browser acceptance:
 
 ```sh
-bash ops/local/health.sh
+fnm exec --using=22.22.0 bash ops/local/health.sh
 ```
 
 Record the binary identity used for a run with `arc-anvil --version` and
