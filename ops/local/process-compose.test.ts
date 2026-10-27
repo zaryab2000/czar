@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const composition = readFileSync(new URL("./process-compose.yaml", import.meta.url), "utf8");
@@ -8,14 +8,10 @@ const forkComposition = readFileSync(
 );
 const forkLauncher = readFileSync(new URL("./fork-anvil.mjs", import.meta.url), "utf8");
 const readme = readFileSync(new URL("./README.md", import.meta.url), "utf8");
-const readiness = readFileSync(
-  new URL("../../apps/signer/scripts/check-signer-k10.ts", import.meta.url),
-  "utf8",
-);
-const k3Readiness = readFileSync(
-  new URL("../../apps/signer/scripts/check-signer-k3.ts", import.meta.url),
-  "utf8",
-);
+const k10ReadinessUrl = new URL("../../apps/signer/scripts/check-signer-k10.ts", import.meta.url);
+const readiness = readFileSync(k10ReadinessUrl, "utf8");
+const k3ReadinessUrl = new URL("../../apps/signer/scripts/check-signer-k3.ts", import.meta.url);
+const k3Readiness = readFileSync(k3ReadinessUrl, "utf8");
 const serverMain = readFileSync(new URL("../../apps/server/src/main.ts", import.meta.url), "utf8");
 const localServer = readFileSync(
   new URL("../../apps/server/src/local-main.ts", import.meta.url),
@@ -46,6 +42,15 @@ function expectDependency(process: string[], name: string, condition: string): v
 }
 
 describe("local process composition", () => {
+  it("resolves K3 and K10 config fallbacks to the root local overlay", () => {
+    const k10ConfigPath = new URL("../../../env/local.toml", k10ReadinessUrl);
+    const k3ConfigPath = new URL("../../../env/local.toml", k3ReadinessUrl);
+    expect(readiness).toContain('new URL("../../../env/local.toml", import.meta.url)');
+    expect(k3Readiness).toContain('new URL("../../../env/local.toml", import.meta.url)');
+    expect(existsSync(k10ConfigPath)).toBe(true);
+    expect(existsSync(k3ConfigPath)).toBe(true);
+  });
+
   it("keeps clean Arc Anvil separate from the fork profile", () => {
     const cleanArc = processSection("arc-anvil").join("\n");
     expect(cleanArc).toContain("arc-anvil --network arc --chain-id 5042002");
