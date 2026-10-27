@@ -10,7 +10,6 @@ export interface ObjectiveStatus {
   readonly objectiveId: string;
   readonly status: string;
   readonly planSummary?: { readonly planId?: string };
-  readonly resultId?: string;
 }
 
 /** Submits one validated objective with the paired device's bearer token. */
@@ -80,7 +79,7 @@ export async function pollManualObjective(input: {
   }
 }
 
-export async function getStatus(
+async function getStatus(
   objectiveId: string,
   token: string,
   fetcher: ObjectiveFetch,

@@ -19,5 +19,4 @@ czar objective "Find current prices" --subject Acme --field price
 ```
 
 The command stops at approval and prints the plan ID and `/approve/<planId>` path.
-After the objective is final, run `czar result <objectiveId>` from the project folder
-to save the served result at `.czar/results/<objectiveId>.md` and acknowledge it.
+Result write-back is held for the SCR-147/Result API contract correction.

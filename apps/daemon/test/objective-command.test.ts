@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -16,56 +16,6 @@ const cleanLayer2: Layer2Client = {
 };
 
 describe("manual objective command", () => {
-  it("writes a quarantined failure result before acknowledging it", async () => {
-    const projectRoot = mkdtempSync(join(tmpdir(), "czar-objective-command-"));
-    const db = openMemoryDatabase(join(projectRoot, "memory.db"), key);
-    const resultId = "res_01K7ZT9P4N5Q6R7S8T9V0W1X2Y";
-    let objectiveId = "";
-    let acknowledged = false;
-    try {
-      await runManualObjective(
-        parseObjectiveOptions(
-          ["Find prices", "--subject", "Acme", "--field", "price"],
-          ["web-search"],
-        ),
-        {
-          database: db,
-          deviceId: "dev_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
-          deviceToken: "opaque-token",
-          layer2: cleanLayer2,
-          pollSeconds: 5,
-          projectRoot,
-          print: () => undefined,
-          acknowledge: async () => {
-            acknowledged = true;
-          },
-          fetcher: async (url, init) => {
-            if (init.method === "POST") {
-              objectiveId = (JSON.parse(String(init.body)) as { objectiveId: string }).objectiveId;
-              return Response.json({ objectiveId, status: "received", updatedAt }, { status: 202 });
-            }
-            if (url.pathname.startsWith("/v1/results/")) {
-              return Response.json({
-                resultId,
-                objectiveId,
-                mimeType: "text/markdown",
-                body: "Result quarantined.\n",
-                provenance: [],
-                createdAt: updatedAt,
-              });
-            }
-            return Response.json({ objectiveId, status: "failed", resultId, updatedAt });
-          },
-        },
-      );
-      const file = readFileSync(join(projectRoot, ".czar", "results", `${objectiveId}.md`), "utf8");
-      expect(file).toContain("Result quarantined.\n");
-      expect(acknowledged).toBe(true);
-    } finally {
-      db.close();
-    }
-  });
-
   it("refuses fallback without a review decision before any request", async () => {
     const db = openMemoryDatabase(
       join(mkdtempSync(join(tmpdir(), "czar-objective-command-")), "memory.db"),

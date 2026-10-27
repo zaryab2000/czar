@@ -11,7 +11,6 @@ import type { ObjectiveOptions } from "#src/objective-options";
 import { redactObjectiveInput } from "#src/objective-redaction";
 import { currentSoulVersionHash } from "#src/objective-soul";
 import { buildObjectiveSubmission } from "#src/objective-submission";
-import { deliverManualResult } from "#src/objective-result";
 
 export interface ObjectiveCommandDeps {
   readonly database: MemoryDatabase;
@@ -24,13 +23,6 @@ export interface ObjectiveCommandDeps {
   readonly sleep?: (milliseconds: number) => Promise<void>;
   readonly now?: () => Date;
   readonly confirmFallback?: (redactedGoal: string) => Promise<boolean>;
-  readonly projectRoot?: string;
-  readonly acknowledge?: (
-    objectiveId: string,
-    resultId: string,
-    writtenAt: string,
-    idempotencyKey: string,
-  ) => Promise<void>;
 }
 
 /** Submits one redacted objective and watches it until approval or a terminal state. */
@@ -66,7 +58,7 @@ export async function runManualObjective(
       JSON.stringify({ forcedReview: redacted.forcedReview ? 1 : 0 }),
     );
   deps.print(body.objectiveId);
-  const status = await pollManualObjective({
+  await pollManualObjective({
     objectiveId: body.objectiveId,
     token: deps.deviceToken,
     intervalSeconds: deps.pollSeconds,
@@ -74,20 +66,4 @@ export async function runManualObjective(
     ...(deps.fetcher === undefined ? {} : { fetcher: deps.fetcher }),
     ...(deps.sleep === undefined ? {} : { sleep: deps.sleep }),
   });
-  if (status.resultId !== undefined) {
-    await deliverManualResult({
-      objectiveId: body.objectiveId,
-      resultId: status.resultId,
-      token: deps.deviceToken,
-      projectRoot: deps.projectRoot ?? process.cwd(),
-      database: deps.database,
-      print: deps.print,
-      acknowledge:
-        deps.acknowledge ??
-        (async () => {
-          throw new Error("Result acknowledgment client is unavailable.");
-        }),
-      ...(deps.fetcher === undefined ? {} : { fetcher: deps.fetcher }),
-    });
-  }
 }

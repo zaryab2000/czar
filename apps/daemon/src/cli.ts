@@ -23,9 +23,6 @@ import { runManualObjective } from "#src/objective-command";
 import { objectivePreflight } from "#src/objective-preflight";
 import { pairedDeviceId, savePairedDevice } from "#src/paired-device";
 import { SidecarSupervisor } from "#src/sidecar";
-import { acknowledgeManualResult } from "#src/objective-ack";
-import { getStatus } from "#src/objective-http";
-import { deliverManualResult } from "#src/objective-result";
 
 const runCommand: CommandRunner = (program, args) =>
   new Promise((resolve) => {
@@ -150,59 +147,10 @@ async function runObjective(argv: readonly string[]): Promise<number> {
           prompt.close();
         }
       },
-      acknowledge: (objectiveId, resultId, writtenAt, idempotencyKey) =>
-        acknowledgeManualResult({ objectiveId, resultId, writtenAt, idempotencyKey, keychain }),
     });
     return 0;
   } finally {
     await supervisor.stop();
-    db.close();
-  }
-}
-
-async function runResult(argv: readonly string[]): Promise<number> {
-  const [objectiveId] = argv;
-  if (process.platform !== "darwin") throw new Error("Results are supported on macOS only.");
-  if (
-    argv.length !== 1 ||
-    objectiveId === undefined ||
-    !/^obj_[0-9A-HJKMNP-TV-Z]{26}$/.test(objectiveId)
-  ) {
-    throw new Error("usage: czar result <objectiveId>");
-  }
-  const config = loadConfig({ env: process.env });
-  const paths = macosPaths(homedir(), config.get("daemon.socketPath") as string);
-  const keychain = createOsKeychain();
-  const token = keychain.get(KEYCHAIN_ACCOUNTS.deviceToken);
-  if (!token) throw new Error("Pair this device first with czar pair <code>.");
-  const db = openPairedSettings(paths, keychain);
-  try {
-    pairedDeviceId(db, token);
-    const status = await getStatus(objectiveId, token, fetch);
-    if (
-      (status.status !== "delivered" && status.status !== "failed") ||
-      status.resultId === undefined
-    ) {
-      throw new Error("Objective has no final result available yet.");
-    }
-    await deliverManualResult({
-      objectiveId,
-      resultId: status.resultId,
-      token,
-      projectRoot: process.cwd(),
-      database: db,
-      print: (line) => process.stdout.write(`${line}\n`),
-      acknowledge: (id, resultId, writtenAt, idempotencyKey) =>
-        acknowledgeManualResult({
-          objectiveId: id,
-          resultId,
-          writtenAt,
-          idempotencyKey,
-          keychain,
-        }),
-    });
-    return 0;
-  } finally {
     db.close();
   }
 }
@@ -229,8 +177,6 @@ async function main(argv: readonly string[]): Promise<number> {
       return runPair(rest);
     case "objective":
       return runObjective(rest);
-    case "result":
-      return runResult(rest);
     case "daemon": {
       const d = deps();
       const daemon = new Daemon({
@@ -256,7 +202,7 @@ async function main(argv: readonly string[]): Promise<number> {
   }
   process.stderr.write(
     "usage: czar status | install | update | uninstall [--delete-memory] | pair <code> | " +
-      "objective <goal> [options] | result <objectiveId> | daemon | config dump\n",
+      "objective <goal> [options] | daemon | config dump\n",
   );
   return 2;
 }
