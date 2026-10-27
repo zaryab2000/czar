@@ -6,6 +6,7 @@ import type { Layer2Client } from "@czar/redaction";
 import { runManualObjective } from "#src/objective-command";
 import { openMemoryDatabase } from "#src/database";
 import { parseObjectiveOptions } from "#src/objective-options";
+import { baseCommandDeps } from "#test/command-fixtures";
 
 const updatedAt = "2026-10-27T00:00:00.000Z";
 const key = "0f".repeat(32);
@@ -33,6 +34,8 @@ describe("manual objective command", () => {
             database: db,
             deviceId: "dev_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
             deviceToken: "opaque-token",
+            ...baseCommandDeps(),
+            ...baseCommandDeps(),
             layer2: {
               async redact(text) {
                 return { text, entities: [], forcedReview: true };
@@ -70,6 +73,7 @@ describe("manual objective command", () => {
           database: db,
           deviceId: "dev_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
           deviceToken: "opaque-token",
+          ...baseCommandDeps(),
           layer2: {
             async redact(text) {
               return { text, entities: [], forcedReview: true };
@@ -126,6 +130,7 @@ describe("manual objective command", () => {
           database: db,
           deviceId: "dev_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
           deviceToken: "opaque-token",
+          ...baseCommandDeps(),
           layer2: cleanLayer2,
           pollSeconds: 5,
           now: () => new Date(updatedAt),
@@ -176,6 +181,8 @@ describe("manual objective command", () => {
             database: db,
             deviceId: "dev_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
             deviceToken: "opaque-token",
+            ...baseCommandDeps(),
+            ...baseCommandDeps(),
             layer2: cleanLayer2,
             pollSeconds: 5,
             print: () => undefined,

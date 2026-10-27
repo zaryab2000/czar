@@ -2,25 +2,33 @@ import { randomUUID } from "node:crypto";
 import { validateRecordedExchange } from "@czar/api-contract";
 import type { ObjectiveSubmission } from "@czar/schemas";
 
-const SERVER_ORIGIN = "http://localhost";
-const TERMINAL = new Set(["no-supplier", "delivered", "failed", "expired", "dismissed"]);
+/** Terminal values of OpenAPI `ObjectiveStatusValue`; polling continues until one is reached. */
+export const TERMINAL_STATUSES: ReadonlySet<string> = new Set([
+  "no-supplier",
+  "delivered",
+  "failed",
+  "expired",
+  "dismissed",
+]);
 
 export type ObjectiveFetch = (input: URL, init: RequestInit) => Promise<Response>;
 export interface ObjectiveStatus {
   readonly objectiveId: string;
   readonly status: string;
-  readonly planSummary?: { readonly planId?: string };
+  readonly planSummary?: { readonly planId?: string; readonly spent?: string };
+  readonly resultId?: string;
 }
 
 /** Submits one validated objective with the paired device's bearer token. */
 export async function submitManualObjective(
   body: ObjectiveSubmission,
   token: string,
+  serverOrigin: URL,
   fetcher: ObjectiveFetch = fetch,
 ): Promise<void> {
   let response: Response;
   try {
-    response = await fetcher(new URL("/v1/objectives", SERVER_ORIGIN), {
+    response = await fetcher(new URL("/v1/objectives", serverOrigin), {
       method: "POST",
       headers: {
         Authorization: `Bearer ${token}`,
@@ -30,7 +38,9 @@ export async function submitManualObjective(
       body: JSON.stringify(body),
     });
   } catch {
-    throw new Error("Could not reach Czar at localhost; objective submission was not confirmed.");
+    throw new Error(
+      `Could not reach Czar at ${serverOrigin.origin}; objective submission was not confirmed.`,
+    );
   }
   const result = await safeJson(response);
   if (response.status !== 202)
@@ -45,10 +55,14 @@ export async function submitManualObjective(
   }
 }
 
-/** Prints each state change and stops at approval or a terminal status. */
+/**
+ * Prints each state change, prints the approval path once at `awaiting-approval`, and returns at a
+ * terminal status (SCR-149 §2).
+ */
 export async function pollManualObjective(input: {
   readonly objectiveId: string;
   readonly token: string;
+  readonly serverOrigin: URL;
   readonly intervalSeconds: number;
   readonly print: (line: string) => void;
   readonly fetcher?: ObjectiveFetch;
@@ -62,7 +76,7 @@ export async function pollManualObjective(input: {
   }
   let previous = "";
   for (;;) {
-    const status = await getStatus(input.objectiveId, input.token, fetcher);
+    const status = await getStatus(input.objectiveId, input.token, input.serverOrigin, fetcher);
     const changed = status.status !== previous;
     if (changed) input.print(`${status.objectiveId}: ${status.status}`);
     previous = status.status;
@@ -72,26 +86,29 @@ export async function pollManualObjective(input: {
         input.print(`Plan: ${planId}`);
         input.print(`/approve/${planId}`);
       } else input.print("Approval link unavailable: objective status has no plan ID.");
-      return status;
     }
-    if (TERMINAL.has(status.status)) return status;
+    if (TERMINAL_STATUSES.has(status.status)) return status;
     await sleep(input.intervalSeconds * 1000);
   }
 }
 
-async function getStatus(
+/** Reads one objective status, validated against the getObjective contract. */
+export async function getStatus(
   objectiveId: string,
   token: string,
+  serverOrigin: URL,
   fetcher: ObjectiveFetch,
 ): Promise<ObjectiveStatus> {
   let response: Response;
   try {
-    response = await fetcher(new URL(`/v1/objectives/${objectiveId}`, SERVER_ORIGIN), {
+    response = await fetcher(new URL(`/v1/objectives/${objectiveId}`, serverOrigin), {
       method: "GET",
       headers: { Authorization: `Bearer ${token}` },
     });
   } catch {
-    throw new Error("Could not reach Czar at localhost while checking objective status.");
+    throw new Error(
+      `Could not reach Czar at ${serverOrigin.origin} while checking objective status.`,
+    );
   }
   const body = await safeJson(response);
   if (response.status !== 200)

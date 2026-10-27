@@ -19,10 +19,11 @@ import { Launchctl, type CommandRunner } from "./launchd.ts";
 import { macosPaths, type DaemonPaths } from "./paths.ts";
 import { readStatus } from "./status.ts";
 import { pairDevice } from "#src/pairing/pair-device";
-import { runManualObjective } from "#src/objective-command";
+import { runManualObjective, runResultCommand } from "#src/objective-command";
 import { objectivePreflight } from "#src/objective-preflight";
 import { pairedDeviceId, savePairedDevice } from "#src/paired-device";
 import { SidecarSupervisor } from "#src/sidecar";
+import { loadCommandConfig, readServerOrigin } from "#src/server-origin";
 
 const runCommand: CommandRunner = (program, args) =>
   new Promise((resolve) => {
@@ -84,7 +85,9 @@ async function runPair(argv: readonly string[]): Promise<number> {
   const [code] = argv;
   if (process.platform !== "darwin") throw new Error("Pairing is supported on macOS only.");
   if (argv.length !== 1 || code === undefined) throw new Error("usage: czar pair <8-digit-code>");
-  const config = loadConfig({ env: process.env });
+  const commandConfig = await loadCommandConfig(process.env);
+  const serverOrigin = readServerOrigin(commandConfig);
+  const config = commandConfig.config;
   const paths = macosPaths(homedir(), config.get("daemon.socketPath") as string);
   const keychain = createOsKeychain();
   const db = openPairedSettings(paths, keychain);
@@ -93,6 +96,7 @@ async function runPair(argv: readonly string[]): Promise<number> {
       code,
       deviceName: await promptDeviceName(),
       platform: "macos",
+      serverOrigin,
       keychain,
     });
     const token = keychain.get(KEYCHAIN_ACCOUNTS.deviceToken);
@@ -111,7 +115,9 @@ async function runPair(argv: readonly string[]): Promise<number> {
 
 async function runObjective(argv: readonly string[]): Promise<number> {
   if (process.platform !== "darwin") throw new Error("Objectives are supported on macOS only.");
-  const config: Config = loadConfig({ env: process.env });
+  const commandConfig = await loadCommandConfig(process.env);
+  const serverOrigin = readServerOrigin(commandConfig);
+  const config: Config = commandConfig.config;
   const paths = macosPaths(homedir(), config.get("daemon.socketPath") as string);
   const keychain = createOsKeychain();
   const preflight = objectivePreflight(argv, keychain, config.get("drives.capabilityTaxonomy"));
@@ -129,6 +135,10 @@ async function runObjective(argv: readonly string[]): Promise<number> {
       database: db,
       deviceId: pairedDeviceId(db, preflight.token),
       deviceToken: preflight.token,
+      keychain,
+      config,
+      serverOrigin,
+      cwd: process.cwd(),
       layer2: sidecarLayer2Client({
         socketPath: sidecarSocket,
         timeoutMs: config.get("redaction.layer2TimeoutMs") as number,
@@ -155,6 +165,37 @@ async function runObjective(argv: readonly string[]): Promise<number> {
   }
 }
 
+async function runResult(argv: readonly string[]): Promise<number> {
+  const [objectiveId] = argv;
+  if (process.platform !== "darwin") throw new Error("Results are supported on macOS only.");
+  if (argv.length !== 1 || objectiveId === undefined) {
+    throw new Error("usage: czar result <objectiveId>");
+  }
+  const commandConfig = await loadCommandConfig(process.env);
+  const serverOrigin = readServerOrigin(commandConfig);
+  const config = commandConfig.config;
+  const paths = macosPaths(homedir(), config.get("daemon.socketPath") as string);
+  const keychain = createOsKeychain();
+  const token = keychain.get(KEYCHAIN_ACCOUNTS.deviceToken);
+  if (!token) throw new Error("This computer is not paired. Run czar pair <code> first.");
+  const db = openPairedSettings(paths, keychain);
+  try {
+    await runResultCommand(objectiveId, {
+      database: db,
+      deviceToken: token,
+      keychain,
+      config,
+      serverOrigin,
+      cwd: process.cwd(),
+      pollSeconds: config.get("daemon.objectivePollSeconds") as number,
+      print: (line) => process.stdout.write(`${line}\n`),
+    });
+    return 0;
+  } finally {
+    db.close();
+  }
+}
+
 async function main(argv: readonly string[]): Promise<number> {
   const [command, ...rest] = argv;
   switch (command) {
@@ -177,6 +218,8 @@ async function main(argv: readonly string[]): Promise<number> {
       return runPair(rest);
     case "objective":
       return runObjective(rest);
+    case "result":
+      return runResult(rest);
     case "daemon": {
       const d = deps();
       const daemon = new Daemon({
@@ -202,7 +245,7 @@ async function main(argv: readonly string[]): Promise<number> {
   }
   process.stderr.write(
     "usage: czar status | install | update | uninstall [--delete-memory] | pair <code> | " +
-      "objective <goal> [options] | daemon | config dump\n",
+      "objective <goal> [options] | result <objectiveId> | daemon | config dump\n",
   );
   return 2;
 }
