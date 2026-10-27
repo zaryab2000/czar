@@ -2406,6 +2406,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 30,
   },
   {
+    "key": "writeback.ackRetryCount",
+    "source": "default",
+    "unit": "count",
+    "value": 3,
+  },
+  {
     "key": "writeback.ackRetryMaxS",
     "source": "default",
     "unit": "s",
