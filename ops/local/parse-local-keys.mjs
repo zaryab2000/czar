@@ -1,0 +1,65 @@
+import { readFile } from "node:fs/promises";
+
+export const LOCAL_KEY_IDS = ["K3", "K5", "K6", "K7", "K8", "relayer", "K20"];
+
+const METADATA_KEYS = ["network", "chainId", "backend", "createdAt"];
+const ADDRESS_PATTERN = /^0x[0-9a-fA-F]{40}$/;
+
+/** Validates the public T-105 local manifest and returns its key entries. */
+export function parseLocalKeysManifest(value) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("local signer key manifest must be a JSON object");
+  }
+  if (
+    value.network !== "arc-local" ||
+    value.chainId !== 5042002 ||
+    value.backend !== "local-keystore" ||
+    typeof value.createdAt !== "string" ||
+    Number.isNaN(Date.parse(value.createdAt))
+  ) {
+    throw new Error("local signer key manifest must target Arc local chain 5042002");
+  }
+  const expectedKeys = [...METADATA_KEYS, ...LOCAL_KEY_IDS].toSorted();
+  if (Object.keys(value).toSorted().join("\n") !== expectedKeys.join("\n")) {
+    throw new Error("local signer key manifest must contain exactly the seven T-105 key entries");
+  }
+
+  const seenAddresses = new Set();
+  for (const keyId of LOCAL_KEY_IDS) {
+    const entry = value[keyId];
+    if (
+      typeof entry !== "object" ||
+      entry === null ||
+      Array.isArray(entry) ||
+      Object.keys(entry).toSorted().join(",") !== "address,ref" ||
+      typeof entry.address !== "string" ||
+      !ADDRESS_PATTERN.test(entry.address) ||
+      /^0x0{40}$/i.test(entry.address) ||
+      entry.ref !== keyId
+    ) {
+      throw new Error(`local signer key manifest has invalid ${keyId} address/ref`);
+    }
+    const normalizedAddress = entry.address.toLowerCase();
+    if (seenAddresses.has(normalizedAddress)) {
+      throw new Error(`local signer key manifest repeats the ${keyId} address`);
+    }
+    seenAddresses.add(normalizedAddress);
+  }
+  return value;
+}
+
+async function main(args) {
+  const [path, keyId] = args;
+  if (path === undefined || !LOCAL_KEY_IDS.includes(keyId)) {
+    throw new Error("usage: parse-local-keys.mjs <manifest-path> <T-105-key-id>");
+  }
+  const manifest = parseLocalKeysManifest(JSON.parse(await readFile(path, "utf8")));
+  process.stdout.write(manifest[keyId].address);
+}
+
+if (process.argv[2] === "--cli") {
+  main(process.argv.slice(3)).catch((error) => {
+    process.stderr.write(`local key manifest: ${error.message}\n`);
+    process.exitCode = 1;
+  });
+}
