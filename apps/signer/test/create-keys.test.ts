@@ -1,4 +1,4 @@
-// T-105 script tests. Only the dry run executes; it keeps throwaway keys in memory and writes nothing.
+// T-105 tests: key creation stays in dry-run; local deployment runs against mocked commands.
 import { describe, expect, it } from "vitest";
 import { getAddress } from "viem";
 import {
@@ -8,9 +8,65 @@ import {
   PHASE1_KEYS,
   validateKeysFile,
 } from "../scripts/create-keys.ts";
+import { readLocalManifest, writeLocalManifest } from "../scripts/create-merchant-keys.ts";
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { chmod, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { join, resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { pathToFileURL } from "node:url";
+
+const LOCAL_UNLOCKED_ACCOUNT = "0x0000000000000000000000000000000000000999";
+const localSample = () => ({
+  network: "arc-local",
+  chainId: 5042002,
+  backend: "local-keystore",
+  createdAt: "2026-10-19T00:00:00.000Z",
+  ...Object.fromEntries(
+    PHASE1_KEYS.map(({ keyId }, index) => [
+      keyId,
+      {
+        address: getAddress(`0x${(index + 1).toString(16).padStart(40, "0")}`),
+        ref: keyId,
+      },
+    ]),
+  ),
+});
+
+async function localDeployFixture(manifest: unknown) {
+  const root = await mkdtemp(join(tmpdir(), "czar-local-deploy-"));
+  const bin = join(root, "bin");
+  const log = join(root, "rpc-calls.jsonl");
+  const forgeLog = join(root, "forge-args.txt");
+  const script = join(root, "ops/local/deploy.sh");
+  await mkdir(bin, { recursive: true });
+  await mkdir(join(root, "ops/local"), { recursive: true });
+  await mkdir(join(root, "deployments"), { recursive: true });
+  await mkdir(join(root, "contracts/script"), { recursive: true });
+  await copyFile(resolve(import.meta.dirname, "../../../ops/local/deploy.sh"), script);
+  await copyFile(
+    resolve(import.meta.dirname, "../../../ops/local/parse-local-keys.mjs"),
+    join(root, "ops/local/parse-local-keys.mjs"),
+  );
+  await writeFile(join(root, "deployments/local-keys.json"), JSON.stringify(manifest));
+  const arcCast = `#!/bin/sh
+set -eu
+if [ "$1" = chain-id ]; then [ "$3" = http://127.0.0.1:8545 ] || exit 1; printf '5042002'; exit 0; fi
+if [ "$1" = rpc ] && [ "$2" = eth_accounts ]; then [ "$4" = http://127.0.0.1:8545 ] || exit 1; printf '["${LOCAL_UNLOCKED_ACCOUNT}"]'; exit 0; fi
+if [ "$1" = rpc ] && [ "$2" = eth_sendTransaction ]; then [ "$5" = http://127.0.0.1:8545 ] || exit 1; printf '%s\\n' "$3" >> "$FUND_LOG"; exit 0; fi
+if [ "$1" = code ]; then printf '0x'; exit 0; fi
+exit 1
+`;
+  await writeFile(join(bin, "arc-cast"), arcCast);
+  await writeFile(join(bin, "arc-forge"), '#!/bin/sh\nprintf \'%s\\n\' "$@" > "$FORGE_LOG"\n');
+  await writeFile(join(root, "contracts/script/deploy.sh"), '#!/bin/sh\narc-forge "$@"\n');
+  await Promise.all([
+    chmod(join(bin, "arc-cast"), 0o755),
+    chmod(join(bin, "arc-forge"), 0o755),
+    chmod(join(root, "contracts/script/deploy.sh"), 0o755),
+  ]);
+  return { root, log, forgeLog, script, bin };
+}
 
 const sample = () => ({
   network: "arc-testnet",
@@ -55,7 +111,131 @@ describe("deployments/arc-testnet-keys.json validation", () => {
 });
 
 describe("local deployment signer roles", () => {
-  it("requires the local manifest and passes it to Deploy.s.sol", async () => {
+  it("parses the T-105 local key/ref manifest and requires all seven entries", async () => {
+    const parserPath = resolve(import.meta.dirname, "../../../ops/local/parse-local-keys.mjs");
+    const { addMerchantKeysToLocalManifest, parseLocalKeysManifest } = await import(
+      pathToFileURL(parserPath).href
+    );
+    const manifest = localSample();
+    expect(parseLocalKeysManifest(manifest).relayer.ref).toBe("relayer");
+    const merchantAddress = getAddress("0x0000000000000000000000000000000000000008");
+    const withMerchant = addMerchantKeysToLocalManifest(manifest, {
+      "czar-search": merchantAddress,
+    });
+    expect(withMerchant["K10:czar-search"].ref).toBe("K10:czar-search");
+    expect(() =>
+      addMerchantKeysToLocalManifest(withMerchant, { "czar-search": merchantAddress }),
+    ).toThrow(/already has or rejects K10:czar-search/);
+    const withoutRelayer = Object.fromEntries(
+      Object.entries(manifest).filter(([key]) => key !== "relayer"),
+    );
+    expect(() => parseLocalKeysManifest(withoutRelayer)).toThrow(
+      /seven T-105 entries and valid K10 entries/,
+    );
+    const placeholder = JSON.parse(
+      await readFile(
+        resolve(import.meta.dirname, "../../../deployments/local-keys.example.json"),
+        "utf8",
+      ),
+    ) as Record<string, unknown>;
+    expect(() => parseLocalKeysManifest(placeholder)).toThrow(/invalid K3 address\/ref/);
+  });
+
+  it("adds merchant K10 public refs to the generated local manifest", async () => {
+    const root = await mkdtemp(join(tmpdir(), "czar-merchant-manifest-"));
+    const path = join(root, "local-keys.json");
+    const manifest = localSample();
+    await writeFile(path, JSON.stringify(manifest));
+    try {
+      const loaded = await readLocalManifest(path);
+      await writeLocalManifest(path, loaded, {
+        "czar-search": getAddress("0x0000000000000000000000000000000000000008"),
+      });
+      const updated = JSON.parse(await readFile(path, "utf8")) as Record<
+        string,
+        { address?: string; ref?: string }
+      >;
+      expect(updated["K10:czar-search"]).toEqual({
+        address: getAddress("0x0000000000000000000000000000000000000008"),
+        ref: "K10:czar-search",
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves concurrent merchant K10 manifest updates", async () => {
+    const root = await mkdtemp(join(tmpdir(), "czar-merchant-manifest-race-"));
+    const path = join(root, "local-keys.json");
+    await writeFile(path, JSON.stringify(localSample()));
+    try {
+      const loaded = await readLocalManifest(path);
+      await Promise.all([
+        writeLocalManifest(path, loaded, {
+          "czar-search": getAddress("0x0000000000000000000000000000000000000008"),
+        }),
+        writeLocalManifest(path, loaded, {
+          "czar-food": getAddress("0x0000000000000000000000000000000000000009"),
+        }),
+      ]);
+      const updated = JSON.parse(await readFile(path, "utf8")) as Record<
+        string,
+        { address?: string; ref?: string }
+      >;
+      expect(updated["K10:czar-search"]?.ref).toBe("K10:czar-search");
+      expect(updated["K10:czar-food"]?.ref).toBe("K10:czar-food");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("passes the new manifest to Deploy.s.sol and funds only the local relayer", async () => {
+    const manifest = localSample();
+    const fixture = await localDeployFixture(manifest);
+    try {
+      const parserResult = spawnSync(
+        "node",
+        [
+          join(fixture.root, "ops/local/parse-local-keys.mjs"),
+          "--cli",
+          "deployments/local-keys.json",
+          "relayer",
+        ],
+        { cwd: fixture.root, encoding: "utf8", env: { PATH: process.env["PATH"] } },
+      );
+      expect(parserResult.status).toBe(0);
+      expect(parserResult.stdout).toHaveLength(42);
+      const result = spawnSync("bash", [fixture.script], {
+        cwd: fixture.root,
+        encoding: "utf8",
+        env: {
+          PATH: `${fixture.bin}${process.env["PATH"] ? `:${process.env["PATH"]}` : ""}`,
+          FUND_LOG: fixture.log,
+          FORGE_LOG: fixture.forgeLog,
+        },
+      });
+      expect(result.status).toBe(0);
+      const funded = (await readFile(fixture.log, "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, string>);
+      expect(funded).toEqual([
+        {
+          from: LOCAL_UNLOCKED_ACCOUNT,
+          to: (manifest as unknown as { relayer: { address: string } }).relayer.address,
+          value: "0xDE0B6B3A7640000",
+        },
+      ]);
+      const forgeArgs = await readFile(fixture.forgeLog, "utf8");
+      expect(forgeArgs).toContain("--unlocked");
+      expect(forgeArgs).toContain("--sender");
+      expect(forgeArgs).toContain(LOCAL_UNLOCKED_ACCOUNT);
+    } finally {
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("uses the local manifest and parser before deployment", async () => {
     const deployScript = await readFile(
       resolve(import.meta.dirname, "../../../ops/local/deploy.sh"),
       "utf8",
@@ -63,10 +243,25 @@ describe("local deployment signer roles", () => {
     expect(deployScript).toContain('KEYS_FILE="$ROOT/deployments/local-keys.json"');
     expect(deployScript).toContain('"../deployments/local-keys.json"');
     expect(deployScript).toContain("arc-cast rpc eth_sendTransaction");
-    expect(deployScript).toContain("manifest[role].address");
-    expect(deployScript).toContain("tr '[:upper:]' '[:lower:]'");
-    expect(deployScript).not.toContain("${ADDRESS,,}");
+    expect(deployScript).toContain('parse-local-keys.mjs" --cli "$KEYS_FILE" relayer');
+    expect(deployScript).not.toContain("for ROLE in K3 K5 K6 K7 K20");
     expect(deployScript).not.toContain(".arc-local-addresses.");
+  });
+
+  it("keeps every committed manifest address as the zero placeholder", async () => {
+    const parserPath = resolve(import.meta.dirname, "../../../ops/local/parse-local-keys.mjs");
+    const { parseLocalKeysManifest } = await import(pathToFileURL(parserPath).href);
+    const example = await readFile(
+      resolve(import.meta.dirname, "../../../deployments/local-keys.example.json"),
+      "utf8",
+    );
+    const template = JSON.parse(example) as Record<string, { address?: string; ref?: string }>;
+    const entries = Object.entries(template).filter(([key]) => key.startsWith("K"));
+    expect(entries.map(([key]) => key)).toContain("K10:czar-search");
+    expect(entries.every(([, entry]) => entry.address === `0x${"0".repeat(40)}`)).toBe(true);
+    expect(example).toContain('"relayer"');
+    expect(example).toContain('"ref": "K3"');
+    expect(() => parseLocalKeysManifest(template)).toThrow(/invalid K3 address\/ref/);
   });
 });
 
@@ -101,6 +296,10 @@ describe("create-keys dry run", () => {
     });
     expect(validateKeysFile(file, true)).toEqual([]);
     expect(file.network).toBe("arc-local");
+    expect((file as unknown as { relayer: { ref: string } }).relayer.ref).toBe("relayer");
+    const parserPath = resolve(import.meta.dirname, "../../../ops/local/parse-local-keys.mjs");
+    const { parseLocalKeysManifest } = await import(pathToFileURL(parserPath).href);
+    expect(parseLocalKeysManifest(file).relayer.ref).toBe("relayer");
     for (const { keyId } of PHASE1_KEYS) {
       const entry = file[keyId as keyof typeof file] as { address: string; ref: string };
       expect(entry.ref).toBe(keyId);
