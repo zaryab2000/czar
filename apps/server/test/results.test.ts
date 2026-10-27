@@ -109,9 +109,13 @@ describe("result routes", () => {
       ).rowCount,
     ).toBe(1);
 
-    expect(
-      (await request(OBJECTIVE_ID, { ...body, writtenAt: "2026-10-22T00:00:00.000Z" }, key)).status,
-    ).toBe(409);
+    const conflict = await request(
+      OBJECTIVE_ID,
+      { ...body, writtenAt: "2026-10-22T00:00:00.000Z" },
+      key,
+    );
+    expect(conflict.status).toBe(409);
+    await expect(conflict.json()).resolves.toMatchObject({ czarCode: "idempotency-conflict" });
     expect(await readAck(pool)).toMatchObject({ writtenAt: body.writtenAt, surface: body.surface });
 
     expect(
