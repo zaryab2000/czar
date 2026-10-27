@@ -8,7 +8,14 @@ const forkComposition = readFileSync(
 );
 const forkLauncher = readFileSync(new URL("./fork-anvil.mjs", import.meta.url), "utf8");
 const readme = readFileSync(new URL("./README.md", import.meta.url), "utf8");
-const readiness = readFileSync(new URL("./check-signer-k10.ts", import.meta.url), "utf8");
+const readiness = readFileSync(
+  new URL("../../apps/signer/scripts/check-signer-k10.ts", import.meta.url),
+  "utf8",
+);
+const k3Readiness = readFileSync(
+  new URL("../../apps/signer/scripts/check-signer-k3.ts", import.meta.url),
+  "utf8",
+);
 const serverMain = readFileSync(new URL("../../apps/server/src/main.ts", import.meta.url), "utf8");
 const localServer = readFileSync(
   new URL("../../apps/server/src/local-main.ts", import.meta.url),
@@ -87,8 +94,9 @@ describe("local process composition", () => {
     expect(k10Ready.join("\n")).toContain(
       "pnpm --filter @czar/signer exec node --disable-warning=ExperimentalWarning",
     );
-    expect(k10Ready.join("\n")).toContain("../../ops/local/check-signer-k10.ts");
+    expect(k10Ready.join("\n")).toContain("scripts/check-signer-k10.ts");
     expect(readiness).toContain('keyAddress("cz-20", "K10:czar-search")');
+    expect(k3Readiness).toContain('keyAddress("cz-15", "K3")');
   });
 
   it("documents the single local stack start command", () => {

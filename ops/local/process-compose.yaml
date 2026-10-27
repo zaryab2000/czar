@@ -128,7 +128,7 @@ processes:
   merchant-k10-ready:
     command: >-
       pnpm --filter @czar/signer exec node --disable-warning=ExperimentalWarning
-      --experimental-strip-types ../../ops/local/check-signer-k10.ts
+      --experimental-strip-types scripts/check-signer-k10.ts
     working_dir: .
     environment:
       - CZAR_LOCAL_CONFIG=../../env/local.toml

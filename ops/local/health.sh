@@ -247,9 +247,9 @@ check "server and database" curl --fail --silent --max-time 2 http://127.0.0.1:3
 check "wallet config" check_wallet_config
 check "signer socket" test -S "$HOME/Library/Application Support/Czar/signer/signer.sock"
 check "K3 signer keyAddress" pnpm --filter @czar/signer exec node --disable-warning=ExperimentalWarning \
-	--experimental-strip-types ../../ops/local/check-signer-k3.ts
+	--experimental-strip-types scripts/check-signer-k3.ts
 check "merchant-k10-ready keyAddress" pnpm --filter @czar/signer exec node \
-	--disable-warning=ExperimentalWarning --experimental-strip-types ../../ops/local/check-signer-k10.ts
+	--disable-warning=ExperimentalWarning --experimental-strip-types scripts/check-signer-k10.ts
 check "merchant health" curl --fail --silent --max-time 2 http://127.0.0.1:8787/health
 check "web app" curl --fail --silent --max-time 3 http://localhost:3001/
 
