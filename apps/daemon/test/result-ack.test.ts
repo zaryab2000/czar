@@ -61,6 +61,7 @@ describe("result acknowledgement client", () => {
         resultAck: ACK,
         keychain: memoryKeychain(),
         config: CONFIG,
+        idempotencyKey: IDEMPOTENCY_KEY,
         serverOrigin: new URL("http://127.0.0.1:3000"),
         fetcher: async () => {
           calls += 1;
@@ -80,6 +81,7 @@ describe("result acknowledgement client", () => {
         resultAck: ACK,
         keychain,
         config: CONFIG,
+        idempotencyKey: IDEMPOTENCY_KEY,
         serverOrigin: new URL("http://127.0.0.1:3000/api"),
         fetcher: async () => new Response(null, { status: 204 }),
       }),
@@ -122,6 +124,7 @@ describe("result acknowledgement client", () => {
         resultAck: ACK,
         keychain,
         config: CONFIG,
+        idempotencyKey: IDEMPOTENCY_KEY,
         serverOrigin: new URL("http://127.0.0.1:3000"),
         sleep: async (milliseconds) => void delays.push(milliseconds),
         fetcher: async () => {
@@ -144,6 +147,7 @@ describe("result acknowledgement client", () => {
         resultAck: ACK,
         keychain,
         config: CONFIG,
+        idempotencyKey: IDEMPOTENCY_KEY,
         serverOrigin: new URL("http://127.0.0.1:3000"),
         sleep: async (milliseconds) => void delays.push(milliseconds),
         fetcher: async () => {

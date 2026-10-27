@@ -16,6 +16,7 @@ const FOREIGN_USER_ID = "usr_01K7ZT9P4N5Q6R7S8T9V0W1X2Z";
 const FOREIGN_DEVICE_ID = "dev_01K7ZT9P4N5Q6R7S8T9V0W1X2Z";
 const FOREIGN_OBJECTIVE_ID = "obj_01K7ZT9P4N5Q6R7S8T9V0W1X2Z";
 const FOREIGN_RESULT_ID = "res_01K7ZT9P4N5Q6R7S8T9V0W1X2Z";
+const UNKNOWN_RESULT_ID = "res_01K7ZT9P4N5Q6R7S8T9V0W1X2W";
 const NOTICE_OBJECTIVE_ID = "obj_01K7ZT9P4N5Q6R7S8T9V0W1X2W";
 const NOTICE_RESULT_ID = "res_01K7ZT9P4N5Q6R7S8T9V0W1X2W";
 
@@ -74,7 +75,7 @@ describe("result routes", () => {
     });
   });
 
-  it("acknowledges only the matching owner result and is idempotent", async () => {
+  it("enforces the four SCR-148 acknowledgment cases", async () => {
     const pool = getPool();
     const { app } = createTestContext(pool);
     const key = randomUUID();
@@ -95,20 +96,61 @@ describe("result routes", () => {
         body: JSON.stringify(resultBody),
       });
 
+    expect((await request(OBJECTIVE_ID, body, "not-a-uuid")).status).toBe(400);
     expect((await request(OBJECTIVE_ID, body, key)).status).toBe(204);
     expect((await request(OBJECTIVE_ID, body, key)).status).toBe(204);
-    expect((await request(OBJECTIVE_ID, body, randomUUID())).status).toBe(204);
-    expect((await request(OBJECTIVE_ID, { ...body, surface: "pr-comment" }, key)).status).toBe(409);
+    expect(await readAck(pool)).toMatchObject({ writtenAt: body.writtenAt, surface: body.surface });
     expect(
-      (await pool.query("SELECT event_id FROM outbox_events WHERE name='result.acknowledged'"))
-        .rowCount,
+      (
+        await pool.query(
+          "SELECT event_id FROM outbox_events WHERE name='result.acknowledged' AND objective_id=$1",
+          [OBJECTIVE_ID],
+        )
+      ).rowCount,
     ).toBe(1);
-    expect((await request(FOREIGN_OBJECTIVE_ID, body, randomUUID())).status).toBe(404);
+
+    expect(
+      (await request(OBJECTIVE_ID, { ...body, writtenAt: "2026-10-22T00:00:00.000Z" }, key)).status,
+    ).toBe(409);
+    expect(await readAck(pool)).toMatchObject({ writtenAt: body.writtenAt, surface: body.surface });
+
+    expect(
+      (
+        await request(
+          OBJECTIVE_ID,
+          { ...body, writtenAt: "2026-10-23T00:00:00.000Z" },
+          randomUUID(),
+        )
+      ).status,
+    ).toBe(204);
+    expect(await readAck(pool)).toMatchObject({ writtenAt: body.writtenAt, surface: body.surface });
+
     expect(
       (await request(OBJECTIVE_ID, { ...body, resultId: FOREIGN_RESULT_ID }, randomUUID())).status,
     ).toBe(404);
+    expect(
+      (await request(FOREIGN_OBJECTIVE_ID, { ...body, resultId: FOREIGN_RESULT_ID }, randomUUID()))
+        .status,
+    ).toBe(404);
+    expect(
+      (await request(OBJECTIVE_ID, { ...body, resultId: UNKNOWN_RESULT_ID }, randomUUID())).status,
+    ).toBe(404);
   });
 });
+
+async function readAck(pool: Awaited<ReturnType<typeof getPool>>): Promise<{
+  writtenAt: string;
+  surface: string;
+}> {
+  const result = await pool.query<{ payload: { writtenAt: string; surface: string } }>(
+    `SELECT payload FROM outbox_events
+     WHERE name='result.acknowledged' AND objective_id=$1 LIMIT 1`,
+    [OBJECTIVE_ID],
+  );
+  const payload = result.rows[0]?.payload;
+  if (!payload) throw new Error("Expected a stored result acknowledgment.");
+  return payload;
+}
 
 function deviceHeaders(): Record<string, string> {
   return { Authorization: `Bearer ${TEST_TOKEN}` };

@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import type { Config } from "@czar/config";
 import { validateRecordedExchange } from "@czar/api-contract";
 import type { ResultAck } from "@czar/schemas";
@@ -24,7 +23,7 @@ export interface AckResultInput {
   readonly keychain: Keychain;
   readonly config: Config;
   readonly serverOrigin: URL;
-  readonly idempotencyKey?: string;
+  readonly idempotencyKey: string;
   readonly fetcher?: ResultAckFetch;
   readonly sleep?: ResultAckSleep;
 }
@@ -39,9 +38,8 @@ export async function ackResult(input: AckResultInput): Promise<void> {
   if (!contract.valid) throw new Error("Result acknowledgement does not match the API contract.");
   const token = readDeviceToken(input.keychain);
   const serverOrigin = validateServerOrigin(input.serverOrigin);
-  const idempotencyKey = input.idempotencyKey ?? randomUUID();
-  if (!UUID_V4.test(idempotencyKey)) throw new Error("Invalid result acknowledgement key.");
-  await sendWithRetries({ input, token, serverOrigin, idempotencyKey });
+  if (!UUID_V4.test(input.idempotencyKey)) throw new Error("Invalid result acknowledgement key.");
+  await sendWithRetries({ input, token, serverOrigin, idempotencyKey: input.idempotencyKey });
 }
 
 async function sendWithRetries(context: {
