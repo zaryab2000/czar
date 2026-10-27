@@ -1,0 +1,207 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://czar.dev/schemas/task-spec.schema.json",
+  "title": "TaskSpec",
+  "description": "The task's real subject, built by code from the person's own file, prompt or error (spec 02 §4.3.1, D84). Travels in ObjectiveSubmission and Plan; part of objectiveHash and planHash.",
+  "type": "object",
+  "x-privacyClass": "redacted-to-server",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "1.1",
+      "description": "Schema version, major.minor; this file is 1.1 (2026-10-20: output, D91).",
+      "x-privacyClass": "redacted-to-server"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "table-fill",
+        "list-fill",
+        "line-fill",
+        "error-fix",
+        "refused-task"
+      ],
+      "description": "Shape of the task.",
+      "x-privacyClass": "redacted-to-server"
+    },
+    "topic": {
+      "type": "string",
+      "maxLength": 300,
+      "description": "Nearest heading, table caption, error class or prompt gist.",
+      "x-privacyClass": "redacted-to-server"
+    },
+    "fileName": {
+      "type": "string",
+      "maxLength": 255,
+      "description": "Base file name only, never a path.",
+      "x-privacyClass": "redacted-to-server"
+    },
+    "fileExt": {
+      "type": "string",
+      "maxLength": 16,
+      "description": "File extension.",
+      "x-privacyClass": "redacted-to-server"
+    },
+    "subjects": {
+      "type": "array",
+      "maxItems": 50,
+      "description": "What to look up or act on, one entry per item (for a table: the row label of each row with a placeholder).",
+      "x-privacyClass": "redacted-to-server",
+      "items": {
+        "type": "object",
+        "description": "One subject.",
+        "x-privacyClass": "redacted-to-server",
+        "additionalProperties": false,
+        "required": [
+          "label"
+        ],
+        "properties": {
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "Subject text, layer 1 only.",
+            "x-privacyClass": "redacted-to-server"
+          },
+          "sourceLine": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "1-based line in the file.",
+            "x-privacyClass": "redacted-to-server"
+          },
+          "addedByUser": {
+            "type": "boolean",
+            "description": "Added on the approval screen.",
+            "x-privacyClass": "redacted-to-server"
+          },
+          "placeholders": {
+            "type": "array",
+            "maxItems": 20,
+            "description": "Exact placeholder spans for this subject, so CZ-11 can fill them in place (D85).",
+            "x-privacyClass": "redacted-to-server",
+            "items": {
+              "type": "object",
+              "description": "One placeholder span.",
+              "x-privacyClass": "redacted-to-server",
+              "additionalProperties": false,
+              "required": [
+                "field",
+                "token"
+              ],
+              "properties": {
+                "field": {
+                  "type": "string",
+                  "maxLength": 64,
+                  "description": "Which field the span is for.",
+                  "x-privacyClass": "redacted-to-server"
+                },
+                "token": {
+                  "type": "string",
+                  "maxLength": 80,
+                  "description": "The exact placeholder text, for example [Add price].",
+                  "x-privacyClass": "redacted-to-server"
+                },
+                "column": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 19,
+                  "description": "Table column index (table-fill).",
+                  "x-privacyClass": "redacted-to-server"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "fields": {
+      "type": "array",
+      "maxItems": 20,
+      "description": "What to find for each subject (placeholder column headers or placeholder text).",
+      "x-privacyClass": "redacted-to-server",
+      "items": {
+        "type": "string",
+        "maxLength": 64,
+        "description": "Field name.",
+        "x-privacyClass": "redacted-to-server"
+      }
+    },
+    "columns": {
+      "type": "array",
+      "maxItems": 20,
+      "description": "Full header row of the source table, in order (table-fill only).",
+      "x-privacyClass": "redacted-to-server",
+      "items": {
+        "type": "string",
+        "maxLength": 64,
+        "description": "Column header.",
+        "x-privacyClass": "redacted-to-server"
+      }
+    },
+    "context": {
+      "type": "string",
+      "maxLength": 2000,
+      "description": "Surrounding text, error text or the person's prompt, after layer 1.",
+      "x-privacyClass": "redacted-to-server"
+    },
+    "sourceTrust": {
+      "type": "string",
+      "enum": [
+        "user-file",
+        "user-prompt",
+        "tool-output"
+      ],
+      "description": "Where the subject came from.",
+      "x-privacyClass": "redacted-to-server"
+    },
+    "editedByUser": {
+      "type": "boolean",
+      "description": "Subjects were changed on the approval screen.",
+      "x-privacyClass": "redacted-to-server"
+    },
+    "output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "format",
+        "formatSource"
+      ],
+      "properties": {
+        "format": {
+          "type": "string",
+          "enum": [
+            "markdown-table",
+            "csv",
+            "json",
+            "markdown-list",
+            "prose"
+          ],
+          "description": "Output format.",
+          "x-privacyClass": "redacted-to-server"
+        },
+        "formatSource": {
+          "type": "string",
+          "enum": [
+            "file",
+            "interview",
+            "default"
+          ],
+          "description": "What decided the format.",
+          "x-privacyClass": "redacted-to-server"
+        }
+      },
+      "description": "How the person wants the result shaped (D91). Built by code: the person's own file decides first, then the interview answer taste.outputFormat, then the default for the task kind. Part of taskSpecHash when present.",
+      "x-privacyClass": "redacted-to-server"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "kind",
+    "topic",
+    "subjects",
+    "fields",
+    "sourceTrust"
+  ],
+  "$comment": "2026-10-20 D91: optional output {format, formatSource}; schemaVersion 1.1."
+}

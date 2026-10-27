@@ -1,0 +1,8 @@
+# Reviewed false positives (T-002, 2026-10-19). Spec examples, EIP-712 vectors, config registry
+# and hashing fixtures are now covered by path allowlists in .gitleaks.toml (T-120).
+# Remaining entries: experiment logs and research notes with contract addresses / idempotency UUIDs.
+dd198662429bb8ffb2841c23530702f3386ee3eb:research/evidence/experiments/a1-erc1271-usdc/raw/fund-transfer.json:generic-api-key:3
+dd198662429bb8ffb2841c23530702f3386ee3eb:research/evidence/arc-circle-docs-2026-10-18.md:generic-api-key:77
+dd198662429bb8ffb2841c23530702f3386ee3eb:research/evidence/experiments/a2-gateway-e2e/raw/fund-transfer.json:generic-api-key:3
+# T-002: earlier wording of the gitleaksignore comment quoted a registry entry.
+572de184e8e29a11d7f887c52f2bb44b6b46ad3c:.gitleaksignore:generic-api-key:9

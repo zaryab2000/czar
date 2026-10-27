@@ -1,0 +1,6 @@
+{
+  "filter_paths": "test/|lib/|script/",
+  "exclude_informational": true,
+  "exclude_optimization": true,
+  "foundry_ignore_compile": true
+}

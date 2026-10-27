@@ -1,0 +1,16 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "ignorePatterns": [
+    "docs/**",
+    "contracts/lib/**",
+    "**/*.md",
+    "pnpm-lock.yaml",
+    "**/.next/**",
+    "**/.ponder/**",
+    "**/generated/**",
+    "apps/redact-sidecar/**",
+    "apps/daemon/test/fixtures/**",
+    "packages/redaction/vendor/**",
+    "packages/hashing/test/fixtures/**"
+  ]
+}

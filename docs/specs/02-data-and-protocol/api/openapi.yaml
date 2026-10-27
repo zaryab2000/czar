@@ -1,0 +1,1850 @@
+openapi: 3.1.0
+info:
+  title: Czar API
+  version: "1.0"
+  summary: Daemon, app and claim-server surfaces for Czar.
+  license:
+    name: Proprietary (Czar specification; not for redistribution)
+    identifier: LicenseRef-Czar-Proprietary
+  description: |
+    Three surfaces on one server. Amounts are USDC 6-decimal atomic-unit integer strings (spec 02 §2.1).
+    Errors are RFC 9457 problem+json with `czarCode` and `retryable` (spec 02 §2.3).
+    Every POST that creates requires `Idempotency-Key` (UUID). A replay with the same body returns the stored
+    response; a replay with a different body returns 409 `idempotency-conflict`.
+    Pagination: `?cursor=&limit=` (max 200), response carries `nextCursor` (null at the end).
+    Rate limits are returned in `RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset` headers.
+    Defaults: daemon 600/min per device, app 120/min per session, claim 30/min per account.
+    Privacy: nothing marked `local-only` in spec 02 §3 is accepted by any route; raw observations never cross.
+    Change log 2026-10-19 (G0-01 review): pay and quote shapes rewritten and the MCP tools mirror them (D75, RV-019,
+    RV-020, RV-021, RV-050); one objective status enum (RV-027); completeModelCall never replays (RV-043); job brief
+    route (RV-025); Phase 1 origin http://localhost (D78, RV-028); lint fixes (quoted descriptions, 4XX responses).
+servers:
+  - url: http://localhost
+    description: "Phase 1: the local server on Zaryab's Mac serves this API and the web app from one origin, http://localhost (D70, D78). The stable public origin arrives with Google Cloud in stage 2."
+tags:
+  - name: daemon
+    description: Daemon ↔ server (device token, K15). Objectives, results, shadow quotes, pay requests.
+  - name: app
+    description: Czar web app ↔ server (passkey-backed session). Phase 1 runs in a desktop browser (D69). Approvals, envelopes, ledger; push routes are stage 2.
+  - name: public
+    description: Public, unauthenticated, rate-limited reads (Czar discovery index, AM-07).
+  - name: provider
+    description: "ERC-8183 specialist providers (signature-authenticated reads of their own job brief, RV-025)."
+  - name: claim
+    description: Claim server (Phase 2, D23, D29). Builder GitHub sign-in or FUNDING.json claims.
+
+security: []
+
+components:
+  securitySchemes:
+    DeviceToken:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+      description: Per-device token issued at pairing (spec 01 K15). Stored in the OS keychain. Revocable in the app.
+    AppSession:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+      description: Short-lived session created from a passkey assertion (D26). 24 h, refreshed on use.
+    ProviderBriefSignature:
+      type: apiKey
+      in: header
+      name: X-Czar-Brief-Signature
+      description: "EIP-712 BriefRequest(jobKey, issuedAt) signature by the job's provider address (EOA or ERC-1271), sent with X-Czar-Provider-Address and X-Czar-Brief-Issued-At (spec 02 §6.2, §9.2; RV-025). issuedAt must be within api.briefSignatureMaxAgeSeconds (300)."
+    ProviderUploadSignature:
+      type: apiKey
+      in: header
+      name: X-Czar-Upload-Signature
+      description: "EIP-712 DeliverableUpload(jobKey, contentHash, issuedAt) signature by the job's provider (EOA or ERC-1271), sent with X-Czar-Provider-Address and X-Czar-Upload-Issued-At; contentHash = keccak256 of the request body (spec 02 §6.2, D87)."
+    GitHubOAuth:
+      type: oauth2
+      description: Builder sign-in (D23). Phase 2. Scope read-only on repository administration.
+      flows:
+        authorizationCode:
+          authorizationUrl: https://github.com/login/oauth/authorize
+          tokenUrl: https://github.com/login/oauth/access_token
+          scopes:
+            read:org: Read organization membership
+            repo: Check admin permission on the claimed repository
+
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: "UUID v4. Same key + same body returns the stored response; same key + different body returns 409. Exceptions: pairDevice and completeModelCall return 409 replay-not-stored instead of replaying (02 §9.3)."
+      schema:
+        type: string
+        format: uuid
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: Opaque cursor from a previous `nextCursor`.
+      schema:
+        type: string
+        maxLength: 512
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+
+  headers:
+    RateLimit-Limit:
+      description: Requests allowed in the current window.
+      schema: { type: integer }
+    RateLimit-Remaining:
+      description: Requests left in the current window.
+      schema: { type: integer }
+    RateLimit-Reset:
+      description: Seconds until the window resets.
+      schema: { type: integer }
+
+  schemas:
+    Problem:
+      type: object
+      description: RFC 9457 problem details plus Czar fields. `detail` never contains user text.
+      x-privacyClass: server-only
+      additionalProperties: false
+      required: [type, title, status, czarCode, retryable]
+      properties:
+        type: { type: string, format: uri, description: "URI under https://czar.dev/problems/" }
+        title: { type: string, maxLength: 120 }
+        status: { type: integer, minimum: 400, maximum: 599 }
+        detail: { type: string, maxLength: 1000, description: "Human-readable; never contains user text." }
+        instance: { type: string, format: uri-reference }
+        czarCode: { type: string, maxLength: 64, description: "Stable machine code, e.g. idempotency-conflict." }
+        retryable: { type: boolean }
+    Page:
+      type: object
+      description: Pagination envelope.
+      x-privacyClass: server-only
+      additionalProperties: false
+      required: [items, nextCursor]
+      properties:
+        items: { type: array, items: {} }
+        nextCursor: { type: [string, "null"], maxLength: 512 }
+
+    Amount6:
+      type: string
+      pattern: "^(0|[1-9][0-9]*)$"
+      description: USDC atomic units, 6 decimals (spec 02 §2.1).
+    Address:
+      type: string
+      pattern: "^0x[0-9a-fA-F]{40}$"
+      description: EIP-55 checksummed address.
+    Hash32:
+      type: string
+      pattern: "^0x[0-9a-f]{64}$"
+    Timestamp:
+      type: string
+      format: date-time
+    ObjectiveStatusValue:
+      type: string
+      description: "The one objective status enum (RV-027). CZ-12's state machine, MCP get_objectives and the daemon use exactly these values. Superseded values: approved (now opening), accepted (now executing), closed (now delivered), cancelled (now dismissed)."
+      enum: [received, planning, no-supplier, awaiting-approval, opening, executing, replanning, delivered, failed, expired, dismissed]
+    PayRequestId:
+      type: string
+      pattern: "^prq_[0-9a-f]{32}$"
+      description: "Client-chosen id of one pay call (prq_ + 32 hex), reused on retry (RV-050). One pay call can cover several authorization indices; each index gets its own server-minted paymentId (spec 02 §7.4)."
+    PaymentId:
+      type: string
+      pattern: "^pay_[0-9a-f]{32}$"
+      description: "Server-minted id of one authorization index (spec 02 §7.4); the x402 payment-identifier value."
+    StepInput:
+      type: object
+      description: "Structured merchant input only (layer 3). Keys must be among the step's inputTemplate.inputKeys and match their declared types and lengths; the MCP server runs redaction layers 1 and 2 on every string value before forwarding, and the server rejects keys outside the template and values with redaction hits (RV-021). Never free user text."
+      maxProperties: 20
+      propertyNames: { pattern: "^[A-Za-z][A-Za-z0-9_]{0,63}$" }
+      additionalProperties:
+        oneOf:
+          - { type: string, maxLength: 1000 }
+          - { type: number }
+          - { type: boolean }
+
+    PairRequest:
+      type: object
+      x-privacyClass: server-only
+      additionalProperties: false
+      required: [pairingCode, deviceName, platform]
+      properties:
+        pairingCode: { type: string, pattern: "^[0-9]{8}$", description: "8-digit code shown in the app; valid 5 minutes." }
+        deviceName: { type: string, maxLength: 64, description: "User-chosen label; never a hostname." }
+        platform: { type: string, enum: [macos, linux, windows] }
+    PairResponse:
+      type: object
+      x-privacyClass: server-only
+      additionalProperties: false
+      required: [deviceId, deviceToken]
+      properties:
+        deviceId: { type: string, pattern: "^dev_[0-9A-HJKMNP-TV-Z]{26}$" }
+        deviceToken: { type: string, description: "Opaque bearer; store in the OS keychain (K15). Shown once. Valid until the device is revoked; no expiry in Phase 1 (SCR-113)." }
+
+    ObjectiveStatus:
+      type: object
+      description: Server-side status of one objective for the daemon.
+      x-privacyClass: redacted-to-server
+      additionalProperties: false
+      required: [objectiveId, status, updatedAt]
+      properties:
+        objectiveId: { type: string, pattern: "^obj_[0-9A-HJKMNP-TV-Z]{26}$" }
+        status: { $ref: "#/components/schemas/ObjectiveStatusValue" }
+        planSummary:
+          type: object
+          description: Display-only summary of the plan (no URLs, no input templates).
+          x-privacyClass: server-only
+          additionalProperties: false
+          properties:
+            planId: { type: string, pattern: "^pln_[0-9A-HJKMNP-TV-Z]{26}$" }
+            cap: { $ref: "#/components/schemas/Amount6" }
+            category: { type: string, maxLength: 32 }
+            stepCount: { type: integer, minimum: 0 }
+            spent: { $ref: "#/components/schemas/Amount6" }
+        envelopeRef: { type: string, description: "Caip10(vault):envelopeId once opened." }
+        resultId: { type: string, pattern: "^res_[0-9A-HJKMNP-TV-Z]{26}$", description: Present once a result is ready for write-back. }
+        updatedAt: { $ref: "#/components/schemas/Timestamp" }
+
+    ResultAck:
+      type: object
+      x-privacyClass: server-only
+      additionalProperties: false
+      required: [resultId, writtenAt, surface]
+      properties:
+        resultId: { type: string, pattern: "^res_[0-9A-HJKMNP-TV-Z]{26}$" }
+        writtenAt: { $ref: "#/components/schemas/Timestamp" }
+        surface: { type: string, enum: [claude-code-file, pr-comment, doc-insert], description: Which write-back adapter delivered it (CZ-11). }
+        artifacts:
+          type: object
+          additionalProperties: false
+          description: "Counts only (N2)."
+          required: [delivered, heldForReview]
+          properties:
+            delivered: { type: integer, minimum: 0 }
+            heldForReview: { type: integer, minimum: 0 }
+            released: { type: integer, minimum: 0 }
+        fill:
+          type: object
+          additionalProperties: false
+          description: "Counts only for the in-place fill (D85). No values, no paths."
+          required: [status]
+          properties:
+            status: { type: string, enum: [filled, partial, none-filled, off, file-missing] }
+            cellsFilled: { type: integer, minimum: 0 }
+            cellsSkippedClash: { type: integer, minimum: 0 }
+            cellsNotFound: { type: integer, minimum: 0 }
+        assembly:
+          type: array
+          maxItems: 64
+          description: "Counts only, one entry per unpaid step the daemon handled (D82, spec 02 §4.6.1). No values, no paths."
+          items:
+            type: object
+            additionalProperties: false
+            required: [stepIndex, kind, status]
+            properties:
+              stepIndex: { type: integer, minimum: 0, maximum: 63 }
+              kind: { type: string, enum: [local, agent-assist] }
+              status: { type: string, enum: [assembled, assembly-failed, handed-to-agent, dropped-no-agent] }
+              rows: { type: integer, minimum: 0 }
+              columns: { type: integer, minimum: 0 }
+              structuralPass: { type: boolean, description: "local-template-v1 result; absent for agent-assist." }
+
+    Result:
+      type: object
+      description: A delivered result for write-back. Body is labelled untrusted merchant output (spec 01 §13.1).
+      x-privacyClass: server-only
+      additionalProperties: false
+      required: [resultId, objectiveId, mimeType, body, provenance, createdAt]
+      properties:
+        resultId: { type: string, pattern: "^res_[0-9A-HJKMNP-TV-Z]{26}$" }
+        objectiveId: { type: string, pattern: "^obj_[0-9A-HJKMNP-TV-Z]{26}$" }
+        mimeType: { type: string, enum: [text/markdown, application/json] }
+        body: { type: string, maxLength: 1000000, description: "Rendered result; every merchant-sourced span is labelled with its origin." }
+        provenance:
+          type: array
+          description: One entry per paid step that contributed.
+          items:
+            type: object
+            additionalProperties: false
+            required: [stepIndex, origin, paymentRefHash, accepted]
+            properties:
+              stepIndex: { type: integer, minimum: 0, maximum: 63 }
+              origin: { type: string, maxLength: 253 }
+              paymentRefHash: { $ref: "#/components/schemas/Hash32" }
+              accepted: { type: boolean }
+        assembly:
+          type: array
+          maxItems: 64
+          description: "Unpaid steps the daemon must handle (D82, spec 02 §4.6.1). `local` steps are filled by the CZ-11 assembler with plain code; `agent-assist` inputs are written for the person's agent. Input values are untrusted merchant data that may hold redaction markers; the daemon restores markers locally."
+          items:
+            type: object
+            additionalProperties: false
+            required: [stepIndex, kind, capability, inputs]
+            properties:
+              stepIndex: { type: integer, minimum: 0, maximum: 63 }
+              kind: { type: string, enum: [local, agent-assist] }
+              capability: { type: string, maxLength: 64 }
+              template: { type: string, enum: [table-build, list-build, merge-dedupe], description: "Present for local steps only." }
+              columns: { type: array, maxItems: 50, items: { type: string, maxLength: 64 }, description: "The plan's inputTemplate.expectedKeys; checked by local-template-v1." }
+              inputs:
+                type: array
+                maxItems: 64
+                description: "StepResult.fields of each paid step this step depends on, accepted steps only."
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [stepIndex, accepted, fields]
+                  properties:
+                    stepIndex: { type: integer, minimum: 0, maximum: 63 }
+                    subjectIndex: { type: integer, minimum: 0, maximum: 49, description: "TaskSpec subject this input belongs to (D84); the assembler builds one row per subject." }
+                    accepted: { type: boolean }
+                    fields:
+                      type: array
+                      maxItems: 50
+                      items:
+                        type: object
+                        additionalProperties: false
+                        required: [name, value]
+                        properties:
+                          name: { type: string, maxLength: 64 }
+                          value: { type: string, maxLength: 2000, description: "Data, never instructions." }
+        taskSpec: { $ref: "../schemas/task-spec.schema.json", description: "The approved TaskSpec, so the assembler can lay out rows (subjects) and columns (D84)." }
+        fillInPlace: { type: boolean, description: "Write found values into the person's file at the recorded placeholders (D85)." }
+        artifacts:
+          type: array
+          maxItems: 64
+          description: "Job deliverables kept whole (H6, D87). Flagged artifacts are held for review on the Mac and never written into the project until released (N2)."
+          items:
+            type: object
+            additionalProperties: false
+            required: [stepIndex, name, mimeType, contentHash, bytes, flags]
+            properties:
+              stepIndex: { type: integer, minimum: 0, maximum: 63 }
+              name: { type: string, maxLength: 255, pattern: "^[A-Za-z0-9._-]{1,255}$" }
+              mimeType: { type: string, maxLength: 100 }
+              contentHash: { $ref: "#/components/schemas/Hash32" }
+              bytes: { type: integer, minimum: 0 }
+              flags: { type: array, items: { type: string, enum: [injection-suspect, pii-suspect, screen-unavailable] } }
+        costTotal: { $ref: "#/components/schemas/Amount6" }
+        minutesSaved: { type: integer, minimum: 0 }
+        createdAt: { $ref: "#/components/schemas/Timestamp" }
+
+    ApprovalIntentRequest:
+      type: object
+      description: "Options chosen on the approval screen (D85). Not part of planHash; it only controls write-back."
+      x-privacyClass: server-only
+      additionalProperties: false
+      properties:
+        fillInPlace: { type: boolean, default: true, description: "Fill the person's file in place of the placeholders when done." }
+
+    SubjectsRevision:
+      type: object
+      description: "Approval-screen edit of the subjects to look up (D84). The server re-plans; the old plan becomes superseded."
+      x-privacyClass: redacted-to-server
+      additionalProperties: false
+      required: [subjects]
+      properties:
+        subjects:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            type: object
+            additionalProperties: false
+            required: [label]
+            properties:
+              label: { type: string, minLength: 1, maxLength: 200 }
+              sourceLine: { type: integer, minimum: 1 }
+              addedByUser: { type: boolean }
+
+    SoulVersionSubmission:
+      type: object
+      description: SoulVersionLeaf fields minus `userPseudonym` (the server adds the pseudonym, spec 02 §4.18).
+      x-privacyClass: hash-on-chain
+      additionalProperties: false
+      required: [soulVersion, soulVersionHash, compiledAt]
+      properties:
+        soulVersion: { type: integer, minimum: 1 }
+        soulVersionHash: { $ref: "#/components/schemas/Hash32" }
+        previousHash: { $ref: "#/components/schemas/Hash32" }
+        compiledAt: { $ref: "#/components/schemas/Timestamp" }
+
+    ShadowQuoteRequest:
+      type: object
+      description: Dry-run pricing. Same shape as ObjectiveSubmission but never creates an envelope.
+      x-privacyClass: redacted-to-server
+      additionalProperties: false
+      required: [submission]
+      properties:
+        submission: { $ref: "../schemas/objective-submission.schema.json" }
+
+    PayRequest:
+      type: object
+      description: "Canonical pay request (D75). The MCP pay tool's input is exactly this object. It names one step of a plan; the server pays only if that plan is approved and its envelope is open (RV-019). The daemon holds no keys."
+      x-privacyClass: redacted-to-server
+      additionalProperties: false
+      required: [payRequestId, idempotencyKey, objectiveId, planId, stepIndex]
+      properties:
+        payRequestId: { $ref: "#/components/schemas/PayRequestId" }
+        idempotencyKey: { type: string, format: uuid }
+        objectiveId: { type: string, pattern: "^obj_[0-9A-HJKMNP-TV-Z]{26}$" }
+        planId: { type: string, pattern: "^pln_[0-9A-HJKMNP-TV-Z]{26}$", description: "The plan returned by createQuote or the planner. If it is not approved yet, the answer is approval-required." }
+        stepIndex: { type: integer, minimum: 0, maximum: 63 }
+        calls: { type: integer, minimum: 1, maximum: 128, default: 1, description: "Calls to make in this request; at most the step's expectedCalls not yet used (RV-019)." }
+        maxAmount: { $ref: "#/components/schemas/Amount6", description: "Optional ceiling for this request; never above the step's remaining cap." }
+        input: { $ref: "#/components/schemas/StepInput" }
+    PayResponse:
+      type: object
+      description: "Canonical pay response (D75). The MCP pay tool's structuredContent is exactly this object."
+      x-privacyClass: server-only
+      additionalProperties: false
+      required: [payRequestId, status]
+      properties:
+        payRequestId: { $ref: "#/components/schemas/PayRequestId" }
+        status: { type: string, enum: [executing, approval-required, accepted, rejected, failed], description: "executing = paid, acceptance running; accepted = passed acceptance; rejected = refused before paying (see reason); failed = paid but not delivered, quarantined or failed acceptance." }
+        elicitationUrl: { type: string, format: uri, description: "Present when status is approval-required (URL-mode elicitation, D3-11). Phase 1 form http://localhost/approve/<planId> (D78)." }
+        planId: { type: string, pattern: "^pln_[0-9A-HJKMNP-TV-Z]{26}$" }
+        envelopeRef: { type: string }
+        stepIndex: { type: integer, minimum: 0, maximum: 63 }
+        paymentIds: { type: array, maxItems: 128, items: { $ref: "#/components/schemas/PaymentId" }, description: "One per authorization index this request used (RV-050)." }
+        amount: { $ref: "#/components/schemas/Amount6", description: "Total paid by this request." }
+        paymentRefHashes: { type: array, maxItems: 128, items: { $ref: "#/components/schemas/Hash32" } }
+        settlement: { type: string, enum: [reserved, settled, received, completed], description: "Gateway payments show received, then completed 0 to 16 min later (A2-26)." }
+        result: { $ref: "../schemas/step-result.schema.json" }
+        callsRemaining: { type: integer, minimum: 0, description: "Calls left on this step before a new approval is needed (RV-019)." }
+        reason: { type: string, maxLength: 64, description: "Stable code when rejected or failed, never user text, e.g. plan-not-approved, step-not-in-plan, step-calls-exhausted, step-cap-exhausted, envelope-not-open, frozen, paused, input-not-in-template, input-redaction-hit, result-quarantined." }
+
+    IngestReport:
+      type: object
+      description: Aggregate counts only. No events, no text.
+      x-privacyClass: redacted-to-server
+      additionalProperties: false
+      required: [deviceId, periodStart, periodEnd, eventsIngested, redactionHits]
+      properties:
+        deviceId: { type: string, pattern: "^dev_[0-9A-HJKMNP-TV-Z]{26}$" }
+        periodStart: { $ref: "#/components/schemas/Timestamp" }
+        periodEnd: { $ref: "#/components/schemas/Timestamp" }
+        eventsIngested: { type: integer, minimum: 0 }
+        redactionHits: { type: integer, minimum: 0 }
+        hosts: { type: array, items: { type: string, enum: [claude-code, codex, cursor, chrome] } }
+        shadowTotals:
+          type: object
+          description: "Shadow-mode totals so the app can show a summary card; no objectives or text (AM-04, D25, D34)."
+          additionalProperties: false
+          required: [minutesObserved, estimatedSpendAtomic, objectivesPriced]
+          properties:
+            minutesObserved: { type: integer, minimum: 0 }
+            estimatedSpendAtomic: { $ref: "#/components/schemas/Amount6" }
+            objectivesPriced: { type: integer, minimum: 0 }
+
+    SessionRequest:
+      type: object
+      description: WebAuthn assertion over a server challenge. Verified server-side; the passkey also owns the MSCA (D26).
+      x-privacyClass: server-only
+      additionalProperties: false
+      required: [challengeId, credentialId, authenticatorData, clientDataJSON, signature]
+      properties:
+        challengeId: { type: string, maxLength: 64 }
+        credentialId: { type: string, maxLength: 1024, description: base64url }
+        authenticatorData: { type: string, maxLength: 4096, description: base64url }
+        clientDataJSON: { type: string, maxLength: 4096, description: base64url }
+        signature: { type: string, maxLength: 1024, description: base64url }
+    SessionResponse:
+      type: object
+      x-privacyClass: server-only
+      additionalProperties: false
+      required: [sessionToken, expiresAt]
+      properties:
+        sessionToken: { type: string }
+        expiresAt: { $ref: "#/components/schemas/Timestamp" }
+    AuthChallengeRequest:
+      type: object
+      description: Ask for a single-use WebAuthn challenge (SCR-125).
+      x-privacyClass: server-only
+      additionalProperties: false
+      required: [purpose]
+      properties:
+        purpose: { type: string, enum: [register, session] }
+    AuthChallenge:
+      type: object
+      description: Single-use, purpose-bound, expires after app.challengeTtlSeconds; only sha256(challenge) is stored (SCR-125).
+      x-privacyClass: server-only
+      additionalProperties: false
+      required: [challengeId, challenge, expiresAt]
+      properties:
+        challengeId: { type: string, maxLength: 64 }
+        challenge: { type: string, maxLength: 64, description: base64url of 32 random bytes }
+        expiresAt: { $ref: "#/components/schemas/Timestamp" }
+    PasskeyRegistration:
+      type: object
+      description: WebAuthn registration over a `register` challenge. The server reads the P-256 key from attestedCredentialData and recomputes the counterfactual MSCA from it; mismatch → 422 (SCR-125).
+      x-privacyClass: server-only
+      additionalProperties: false
+      required: [challengeId, credentialId, clientDataJSON, attestationObject, msca]
+      properties:
+        challengeId: { type: string, maxLength: 64 }
+        credentialId: { type: string, maxLength: 1024, description: base64url }
+        clientDataJSON: { type: string, maxLength: 4096, description: base64url }
+        attestationObject: { type: string, maxLength: 8192, description: base64url }
+        msca: { $ref: "#/components/schemas/Address" }
+
+    AppWalletConfig:
+      type: object
+      description: Public, same-origin wallet bootstrap values from validated server config (SCR-140). K2 is a public-facing client key, not a private key.
+      x-privacyClass: public
+      additionalProperties: false
+      required: [circleClientUrl, circleClientKey, arcRpcUrl, bundlerOrder, bundlerEndpoints]
+      properties:
+        circleClientUrl:
+          type: string
+          format: uri
+          minLength: 1
+          description: Circle Modular Wallets client base URL from app.circleClientUrl.
+        circleClientKey:
+          type: string
+          minLength: 1
+          description: Public-facing K2 client key from app.circleClientKey.
+        arcRpcUrl:
+          type: string
+          format: uri
+          minLength: 1
+          description: Browser Arc RPC URL from app.arcRpcUrl.
+        bundlerOrder:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          description: Existing app.bundlerOrder, tried in order.
+          items: { type: string, enum: [circle, pimlico, alchemy, zerodev] }
+        bundlerEndpoints:
+          type: object
+          additionalProperties: false
+          description: Existing app.bundlerEndpoints, keyed by bundler name.
+          properties:
+            circle: { type: string, format: uri }
+            pimlico: { type: string, format: uri }
+            alchemy: { type: string, format: uri }
+            zerodev: { type: string, format: uri }
+
+    Me:
+      type: object
+      description: The signed-in user's accounts and limits (mirror of chain state).
+      x-privacyClass: server-only
+      additionalProperties: false
+      required: [userId, msca, vault, vaultCreated, network, balances, limits, frozen, paused]
+      properties:
+        userId: { type: string, pattern: "^usr_[0-9A-HJKMNP-TV-Z]{26}$" }
+        msca: { $ref: "#/components/schemas/Address" }
+        vault: { $ref: "#/components/schemas/Address", description: "factory predictVault(msca) until VaultCreated is indexed, then the created vault (SCR-125)." }
+        vaultCreated: { type: boolean, description: "true once VaultCreated is indexed (SCR-125)." }
+        network: { type: string, pattern: "^eip155:[0-9]+$" }
+        balances:
+          type: object
+          additionalProperties: false
+          required: [vaultBalance, free, committed, mscaBalance, asOfBlock]
+          properties:
+            vaultBalance: { $ref: "#/components/schemas/Amount6" }
+            free: { $ref: "#/components/schemas/Amount6" }
+            committed: { $ref: "#/components/schemas/Amount6" }
+            mscaBalance: { $ref: "#/components/schemas/Amount6", description: "Gas reserve on the MSCA (spec 01 §7.1), shown as \"Network fee reserve\" (D52)." }
+            pocketOutstanding: { $ref: "#/components/schemas/Amount6", description: "Sum of pocket outstanding over open envelopes (AM-03)." }
+            asOfBlock: { type: integer }
+        limits:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [category, userMax, autoLimit, usedThisPeriod, periodId]
+            properties:
+              category: { type: string, maxLength: 32 }
+              userMax: { $ref: "#/components/schemas/Amount6" }
+              autoLimit: { $ref: "#/components/schemas/Amount6" }
+              usedThisPeriod: { $ref: "#/components/schemas/Amount6" }
+              periodId: { type: integer }
+              periodEndsAt: { $ref: "#/components/schemas/Timestamp", description: "End of the current 7-day autonomy period (AM-03)." }
+        mode: { type: string, enum: [shadow, live], description: "Shadow mode for the first week, then live (product §6.7, AM-03)." }
+        shadowEndsAt: { $ref: "#/components/schemas/Timestamp", description: "When shadow mode ends (AM-03)." }
+        frozen: { type: boolean }
+        paused: { type: boolean, description: Guardian pause (K6). }
+        displayCurrency: { type: string, const: USD, description: "Phase 1 shows USD only; USDC displays 1:1 as USD (D51)." }
+
+    ApprovalSummary:
+      type: object
+      x-privacyClass: server-only
+      additionalProperties: false
+      required: [planId, objectiveId, goal, cap, category, stepCount, createdAt, expiresAt, status]
+      properties:
+        planId: { type: string, pattern: "^pln_[0-9A-HJKMNP-TV-Z]{26}$" }
+        objectiveId: { type: string, pattern: "^obj_[0-9A-HJKMNP-TV-Z]{26}$" }
+        goal: { type: string, maxLength: 1000, description: Redacted goal text (redacted-to-server). }
+        cap: { $ref: "#/components/schemas/Amount6" }
+        capDisplay: { type: string, maxLength: 32, description: "USD string, e.g. \"$0.88\" (D51: USD only in Phase 1)." }
+        category: { type: string, maxLength: 32 }
+        stepCount: { type: integer }
+        newPayees: { type: integer, description: Count of payees never paid before (warning in UI). }
+        createdAt: { $ref: "#/components/schemas/Timestamp" }
+        expiresAt: { $ref: "#/components/schemas/Timestamp" }
+        status: { type: string, enum: [pending, intent-issued, submitted, opened, expired, declined] }
+
+    ApprovalIntent:
+      type: object
+      description: Exact calldata for the owner's UserOp. The app builds and submits the UserOp through Circle's bundler (D30, A6-19); Czar never submits it.
+      x-privacyClass: public
+      additionalProperties: false
+      required: [planId, planHash, objectiveHash, payeeRoot, vault, to, calldata, value, chainId, expiresAt]
+      properties:
+        planId: { type: string }
+        planHash: { $ref: "#/components/schemas/Hash32" }
+        objectiveHash: { $ref: "#/components/schemas/Hash32" }
+        payeeRoot: { $ref: "#/components/schemas/Hash32" }
+        vault: { $ref: "#/components/schemas/Address" }
+        to: { $ref: "#/components/schemas/Address", description: Always the vault. }
+        calldata: { type: string, pattern: "^0x[0-9a-f]*$", description: ABI-encoded `openEnvelope(...)` (spec 03 czar-vault.md). }
+        value: { type: string, const: "0" }
+        chainId: { type: integer }
+        decoded:
+          type: object
+          description: "The `OpenEnvelopeParams` arguments decoded (spec 03 ICzarVault), so the app can show them and re-encode to verify (AM-06)."
+          additionalProperties: false
+          required: [cap, maxStepAmount, pocketCapBps, expiresAt, categoryId, objectiveHash, planHash, payeeRoot]
+          properties:
+            cap: { $ref: "#/components/schemas/Amount6" }
+            maxStepAmount: { $ref: "#/components/schemas/Amount6" }
+            pocketCapBps: { type: integer, minimum: 0, maximum: 10000 }
+            expiresAt: { type: integer, description: Unix seconds (uint64). }
+            categoryId: { $ref: "#/components/schemas/Hash32" }
+            objectiveHash: { $ref: "#/components/schemas/Hash32" }
+            planHash: { $ref: "#/components/schemas/Hash32" }
+            payeeRoot: { $ref: "#/components/schemas/Hash32" }
+        expiresAt: { $ref: "#/components/schemas/Timestamp" }
+
+    SubmittedNotice:
+      type: object
+      x-privacyClass: public
+      additionalProperties: false
+      required: [userOpHash]
+      properties:
+        userOpHash: { $ref: "#/components/schemas/Hash32" }
+        bundler: { type: string, enum: [circle, pimlico, alchemy, zerodev], description: A6-15 to A6-19. }
+
+    FreezeIntent:
+      type: object
+      x-privacyClass: public
+      additionalProperties: false
+      required: [vault, to, calldata, value, chainId]
+      properties:
+        vault: { $ref: "#/components/schemas/Address" }
+        to: { $ref: "#/components/schemas/Address" }
+        calldata: { type: string, pattern: "^0x[0-9a-f]*$", description: ABI-encoded `freeze()` or `unfreeze()`. }
+        value: { type: string, const: "0" }
+        chainId: { type: integer }
+
+    ManualReturn:
+      type: object
+      description: "A pocket return waiting for, or done by, the owner's recordManualReturn UserOp (SCR-133)."
+      x-privacyClass: public
+      additionalProperties: false
+      required: [envelopeRef, vault, pocket, returnedAmount, returnTx, state]
+      properties:
+        envelopeRef: { type: string }
+        vault: { $ref: "#/components/schemas/Address" }
+        pocket: { $ref: "#/components/schemas/Address" }
+        returnedAmount: { $ref: "#/components/schemas/Amount6", description: "USDC the pocket key returned to the vault after the slow withdrawal; the amount the app submits." }
+        returnTx: { $ref: "#/components/schemas/Hash32" }
+        state: { type: string, enum: [manual-return-required, recorded, expired], description: "expired = the pocket closed before the return was recorded; the USDC is already in the vault." }
+        recordedCredit: { $ref: "#/components/schemas/Amount6", description: "credit from ManualReturnRecorded; may be lower than returnedAmount (contract bound)." }
+        recordedTx: { $ref: "#/components/schemas/Hash32" }
+
+    PairingCode:
+      type: object
+      description: "One-time pairing code for pairDevice (SCR-134)."
+      x-privacyClass: server-only
+      additionalProperties: false
+      required: [code, expiresAt]
+      properties:
+        code: { type: string, pattern: "^[0-9]{8}$", description: "Shown once in the app; never logged." }
+        expiresAt: { $ref: "#/components/schemas/Timestamp" }
+
+    Device:
+      type: object
+      description: "A paired computer (SCR-134)."
+      x-privacyClass: server-only
+      additionalProperties: false
+      required: [deviceId, deviceName, platform, createdAt]
+      properties:
+        deviceId: { type: string, pattern: "^dev_[0-9A-HJKMNP-TV-Z]{26}$" }
+        deviceName: { type: string, maxLength: 64 }
+        platform: { type: string, enum: [macos, linux, windows] }
+        createdAt: { $ref: "#/components/schemas/Timestamp" }
+        revokedAt: { $ref: "#/components/schemas/Timestamp" }
+
+    EnvelopeDetail:
+      type: object
+      x-privacyClass: public
+      additionalProperties: false
+      required: [envelope, reservations, pockets, jobs]
+      properties:
+        envelope: { $ref: "../schemas/envelope.schema.json" }
+        reservations: { type: array, items: { $ref: "../schemas/reservation.schema.json" } }
+        pockets: { type: array, items: { $ref: "../schemas/pocket-record.schema.json" } }
+        jobs: { type: array, items: { $ref: "../schemas/job-record.schema.json" } }
+
+    LedgerReceipt:
+      type: object
+      description: One paid step as the user sees it (ROI ledger, CZ-25).
+      x-privacyClass: server-only
+      additionalProperties: false
+      required: [objectiveId, envelopeRef, stepIndex, amount, rail, status, paymentRefHash, createdAt]
+      properties:
+        objectiveId: { type: string }
+        envelopeRef: { type: string }
+        stepIndex: { type: integer }
+        amount: { $ref: "#/components/schemas/Amount6" }
+        amountDisplay: { type: string, maxLength: 32, description: USD string (D51). }
+        rail: { type: string, enum: [x402-exact, gateway-batched, erc8183-job] }
+        status: { type: string, enum: [reserved, settled, pending, completed, released, refunded, failed, quarantined], description: "quarantined = result held back by the injection screen (AM-05)." }
+        merchantIsCzar: { type: boolean, description: "True for Czar's own merchants, whose sales Czar refunds by policy (D50, AM-05)." }
+        merchantLabel: { type: string, maxLength: 64, description: Origin host only. }
+        accepted: { type: [boolean, "null"] }
+        minutesSaved: { type: integer }
+        minutesSource: { type: string, enum: [estimate, reported], description: "estimate = daemon's minutesSaved; reported = report_outcome.minutesSavedActual (AM-05)." }
+        paymentRefHash: { $ref: "#/components/schemas/Hash32" }
+        settlementTx: { $ref: "#/components/schemas/Hash32" }
+        createdAt: { $ref: "#/components/schemas/Timestamp" }
+
+    MonthlyStatement:
+      type: object
+      x-privacyClass: server-only
+      additionalProperties: false
+      required: [month, totalSpent, totalMinutesSaved, objectives, receipts]
+      properties:
+        month: { type: string, pattern: "^[0-9]{4}-[0-9]{2}$" }
+        totalSpent: { $ref: "#/components/schemas/Amount6" }
+        totalSpentDisplay: { type: string }
+        totalMinutesSaved: { type: integer }
+        objectives: { type: integer }
+        receipts: { type: integer }
+        byCategory:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [category, spent, minutesSaved]
+            properties:
+              category: { type: string }
+              spent: { $ref: "#/components/schemas/Amount6" }
+              minutesSaved: { type: integer }
+
+    PushSubscription:
+      type: object
+      description: "Stage 2 (D69): Declarative Web Push subscription from the installed web app (D2-01, D2-06). Not used in Phase 1."
+      x-stage: 2
+      x-privacyClass: server-only
+      additionalProperties: false
+      required: [endpoint, keys, declarative]
+      properties:
+        endpoint: { type: string, format: uri, description: Apple or browser push endpoint. }
+        keys:
+          type: object
+          additionalProperties: false
+          required: [p256dh, auth]
+          properties:
+            p256dh: { type: string }
+            auth: { type: string }
+        declarative: { type: boolean, const: true, description: "Client supports web_push 8030 JSON (D2-06)." }
+        expirationTime: { type: [integer, "null"] }
+    PushSubscriptionCreated:
+      type: object
+      x-privacyClass: server-only
+      additionalProperties: false
+      required: [subscriptionId]
+      properties:
+        subscriptionId: { type: string, pattern: "^psh_[0-9A-HJKMNP-TV-Z]{26}$" }
+
+    SoulPointer:
+      type: object
+      description: Phase 1 has no soul view in the app (D34). Points to the desktop viewer.
+      x-privacyClass: server-only
+      additionalProperties: false
+      required: [available, message]
+      properties:
+        available: { type: boolean, const: false }
+        message: { type: string, maxLength: 200 }
+        desktopUrl: { type: string, const: "http://127.0.0.1/soul", description: Served by the daemon on loopback only (D3-08). }
+
+    ClaimStart:
+      type: object
+      x-privacyClass: server-only
+      additionalProperties: false
+      required: [repoFullName, wallet]
+      properties:
+        repoFullName: { type: string, pattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" }
+        wallet: { $ref: "#/components/schemas/Address" }
+    ClaimGithubStartResponse:
+      type: object
+      x-privacyClass: server-only
+      additionalProperties: false
+      required: [claimId, authorizeUrl]
+      properties:
+        claimId: { type: string, pattern: "^clm_[0-9A-HJKMNP-TV-Z]{26}$" }
+        authorizeUrl: { type: string, format: uri }
+    ClaimGithubCallback:
+      type: object
+      x-privacyClass: server-only
+      additionalProperties: false
+      required: [claimId, code, state]
+      properties:
+        claimId: { type: string }
+        code: { type: string, maxLength: 256 }
+        state: { type: string, maxLength: 256 }
+    ClaimFileStartResponse:
+      type: object
+      description: One-time code and the exact file to commit on the default branch (D23 fallback; shape follows A8-08).
+      x-privacyClass: server-only
+      additionalProperties: false
+      required: [claimId, oneTimeCode, filePath, fileContent, expiresAt]
+      properties:
+        claimId: { type: string }
+        oneTimeCode: { type: string, pattern: "^[A-Z0-9]{12}$" }
+        filePath: { type: string, const: FUNDING.json }
+        fileContent: { type: string, description: 'JSON text: {"czar": {"wallet": "0x…", "code": "…"}}' }
+        expiresAt: { $ref: "#/components/schemas/Timestamp" }
+    ClaimFileVerify:
+      type: object
+      x-privacyClass: server-only
+      additionalProperties: false
+      required: [claimId]
+      properties:
+        claimId: { type: string }
+    ClaimStatus:
+      type: object
+      x-privacyClass: public
+      additionalProperties: false
+      required: [repoId, status, escrowBalance]
+      properties:
+        repoId: { $ref: "#/components/schemas/Hash32", description: "keccak256(\"github:\" + numeric repo id) (spec 02 §7.1)." }
+        status: { type: string, enum: [unclaimed, verifying, scheduled, released, cancelled, rejected] }
+        escrowBalance: { $ref: "#/components/schemas/Amount6" }
+        wallet: { $ref: "#/components/schemas/Address" }
+        releaseAfter: { $ref: "#/components/schemas/Timestamp", description: Timelock end (spec 01 §8.6). }
+        releaseTx: { $ref: "#/components/schemas/Hash32" }
+
+    FindServiceRequest:
+      type: object
+      description: "Same as the MCP `find_service` input (mcp/czar-mcp-tools.md §2.2, AM-01)."
+      x-privacyClass: redacted-to-server
+      additionalProperties: false
+      required: [capability]
+      properties:
+        capability: { type: string, maxLength: 64, description: "Capability tag, lowercase kebab-case, e.g. web-search." }
+        taskClass: { type: string, maxLength: 64 }
+        maxPrice: { $ref: "#/components/schemas/Amount6", description: Amount6 cap per call. }
+        network: { type: string, pattern: "^eip155:[0-9]+$", default: "eip155:5042002", description: "Must be selection.paymentNetwork; any other value returns 422 network-not-payable (D83)." }
+        rails: { type: array, items: { type: string, enum: [x402-exact, gateway-batched, erc8183-job] } }
+        allowUnverified: { type: boolean, default: false }
+        includeMarketView: { type: boolean, default: false, description: "Also return the D83 Lane A MarketView for this capability (rank-only, never payable)." }
+    MarketViewRequest:
+      type: object
+      description: "Lane A of D83 (spec 02 §4.22)."
+      x-privacyClass: redacted-to-server
+      additionalProperties: false
+      required: [capability]
+      properties:
+        capability: { type: string, maxLength: 64 }
+        maxPrice: { $ref: "#/components/schemas/Amount6" }
+    FindServiceResponse:
+      type: object
+      description: "Same as the MCP `find_service` output (§2.2). Structured fields only; no merchant text."
+      x-privacyClass: server-only
+      additionalProperties: false
+      required: [ranked, unverified, insufficientEvidence, policyVersion, snapshotId]
+      properties:
+        marketView: { $ref: "../schemas/market-view.schema.json", description: "Present when includeMarketView was true (D83)." }
+        ranked:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [serviceId, rank, price, rail, score, badges, evidenceAgeDays]
+            properties:
+              serviceId: { type: string }
+              rank: { type: integer }
+              price: { $ref: "#/components/schemas/Amount6" }
+              rail: { type: string, enum: [x402-exact, gateway-batched, erc8183-job] }
+              score: { type: number }
+              badges: { type: array, items: { type: string } }
+              evidenceAgeDays: { type: number }
+              missing: { type: array, items: { type: string } }
+        unverified:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [serviceId, nEff]
+            properties:
+              serviceId: { type: string }
+              nEff: { type: number }
+        insufficientEvidence: { type: boolean }
+        policyVersion: { type: string }
+        snapshotId: { type: string }
+    QuoteRequest:
+      type: object
+      description: "Same as the MCP quote input (§2.3, AM-01). The server derives the category from the capability; the earlier caller-supplied category field is superseded (RV-019)."
+      x-privacyClass: redacted-to-server
+      additionalProperties: false
+      required: [capability]
+      properties:
+        objectiveId: { type: string, pattern: "^obj_[0-9A-HJKMNP-TV-Z]{26}$" }
+        capability: { type: string, maxLength: 64 }
+        serviceId: { type: string, maxLength: 40 }
+        resourceUrl: { type: string, format: uri, maxLength: 2048, description: "Optional. Must be an https URL of a service in Czar's index; any other URL is refused with resource-not-indexed. Every probe goes through the shared SSRF-safe fetcher (RV-019, RV-022)." }
+        expectedCalls: { type: integer, minimum: 1, maximum: 128, default: 1 }
+        maxAmount: { $ref: "#/components/schemas/Amount6" }
+    QuoteResponse:
+      type: object
+      description: "Same as the MCP quote output (§2.3). Every quote is a step of a plan (planId, stepIndex) that pay can name; when approvalNeeded is true the MCP server turns it into a URL-mode elicitation (§4)."
+      x-privacyClass: server-only
+      additionalProperties: false
+      required: [quoteId, planId, stepIndex, kind, unitAmount, expectedCalls, stepCap, routingReason, approvalNeeded, expiresAt]
+      properties:
+        quoteId: { type: string, pattern: "^qte_[0-9A-HJKMNP-TV-Z]{26}$" }
+        planId: { type: string, pattern: "^pln_[0-9A-HJKMNP-TV-Z]{26}$" }
+        stepIndex: { type: integer, minimum: 0, maximum: 63 }
+        kind: { type: string, enum: [x402-exact, gateway-nano, erc8183-job] }
+        serviceId: { type: string }
+        payee: { $ref: "#/components/schemas/Address" }
+        unitAmount: { $ref: "#/components/schemas/Amount6" }
+        expectedCalls: { type: integer }
+        stepCap: { $ref: "#/components/schemas/Amount6" }
+        routingReason: { type: string }
+        approvalNeeded: { type: boolean }
+        elicitationUrl: { type: string, format: uri, description: "Approval page when approvalNeeded is true." }
+        envelopeRef: { type: string, description: "Open envelope that already covers this step, if any." }
+        expiresAt: { $ref: "#/components/schemas/Timestamp" }
+    OutcomeReport:
+      type: object
+      description: "Same as the MCP `report_outcome` input (§2.5, AM-01)."
+      x-privacyClass: redacted-to-server
+      additionalProperties: false
+      required: [payRequestId, outcome]
+      properties:
+        payRequestId: { $ref: "#/components/schemas/PayRequestId" }
+        paymentId: { $ref: "#/components/schemas/PaymentId", description: "Optional; narrows the outcome to one authorization index (RV-050)." }
+        outcome: { type: string, enum: [useful, not-useful, wrong, unused] }
+        reasonCode: { type: string, enum: [missing-field, stale, incorrect, slow, format, other] }
+        minutesSavedActual: { type: integer, minimum: 0 }
+    OutcomeRecorded:
+      type: object
+      x-privacyClass: server-only
+      additionalProperties: false
+      required: [recorded]
+      properties:
+        recorded: { type: boolean }
+        receiptObsId: { type: string }
+    ModelCallRequest:
+      type: object
+      description: "Model proxy call from the daemon (AM-02). The proxy forwards to the hosted model and stores only token counts (D31), so it never replays a stored response (RV-043)."
+      x-privacyClass: redacted-to-server
+      additionalProperties: false
+      required: [prompt, promptHash, input, schema]
+      properties:
+        prompt: { type: string, enum: [P-01, P-04, P-05, P-06, P-07] }
+        promptHash: { $ref: "#/components/schemas/Hash32", description: Hash of the prompt file the daemon used. }
+        input: { type: object, description: "Redacted and screened input as defined for that prompt in spec 04 ai-prompts.md." }
+        schema: { type: object, description: Output JSON Schema the model must follow. }
+    ModelCallResponse:
+      type: object
+      x-privacyClass: redacted-to-server
+      additionalProperties: false
+      required: [output, usage]
+      properties:
+        output: { type: object }
+        usage:
+          type: object
+          additionalProperties: false
+          required: [inputTokens, outputTokens]
+          properties:
+            inputTokens: { type: integer, minimum: 0 }
+            outputTokens: { type: integer, minimum: 0 }
+    IndexResourcesResponse:
+      type: object
+      description: "Czar discovery index, Circle-compatible list shape (spec 02 §12.1, AM-07). Items follow §12.2."
+      x-privacyClass: public
+      additionalProperties: false
+      required: [x402Version, items, pagination]
+      properties:
+        x402Version: { type: integer, const: 2 }
+        items: { type: array, items: { type: object, description: Index item (spec 02 §12.2). } }
+        pagination:
+          type: object
+          additionalProperties: false
+          required: [limit, offset, total]
+          properties:
+            limit: { type: integer }
+            offset: { type: integer }
+            total: { type: integer }
+    IndexSearchResponse:
+      type: object
+      description: "Spec search shape: note `resources`, not `items` (A3-34, §12.1)."
+      x-privacyClass: public
+      additionalProperties: false
+      required: [x402Version, resources]
+      properties:
+        x402Version: { type: integer, const: 2 }
+        resources: { type: array, items: { type: object, description: Index item (spec 02 §12.2). } }
+        partialResults: { type: boolean }
+        pagination:
+          type: [object, "null"]
+          properties:
+            limit: { type: integer }
+            cursor: { type: [string, "null"] }
+
+  responses:
+    Problem:
+      description: Error
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    RateLimited:
+      description: Too many requests
+      headers:
+        RateLimit-Limit: { $ref: "#/components/headers/RateLimit-Limit" }
+        RateLimit-Remaining: { $ref: "#/components/headers/RateLimit-Remaining" }
+        RateLimit-Reset: { $ref: "#/components/headers/RateLimit-Reset" }
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+
+paths:
+  # ---------------- daemon ----------------
+  /v1/devices/pair:
+    post:
+      tags: [daemon]
+      summary: Exchange an 8-digit pairing code for a device token.
+      description: "The code is single-use and valid for 5 minutes. The token in the response is returned once and never again (AM-18). Retrying with the same Idempotency-Key after success returns 409 replay-not-stored (SCR-113)."
+      operationId: pairDevice
+      parameters: [ { $ref: "#/components/parameters/IdempotencyKey" } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/PairRequest" } } }
+      responses:
+        "201": { description: Paired, content: { application/json: { schema: { $ref: "#/components/schemas/PairResponse" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/Problem" }
+
+  /v1/objectives:
+    post:
+      tags: [daemon]
+      summary: Submit a redacted objective (D25).
+      operationId: submitObjective
+      security: [ { DeviceToken: [] } ]
+      parameters: [ { $ref: "#/components/parameters/IdempotencyKey" } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "../schemas/objective-submission.schema.json" } } }
+      responses:
+        "202": { description: Accepted for planning, content: { application/json: { schema: { $ref: "#/components/schemas/ObjectiveStatus" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "422": { description: objectiveHash does not recompute (spec 02 §5.2), content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/Problem" }
+    get:
+      tags: [daemon]
+      summary: List this device's objectives.
+      operationId: listObjectives
+      security: [ { DeviceToken: [] } ]
+      parameters:
+        - name: status
+          in: query
+          schema: { $ref: "#/components/schemas/ObjectiveStatusValue" }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200":
+          description: Page of ObjectiveStatus
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Page" }
+                  - type: object
+                    properties:
+                      items: { type: array, items: { $ref: "#/components/schemas/ObjectiveStatus" } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/Problem" }
+
+  /v1/objectives/{objectiveId}:
+    get:
+      tags: [daemon]
+      summary: Status, plan summary and result pointer.
+      operationId: getObjective
+      security: [ { DeviceToken: [] } ]
+      parameters:
+        - name: objectiveId
+          in: path
+          required: true
+          schema: { type: string, pattern: "^obj_[0-9A-HJKMNP-TV-Z]{26}$" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/ObjectiveStatus" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "401": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/Problem" }
+
+  /v1/objectives/{objectiveId}/results/ack:
+    post:
+      tags: [daemon]
+      summary: Confirm a result was written into the workflow (CZ-11).
+      operationId: ackResult
+      security: [ { DeviceToken: [] } ]
+      parameters:
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+        - name: objectiveId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/ResultAck" } } }
+      responses:
+        "204": { description: Acknowledged }
+        "404": { $ref: "#/components/responses/Problem" }
+
+  /v1/results/{resultId}:
+    get:
+      tags: [daemon]
+      summary: Download a result for write-back.
+      operationId: getResult
+      security: [ { DeviceToken: [] } ]
+      parameters:
+        - name: resultId
+          in: path
+          required: true
+          schema: { type: string, pattern: "^res_[0-9A-HJKMNP-TV-Z]{26}$" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Result" } } } }
+        "404": { $ref: "#/components/responses/Problem" }
+
+
+  /v1/results/{resultId}/artifacts/{contentHash}:
+    get:
+      tags: [daemon]
+      summary: Download one artifact of a result (H6, D87). The daemon decides where to write it (project folder, or held for review if flagged, N2).
+      operationId: getResultArtifact
+      security: [ { DeviceToken: [] } ]
+      parameters:
+        - { name: resultId, in: path, required: true, schema: { type: string, pattern: "^res_[0-9A-HJKMNP-TV-Z]{26}$" } }
+        - { name: contentHash, in: path, required: true, schema: { $ref: "#/components/schemas/Hash32" } }
+      responses:
+        "200": { description: The artifact bytes, content: { application/octet-stream: { schema: { type: string, format: binary } } } }
+        "404": { $ref: "#/components/responses/Problem" }
+  /v1/soul-versions:
+    post:
+      tags: [daemon]
+      summary: Register a soul version hash for anchoring (spec 02 §4.18).
+      operationId: submitSoulVersion
+      security: [ { DeviceToken: [] } ]
+      parameters: [ { $ref: "#/components/parameters/IdempotencyKey" } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/SoulVersionSubmission" } } }
+      responses:
+        "202": { description: Queued for the next evidence batch }
+        "409": { $ref: "#/components/responses/Problem" }
+
+  /v1/shadow/quotes:
+    post:
+      tags: [daemon]
+      summary: Dry-run pricing for shadow mode (CZ-08). No envelope, no payment.
+      operationId: shadowQuote
+      security: [ { DeviceToken: [] } ]
+      parameters: [ { $ref: "#/components/parameters/IdempotencyKey" } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/ShadowQuoteRequest" } } }
+      responses:
+        "200": { description: Plan with shadow=true, content: { application/json: { schema: { $ref: "../schemas/plan.schema.json" } } } }
+        "422": { $ref: "#/components/responses/Problem" }
+
+  /v1/pay/requests:
+    post:
+      tags: [daemon]
+      summary: Pay for one step of an approved plan; the MCP pay tool mirrors this route (D75). Czar enforces approval, never the client (D3-09).
+      operationId: createPayRequest
+      security: [ { DeviceToken: [] } ]
+      parameters: [ { $ref: "#/components/parameters/IdempotencyKey" } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/PayRequest" } } }
+      responses:
+        "200": { description: Decision, content: { application/json: { schema: { $ref: "#/components/schemas/PayResponse" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "409": { description: "payRequestId reused with a different request (spec 02 §7.4, RV-050)", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /v1/hooks/ingest-report:
+    post:
+      tags: [daemon]
+      summary: Aggregate ingest counts (no events, no text).
+      operationId: ingestReport
+      security: [ { DeviceToken: [] } ]
+      parameters: [ { $ref: "#/components/parameters/IdempotencyKey" } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/IngestReport" } } }
+      responses:
+        "4XX": { $ref: "#/components/responses/Problem" }
+        "204": { description: Recorded }
+
+  /v1/services/search:
+    post:
+      tags: [daemon]
+      summary: Ranked services for a capability (backs MCP find_service, AM-01).
+      operationId: findService
+      security: [ { DeviceToken: [] } ]
+      parameters: [ { $ref: "#/components/parameters/IdempotencyKey" } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/FindServiceRequest" } } }
+      responses:
+        "200": { description: Ranked candidates, content: { application/json: { schema: { $ref: "#/components/schemas/FindServiceResponse" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /v1/services/market-view:
+    post:
+      tags: [daemon]
+      summary: Real-market services for a capability, probed without paying (D83 Lane A). Never payable in Phase 1.
+      operationId: getMarketView
+      security: [ { DeviceToken: [] }, { AppSession: [] } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/MarketViewRequest" } } }
+      responses:
+        "200": { description: MarketView, content: { application/json: { schema: { $ref: "../schemas/market-view.schema.json" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /v1/quotes:
+    post:
+      tags: [daemon]
+      summary: Price and route one step without paying (backs MCP quote, AM-01).
+      operationId: createQuote
+      security: [ { DeviceToken: [] } ]
+      parameters: [ { $ref: "#/components/parameters/IdempotencyKey" } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/QuoteRequest" } } }
+      responses:
+        "200": { description: Quote, content: { application/json: { schema: { $ref: "#/components/schemas/QuoteResponse" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /v1/outcomes:
+    post:
+      tags: [daemon]
+      summary: Record whether a delivered result was useful (backs MCP report_outcome, AM-01).
+      operationId: reportOutcome
+      security: [ { DeviceToken: [] } ]
+      parameters: [ { $ref: "#/components/parameters/IdempotencyKey" } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/OutcomeReport" } } }
+      responses:
+        "200": { description: Recorded, content: { application/json: { schema: { $ref: "#/components/schemas/OutcomeRecorded" } } } }
+        "404": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /v1/models/complete:
+    post:
+      tags: [daemon]
+      summary: Model proxy for P-01, P-04, P-05, P-06, P-07 (D90). Stores only token counts (D31, AM-02).
+      description: "Exempt from idempotent response replay (RV-043). The proxy keeps the Idempotency-Key, a body fingerprint and token counts only, so a second request with the same key gets 409 replay-not-stored whatever its body. The daemon then decides whether to call again with a new key."
+      operationId: completeModelCall
+      security: [ { DeviceToken: [] } ]
+      parameters: [ { $ref: "#/components/parameters/IdempotencyKey" } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/ModelCallRequest" } } }
+      responses:
+        "200": { description: Model output, content: { application/json: { schema: { $ref: "#/components/schemas/ModelCallResponse" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "409": { description: "replay-not-stored (RV-043)", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { description: Model unavailable or over budget; the daemon falls back (D58), content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+
+  # ---------------- provider ----------------
+  /v1/jobs/{jobKey}/brief:
+    get:
+      tags: [provider]
+      summary: The ERC-8183 job brief, for the job's provider only (RV-025).
+      description: "Returns the JobBrief whose fields are the preimage of the job's on-chain descriptionHash. Only the provider named in the job can read it; any other caller gets 404, so the route is no existence oracle."
+      operationId: getJobBrief
+      security: [ { ProviderBriefSignature: [] } ]
+      parameters:
+        - { name: jobKey, in: path, required: true, schema: { $ref: "#/components/schemas/Hash32" } }
+        - { name: X-Czar-Provider-Address, in: header, required: true, schema: { $ref: "#/components/schemas/Address" } }
+        - { name: X-Czar-Brief-Issued-At, in: header, required: true, schema: { type: integer, minimum: 0, description: "Unix seconds signed in BriefRequest.issuedAt." } }
+      responses:
+        "200": { description: The brief, content: { application/json: { schema: { $ref: "../schemas/job-brief.schema.json" } } } }
+        "404": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /v1/jobs/{jobKey}/deliverable:
+    post:
+      tags: [provider]
+      summary: Upload an ERC-8183 deliverable before submitting its hash (D87 push model).
+      description: "Only the job's on-chain provider. Append-only: each upload is a version keyed by contentHash, never replaced (N4). Limits: acceptance.maxUploadsPerJob 10, total 2 x acceptance.deliverableMaxBytes. In Phase 1 the server is local, so only a provider on the same machine can reach it (N3)."
+      operationId: uploadJobDeliverable
+      security: [ { ProviderUploadSignature: [] } ]
+      parameters:
+        - { name: jobKey, in: path, required: true, schema: { $ref: "#/components/schemas/Hash32" } }
+        - { name: X-Czar-Provider-Address, in: header, required: true, schema: { $ref: "#/components/schemas/Address" } }
+        - { name: X-Czar-Upload-Issued-At, in: header, required: true, schema: { type: integer, minimum: 0 } }
+      requestBody:
+        required: true
+        content: { application/octet-stream: { schema: { type: string, format: binary } } }
+      responses:
+        "201":
+          description: Stored
+          content: { application/json: { schema: { type: object, additionalProperties: false, required: [contentHash], properties: { contentHash: { $ref: "#/components/schemas/Hash32" } } } } }
+        "404": { $ref: "#/components/responses/Problem" }
+        "413": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  # ---------------- public ----------------
+  /v2/x402/discovery/resources:
+    get:
+      tags: [public]
+      summary: Czar discovery index, Circle-compatible list (spec 02 §12, AM-07). No auth.
+      operationId: listIndexResources
+      security: []
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+        - { name: network, in: query, schema: { type: string } }
+        - { name: payTo, in: query, schema: { type: string } }
+        - { name: scheme, in: query, schema: { type: string } }
+        - { name: type, in: query, schema: { type: string } }
+      responses:
+        "200": { description: Items, content: { application/json: { schema: { $ref: "#/components/schemas/IndexResourcesResponse" } } } }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /v2/x402/discovery/search:
+    get:
+      tags: [public]
+      summary: Czar discovery index, spec search shape (A3-34, AM-07). No auth.
+      operationId: searchIndexResources
+      security: []
+      parameters:
+        - { name: query, in: query, required: true, schema: { type: string, maxLength: 256 } }
+        - { name: cursor, in: query, schema: { type: string, maxLength: 512 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        "200": { description: Resources, content: { application/json: { schema: { $ref: "#/components/schemas/IndexSearchResponse" } } } }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /v1/snapshots:
+    get:
+      tags: [public]
+      summary: "(Phase 2) Feature snapshot list (SL-C11, AM-07)."
+      operationId: listSnapshots
+      x-phase: 2
+      security: []
+      responses:
+        "4XX": { $ref: "#/components/responses/Problem" }
+        "200": { description: Snapshot list, content: { application/json: { schema: { $ref: "#/components/schemas/Page" } } } }
+
+  /v1/snapshots/{id}:
+    get:
+      tags: [public]
+      summary: "(Phase 2) One feature snapshot (SL-C11, AM-07)."
+      operationId: getSnapshot
+      x-phase: 2
+      security: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, maxLength: 128 } }
+      responses:
+        "200": { description: Snapshot, content: { application/x-ndjson: { schema: { type: string } } } }
+        "404": { $ref: "#/components/responses/Problem" }
+
+  # ---------------- app ----------------
+  /v1/auth/session:
+    post:
+      tags: [app]
+      summary: Create a session from a passkey assertion (D26).
+      operationId: createSession
+      parameters: [ { $ref: "#/components/parameters/IdempotencyKey" } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/SessionRequest" } } }
+      responses:
+        "201": { description: Session, content: { application/json: { schema: { $ref: "#/components/schemas/SessionResponse" } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /v1/auth/challenge:
+    post:
+      tags: [app]
+      summary: Issue a single-use WebAuthn challenge for registration or sign-in (SCR-125).
+      operationId: createAuthChallenge
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/AuthChallengeRequest" } } }
+      responses:
+        "201": { description: Challenge, content: { application/json: { schema: { $ref: "#/components/schemas/AuthChallenge" } } } }
+        "400": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /v1/auth/passkey:
+    post:
+      tags: [app]
+      summary: Register the owner's passkey, create the user and open a session (SCR-125). Phase 1, one passkey per user.
+      operationId: registerPasskey
+      parameters: [ { $ref: "#/components/parameters/IdempotencyKey" } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/PasskeyRegistration" } } }
+      responses:
+        "201": { description: Session, content: { application/json: { schema: { $ref: "#/components/schemas/SessionResponse" } } } }
+        "401": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /v1/app/wallet-config:
+    get:
+      tags: [app]
+      summary: Public wallet bootstrap before passkey registration (SCR-140).
+      operationId: getAppWalletConfig
+      responses:
+        "200":
+          description: Public wallet configuration; Cache-Control no-store.
+          headers:
+            Cache-Control:
+              description: Always no-store; browser obtains current server configuration.
+              schema: { type: string, enum: [no-store] }
+          content: { application/json: { schema: { $ref: "#/components/schemas/AppWalletConfig" } } }
+        "503": { $ref: "#/components/responses/Problem" }
+
+  /v1/me:
+    get:
+      tags: [app]
+      summary: Accounts, balances mirror, limits.
+      operationId: getMe
+      security: [ { AppSession: [] } ]
+      responses:
+        "4XX": { $ref: "#/components/responses/Problem" }
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Me" } } } }
+
+  /v1/approvals:
+    get:
+      tags: [app]
+      summary: Pending approvals. This list, not push, is the source of truth (spec 01 FD-32).
+      operationId: listApprovals
+      security: [ { AppSession: [] } ]
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [pending, intent-issued, submitted, opened, expired, declined], default: pending }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "4XX": { $ref: "#/components/responses/Problem" }
+        "200":
+          description: Page of ApprovalSummary
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Page" }
+                  - type: object
+                    properties:
+                      items: { type: array, items: { $ref: "#/components/schemas/ApprovalSummary" } }
+
+  /v1/approvals/{planId}:
+    get:
+      tags: [app]
+      summary: Full plan for display (payees, amounts, alternates).
+      operationId: getApproval
+      security: [ { AppSession: [] } ]
+      parameters:
+        - name: planId
+          in: path
+          required: true
+          schema: { type: string, pattern: "^pln_[0-9A-HJKMNP-TV-Z]{26}$" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "../schemas/plan.schema.json" } } } }
+        "404": { $ref: "#/components/responses/Problem" }
+
+  /v1/approvals/{planId}/subjects:
+    post:
+      tags: [app]
+      summary: Edit the subjects Czar will look up, then re-plan (D84). Returns the new plan; the old one is superseded.
+      operationId: revisePlanSubjects
+      security: [ { AppSession: [] } ]
+      parameters:
+        - name: planId
+          in: path
+          required: true
+          schema: { type: string, pattern: "^pln_[0-9A-HJKMNP-TV-Z]{26}$" }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/SubjectsRevision" } } }
+      responses:
+        "200": { description: New plan, content: { application/json: { schema: { $ref: "../schemas/plan.schema.json" } } } }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+
+  /v1/approvals/{planId}/intent:
+    post:
+      tags: [app]
+      summary: Get the exact `openEnvelope` calldata and payeeRoot. The app builds and submits the UserOp itself.
+      operationId: createApprovalIntent
+      security: [ { AppSession: [] } ]
+      parameters:
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+        - name: planId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content: { application/json: { schema: { $ref: "#/components/schemas/ApprovalIntentRequest" } } }
+      responses:
+        "200": { description: Intent, content: { application/json: { schema: { $ref: "#/components/schemas/ApprovalIntent" } } } }
+        "409": { description: Plan expired or already opened, content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+
+  /v1/approvals/{planId}/submitted:
+    post:
+      tags: [app]
+      summary: Tell the server which UserOp was submitted so the indexer can match `EnvelopeOpened`.
+      operationId: notifySubmitted
+      security: [ { AppSession: [] } ]
+      parameters:
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+        - name: planId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/SubmittedNotice" } } }
+      responses:
+        "4XX": { $ref: "#/components/responses/Problem" }
+        "202": { description: Watching }
+
+  /v1/envelopes:
+    get:
+      tags: [app]
+      summary: Envelopes (mirror).
+      operationId: listEnvelopes
+      security: [ { AppSession: [] } ]
+      parameters:
+        - name: state
+          in: query
+          schema: { type: string, enum: [Open, Closing, Closed] }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "4XX": { $ref: "#/components/responses/Problem" }
+        "200":
+          description: Page of Envelope
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Page" }
+                  - type: object
+                    properties:
+                      items: { type: array, items: { $ref: "../schemas/envelope.schema.json" } }
+
+  /v1/envelopes/{envelopeRef}:
+    get:
+      tags: [app]
+      summary: Envelope with reservations, pockets and jobs.
+      operationId: getEnvelope
+      security: [ { AppSession: [] } ]
+      parameters:
+        - name: envelopeRef
+          in: path
+          required: true
+          description: "`eip155:<chainId>:<vault>:<envelopeId>`"
+          schema: { type: string, maxLength: 128 }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/EnvelopeDetail" } } } }
+        "404": { $ref: "#/components/responses/Problem" }
+
+  /v1/freeze/intent:
+    post:
+      tags: [app]
+      summary: Calldata for `freeze()` / `unfreeze()`; the app submits the UserOp.
+      operationId: createFreezeIntent
+      security: [ { AppSession: [] } ]
+      parameters: [ { $ref: "#/components/parameters/IdempotencyKey" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [action]
+              properties:
+                action: { type: string, enum: [freeze, unfreeze] }
+      responses:
+        "4XX": { $ref: "#/components/responses/Problem" }
+        "200": { description: Intent, content: { application/json: { schema: { $ref: "#/components/schemas/FreezeIntent" } } } }
+
+  /v1/pockets/manual-returns:
+    get:
+      tags: [app]
+      summary: Pocket returns for the owner to record with a recordManualReturn UserOp (SCR-133).
+      operationId: listManualReturns
+      security: [ { AppSession: [] } ]
+      parameters:
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "4XX": { $ref: "#/components/responses/Problem" }
+        "200":
+          description: Page of ManualReturn
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Page" }
+                  - type: object
+                    properties:
+                      items: { type: array, items: { $ref: "#/components/schemas/ManualReturn" } }
+
+  /v1/devices/pairing-codes:
+    post:
+      tags: [app]
+      summary: Issue an 8-digit pairing code for pairDevice (SCR-134).
+      operationId: createPairingCode
+      security: [ { AppSession: [] } ]
+      parameters: [ { $ref: "#/components/parameters/IdempotencyKey" } ]
+      responses:
+        "4XX": { $ref: "#/components/responses/Problem" }
+        "201": { description: Code issued, content: { application/json: { schema: { $ref: "#/components/schemas/PairingCode" } } } }
+
+  /v1/devices:
+    get:
+      tags: [app]
+      summary: The session user's paired devices (SCR-134).
+      operationId: listDevices
+      security: [ { AppSession: [] } ]
+      parameters:
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "4XX": { $ref: "#/components/responses/Problem" }
+        "200":
+          description: Page of Device
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Page" }
+                  - type: object
+                    properties:
+                      items: { type: array, items: { $ref: "#/components/schemas/Device" } }
+
+  /v1/devices/{deviceId}/revoke:
+    post:
+      tags: [app]
+      summary: Revoke a paired device; its token is refused from then on (SCR-134).
+      operationId: revokeDevice
+      security: [ { AppSession: [] } ]
+      parameters:
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+        - name: deviceId
+          in: path
+          required: true
+          schema: { type: string, pattern: "^dev_[0-9A-HJKMNP-TV-Z]{26}$" }
+      responses:
+        "4XX": { $ref: "#/components/responses/Problem" }
+        "204": { description: Revoked }
+
+  /v1/ledger/receipts:
+    get:
+      tags: [app]
+      summary: ROI ledger receipts.
+      operationId: listReceipts
+      security: [ { AppSession: [] } ]
+      parameters:
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "4XX": { $ref: "#/components/responses/Problem" }
+        "200":
+          description: Page of LedgerReceipt
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Page" }
+                  - type: object
+                    properties:
+                      items: { type: array, items: { $ref: "#/components/schemas/LedgerReceipt" } }
+
+  /v1/ledger/monthly/{yyyy-mm}:
+    get:
+      tags: [app]
+      summary: Monthly statement.
+      operationId: getMonthlyStatement
+      security: [ { AppSession: [] } ]
+      parameters:
+        - name: yyyy-mm
+          in: path
+          required: true
+          schema: { type: string, pattern: "^[0-9]{4}-[0-9]{2}$" }
+      responses:
+        "4XX": { $ref: "#/components/responses/Problem" }
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/MonthlyStatement" } } } }
+
+  /v1/push/subscriptions:
+    post:
+      tags: [app]
+      summary: "Stage 2 (D69): register a Declarative Web Push subscription (D2-06). Created only after a user tap (D2-02)."
+      x-stage: 2
+      operationId: createPushSubscription
+      security: [ { AppSession: [] } ]
+      parameters: [ { $ref: "#/components/parameters/IdempotencyKey" } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/PushSubscription" } } }
+      responses:
+        "4XX": { $ref: "#/components/responses/Problem" }
+        "201": { description: Created, content: { application/json: { schema: { $ref: "#/components/schemas/PushSubscriptionCreated" } } } }
+
+  /v1/push/subscriptions/{id}:
+    delete:
+      tags: [app]
+      summary: "Stage 2 (D69): remove a push subscription."
+      x-stage: 2
+      operationId: deletePushSubscription
+      security: [ { AppSession: [] } ]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, pattern: "^psh_[0-9A-HJKMNP-TV-Z]{26}$" }
+      responses:
+        "4XX": { $ref: "#/components/responses/Problem" }
+        "204": { description: Deleted }
+
+  /v1/soul/pointer:
+    get:
+      tags: [app]
+      summary: Desktop-only notice for the soul viewer (D34).
+      operationId: getSoulPointer
+      security: [ { AppSession: [] } ]
+      responses:
+        "4XX": { $ref: "#/components/responses/Problem" }
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/SoulPointer" } } } }
+
+  # ---------------- claim (Phase 2) ----------------
+  /v1/claims/github/start:
+    post:
+      tags: [claim]
+      summary: "(Phase 2) Start a GitHub sign-in claim for a repo (D23 default)."
+      operationId: startGithubClaim
+      parameters: [ { $ref: "#/components/parameters/IdempotencyKey" } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/ClaimStart" } } }
+      responses:
+        "201": { description: Redirect target, content: { application/json: { schema: { $ref: "#/components/schemas/ClaimGithubStartResponse" } } } }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /v1/claims/github/callback:
+    post:
+      tags: [claim]
+      summary: "(Phase 2) Finish GitHub sign-in; server checks admin permission on the repo and schedules a timelocked release."
+      operationId: finishGithubClaim
+      security: [ { GitHubOAuth: [repo] } ]
+      parameters: [ { $ref: "#/components/parameters/IdempotencyKey" } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/ClaimGithubCallback" } } }
+      responses:
+        "200": { description: Claim status, content: { application/json: { schema: { $ref: "#/components/schemas/ClaimStatus" } } } }
+        "403": { $ref: "#/components/responses/Problem" }
+
+  /v1/claims/file/start:
+    post:
+      tags: [claim]
+      summary: "(Phase 2) Start a FUNDING.json claim (D23 fallback). Returns the one-time code and file to commit."
+      operationId: startFileClaim
+      parameters: [ { $ref: "#/components/parameters/IdempotencyKey" } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/ClaimStart" } } }
+      responses:
+        "4XX": { $ref: "#/components/responses/Problem" }
+        "201": { description: Code issued, content: { application/json: { schema: { $ref: "#/components/schemas/ClaimFileStartResponse" } } } }
+
+  /v1/claims/file/verify:
+    post:
+      tags: [claim]
+      summary: "(Phase 2) Server reads FUNDING.json from the default branch through the GitHub API (A8-08 shape) and schedules the release."
+      operationId: verifyFileClaim
+      parameters: [ { $ref: "#/components/parameters/IdempotencyKey" } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/ClaimFileVerify" } } }
+      responses:
+        "200": { description: Claim status, content: { application/json: { schema: { $ref: "#/components/schemas/ClaimStatus" } } } }
+        "422": { $ref: "#/components/responses/Problem" }
+        "429": { description: "GitHub rate limit (E1-09, E1-10)", content: { application/problem+json: { schema: { $ref: "#/components/schemas/Problem" } } } }
+
+  /v1/claims/{repoId}:
+    get:
+      tags: [claim]
+      summary: "(Phase 2) Escrow balance and release status for a repo."
+      operationId: getClaim
+      parameters:
+        - name: repoId
+          in: path
+          required: true
+          schema: { $ref: "#/components/schemas/Hash32" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/ClaimStatus" } } } }
+        "404": { $ref: "#/components/responses/Problem" }
+
+# x-changeLog (2026-10-18):
+# - AM-01 added findService, createQuote, reportOutcome routes and their schemas (copied from mcp/czar-mcp-tools.md §2.2, §2.3, §2.5).
+# - AM-02 added completeModelCall (model proxy, stores counts only).
+# - AM-03 Me: mode, shadowEndsAt, limits[].periodEndsAt, balances.pocketOutstanding.
+# - AM-04 IngestReport.shadowTotals.
+# - AM-05 LedgerReceipt: merchantIsCzar, minutesSource, status quarantined.
+# - AM-06 ApprovalIntent.decoded fixed to OpenEnvelopeParams fields.
+# - AM-07 public listIndexResources and searchIndexResources; Phase 2 listSnapshots and getSnapshot (x-phase 2).
+# - AM-18 pairDevice description: single-use 5-minute code, token returned once.
+# - D51 USD only: displayCurrency const USD; capDisplay and amountDisplay are USD strings.
+# - D52 mscaBalance described as the "Network fee reserve".
+# x-changeLog: 2026-10-19 D69 — app tag is the desktop browser web app in Phase 1; push subscription routes and schemas tagged stage 2 (x-stage: 2); kept defined.
+# - D82 (2026-10-20): Result.assembly and ResultAck.assembly for unpaid local and agent-assist steps.
+# - D83 (2026-10-20): getMarketView route and MarketViewRequest; FindServiceRequest.network must be the payment network; includeMarketView and FindServiceResponse.marketView.
+# - D84 (2026-10-20): Result.taskSpec, Result.assembly[].inputs[].subjectIndex, SubjectsRevision, revisePlanSubjects route.
+# - D85 (2026-10-20): Plan.fillInPlace via ApprovalIntentRequest; Result.fillInPlace; ResultAck.fill counts.
+# - D86/D87 (2026-10-20): uploadJobDeliverable route and ProviderUploadSignature scheme; JobBrief v2.
+# - D87 (2026-10-20): Result.artifacts, ResultAck.artifacts counts, getResultArtifact route (H6, N2).
+# - SCR-133, SCR-134 (2026-10-25): listManualReturns, createPairingCode, listDevices, revokeDevice and the ManualReturn, PairingCode, Device schemas.
+# - D90 (2026-10-20): completeModelCall accepts P-07 (source-belief-extractor). Nothing else changes here; demandEvidence and the server approval policy for confirmed objectives are held in SCR-030.

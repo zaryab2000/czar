@@ -1,0 +1,11 @@
+{
+  "token": "USDC",
+  "balances": [
+    {
+      "domain": 26,
+      "depositor": "0xdc5b9476099311d00d5b183aa4bfdff836c5e84f",
+      "balance": "0.001000",
+      "pendingBatch": "0"
+    }
+  ]
+}

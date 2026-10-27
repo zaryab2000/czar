@@ -1,0 +1,37 @@
+{
+  "name": "@czar/indexer",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "imports": {
+    "#src/*": "./src/*.ts",
+    "#test/*": "./test/*.ts"
+  },
+  "exports": {
+    "./rpc": "./src/rpc/arc-transport.ts",
+    "./handlers": "./src/handlers.ts",
+    "./schema": "./ponder.schema.ts",
+    "./mirrors": "./src/mirrors.ts",
+    "./chain": "./src/chain.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json && tsc -p test/fixtures/resume/tsconfig.json && tsc -p test/fixtures/replay/tsconfig.json",
+    "test": "vitest run",
+    "start:local": "ponder dev --port 42069"
+  },
+  "dependencies": {
+    "@czar/config": "workspace:*",
+    "@czar/hashing": "workspace:*",
+    "@czar/logging": "workspace:*",
+    "@czar/schemas": "workspace:*",
+    "@czar/vault-client": "workspace:*",
+    "drizzle-orm": "0.41.0",
+    "ponder": "0.18.2",
+    "viem": "2.57.7"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.2.13",
+    "ajv": "8.20.0",
+    "hono": "4.13.13"
+  }
+}

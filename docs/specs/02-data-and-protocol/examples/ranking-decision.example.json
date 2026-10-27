@@ -1,0 +1,53 @@
+{
+  "schemaVersion": "1.1",
+  "query_id": "example",
+  "received_at": "2026-10-19T12:00:00.000Z",
+  "policy_version": "pol_80a2df9a87ea87eb",
+  "snapshot_id": "0x10ad93eb3b1f0395a599eda358f5e281dff35791119c0d6da8cda0c2692e41a7",
+  "snapshot_anchor_tx": "0xdba90ff9f6d779d5b50dcf25288a197a8487065a9777609585ffb4d9932063f3",
+  "query": {
+    "task": "example",
+    "constraints": {},
+    "risk_quantile": 0.5,
+    "weights": {}
+  },
+  "candidates_considered": 0,
+  "excluded": [
+    {
+      "service_id": "svc_ed6a970e389a41c574b385c580e98094",
+      "gate": "example",
+      "detail": "example"
+    }
+  ],
+  "ranked": [
+    {
+      "rank": 1,
+      "service_id": "svc_f961586d8dcd298f70c4c68c87303b22",
+      "version_id": "ver_29152b6ab5cef7b910e438d9f6b3f2a9",
+      "score": 0,
+      "features": {},
+      "evidence_refs": [
+        "example"
+      ],
+      "evidence_age_days": 0,
+      "missing": [
+        "example"
+      ],
+      "badges": [
+        "example"
+      ],
+      "explanation": "example"
+    }
+  ],
+  "unverified": [
+    {
+      "service_id": "svc_eaded8764b2f7033a54a8f90bbac3699",
+      "reason": "n_eff_below_min",
+      "n_eff": 0
+    }
+  ],
+  "missing_dimensions_for_class": [
+    "example"
+  ],
+  "insufficient_evidence": false
+}

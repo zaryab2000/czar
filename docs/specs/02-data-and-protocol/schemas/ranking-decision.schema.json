@@ -1,0 +1,319 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://czar.dev/schemas/ranking-decision.schema.json",
+  "title": "RankingDecision",
+  "description": "Selection Layer RankingDecision, adopted verbatim from SL \u00a75.6 (spec 02 \u00a74.19).",
+  "type": "object",
+  "x-privacyClass": "server-only",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "description": "Schema version, major.minor; this file is 1.1 (2026-10-25: snapshot_anchor_tx may be null for the unanchored interim producer, SCR-137).",
+      "x-privacyClass": "server-only",
+      "const": "1.1"
+    },
+    "query_id": {
+      "type": "string",
+      "description": "Query id.",
+      "x-privacyClass": "server-only",
+      "maxLength": 128
+    },
+    "received_at": {
+      "$ref": "common.schema.json#/$defs/Timestamp",
+      "description": "Receipt time.",
+      "x-privacyClass": "server-only"
+    },
+    "policy_version": {
+      "$ref": "common.schema.json#/$defs/SlPolicyVersion",
+      "description": "Policy version: pol_ + 16 hex of keccak256 over the policy definition (SL PolicyVersion); for the interim producer, over its JCS descriptor (SCR-137).",
+      "x-privacyClass": "server-only"
+    },
+    "snapshot_id": {
+      "$ref": "common.schema.json#/$defs/Hash32",
+      "description": "Snapshot root: the anchored FEATURE_SNAPSHOT root (SL); for the Phase 1 interim producer, keccak256 of the stored JCS interim snapshot (SCR-137).",
+      "x-privacyClass": "server-only"
+    },
+    "snapshot_anchor_tx": {
+      "oneOf": [
+        {
+          "$ref": "common.schema.json#/$defs/Hash32"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Anchor transaction of snapshot_id; null means the snapshot is not anchored (Phase 1 interim producer, SCR-137) and must never be presented as anchored.",
+      "x-privacyClass": "server-only"
+    },
+    "query": {
+      "type": "object",
+      "description": "The query.",
+      "x-privacyClass": "server-only",
+      "properties": {
+        "task": {
+          "type": "string",
+          "description": "Task text.",
+          "x-privacyClass": "server-only",
+          "maxLength": 4000
+        },
+        "task_class": {
+          "type": "string",
+          "description": "Task class.",
+          "x-privacyClass": "server-only",
+          "maxLength": 128
+        },
+        "constraints": {
+          "type": "object",
+          "description": "Constraints (SL C4).",
+          "x-privacyClass": "server-only"
+        },
+        "risk_quantile": {
+          "type": "number",
+          "description": "Risk quantile.",
+          "x-privacyClass": "server-only",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "weights": {
+          "type": "object",
+          "description": "Weights.",
+          "x-privacyClass": "server-only"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "task",
+        "constraints",
+        "risk_quantile",
+        "weights"
+      ]
+    },
+    "candidates_considered": {
+      "type": "integer",
+      "description": "Candidates considered.",
+      "x-privacyClass": "server-only",
+      "minimum": 0
+    },
+    "excluded": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "description": "Exclusion.",
+        "x-privacyClass": "server-only",
+        "properties": {
+          "service_id": {
+            "$ref": "common.schema.json#/$defs/SlServiceId",
+            "description": "Service.",
+            "x-privacyClass": "server-only"
+          },
+          "gate": {
+            "type": "string",
+            "description": "Gate.",
+            "x-privacyClass": "server-only",
+            "maxLength": 64
+          },
+          "detail": {
+            "type": "string",
+            "description": "Detail.",
+            "x-privacyClass": "server-only",
+            "maxLength": 512
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "service_id",
+          "gate",
+          "detail"
+        ]
+      },
+      "description": "Excluded candidates.",
+      "x-privacyClass": "server-only"
+    },
+    "ranked": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "description": "Ranked entry.",
+        "x-privacyClass": "server-only",
+        "properties": {
+          "rank": {
+            "type": "integer",
+            "description": "Rank.",
+            "x-privacyClass": "server-only",
+            "minimum": 1
+          },
+          "service_id": {
+            "$ref": "common.schema.json#/$defs/SlServiceId",
+            "description": "Service.",
+            "x-privacyClass": "server-only"
+          },
+          "version_id": {
+            "$ref": "common.schema.json#/$defs/SlVersionId",
+            "description": "Version.",
+            "x-privacyClass": "server-only"
+          },
+          "score": {
+            "type": "number",
+            "description": "Score.",
+            "x-privacyClass": "server-only"
+          },
+          "features": {
+            "type": "object",
+            "description": "Features.",
+            "x-privacyClass": "server-only"
+          },
+          "evidence_refs": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "description": "Evidence ref.",
+              "x-privacyClass": "server-only",
+              "maxLength": 128
+            },
+            "description": "Evidence refs.",
+            "x-privacyClass": "server-only"
+          },
+          "evidence_age_days": {
+            "type": "number",
+            "description": "Evidence age in days.",
+            "x-privacyClass": "server-only",
+            "minimum": 0
+          },
+          "missing": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "description": "Missing feature.",
+              "x-privacyClass": "server-only",
+              "maxLength": 64
+            },
+            "description": "Missing features.",
+            "x-privacyClass": "server-only"
+          },
+          "badges": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "description": "Badge.",
+              "x-privacyClass": "server-only",
+              "maxLength": 64
+            },
+            "description": "Badges.",
+            "x-privacyClass": "server-only"
+          },
+          "explanation": {
+            "type": "string",
+            "description": "Templated explanation.",
+            "x-privacyClass": "server-only",
+            "maxLength": 2000
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "rank",
+          "service_id",
+          "version_id",
+          "score",
+          "features",
+          "evidence_refs",
+          "evidence_age_days",
+          "missing",
+          "badges",
+          "explanation"
+        ]
+      },
+      "description": "Ranked list.",
+      "x-privacyClass": "server-only"
+    },
+    "unverified": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "description": "Unverified entry.",
+        "x-privacyClass": "server-only",
+        "properties": {
+          "service_id": {
+            "$ref": "common.schema.json#/$defs/SlServiceId",
+            "description": "Service.",
+            "x-privacyClass": "server-only"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Reason.",
+            "x-privacyClass": "server-only",
+            "const": "n_eff_below_min"
+          },
+          "n_eff": {
+            "type": "number",
+            "description": "Effective evidence count.",
+            "x-privacyClass": "server-only",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "service_id",
+          "reason",
+          "n_eff"
+        ]
+      },
+      "description": "Unverified section.",
+      "x-privacyClass": "server-only"
+    },
+    "missing_dimensions_for_class": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "description": "Dimension.",
+        "x-privacyClass": "server-only",
+        "maxLength": 64
+      },
+      "description": "Structurally missing dimensions.",
+      "x-privacyClass": "server-only"
+    },
+    "insufficient_evidence": {
+      "type": "boolean",
+      "description": "True when nothing could be ranked.",
+      "x-privacyClass": "server-only"
+    },
+    "exploration_slot": {
+      "type": "object",
+      "description": "Exploration slot.",
+      "x-privacyClass": "server-only",
+      "properties": {
+        "service_id": {
+          "$ref": "common.schema.json#/$defs/SlServiceId",
+          "description": "Service.",
+          "x-privacyClass": "server-only"
+        },
+        "reason": {
+          "type": "string",
+          "description": "Reason.",
+          "x-privacyClass": "server-only",
+          "maxLength": 512
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "service_id",
+        "reason"
+      ]
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "query_id",
+    "received_at",
+    "policy_version",
+    "snapshot_id",
+    "snapshot_anchor_tx",
+    "query",
+    "candidates_considered",
+    "excluded",
+    "ranked",
+    "unverified",
+    "missing_dimensions_for_class",
+    "insufficient_evidence"
+  ]
+}

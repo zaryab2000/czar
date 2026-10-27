@@ -1,0 +1,31 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error"
+  },
+  "rules": {
+    "no-console": "error",
+    "eqeqeq": "error",
+    "no-restricted-imports": [
+      "error",
+      {
+        "patterns": [
+          {
+            "group": ["../*", "**/../*"],
+            "message": "Absolute imports only (@czar/...); no relative '..' paths (cross-cutting §1)."
+          }
+        ]
+      }
+    ]
+  },
+  "ignorePatterns": [
+    "**/node_modules/**",
+    "contracts/**",
+    "docs/**",
+    "**/.next/**",
+    "**/.ponder/**",
+    "**/generated/**",
+    "apps/redact-sidecar/**"
+  ]
+}

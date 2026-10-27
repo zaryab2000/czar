@@ -1,0 +1,89 @@
+{
+  "tag": "0xabf82537a2dce15f109dca3554542a6a546f104bd1343c99de6c06fdd41462fe",
+  "fourLeaves": {
+    "root": "0x5260a09a91439828d8270628cc7759cccd88e6fb8c0913079b9cb3b4ed7a8053",
+    "leaves": [
+      {
+        "payee": "0x000000000000000000000000000000000000beef",
+        "kind": 1,
+        "stepIndex": 0,
+        "stepCap": "1000000",
+        "leaf": "0x730c32c180b9f083f727dd233f0736cd6a5a0ae28a6e6c49dea73bfa0bf9c6f8",
+        "proof": [
+          "0xab9631b63ff19fbac7755a1065d573f639d8d443130d6077cf2f1c7e3113f856",
+          "0x89c3e8f52ad7e7775b76d91a2e009bd59bb09b3c83b270fc21645a4443a2cde9"
+        ]
+      },
+      {
+        "payee": "0x000000000000000000000000000000000000cafe",
+        "kind": 1,
+        "stepIndex": 0,
+        "stepCap": "1000000",
+        "leaf": "0x26c269f6eccb85afb6706039229e977df700c4e25fe066861064966295b1dfe7",
+        "proof": [
+          "0x04e78038f4a24b35844ef3fcf59c513c5437c3866b648a9e11cf2f90978bf372",
+          "0x2bc447d59d756cdde730e0958a2ffe4f559f7ebfb0f71c1bc6c372a3407438aa"
+        ]
+      },
+      {
+        "payee": "0x000000000000000000000000000000000000d00d",
+        "kind": 2,
+        "stepIndex": 1,
+        "stepCap": "400000",
+        "leaf": "0x04e78038f4a24b35844ef3fcf59c513c5437c3866b648a9e11cf2f90978bf372",
+        "proof": [
+          "0x26c269f6eccb85afb6706039229e977df700c4e25fe066861064966295b1dfe7",
+          "0x2bc447d59d756cdde730e0958a2ffe4f559f7ebfb0f71c1bc6c372a3407438aa"
+        ]
+      },
+      {
+        "payee": "0x000000000000000000000000000000000000b0c0",
+        "kind": 4,
+        "stepIndex": 4294967295,
+        "stepCap": "0",
+        "leaf": "0xab9631b63ff19fbac7755a1065d573f639d8d443130d6077cf2f1c7e3113f856",
+        "proof": [
+          "0x730c32c180b9f083f727dd233f0736cd6a5a0ae28a6e6c49dea73bfa0bf9c6f8",
+          "0x89c3e8f52ad7e7775b76d91a2e009bd59bb09b3c83b270fc21645a4443a2cde9"
+        ]
+      }
+    ]
+  },
+  "threeLeaves": {
+    "root": "0xe963ac023d4d117e5d7256956871299fbb685e71713ea9eb912cb79f97f6a281",
+    "leaves": [
+      {
+        "payee": "0x000000000000000000000000000000000000beef",
+        "kind": 1,
+        "stepIndex": 0,
+        "stepCap": "1000000",
+        "leaf": "0x730c32c180b9f083f727dd233f0736cd6a5a0ae28a6e6c49dea73bfa0bf9c6f8",
+        "proof": [
+          "0x89c3e8f52ad7e7775b76d91a2e009bd59bb09b3c83b270fc21645a4443a2cde9"
+        ]
+      },
+      {
+        "payee": "0x000000000000000000000000000000000000cafe",
+        "kind": 1,
+        "stepIndex": 0,
+        "stepCap": "1000000",
+        "leaf": "0x26c269f6eccb85afb6706039229e977df700c4e25fe066861064966295b1dfe7",
+        "proof": [
+          "0x04e78038f4a24b35844ef3fcf59c513c5437c3866b648a9e11cf2f90978bf372",
+          "0x730c32c180b9f083f727dd233f0736cd6a5a0ae28a6e6c49dea73bfa0bf9c6f8"
+        ]
+      },
+      {
+        "payee": "0x000000000000000000000000000000000000d00d",
+        "kind": 2,
+        "stepIndex": 1,
+        "stepCap": "400000",
+        "leaf": "0x04e78038f4a24b35844ef3fcf59c513c5437c3866b648a9e11cf2f90978bf372",
+        "proof": [
+          "0x26c269f6eccb85afb6706039229e977df700c4e25fe066861064966295b1dfe7",
+          "0x730c32c180b9f083f727dd233f0736cd6a5a0ae28a6e6c49dea73bfa0bf9c6f8"
+        ]
+      }
+    ]
+  }
+}

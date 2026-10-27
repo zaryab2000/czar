@@ -1,0 +1,6 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+# Supply-chain rules (cross-cutting §7): a version must be at least one day old.
+minimumReleaseAge: 1440

@@ -22,3 +22,32 @@ __pycache__/
 
 # Tool output
 graphify-out/
+
+# Keys (T-001; the signer keystore lives outside the repository, D78)
+keystore/
+*.keystore
+*.p12
+
+# Build output (T-001)
+.next/
+.ponder/
+contracts/out/
+contracts/cache/
+coverage/
+playwright-report/
+test-results/
+*.tsbuildinfo
+apps/indexer/test/fixtures/resume/.ponder/
+apps/web/next-env.d.ts
+
+
+# Docs
+docs-internal/
+
+contracts/broadcast/*/31337/
+contracts/slither-out.json
+deployments/local.json
+deployments/arc-local.json
+
+deployments/.vault-client-test*.json
+contracts/broadcast

@@ -1,0 +1,21 @@
+{
+  "name": "@czar/vault-client",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "imports": {
+    "#src/*": "./src/*.ts"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "gen-abi": "node scripts/gen-abi.ts",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@czar/hashing": "workspace:*",
+    "viem": "2.57.7"
+  }
+}

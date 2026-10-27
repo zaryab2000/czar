@@ -1,0 +1,375 @@
+openapi: 3.1.0
+info:
+  title: Czar daemon local viewer API
+  version: "1.1"
+  summary: Loopback routes the daemon serves to the desktop soul viewer (CZ-05, D34). Never exposed off the machine.
+  license:
+    name: Proprietary (Czar specification; not for redistribution)
+    identifier: LicenseRef-Czar-Proprietary
+  description: |
+    Served by the daemon (CZ-02) on its Unix domain socket (mode 0600) or on `127.0.0.1:<port>`; never on `0.0.0.0` (D3-08).
+    Every request must carry the local viewer bearer token (stored in the OS keychain, same rules as K16) and, over HTTP,
+    an `Origin` header equal to the viewer's own loopback origin; any other `Origin` gets 403 (DNS-rebinding defence, D3-08).
+    Everything here is `local-only` (spec 02 §3). Nothing in these responses is sent to Czar's server.
+    Errors use the same RFC 9457 shape as `openapi.yaml` (`czarCode`, `retryable`).
+    Source: amendment AM-16; route list from `docs/specs/04-components/local/local-soul-and-drives.md` CZ-05.
+    Change log 2026-10-19: license field and 4XX responses added (lint, G0-01 review verification).
+    Change log 2026-10-20 (D90): soul-input routes (interview, source roots, scans, paste import, proposals, bundle confirm); typed receipt union; egress kind source-excerpt. Version 1.1.
+servers:
+  - url: http://127.0.0.1
+    description: Loopback only; the port is chosen at install and stored in daemon settings.
+security:
+  - LocalViewerToken: []
+components:
+  securitySchemes:
+    LocalViewerToken:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+      description: Local viewer token generated at install, kept in the OS keychain (@napi-rs/keyring, B6-17). Plus a mandatory Origin check over HTTP.
+  schemas:
+    Problem:
+      type: object
+      x-privacyClass: local-only
+      additionalProperties: false
+      required: [type, title, status, czarCode, retryable]
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string, maxLength: 120 }
+        status: { type: integer }
+        detail: { type: string, maxLength: 1000 }
+        czarCode: { type: string, maxLength: 64 }
+        retryable: { type: boolean }
+    Belief:
+      $ref: "../schemas/soul.schema.json#/$defs/Belief"
+    BeliefEdit:
+      type: object
+      description: One user edit. User edits always win over the compiler (CZ-04).
+      x-privacyClass: local-only
+      additionalProperties: false
+      required: [op]
+      properties:
+        op: { type: string, enum: [edit, pin, unpin, delete, setConfidence] }
+        text: { type: string, maxLength: 500, description: New text for op=edit. }
+        confidence: { type: number, minimum: 0, maximum: 1, description: For op=setConfidence. }
+    SoulDiff:
+      type: object
+      description: '"What Czar learned about you this week" (CZ-04 §5.6). Lists of beliefIds.'
+      x-privacyClass: local-only
+      additionalProperties: false
+      required: [version, baseVersion, added, strengthened, faded, removed]
+      properties:
+        version: { type: integer }
+        baseVersion: { type: integer }
+        added: { type: array, items: { type: string } }
+        strengthened: { type: array, items: { type: string } }
+        faded: { type: array, items: { type: string } }
+        removed: { type: array, items: { type: string } }
+    ReceiptSummary:
+      description: One receipt behind a belief (D90 typed union). Observed receipts show the redacted ActivityEvent summary; source receipts show the source label, date and redacted excerpt.
+      oneOf:
+        - $ref: "#/components/schemas/ObservedReceiptSummary"
+        - $ref: "#/components/schemas/SourceReceiptSummary"
+      discriminator: { propertyName: receiptType }
+    ObservedReceiptSummary:
+      type: object
+      description: One observation behind a belief, shown as its redacted ActivityEvent summary.
+      x-privacyClass: local-only
+      additionalProperties: false
+      required: [receiptType, eventId, occurredAt, eventType, summary]
+      properties:
+        receiptType: { type: string, const: observed }
+        eventId: { type: string, pattern: "^evt_[0-9A-HJKMNP-TV-Z]{26}$" }
+        occurredAt: { type: string, format: date-time }
+        eventType: { type: string }
+        summary: { type: string, maxLength: 2000 }
+    SourceReceiptSummary:
+      type: object
+      description: One source receipt behind a belief (spec 02 §4.23). `locator` is shown on this Mac only.
+      x-privacyClass: local-only
+      additionalProperties: false
+      required: [receiptType, receiptId, sourceClass, kind, origin, capturedAt, excerpt]
+      properties:
+        receiptType: { type: string, const: source }
+        receiptId: { type: string, pattern: "^src_[0-9A-HJKMNP-TV-Z]{26}$" }
+        sourceClass: { type: string, enum: [declared, local-file, imported] }
+        kind: { type: string, enum: [interview, agent-file, git-commit, git-marker, import-paste, agent-summary] }
+        origin: { type: string, enum: [viewer, agent-host] }
+        capturedAt: { type: string, format: date-time }
+        excerpt: { type: string, maxLength: 500 }
+        locator: { type: string, maxLength: 1024 }
+    InterviewResult:
+      type: object
+      description: Result of an interview submission (D90). One belief per answered question (spec 02 §4.25); hourlyValue makes none. Answers Czar does not map are listed in ignoredFields.
+      x-privacyClass: local-only
+      additionalProperties: false
+      required: [version, beliefIds, ignoredFields]
+      properties:
+        version: { type: integer, minimum: 1 }
+        beliefIds: { type: array, maxItems: 30, items: { type: string, pattern: "^blf_[0-9A-HJKMNP-TV-Z]{26}$" } }
+        ignoredFields: { type: array, maxItems: 30, items: { type: string, maxLength: 64 } }
+    SourceRoot:
+      type: object
+      description: A project root the daemon already knows from CZ-02 file_paths. The full path is shown on this Mac only.
+      x-privacyClass: local-only
+      additionalProperties: false
+      required: [rootId, label, hasAgentFiles, isGitRepo]
+      properties:
+        rootId: { type: string, pattern: "^[0-9a-f]{64}$", description: Lowercase hex of projectRef (spec 02 §4.26). }
+        label: { type: string, maxLength: 255, description: Folder base name. }
+        path: { type: string, maxLength: 1024 }
+        hasAgentFiles: { type: boolean }
+        isGitRepo: { type: boolean }
+        consentRemembered: { type: boolean, description: True when a consent for this exact scope exists. }
+    SourceScanRequest:
+      type: object
+      x-privacyClass: local-only
+      additionalProperties: false
+      required: [rootId, includeAgentFiles, includeGit, egressConsent]
+      properties:
+        rootId: { type: string, pattern: "^[0-9a-f]{64}$" }
+        includeAgentFiles: { type: boolean }
+        includeGlobalAgentFile: { type: boolean, default: false }
+        includeGit: { type: boolean }
+        egressConsent: { type: boolean, description: "The person approved sending redacted excerpts to the model proxy after seeing the preview. False runs no model call and makes no automatic proposal." }
+    ImportText:
+      type: object
+      x-privacyClass: local-only
+      additionalProperties: false
+      required: [text, sourceLabel, egressConsent]
+      properties:
+        text: { type: string, maxLength: 12000, description: "soulInput.importTextMaxChars. Deleted when processing ends." }
+        sourceLabel: { type: string, enum: [chatgpt-memory, chatgpt-custom-instructions, claude-memory, claude-project-instructions, other] }
+        egressConsent: { type: boolean }
+    ProposalDecision:
+      type: object
+      x-privacyClass: local-only
+      additionalProperties: false
+      required: [op]
+      properties:
+        op: { type: string, enum: [accept, edit-and-accept, reject] }
+        text: { type: string, maxLength: 500, description: For op=edit-and-accept. }
+    ProposalDecisionResult:
+      type: object
+      x-privacyClass: local-only
+      additionalProperties: false
+      required: [status]
+      properties:
+        status: { type: string, enum: [accepted, rejected] }
+        beliefId: { type: string, pattern: "^blf_[0-9A-HJKMNP-TV-Z]{26}$" }
+        version: { type: integer, minimum: 1 }
+    BundleConfirm:
+      type: object
+      description: Confirms one agent-mediated interview bundle (D90 item 5). Lists exactly the proposals the viewer displayed in full; any mismatch with the bundle is refused.
+      x-privacyClass: local-only
+      additionalProperties: false
+      required: [displayedProposalIds]
+      properties:
+        displayedProposalIds: { type: array, minItems: 1, maxItems: 30, items: { type: string, pattern: "^prop_[0-9A-HJKMNP-TV-Z]{26}$" } }
+    ShadowReport:
+      type: object
+      description: The CZ-08 "what you missed" report. Amounts are USD strings and Amount6 (D51).
+      x-privacyClass: local-only
+      additionalProperties: false
+      required: [periodStart, periodEnd, items, totalMinutes, totalEstimateAtomic]
+      properties:
+        periodStart: { type: string, format: date-time }
+        periodEnd: { type: string, format: date-time }
+        items:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [objectiveId, goal, minutesSaved, estimateAtomic]
+            properties:
+              objectiveId: { type: string }
+              goal: { type: string, maxLength: 1000 }
+              minutesSaved: { type: integer }
+              estimateAtomic: { type: string, pattern: "^(0|[1-9][0-9]*)$" }
+        totalMinutes: { type: integer }
+        totalEstimateAtomic: { type: string, pattern: "^(0|[1-9][0-9]*)$" }
+    EgressEntry:
+      type: object
+      description: One departure from the machine, from the daemon's audit_local table (counts and hashes only).
+      x-privacyClass: local-only
+      additionalProperties: false
+      required: [at, kind, payloadHash, bytes, destination]
+      properties:
+        at: { type: string, format: date-time }
+        kind: { type: string, enum: [objective, soul-version, ack, report, shadow-quote, model-excerpt, source-excerpt] }
+        payloadHash: { type: string, pattern: "^0x[0-9a-f]{64}$" }
+        bytes: { type: integer, minimum: 0 }
+        destination: { type: string, enum: [server, model-proxy] }
+  responses:
+    Problem:
+      description: Error
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+paths:
+  /local/soul:
+    get:
+      summary: Current soul.json (spec 02 §4.2).
+      operationId: getLocalSoul
+      responses:
+        "200": { description: Soul, content: { application/json: { schema: { $ref: "../schemas/soul.schema.json" } } } }
+        "403": { $ref: "#/components/responses/Problem" }
+  /local/soul/beliefs/{beliefId}:
+    post:
+      summary: Edit, pin, unpin, delete or set the confidence of one belief.
+      operationId: editLocalBelief
+      parameters:
+        - { name: beliefId, in: path, required: true, schema: { type: string, pattern: "^blf_[0-9A-HJKMNP-TV-Z]{26}$" } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/BeliefEdit" } } }
+      responses:
+        "200": { description: Updated belief, content: { application/json: { schema: { $ref: "#/components/schemas/Belief" } } } }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+  /local/soul/diff:
+    get:
+      summary: Newest weekly diff.
+      operationId: getLocalSoulDiff
+      responses:
+        "4XX": { description: "Problem (unauthorised local token, bad Origin, not found)", content: { application/problem+json: { schema: { type: object } } } }
+        "200": { description: Diff, content: { application/json: { schema: { $ref: "#/components/schemas/SoulDiff" } } } }
+  /local/soul/receipts/{beliefId}:
+    get:
+      summary: Receipt summaries behind one belief.
+      operationId: getLocalBeliefReceipts
+      parameters:
+        - { name: beliefId, in: path, required: true, schema: { type: string, pattern: "^blf_[0-9A-HJKMNP-TV-Z]{26}$" } }
+      responses:
+        "200": { description: Receipts, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/ReceiptSummary" } } } } }
+        "404": { $ref: "#/components/responses/Problem" }
+  /local/shadow/report:
+    get:
+      summary: Shadow-mode "what you missed" report (CZ-08).
+      operationId: getLocalShadowReport
+      responses:
+        "4XX": { description: "Problem (unauthorised local token, bad Origin, not found)", content: { application/problem+json: { schema: { type: object } } } }
+        "200": { description: Report, content: { application/json: { schema: { $ref: "#/components/schemas/ShadowReport" } } } }
+  /local/audit/egress:
+    get:
+      summary: What left this machine, as counts and hashes.
+      operationId: getLocalEgress
+      parameters:
+        - { name: since, in: query, schema: { type: string, format: date-time } }
+      responses:
+        "4XX": { description: "Problem (unauthorised local token, bad Origin, not found)", content: { application/problem+json: { schema: { type: object } } } }
+        "200": { description: Entries, content: { application/json: { schema: { type: array, items: { $ref: "#/components/schemas/EgressEntry" } } } } }
+  /local/soul/interview:
+    post:
+      summary: Submit typed interview answers (D90). Deterministic mapping, no model call, no spending setting written.
+      operationId: submitLocalSoulInterview
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "../schemas/interview-submission.schema.json" } } }
+      responses:
+        "200": { description: New version and beliefs, content: { application/json: { schema: { $ref: "#/components/schemas/InterviewResult" } } } }
+        "403": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+        "422": { $ref: "#/components/responses/Problem" }
+  /local/soul/source-roots:
+    get:
+      summary: Known project roots that may be scanned (CZ-02 file_paths only; no arbitrary host paths).
+      operationId: listLocalSoulSourceRoots
+      responses:
+        "200": { description: Roots, content: { application/json: { schema: { type: array, maxItems: 100, items: { $ref: "#/components/schemas/SourceRoot" } } } } }
+        "403": { $ref: "#/components/responses/Problem" }
+  /local/soul/source-scans:
+    post:
+      summary: Start a bounded, consented scan of one known root (CZ-02 §5.6). Creates proposals only.
+      operationId: startLocalSoulSourceScan
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/SourceScanRequest" } } }
+      responses:
+        "202": { description: Scan started, content: { application/json: { schema: { $ref: "../schemas/source-scan.schema.json" } } } }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+  /local/soul/source-scans/{scanId}:
+    get:
+      summary: Status and counts of one scan.
+      operationId: getLocalSoulSourceScan
+      parameters:
+        - { name: scanId, in: path, required: true, schema: { type: string, pattern: "^scan_[0-9A-HJKMNP-TV-Z]{26}$" } }
+      responses:
+        "200": { description: Scan, content: { application/json: { schema: { $ref: "../schemas/source-scan.schema.json" } } } }
+        "404": { $ref: "#/components/responses/Problem" }
+  /local/soul/import-text:
+    post:
+      summary: Paste saved memory or custom instructions (no archive upload, SCR-031). Creates proposals; the paste is deleted when processing ends.
+      operationId: proposeLocalSoulImportText
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/ImportText" } } }
+      responses:
+        "200":
+          description: Proposals created
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [proposalIds, flags]
+                properties:
+                  proposalIds: { type: array, maxItems: 10, items: { type: string, pattern: "^prop_[0-9A-HJKMNP-TV-Z]{26}$" } }
+                  flags: { type: array, maxItems: 20, items: { type: string } }
+        "403": { $ref: "#/components/responses/Problem" }
+        "413": { $ref: "#/components/responses/Problem" }
+  /local/soul/proposals:
+    get:
+      summary: Proposals waiting for review, with their source labels. Never part of getLocalSoul.
+      operationId: listLocalSoulProposals
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [pending, accepted, rejected, expired], default: pending } }
+        - { name: cursor, in: query, schema: { type: string, maxLength: 128 } }
+      responses:
+        "200":
+          description: Page of proposals
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items]
+                properties:
+                  items: { type: array, maxItems: 100, items: { $ref: "../schemas/proposed-belief.schema.json" } }
+                  nextCursor: { type: string, maxLength: 128 }
+        "403": { $ref: "#/components/responses/Problem" }
+  /local/soul/proposals/{proposalId}:
+    post:
+      summary: Accept, edit and accept, or reject one proposal. Acceptance rechecks the source digest, redaction and deny-list and writes one soul version atomically.
+      operationId: decideLocalSoulProposal
+      parameters:
+        - { name: proposalId, in: path, required: true, schema: { type: string, pattern: "^prop_[0-9A-HJKMNP-TV-Z]{26}$" } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/ProposalDecision" } } }
+      responses:
+        "200": { description: Decision applied, content: { application/json: { schema: { $ref: "#/components/schemas/ProposalDecisionResult" } } } }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+  /local/soul/bundles/{bundleId}/confirm:
+    post:
+      summary: Confirm an agent-mediated interview bundle as declared (D90 item 5). Only exact answers to fixed question ids, all displayed in full.
+      operationId: confirmLocalSoulBundle
+      parameters:
+        - { name: bundleId, in: path, required: true, schema: { type: string, pattern: "^prop_[0-9A-HJKMNP-TV-Z]{26}$" } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/BundleConfirm" } } }
+      responses:
+        "200": { description: New version and beliefs, content: { application/json: { schema: { $ref: "#/components/schemas/InterviewResult" } } } }
+        "403": { $ref: "#/components/responses/Problem" }
+        "404": { $ref: "#/components/responses/Problem" }
+        "409": { $ref: "#/components/responses/Problem" }
+
+# x-changeLog (2026-10-18):
+# - AM-16 created this file for the daemon's loopback viewer routes (CZ-05).
+# x-changeLog (2026-10-20):
+# - D90 soul-input routes and the typed ReceiptSummary union. confirmLocalOpenLoop is held in SCR-030 (Flow 7 review).

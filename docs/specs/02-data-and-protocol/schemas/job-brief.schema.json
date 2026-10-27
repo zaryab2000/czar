@@ -1,0 +1,319 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://czar.dev/schemas/job-brief.schema.json",
+  "title": "JobBrief",
+  "description": "What an ERC-8183 provider must deliver (spec 02 §4.21, RV-025). Served only to the job's provider at GET /v1/jobs/{jobKey}/brief after an EIP-712 BriefRequest signature; never public, never on-chain. Its fields are the preimage of the on-chain descriptionHash. Version 2 (D86, D87): carries the approved TaskSpec; type-agnostic (no job-kind list); deliverables are pushed to Czar; optional fields may be added in later versions and providers must ignore optional fields they do not use.",
+  "type": "object",
+  "x-privacyClass": "server-only",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "1.0",
+      "description": "Schema version, major.minor; this file is 1.0.",
+      "x-privacyClass": "server-only"
+    },
+    "briefVersion": {
+      "type": "integer",
+      "const": 2,
+      "description": "Brief format version (2 since D86/D87). Optional fields may be added without a version change; providers ignore optional fields they do not use.",
+      "x-privacyClass": "server-only"
+    },
+    "network": {
+      "$ref": "common.schema.json#/$defs/Caip2",
+      "description": "Chain of the job.",
+      "x-privacyClass": "server-only"
+    },
+    "jobEscrow": {
+      "$ref": "common.schema.json#/$defs/Address",
+      "description": "ERC-8183 instance.",
+      "x-privacyClass": "server-only"
+    },
+    "jobId": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)$",
+      "description": "Escrow job id as a decimal string (uint256).",
+      "x-privacyClass": "server-only"
+    },
+    "jobKey": {
+      "$ref": "common.schema.json#/$defs/Hash32",
+      "description": "keccak256(abi.encode(jobEscrow, jobId)) (spec 02 §7.1).",
+      "x-privacyClass": "server-only"
+    },
+    "planHash": {
+      "$ref": "common.schema.json#/$defs/Hash32",
+      "description": "descriptionHash preimage field.",
+      "x-privacyClass": "server-only"
+    },
+    "stepIndex": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 63,
+      "description": "descriptionHash preimage field.",
+      "x-privacyClass": "server-only"
+    },
+    "acceptanceProfileId": {
+      "type": "string",
+      "maxLength": 80,
+      "description": "descriptionHash preimage field; SL ProfileId.",
+      "x-privacyClass": "server-only"
+    },
+    "capability": {
+      "type": "string",
+      "maxLength": 64,
+      "description": "Capability tag.",
+      "x-privacyClass": "server-only"
+    },
+    "inputs": {
+      "type": "object",
+      "maxProperties": 20,
+      "propertyNames": {
+        "pattern": "^[A-Za-z][A-Za-z0-9_]{0,63}$"
+      },
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "type": "string",
+            "maxLength": 1000
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "boolean"
+          }
+        ]
+      },
+      "description": "Structured input for the call: the step's callInputs, keys from inputTemplate.inputKeys (RV-021), values rendered from the approved TaskSpec and earlier results (D84, D86 C1-a). Superseded by D86: 'Never free user text'.",
+      "x-privacyClass": "server-only"
+    },
+    "taskSpec": {
+      "$ref": "task-spec.schema.json",
+      "description": "The approved TaskSpec: topic, subjects, fields, columns, context (D86 C1-a). Phase 1 carries no files.",
+      "x-privacyClass": "server-only"
+    },
+    "inputSalt": {
+      "$ref": "common.schema.json#/$defs/Hash32",
+      "description": "Random per job; stops guessing low-entropy inputs from the public hash.",
+      "x-privacyClass": "server-only"
+    },
+    "inputCommit": {
+      "$ref": "common.schema.json#/$defs/Hash32",
+      "description": "H({hashRule: czar-hash-v1, kind: job-input, inputs, inputSalt}) (spec 02 §5.2).",
+      "x-privacyClass": "server-only"
+    },
+    "deliverable": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mimeType",
+        "delivery"
+      ],
+      "properties": {
+        "mimeType": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Expected media type.",
+          "x-privacyClass": "server-only"
+        },
+        "expectedKeys": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "Key.",
+            "x-privacyClass": "server-only"
+          },
+          "description": "Keys the acceptance requirement check looks for.",
+          "x-privacyClass": "server-only"
+        },
+        "schema": {
+          "type": "object",
+          "description": "Optional JSON Schema the deliverable must validate against (8 KiB max when serialized).",
+          "x-privacyClass": "server-only"
+        },
+        "delivery": {
+          "type": "string",
+          "const": "push",
+          "description": "How the provider hands over the bytes (D87, replaces D53): push = upload to uploadRoute signed as DeliverableUpload, then submit the keccak256 of the bytes.",
+          "x-privacyClass": "server-only"
+        },
+        "uploadRoute": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Upload route on Czar's server: POST /v1/jobs/{jobKey}/deliverable. In Phase 1 the server is local (http://localhost), so only a provider on the same machine can reach it (N3).",
+          "x-privacyClass": "server-only"
+        },
+        "maxBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "acceptance.deliverableMaxBytes.",
+          "x-privacyClass": "server-only"
+        }
+      },
+      "description": "What to submit and where.",
+      "x-privacyClass": "server-only"
+    },
+    "budgetCap": {
+      "$ref": "common.schema.json#/$defs/Amount6",
+      "description": "The job's reservedCap; a setBudget above it is refused.",
+      "x-privacyClass": "server-only"
+    },
+    "targetBudget": {
+      "$ref": "common.schema.json#/$defs/Amount6",
+      "description": "The price Czar planned for this job (the provider's listed price, M1); setting it is expected, but any budget up to budgetCap is accepted.",
+      "x-privacyClass": "server-only"
+    },
+    "evaluator": {
+      "$ref": "common.schema.json#/$defs/Address",
+      "description": "Czar evaluator K7.",
+      "x-privacyClass": "server-only"
+    },
+    "expiredAt": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Job expiry, unix seconds.",
+      "x-privacyClass": "server-only"
+    },
+    "submitBy": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Unix seconds: submit (and upload) by this time; = expiredAt − acceptance.evaluationWindowSeconds (M4, N5). Later submissions are evaluated only if a decision can still be made before the cutoff.",
+      "x-privacyClass": "server-only"
+    },
+    "decisionCutoff": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Unix seconds: the evaluator sends its decision by this time; a deliverable still missing then is rejected (N5).",
+      "x-privacyClass": "server-only"
+    },
+    "issuedAt": {
+      "$ref": "common.schema.json#/$defs/Timestamp",
+      "description": "When the server built this response.",
+      "x-privacyClass": "server-only"
+    },
+    "terms": {
+      "type": "object",
+      "description": "Plain facts the provider should know before bidding (H5, M3, D27).",
+      "x-privacyClass": "server-only",
+      "additionalProperties": false,
+      "required": [
+        "evaluatorIsBuyerAgent",
+        "checks",
+        "correctnessChecked",
+        "onBuyerFreeze"
+      ],
+      "properties": {
+        "evaluatorIsBuyerAgent": {
+          "type": "boolean",
+          "description": "The evaluator is Czar, acting for the buyer (D27).",
+          "x-privacyClass": "server-only"
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "delivery",
+              "structural",
+              "requirement"
+            ],
+            "description": "Check kind.",
+            "x-privacyClass": "server-only"
+          },
+          "description": "What the evaluator checks.",
+          "x-privacyClass": "server-only"
+        },
+        "correctnessChecked": {
+          "type": "boolean",
+          "const": false,
+          "description": "Always false in Phase 1: Czar checks the form, not correctness (H5).",
+          "x-privacyClass": "server-only"
+        },
+        "onBuyerFreeze": {
+          "type": "string",
+          "const": "reject-unsubmitted-hold-submitted",
+          "description": "If the buyer freezes: a funded job not yet submitted is rejected and refunded; a submitted job is held until unfreeze or the decision cutoff (M3).",
+          "x-privacyClass": "server-only"
+        }
+      }
+    },
+    "attachments": {
+      "type": "array",
+      "maxItems": 10,
+      "description": "Reserved for approved file sharing (C1-b, stage 2). Absent in Phase 1 (D86).",
+      "x-privacyClass": "server-only",
+      "items": {
+        "type": "object",
+        "description": "One approved file.",
+        "x-privacyClass": "server-only",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "mimeType",
+          "contentHash",
+          "ref",
+          "bytes"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 255,
+            "description": "Base name.",
+            "x-privacyClass": "server-only"
+          },
+          "mimeType": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "Media type.",
+            "x-privacyClass": "server-only"
+          },
+          "contentHash": {
+            "$ref": "common.schema.json#/$defs/Hash32",
+            "description": "keccak256 of the bytes.",
+            "x-privacyClass": "server-only"
+          },
+          "ref": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Download reference, served to the provider only.",
+            "x-privacyClass": "server-only"
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Size.",
+            "x-privacyClass": "server-only"
+          }
+        }
+      }
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "briefVersion",
+    "network",
+    "jobEscrow",
+    "jobId",
+    "jobKey",
+    "planHash",
+    "stepIndex",
+    "acceptanceProfileId",
+    "capability",
+    "inputs",
+    "inputSalt",
+    "inputCommit",
+    "deliverable",
+    "budgetCap",
+    "evaluator",
+    "expiredAt",
+    "issuedAt",
+    "taskSpec",
+    "targetBudget",
+    "submitBy",
+    "decisionCutoff",
+    "terms"
+  ],
+  "$comment": "2026-10-19: created for RV-025."
+}

@@ -1,0 +1,195 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://czar.dev/schemas/interview-submission.schema.json",
+  "title": "InterviewSubmission",
+  "description": "Typed answers from the optional soul interview (spec 02 §4.25, D90). Each field is a fixed question id. Deterministic templates map answers to beliefs; no model call. Budget answers never change vault settings.",
+  "type": "object",
+  "x-privacyClass": "local-only",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "1.1",
+      "description": "Schema version, major.minor; this file is 1.1 (2026-10-20: taste.outputFormat, D91).",
+      "x-privacyClass": "local-only"
+    },
+    "idempotencyKey": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Fixed per submission; a repeat returns the same result.",
+      "x-privacyClass": "local-only"
+    },
+    "place": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "locale": {
+          "type": "string",
+          "maxLength": 35,
+          "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$",
+          "description": "BCP 47 language tag.",
+          "x-privacyClass": "local-only"
+        },
+        "timeZone": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "IANA time zone name.",
+          "x-privacyClass": "local-only"
+        },
+        "displayCurrencyPreference": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$",
+          "description": "ISO 4217 code the person prefers; descriptive only, Phase 1 shows USD (D51).",
+          "x-privacyClass": "local-only"
+        }
+      },
+      "description": "Place answers; saved context only in Phase 1 (D90 item 6).",
+      "x-privacyClass": "local-only"
+    },
+    "mission": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "projectRootId": {
+          "type": "string",
+          "description": "Lowercase hex of a known root projectRef from listLocalSoulSourceRoots (spec 02 §4.26); links the deadline to that project.",
+          "x-privacyClass": "local-only",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "projectName": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Project name.",
+          "x-privacyClass": "local-only"
+        },
+        "goal": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "What the project should achieve.",
+          "x-privacyClass": "local-only"
+        },
+        "deadline": {
+          "type": "string",
+          "format": "date",
+          "description": "Project deadline (date).",
+          "x-privacyClass": "local-only"
+        }
+      },
+      "description": "Mission answers.",
+      "x-privacyClass": "local-only"
+    },
+    "constraints": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxTotalPerObjective": {
+          "$ref": "common.schema.json#/$defs/Amount6",
+          "description": "Most the person wants one objective to cost; becomes ObjectiveSubmission.constraints.maxTotal. Never a vault limit.",
+          "x-privacyClass": "local-only"
+        },
+        "noNewPayees": {
+          "type": "boolean",
+          "description": "Only previously used payees; becomes ObjectiveSubmission.constraints.noNewPayees.",
+          "x-privacyClass": "local-only"
+        },
+        "categoriesAllowed": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "$ref": "common.schema.json#/$defs/Category",
+            "description": "Category.",
+            "x-privacyClass": "local-only"
+          },
+          "description": "Allowed spending categories; becomes ObjectiveSubmission.constraints.categoriesAllowed.",
+          "x-privacyClass": "local-only"
+        },
+        "offLimitsTools": {
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "type": "string",
+            "maxLength": 120,
+            "description": "Name.",
+            "x-privacyClass": "local-only"
+          },
+          "description": "Tools or vendors the person does not want used; saved context.",
+          "x-privacyClass": "local-only"
+        },
+        "privacyRule": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "A privacy rule in the person's words; saved context.",
+          "x-privacyClass": "local-only"
+        }
+      },
+      "description": "Constraint answers. The three typed fields feed ObjectiveSubmission.constraints; the text fields are saved context.",
+      "x-privacyClass": "local-only"
+    },
+    "taste": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "preferredFormat": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Preferred output format.",
+          "x-privacyClass": "local-only"
+        },
+        "preferredSources": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Preferred or trusted sources.",
+          "x-privacyClass": "local-only"
+        },
+        "outputFormat": {
+          "type": "string",
+          "enum": [
+            "markdown-table",
+            "csv",
+            "json",
+            "markdown-list",
+            "prose"
+          ],
+          "description": "Preferred result format when the person's file does not decide it; becomes TaskSpec.output.format (D91). Typed, so it can reach the server.",
+          "x-privacyClass": "local-only"
+        }
+      },
+      "description": "Taste answers. outputFormat is used (D91); the other taste answers are saved context only in Phase 1.",
+      "x-privacyClass": "local-only"
+    },
+    "spendingPosture": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "riskPreference": {
+          "type": "string",
+          "enum": [
+            "careful",
+            "balanced",
+            "relaxed"
+          ],
+          "description": "How careful the person wants Czar to be.",
+          "x-privacyClass": "local-only"
+        },
+        "note": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Free note.",
+          "x-privacyClass": "local-only"
+        }
+      },
+      "description": "Spending posture answers; saved context only in Phase 1. Lowering a real limit is a CZ-22 owner action.",
+      "x-privacyClass": "local-only"
+    },
+    "hourlyValue": {
+      "$ref": "common.schema.json#/$defs/Amount6",
+      "description": "Hourly value in USD (USDC atomic units); sets soul.json hourlyValue with setByUser true.",
+      "x-privacyClass": "local-only"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "idempotencyKey"
+  ],
+  "$comment": "2026-10-20: created for D90 (soul inputs beyond observation). 2026-10-20 D91: taste.outputFormat; schemaVersion 1.1."
+}

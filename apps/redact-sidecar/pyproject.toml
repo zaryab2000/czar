@@ -1,0 +1,37 @@
+[project]
+name = "czar-redact"
+version = "0.1.0"
+description = "Czar layer-2 redaction helper (CZ-26): Presidio over a local Unix socket"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+  # C2-01: Presidio 2.2.364 (repo data-privacy-stack/presidio).
+  "presidio-analyzer==2.2.364",
+  "presidio-anonymizer==2.2.364",
+  "spacy==3.8.16",
+  # spaCy English pipeline used by Presidio's default NLP engine (SCR-106: model version not in the build plan).
+  "en-core-web-md @ https://github.com/explosion/spacy-models/releases/download/en_core_web_md-3.8.0/en_core_web_md-3.8.0-py3-none-any.whl",
+]
+
+[project.scripts]
+czar-redact = "czar_redact.server:main"
+
+[dependency-groups]
+dev = ["pytest==8.4.2"]
+
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/czar_redact"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.uv]
+# Supply chain (cross-cutting §7): exact pins, hashes in uv.lock, packages at least one day old.
+exclude-newer = "2026-10-18T00:00:00Z"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

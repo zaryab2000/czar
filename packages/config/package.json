@@ -1,0 +1,18 @@
+{
+  "name": "@czar/config",
+  "version": "0.0.0",
+  "private": true,
+  "bin": {
+    "czar-config": "./src/cli.ts"
+  },
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./non-parameters": "./src/non-parameters.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "dump": "node src/cli.ts dump"
+  }
+}

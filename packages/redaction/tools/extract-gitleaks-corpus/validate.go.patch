@@ -1,0 +1,33 @@
+--- /root/go/pkg/mod/github.com/zricethezav/gitleaks/v8@v8.30.1/cmd/generate/config/utils/validate.go	2026-10-19 15:02:06.029996423 +0000
++++ cmd/generate/config/utils/validate.go	2026-10-19 15:15:02.009758007 +0000
+@@ -13,9 +13,22 @@
+ 	"github.com/zricethezav/gitleaks/v8/logging"
+ )
+ 
++type TP struct{ Text string; Secrets []string }
++type Sample struct{ Rule string; TPs []TP; FPs []string; Paths bool }
++var Recorded []Sample
++
+ func Validate(rule config.Rule, truePositives []string, falsePositives []string) *config.Rule {
+ 	r := &rule
+ 	d := createSingleRuleDetector(r)
++	sample := Sample{Rule: r.RuleID, FPs: falsePositives}
++	for _, tp := range truePositives {
++		var secrets []string
++		for _, f := range d.DetectString(tp) {
++			secrets = append(secrets, f.Secret)
++		}
++		sample.TPs = append(sample.TPs, TP{Text: tp, Secrets: secrets})
++	}
++	Recorded = append(Recorded, sample)
+ 	for _, tp := range truePositives {
+ 		if len(d.DetectString(tp)) < 1 {
+ 			logging.Fatal().
+@@ -40,6 +53,7 @@
+ 
+ func ValidateWithPaths(rule config.Rule, truePositives map[string]string, falsePositives map[string]string) *config.Rule {
+ 	r := &rule
++	Recorded = append(Recorded, Sample{Rule: r.RuleID, Paths: true})
+ 	d := createSingleRuleDetector(r)
+ 	for path, tp := range truePositives {
+ 		f := detect.Fragment{Raw: tp, FilePath: path}

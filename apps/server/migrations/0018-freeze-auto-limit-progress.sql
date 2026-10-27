@@ -1,0 +1,2 @@
+ALTER TABLE payer_freeze_autolimit_events
+ADD COLUMN auto_limits_lowered_at timestamptz;

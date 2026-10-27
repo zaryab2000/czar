@@ -1,0 +1,196 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://czar.dev/schemas/objective-submission.schema.json",
+  "title": "ObjectiveSubmission",
+  "description": "The only object the daemon sends to the server for a new objective (spec 02 §4.4; D25). Contains no local-only field.",
+  "type": "object",
+  "x-privacyClass": "redacted-to-server",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "description": "Schema version, major.minor; this file is 1.0.",
+      "x-privacyClass": "redacted-to-server",
+      "const": "1.0"
+    },
+    "objectiveId": {
+      "$ref": "common.schema.json#/$defs/ObjectiveId",
+      "description": "Objective id.",
+      "x-privacyClass": "redacted-to-server"
+    },
+    "objectiveHash": {
+      "$ref": "common.schema.json#/$defs/Hash32",
+      "description": "objectiveHash per spec 02 §5.2.",
+      "x-privacyClass": "hash-on-chain"
+    },
+    "soulVersionHash": {
+      "$ref": "common.schema.json#/$defs/Hash32",
+      "description": "soulVersionHash per spec 02 §5.2.",
+      "x-privacyClass": "hash-on-chain"
+    },
+    "observationHashes": {
+      "type": "array",
+      "items": {
+        "$ref": "common.schema.json#/$defs/Hash32",
+        "description": "Observation hash.",
+        "x-privacyClass": "hash-on-chain"
+      },
+      "description": "Observation hashes.",
+      "x-privacyClass": "hash-on-chain",
+      "maxItems": 50
+    },
+    "detector": {
+      "type": "string",
+      "enum": [
+        "placeholder",
+        "repeated-error",
+        "agent-refusal",
+        "stale-work",
+        "repeated-search",
+        "copy-paste-loop",
+        "deadline"
+      ],
+      "description": "Detector.",
+      "x-privacyClass": "redacted-to-server"
+    },
+    "goal": {
+      "type": "string",
+      "description": "Redacted plain-language goal.",
+      "x-privacyClass": "redacted-to-server",
+      "maxLength": 1000
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "$ref": "common.schema.json#/$defs/CapabilityTag",
+        "description": "Capability tag.",
+        "x-privacyClass": "redacted-to-server"
+      },
+      "description": "Capabilities needed.",
+      "x-privacyClass": "redacted-to-server",
+      "maxItems": 10
+    },
+    "deadline": {
+      "$ref": "common.schema.json#/$defs/Timestamp",
+      "description": "Deadline if known.",
+      "x-privacyClass": "redacted-to-server"
+    },
+    "minutesSaved": {
+      "type": "integer",
+      "description": "Estimated minutes saved.",
+      "x-privacyClass": "redacted-to-server",
+      "minimum": 0
+    },
+    "hourlyBand": {
+      "type": "string",
+      "enum": [
+        "A",
+        "B",
+        "C",
+        "D",
+        "E"
+      ],
+      "description": "A under $25/h ... E over $200/h; exact amount stays local.",
+      "x-privacyClass": "redacted-to-server"
+    },
+    "constraints": {
+      "type": "object",
+      "description": "Constraints from the soul.",
+      "x-privacyClass": "redacted-to-server",
+      "properties": {
+        "maxTotal": {
+          "$ref": "common.schema.json#/$defs/Amount6",
+          "description": "Maximum total spend for this objective.",
+          "x-privacyClass": "redacted-to-server"
+        },
+        "categoriesAllowed": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/Category",
+            "description": "Category.",
+            "x-privacyClass": "redacted-to-server"
+          },
+          "description": "Allowed categories.",
+          "x-privacyClass": "redacted-to-server"
+        },
+        "noNewPayees": {
+          "type": "boolean",
+          "description": "Only previously used payees.",
+          "x-privacyClass": "redacted-to-server"
+        }
+      },
+      "additionalProperties": false
+    },
+    "redaction": {
+      "type": "object",
+      "description": "Redaction stats; counts and entity names only.",
+      "x-privacyClass": "redacted-to-server",
+      "properties": {
+        "layer2": {
+          "type": "object",
+          "description": "Layer-2 (PII) stats.",
+          "x-privacyClass": "redacted-to-server",
+          "properties": {
+            "hits": {
+              "type": "integer",
+              "description": "Number of layer-2 replacements.",
+              "x-privacyClass": "redacted-to-server",
+              "minimum": 0
+            },
+            "entities": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "description": "Presidio entity name.",
+                "x-privacyClass": "redacted-to-server",
+                "maxLength": 64
+              },
+              "description": "Entity names that fired.",
+              "x-privacyClass": "redacted-to-server"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "hits",
+            "entities"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "layer2"
+      ]
+    },
+    "deviceId": {
+      "$ref": "common.schema.json#/$defs/DeviceId",
+      "description": "Device id from the device token.",
+      "x-privacyClass": "server-only"
+    },
+    "submittedAt": {
+      "$ref": "common.schema.json#/$defs/Timestamp",
+      "description": "Submission time.",
+      "x-privacyClass": "redacted-to-server"
+    },
+    "taskSpec": {
+      "$ref": "task-spec.schema.json",
+      "description": "The task's real subject (D84, §4.3.1).",
+      "x-privacyClass": "redacted-to-server"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "objectiveId",
+    "objectiveHash",
+    "soulVersionHash",
+    "observationHashes",
+    "detector",
+    "goal",
+    "capabilities",
+    "minutesSaved",
+    "hourlyBand",
+    "redaction",
+    "deviceId",
+    "submittedAt",
+    "taskSpec"
+  ]
+}

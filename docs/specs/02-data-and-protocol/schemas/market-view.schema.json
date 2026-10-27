@@ -1,0 +1,258 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://czar.dev/schemas/market-view.schema.json",
+  "title": "MarketView",
+  "description": "Lane A of D83: real services on the market network, checked by unpaid 402 probes only. Never payable in Phase 1, never a quality ranking (spec 02 §4.22).",
+  "type": "object",
+  "x-privacyClass": "server-only",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "1.0",
+      "description": "Schema version.",
+      "x-privacyClass": "server-only"
+    },
+    "viewId": {
+      "type": "string",
+      "pattern": "^mkv_[0-9A-HJKMNP-TV-Z]{26}$",
+      "description": "View id.",
+      "x-privacyClass": "server-only"
+    },
+    "capability": {
+      "$ref": "common.schema.json#/$defs/CapabilityTag",
+      "description": "Capability queried.",
+      "x-privacyClass": "server-only"
+    },
+    "network": {
+      "$ref": "common.schema.json#/$defs/Caip2",
+      "description": "selection.marketNetwork.",
+      "x-privacyClass": "server-only"
+    },
+    "paymentNetwork": {
+      "$ref": "common.schema.json#/$defs/Caip2",
+      "description": "selection.paymentNetwork, shown so readers see the split.",
+      "x-privacyClass": "server-only"
+    },
+    "generatedAt": {
+      "$ref": "common.schema.json#/$defs/Timestamp",
+      "description": "When the view was built.",
+      "x-privacyClass": "server-only"
+    },
+    "catalogFetchedAt": {
+      "$ref": "common.schema.json#/$defs/Timestamp",
+      "description": "Freshness of the live catalog page (cached ≤ 3,600 s, p1-D2).",
+      "x-privacyClass": "server-only"
+    },
+    "counts": {
+      "type": "object",
+      "description": "Totals for this capability.",
+      "x-privacyClass": "server-only",
+      "additionalProperties": false,
+      "required": [
+        "listed",
+        "probed",
+        "ready"
+      ],
+      "properties": {
+        "listed": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Listings matched.",
+          "x-privacyClass": "server-only"
+        },
+        "probed": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Probed in this view.",
+          "x-privacyClass": "server-only"
+        },
+        "ready": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Tier ready.",
+          "x-privacyClass": "server-only"
+        }
+      }
+    },
+    "priceSummary": {
+      "type": "object",
+      "description": "Over tier-ready rows only.",
+      "x-privacyClass": "server-only",
+      "additionalProperties": false,
+      "properties": {
+        "low": {
+          "$ref": "common.schema.json#/$defs/Amount6",
+          "description": "Lowest live price.",
+          "x-privacyClass": "server-only"
+        },
+        "median": {
+          "$ref": "common.schema.json#/$defs/Amount6",
+          "description": "Median live price.",
+          "x-privacyClass": "server-only"
+        }
+      }
+    },
+    "services": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "description": "One real-market service.",
+        "x-privacyClass": "server-only",
+        "additionalProperties": false,
+        "required": [
+          "serviceId",
+          "resource",
+          "network",
+          "payable",
+          "tier",
+          "probe",
+          "label"
+        ],
+        "properties": {
+          "serviceId": {
+            "$ref": "common.schema.json#/$defs/SlServiceId",
+            "description": "Selection Layer service id.",
+            "x-privacyClass": "server-only"
+          },
+          "resource": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048,
+            "description": "Endpoint URL as listed (allowed field, p1-D8).",
+            "x-privacyClass": "server-only"
+          },
+          "network": {
+            "$ref": "common.schema.json#/$defs/Caip2",
+            "description": "Always selection.marketNetwork in Phase 1.",
+            "x-privacyClass": "server-only"
+          },
+          "payable": {
+            "type": "boolean",
+            "const": false,
+            "description": "Always false in Phase 1 (D83 point 3).",
+            "x-privacyClass": "server-only"
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "listing-mismatch",
+              "unreachable",
+              "not-probed"
+            ],
+            "description": "Readiness tier from the unpaid probe; not a quality score.",
+            "x-privacyClass": "server-only"
+          },
+          "rail": {
+            "type": "string",
+            "enum": [
+              "x402-exact",
+              "gateway-batched",
+              "erc8183-job"
+            ],
+            "description": "Rail from the live 402.",
+            "x-privacyClass": "server-only"
+          },
+          "livePrice": {
+            "$ref": "common.schema.json#/$defs/Amount6",
+            "description": "Price from the live 402; absent if not reachable.",
+            "x-privacyClass": "server-only"
+          },
+          "listedPrice": {
+            "$ref": "common.schema.json#/$defs/Amount6",
+            "description": "Price in the catalog listing.",
+            "x-privacyClass": "server-only"
+          },
+          "payTo": {
+            "$ref": "common.schema.json#/$defs/Address",
+            "description": "Payee from the live 402.",
+            "x-privacyClass": "server-only"
+          },
+          "probe": {
+            "type": "object",
+            "description": "Czar's own unpaid probe outcome.",
+            "x-privacyClass": "server-only",
+            "additionalProperties": false,
+            "required": [
+              "probedAt",
+              "reachable"
+            ],
+            "properties": {
+              "probedAt": {
+                "$ref": "common.schema.json#/$defs/Timestamp",
+                "description": "When Czar probed.",
+                "x-privacyClass": "server-only"
+              },
+              "reachable": {
+                "type": "boolean",
+                "description": "A 402 came back within selection.probeTimeoutMs.",
+                "x-privacyClass": "server-only"
+              },
+              "wellFormed": {
+                "type": "boolean",
+                "description": "The 402 parsed as x402 v2 (02 §11.2).",
+                "x-privacyClass": "server-only"
+              },
+              "priceMatchesListing": {
+                "type": "boolean",
+                "description": "Live amount equals the listed amount.",
+                "x-privacyClass": "server-only"
+              },
+              "payToMatchesListing": {
+                "type": "boolean",
+                "description": "Live payTo equals the listed payTo.",
+                "x-privacyClass": "server-only"
+              },
+              "latencyMs": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Time to the 402 response.",
+                "x-privacyClass": "server-only"
+              },
+              "successRate7d": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "description": "Share of Czar's unpaid probes in 7 days that were reachable and well-formed.",
+                "x-privacyClass": "server-only"
+              },
+              "probes7d": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Number of probes behind successRate7d.",
+                "x-privacyClass": "server-only"
+              }
+            }
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Fixed wording (CZ-18 §12).",
+            "x-privacyClass": "server-only"
+          }
+        }
+      },
+      "description": "Ordered by tier (ready first), then live price ascending.",
+      "x-privacyClass": "server-only"
+    },
+    "notice": {
+      "type": "string",
+      "maxLength": 300,
+      "description": "Always the fixed notice text (CZ-18 §12).",
+      "x-privacyClass": "server-only"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "viewId",
+    "capability",
+    "network",
+    "paymentNetwork",
+    "generatedAt",
+    "counts",
+    "services",
+    "notice"
+  ]
+}

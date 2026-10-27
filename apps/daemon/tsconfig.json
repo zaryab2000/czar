@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // The package's exports map has no "types" condition, so point the compiler at its bundled index.d.ts.
+    "paths": {
+      "better-sqlite3-multiple-ciphers": [
+        "./node_modules/better-sqlite3-multiple-ciphers/index.d.ts"
+      ]
+    }
+  },
+  "include": ["src", "test"]
+}

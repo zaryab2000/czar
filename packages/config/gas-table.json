@@ -1,0 +1,9 @@
+{
+  "routing.gas.finalize": 89152,
+  "routing.gas.pocketDrain": 440170,
+  "routing.gas.pocketSetup": 485476,
+  "routing.gas.pocketSweep": 21000,
+  "routing.gas.reserve": 227094,
+  "routing.gas.settleBase": 100559,
+  "routing.gas.settleIdx": 8091
+}

@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "1.0",
+  "proposalId": "prop_6K8M4N6P8R0T2V4X6Z8B0D2F4H",
+  "section": "taste",
+  "key": "taste:format:markdown-table",
+  "text": "Prefers Markdown tables for release notes",
+  "sourceClass": "local-file",
+  "sourceReceiptIds": [
+    "src_4N6P8R0T2V4X6Z8B0D2F4H6K8M"
+  ],
+  "status": "pending",
+  "createdAt": "2026-10-20T09:05:02.000Z",
+  "screenFlags": []
+}
