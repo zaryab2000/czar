@@ -678,7 +678,6 @@ async function getRoute(context: ServerContext, deps: AppDependencies): Promise<
             cap: row.plan_cap,
             category: row.plan_category,
             stepCount: row.plan_step_count,
-            spent: "0",
           },
         }
       : {}),

@@ -324,9 +324,62 @@ describe("CZ-12 daemon routes", () => {
         cap: "2500000",
         category: "research",
         stepCount: 2,
-        spent: "0",
       },
     });
+  });
+
+  it("getObjective_omitsSpentWhenSettledSpendIsNotInPlanSummarySource", async () => {
+    const pool = getPool();
+    const objectiveId = "obj_01K7ZT9P4N5Q6R7S8T9V0W1X2N";
+    const planId = "pln_01K7ZT9P4N5Q6R7S8T9V0W1X2N";
+    const submission = makeObjectiveSubmission(objectiveId);
+    await pool.query(
+      `INSERT INTO objectives (objective_id,user_id,device_id,submission,objective_hash,state,plan_id)
+       VALUES ($1,$2,$3,$4::jsonb,$5,'delivered',$6)`,
+      [
+        objectiveId,
+        TEST_USER_ID,
+        submission.deviceId,
+        JSON.stringify(submission),
+        submission.objectiveHash,
+        planId,
+      ],
+    );
+    await pool.query(
+      `INSERT INTO plans (plan_id,objective_id,plan,plan_hash,payee_root,state)
+       VALUES ($1,$2,$3::jsonb,$4,$5,'approved')`,
+      [
+        planId,
+        objectiveId,
+        JSON.stringify({ cap: "2500000", category: "research", steps: [{}] }),
+        `0x${"5".repeat(64)}`,
+        `0x${"6".repeat(64)}`,
+      ],
+    );
+    await pool.query(
+      `INSERT INTO evidence_receipts
+       (obs_id,envelope_ref,step_index,reservation_id,authorization_index,payment_ref_hash,receipt,created_at)
+       VALUES ($1,$2,0,1,0,$3,$4::jsonb,$5)`,
+      [
+        `obs_${"a".repeat(32)}`,
+        "eip155:5042002:0x0000000000000000000000000000000000000001:1",
+        `0x${"7".repeat(64)}`,
+        JSON.stringify({ payment: { rail: "x402-exact", amount: "125000" } }),
+        new Date("2026-10-27T00:00:00.000Z"),
+      ],
+    );
+
+    const response = await context.app.request(`/v1/objectives/${objectiveId}`, {
+      headers: { Authorization: `Bearer ${TEST_TOKEN}` },
+    });
+    const body = (await response.json()) as Record<string, unknown>;
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      status: "delivered",
+      planSummary: { planId, cap: "2500000", category: "research", stepCount: 1 },
+    });
+    expect(body["planSummary"]).not.toHaveProperty("spent");
   });
 
   it("auth_unknownRevokedAndForeignDevice", async () => {
