@@ -69,9 +69,8 @@ export class SidecarSupervisor {
     const child = this.#child;
     this.#child = null;
     if (child !== null && child.exitCode === null) {
-      const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
-      child.kill("SIGTERM");
-      await exited;
+      const exited = new Promise<void>((resolve) => child.once("close", () => resolve()));
+      if (child.kill("SIGTERM")) await exited;
     }
   }
 
@@ -89,10 +88,17 @@ export class SidecarSupervisor {
       "--socket",
       this.#options.socketPath,
     ]);
+    let startError = false;
+    child.once("error", () => {
+      startError = true;
+      if (this.#child === child) this.#child = null;
+    });
     this.#child = child;
     const deadline = this.#now() + this.#options.startTimeoutMs;
     while (!existsSync(this.#options.socketPath)) {
-      if (child.exitCode !== null) throw new SidecarUnavailableError("exited during start");
+      if (startError || child.exitCode !== null) {
+        throw new SidecarUnavailableError("exited during start");
+      }
       if (this.#now() > deadline) {
         child.kill("SIGKILL");
         throw new SidecarUnavailableError("start timeout");

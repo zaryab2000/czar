@@ -26,6 +26,7 @@
   "dependencies": {
     "@czar/api-contract": "workspace:*",
     "@czar/config": "workspace:*",
+    "@czar/hashing": "workspace:*",
     "@czar/logging": "workspace:*",
     "@czar/redaction": "workspace:*",
     "@czar/schemas": "workspace:*",

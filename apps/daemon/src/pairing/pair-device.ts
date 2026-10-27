@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { validateRecordedExchange } from "@czar/api-contract";
 import { KEYCHAIN_ACCOUNTS, type Keychain } from "#src/keychain";
 
-const SERVER_ORIGIN = "http://localhost";
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export type PairingFetch = (input: URL, init: RequestInit) => Promise<Response>;
@@ -12,6 +11,8 @@ export interface PairDeviceInput {
   readonly deviceName: string;
   readonly platform: "macos";
   readonly keychain: Keychain;
+  /** `daemon.serverOrigin`, already validated by the caller (SCR-149 §1). */
+  readonly serverOrigin: URL;
   readonly fetcher?: PairingFetch;
   readonly idempotencyKey?: string;
 }
@@ -39,6 +40,7 @@ export async function pairDevice(input: PairDeviceInput): Promise<PairDeviceResu
   };
   const response = await sendPairRequest(
     input.fetcher ?? defaultFetch,
+    input.serverOrigin,
     idempotencyKey,
     requestBody,
   );
@@ -79,11 +81,12 @@ function checkKeychain(keychain: Keychain): void {
 
 async function sendPairRequest(
   fetcher: PairingFetch,
+  serverOrigin: URL,
   idempotencyKey: string,
   requestBody: { pairingCode: string; deviceName: string; platform: "macos" },
 ): Promise<Response> {
   try {
-    return await fetcher(new URL("/v1/devices/pair", SERVER_ORIGIN), {
+    return await fetcher(new URL("/v1/devices/pair", serverOrigin), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -93,7 +96,7 @@ async function sendPairRequest(
     });
   } catch {
     throw new PairingError(
-      "Could not reach Czar at localhost. Check that Czar is running; if pairing may have completed, request a new code.",
+      `Could not reach Czar at ${serverOrigin.origin}. Check that Czar is running; if pairing may have completed, request a new code.`,
     );
   }
 }

@@ -32,6 +32,9 @@ importers:
       '@czar/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@czar/hashing':
+        specifier: workspace:*
+        version: link:../../packages/hashing
       '@czar/logging':
         specifier: workspace:*
         version: link:../../packages/logging
