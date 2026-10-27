@@ -3467,6 +3467,6 @@ export const PARAMETERS = [
     default: 5,
     unit: "s",
     reason: "czar objective polls the objective state for a human at the terminal; one GET per 5 s is negligible (SCR-147)",
-    source: "docs/specs/05-build-plan/phase-1-tasks.md",
+    source: "docs/specs/05-build-plan/phase-1-tasks.md:1036",
   },
 ] as const satisfies readonly ParameterSpec[];
