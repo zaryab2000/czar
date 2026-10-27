@@ -4,16 +4,7 @@ export const USDC_ADDRESS = "0x3600000000000000000000000000000000000000";
 export const OWNER_NATIVE_AMOUNT = 10n ** 18n;
 export const SERVICE_NATIVE_AMOUNT = 10n * 10n ** 18n;
 export const VAULT_USDC_AMOUNT = 10n * 10n ** 6n;
-const FUNDED_KEY_ROLES = new Set([
-  "K3",
-  "K5",
-  "K6",
-  "K7",
-  "K8",
-  "K20",
-  "K10:czar-search",
-  "relayer",
-]);
+const FUNDED_KEY_ROLES = new Set(["K3", "K5", "K6", "K7", "K20", "K10:czar-search", "relayer"]);
 
 export function parseAmount(value, decimals) {
   const pattern = new RegExp(`^(0|[1-9][0-9]*)(?:\\.([0-9]{1,${decimals}}))?$`);
