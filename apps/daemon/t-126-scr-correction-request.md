@@ -8,10 +8,12 @@ SCR-147 §"After submitting" line 62 requires the daemon to write
 `renderedBody`, and sets `additionalProperties: false`. A schema-valid `getResult`
 response therefore cannot provide the named field.
 
-SCR-148 (PR #109) resolves the separate acknowledgment-key conflict: OpenAPI's
+SCR-148 (merged PR #109) resolves the separate acknowledgment-key conflict: OpenAPI's
 UUID v4 rule wins. T-126 must persist one key and one request body per result
 before sending, then reuse both for retries and later `czar result` calls. PR
-#106 remains the result route and acknowledgment client dependency.
+#106 remains the result route and acknowledgment client dependency. The durable
+key and request-body state is prepared in `apps/daemon/src/result-ack-state.ts`;
+no network call uses it until the result client integration is available.
 
 The architect still needs to reconcile `renderedBody` with the canonical
 `Result.body` field. Until then, T-126 includes submission, redaction, status
