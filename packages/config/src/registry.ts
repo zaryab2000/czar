@@ -3470,4 +3470,15 @@ export const PARAMETERS = [
       "czar objective polls the objective state for a human at the terminal; one GET per 5 s is negligible (SCR-147)",
     source: "docs/specs/05-build-plan/phase-1-tasks.md:1036",
   },
+  {
+    key: "daemon.serverOrigin",
+    type: "string",
+    default: null,
+    unit: "url",
+    reason:
+      "origin of the Czar server for daemon commands that contact it; https, or loopback only with the local overlay (SCR-149)",
+    source:
+      "docs/specs/06-review/change-requests/SCR-149-daemon-server-origin-and-result-polling.md:16",
+    noDefault: true,
+  },
 ] as const satisfies readonly ParameterSpec[];
