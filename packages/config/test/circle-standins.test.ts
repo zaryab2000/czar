@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { loadConfig } from "@czar/config";
 import {
   handleStandinRequest,
+  STANDIN_GATEWAY_WALLET,
   validateStandinStartup,
   type StandinOptions,
 } from "../../../ops/local/circle-standins/server.ts";
@@ -11,6 +12,15 @@ import {
   VAULT as signerVault,
 } from "../../../apps/signer/test/helpers.ts";
 import { derivedNonce } from "../../../packages/hashing/src/ids.ts";
+import {
+  addressToBytes32,
+  transferSpecHash,
+  type TransferSpec,
+} from "../../../packages/hashing/src/eip712.ts";
+import {
+  CANONICAL_GATEWAY_MINTER,
+  CANONICAL_GATEWAY_WALLET,
+} from "../../../ops/local/gateway-doubles.ts";
 
 const overlayPath = new URL("../../../env/local.toml", import.meta.url);
 const localConfig = loadConfig({
@@ -298,10 +308,162 @@ describe("D92 Gateway fixture routes", () => {
       }),
       vi.fn(),
     );
-    expect(await submitResponse.json()).toMatchObject({
-      transferId: expect.any(String),
-      attestation: expect.stringMatching(/^0x[\da-f]{64}$/),
-      signature: expect.stringMatching(/^0x[\da-f]{130}$/),
+    expect(submitResponse.status).toBe(400);
+    expect(await submitResponse.json()).toEqual({ error: "invalid_request" });
+  });
+});
+
+function word(input: string | bigint): string {
+  return (typeof input === "bigint" ? input.toString(16) : input.slice(2).toLowerCase()).padStart(
+    64,
+    "0",
+  );
+}
+
+describe("SCR-150 local Gateway transfer and chain-backed balances", () => {
+  it("reads the same canonical GatewayWallet address as the placement helper", () => {
+    expect(STANDIN_GATEWAY_WALLET).toBe(CANONICAL_GATEWAY_WALLET);
+  });
+
+  const usdc = "0x3600000000000000000000000000000000000000";
+  const wallet = CANONICAL_GATEWAY_WALLET;
+  const minter = CANONICAL_GATEWAY_MINTER;
+  const pocket = "0x00000000000000000000000000000000000000e1";
+  const vault = "0x00000000000000000000000000000000000000ca";
+  const controller = "0x00000000000000000000000000000000000000a1";
+  const burnTx = `0x${"ab".repeat(32)}`;
+  const value = 990_000n;
+  const fee = 3_500n;
+  const spec: TransferSpec = {
+    version: 1,
+    sourceDomain: 26,
+    destinationDomain: 26,
+    sourceContract: addressToBytes32(wallet as `0x${string}`),
+    destinationContract: addressToBytes32(minter as `0x${string}`),
+    sourceToken: addressToBytes32(usdc as `0x${string}`),
+    destinationToken: addressToBytes32(usdc as `0x${string}`),
+    sourceDepositor: addressToBytes32(pocket as `0x${string}`),
+    destinationRecipient: addressToBytes32(vault as `0x${string}`),
+    sourceSigner: addressToBytes32(vault as `0x${string}`),
+    destinationCaller: `0x${"0".repeat(64)}`,
+    value,
+    salt: `0x${"5a".repeat(32)}`,
+    hookData: "0x",
+  };
+  const transferRequest = (maxFee = "10000", overrides: Record<string, unknown> = {}) =>
+    new Request("http://127.0.0.1:4999/v1/transfer", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify([
+        {
+          burnIntent: {
+            maxBlockHeight: "1000",
+            maxFee,
+            spec: { ...spec, value: spec.value.toString(), ...overrides },
+          },
+          signature: `0x${"33".repeat(65)}`,
+          contractSigner: true,
+        },
+      ]),
+    });
+  const chainRpc = (options: { code?: string; available?: bigint; status?: string } = {}) =>
+    vi.fn(async (method: string, _params: readonly unknown[]) => {
+      if (method === "eth_getCode") return options.code ?? "0x6080";
+      if (method === "eth_call")
+        return `0x${(options.available ?? 5_000_000n).toString(16).padStart(64, "0")}`;
+      if (method === "eth_accounts") return [controller];
+      if (method === "eth_sendTransaction") return burnTx;
+      if (method === "eth_getTransactionReceipt") return { status: options.status ?? "0x1" };
+      throw new Error(`unexpected ${method}`);
+    });
+
+  it("burns value + fee into the minter double and returns the local attestation", async () => {
+    const rpc = chainRpc();
+    const response = await handleStandinRequest(transferRequest(), rpc, usdc, {
+      gatewayFeeAtomic: fee,
+    });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      attestation: string;
+      signature: string;
+      transferId: string;
+    };
+    const hash = transferSpecHash(spec);
+    // abi.encode(bytes32, address, uint256, address): four static words.
+    expect(body.attestation).toBe(`0x${hash.slice(2)}${word(vault)}${word(value)}${word(pocket)}`);
+    expect(body.signature).toMatch(/^0x[\da-f]{130}$/);
+    expect(body.transferId).toMatch(/^[\da-f-]{36}$/);
+    const send = rpc.mock.calls.find(([method]) => method === "eth_sendTransaction");
+    expect(send?.[1]).toEqual([
+      {
+        from: controller,
+        to: wallet,
+        // testBurn(address,address,uint256,address) selector 0xc6a95d04 (keccak256, computed with viem).
+        data: `0xc6a95d04${word(usdc)}${word(pocket)}${word(value + fee)}${word(minter)}`,
+      },
+    ]);
+  });
+
+  it("refuses a burn above the available balance without sending a transaction", async () => {
+    const rpc = chainRpc({ available: value + fee - 1n });
+    const response = await handleStandinRequest(transferRequest(), rpc, usdc, {
+      gatewayFeeAtomic: fee,
+    });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "insufficient_balance" });
+    expect(rpc.mock.calls.some(([method]) => method === "eth_sendTransaction")).toBe(false);
+  });
+
+  it("refuses a max fee below the Gateway fee", async () => {
+    const rpc = chainRpc();
+    const response = await handleStandinRequest(transferRequest("3499"), rpc, usdc, {
+      gatewayFeeAtomic: fee,
+    });
+    expect(await response.json()).toEqual({ error: "max_fee_too_low" });
+  });
+
+  it("reports a missing Gateway double as unavailable", async () => {
+    const rpc = chainRpc({ code: "0x" });
+    const response = await handleStandinRequest(transferRequest(), rpc, usdc, {
+      gatewayFeeAtomic: fee,
+    });
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: "gateway_double_missing" });
+  });
+
+  it("rejects a token other than the configured USDC and a reverted burn", async () => {
+    const other = addressToBytes32("0x00000000000000000000000000000000000000ee");
+    const wrongToken = await handleStandinRequest(
+      transferRequest("10000", { sourceToken: other, destinationToken: other }),
+      chainRpc(),
+      usdc,
+      { gatewayFeeAtomic: fee },
+    );
+    expect(await wrongToken.json()).toEqual({ error: "unsupported_token" });
+    const reverted = await handleStandinRequest(
+      transferRequest(),
+      chainRpc({ status: "0x0" }),
+      usdc,
+      {
+        gatewayFeeAtomic: fee,
+      },
+    );
+    expect(reverted.status).toBe(502);
+    expect(await reverted.json()).toEqual({ error: "burn_failed" });
+  });
+
+  it("reads balances from the Gateway double when it is placed", async () => {
+    const rpc = chainRpc({ available: 1_234_567n });
+    const response = await handleStandinRequest(
+      new Request("http://127.0.0.1:4999/v1/balances", {
+        method: "POST",
+        body: JSON.stringify({ token: "USDC", balances: [{ domain: 26, depositor: pocket }] }),
+      }),
+      rpc,
+      usdc,
+    );
+    expect(await response.json()).toMatchObject({
+      balances: [{ domain: 26, depositor: pocket, balance: "1.234567", pendingBatch: "0.000000" }],
     });
   });
 });
