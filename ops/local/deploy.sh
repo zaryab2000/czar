@@ -3,6 +3,10 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 RPC_URL="http://127.0.0.1:8545"
+if ! arc-cast rpc anvil_nodeInfo --rpc-url "$RPC_URL" >/dev/null; then
+	echo "local deploy refused: Arc RPC did not answer anvil_nodeInfo" >&2
+	exit 1
+fi
 if [ "$(arc-cast chain-id --rpc-url "$RPC_URL")" != "5042002" ]; then
 	echo "local deploy expects Arc Anvil chain id 5042002" >&2
 	exit 1

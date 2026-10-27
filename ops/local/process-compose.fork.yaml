@@ -1,0 +1,50 @@
+version: "0.5"
+processes:
+  arc-anvil:
+    command: node ops/local/fork-anvil.mjs
+    working_dir: .
+    readiness_probe:
+      exec:
+        command: >-
+          curl --fail --silent --max-time 2 -X POST -H 'content-type: application/json'
+          --data '{"jsonrpc":"2.0","id":1,"method":"anvil_nodeInfo","params":[]}'
+          http://127.0.0.1:8545 | grep -q '"result"'
+      initial_delay_seconds: 5
+      period_seconds: 2
+      timeout_seconds: 2
+  mock-bundler:
+    command: pnpm --filter @czar/web exec node e2e/mock-bundler.mjs
+    working_dir: .
+    environment:
+      - CZAR_ARC_RPC_URL=http://127.0.0.1:8545
+      - CZAR_MOCK_BUNDLER_PORT=4337
+    depends_on:
+      arc-anvil:
+        condition: process_healthy
+    readiness_probe:
+      http_get:
+        host: 127.0.0.1
+        port: 4337
+        path: /health
+      initial_delay_seconds: 2
+      period_seconds: 2
+      timeout_seconds: 2
+  web:
+    command: pnpm --filter @czar/web dev -- --port 3001
+    working_dir: .
+    environment:
+      - CZAR_SERVER_URL=http://127.0.0.1:3000
+      - PORT=3001
+    depends_on:
+      server:
+        condition: process_healthy
+      mock-bundler:
+        condition: process_healthy
+    readiness_probe:
+      http_get:
+        host: localhost
+        port: 3001
+        path: /
+      initial_delay_seconds: 5
+      period_seconds: 3
+      timeout_seconds: 2

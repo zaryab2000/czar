@@ -49,6 +49,7 @@ contracts/slither-out.json
 deployments/local.json
 deployments/arc-local.json
 deployments/local-keys.json
+deployments/.arc-fork-pin.json
 
 deployments/.vault-client-test*.json
 contracts/broadcast
