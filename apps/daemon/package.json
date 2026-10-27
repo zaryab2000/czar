@@ -24,8 +24,10 @@
   "dependencies": {
     "@czar/api-contract": "workspace:*",
     "@czar/config": "workspace:*",
+    "@czar/hashing": "workspace:*",
     "@czar/logging": "workspace:*",
     "@czar/redaction": "workspace:*",
+    "@czar/schemas": "workspace:*",
     "@napi-rs/keyring": "2.1.1",
     "better-sqlite3-multiple-ciphers": "13.0.3"
   },

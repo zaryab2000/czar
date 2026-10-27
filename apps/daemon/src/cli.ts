@@ -3,18 +3,25 @@
 import { execFile } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
+import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { Entry } from "@napi-rs/keyring";
 import { loadConfig } from "@czar/config";
+import type { Config } from "@czar/config";
+import { sidecarLayer2Client } from "@czar/redaction";
 import { Daemon } from "./daemon.ts";
+import { openMemoryDatabase, type MemoryDatabase } from "./database.ts";
 import { install, uninstall, update, type InstallDeps } from "./install.ts";
-import { osKeychain } from "./keychain.ts";
+import { KEYCHAIN_ACCOUNTS, osKeychain, type Keychain } from "./keychain.ts";
 import { Launchctl, type CommandRunner } from "./launchd.ts";
-import { macosPaths } from "./paths.ts";
+import { macosPaths, type DaemonPaths } from "./paths.ts";
 import { readStatus } from "./status.ts";
 import { pairDevice } from "#src/pairing/pair-device";
+import { runManualObjective } from "#src/objective-command";
+import { objectivePreflight } from "#src/objective-preflight";
+import { pairedDeviceId, savePairedDevice } from "#src/paired-device";
 
 const runCommand: CommandRunner = (program, args) =>
   new Promise((resolve) => {
@@ -59,6 +66,66 @@ async function promptDeviceName(): Promise<string> {
   }
 }
 
+function openPairedSettings(paths: DaemonPaths, keychain: Keychain): MemoryDatabase {
+  const key = keychain.get(KEYCHAIN_ACCOUNTS.memoryDbKey);
+  if (!key) throw new Error("Czar memory is not initialized. Start czar daemon before pairing.");
+  return openMemoryDatabase(paths.databasePath, key);
+}
+
+async function runPair(argv: readonly string[]): Promise<number> {
+  const [code] = argv;
+  if (process.platform !== "darwin") throw new Error("Pairing is supported on macOS only.");
+  if (argv.length !== 1 || code === undefined) throw new Error("usage: czar pair <8-digit-code>");
+  const config = loadConfig({ env: process.env });
+  const paths = macosPaths(homedir(), config.get("daemon.socketPath") as string);
+  const keychain = createOsKeychain();
+  const db = openPairedSettings(paths, keychain);
+  try {
+    const result = await pairDevice({
+      code,
+      deviceName: await promptDeviceName(),
+      platform: "macos",
+      keychain,
+    });
+    const token = keychain.get(KEYCHAIN_ACCOUNTS.deviceToken);
+    if (!token) throw new Error("Paired token was not saved; request a new pairing code.");
+    try {
+      savePairedDevice(db, result.deviceId, token);
+    } catch {
+      throw new Error("Paired device ID could not be saved. Fix Czar memory and pair again.");
+    }
+    process.stdout.write(`Paired device ${result.deviceId}.\n`);
+    return 0;
+  } finally {
+    db.close();
+  }
+}
+
+async function runObjective(argv: readonly string[]): Promise<number> {
+  if (process.platform !== "darwin") throw new Error("Objectives are supported on macOS only.");
+  const config: Config = loadConfig({ env: process.env });
+  const paths = macosPaths(homedir(), config.get("daemon.socketPath") as string);
+  const keychain = createOsKeychain();
+  const preflight = objectivePreflight(argv, keychain, config.get("drives.capabilityTaxonomy"));
+  const db = openPairedSettings(paths, keychain);
+  try {
+    await runManualObjective(preflight.options, {
+      database: db,
+      deviceId: pairedDeviceId(db, preflight.token),
+      deviceToken: preflight.token,
+      layer2: sidecarLayer2Client({
+        socketPath: join(paths.supportDir, "czar-redact.sock"),
+        timeoutMs: config.get("redaction.layer2TimeoutMs") as number,
+      }),
+      pollSeconds: config.get("daemon.objectivePollSeconds") as number,
+      print: (line) => process.stdout.write(`${line}\n`),
+    });
+    return 0;
+  } finally {
+    db.close();
+  }
+}
+
 async function main(argv: readonly string[]): Promise<number> {
   const [command, ...rest] = argv;
   switch (command) {
@@ -77,21 +144,10 @@ async function main(argv: readonly string[]): Promise<number> {
     case "uninstall":
       await uninstall(deps(), { deleteMemory: rest.includes("--delete-memory") });
       return 0;
-    case "pair": {
-      const code = rest[0];
-      if (process.platform !== "darwin") throw new Error("Pairing is supported on macOS only.");
-      if (rest.length !== 1 || code === undefined)
-        throw new Error("usage: czar pair <8-digit-code>");
-      const deviceName = await promptDeviceName();
-      const result = await pairDevice({
-        code,
-        deviceName,
-        platform: "macos",
-        keychain: createOsKeychain(),
-      });
-      process.stdout.write(`Paired device ${result.deviceId}.\n`);
-      return 0;
-    }
+    case "pair":
+      return runPair(rest);
+    case "objective":
+      return runObjective(rest);
     case "daemon": {
       const d = deps();
       const daemon = new Daemon({
@@ -116,7 +172,7 @@ async function main(argv: readonly string[]): Promise<number> {
       break;
   }
   process.stderr.write(
-    "usage: czar status | install | update | uninstall [--delete-memory] | pair <code> | daemon | config dump\n",
+    "usage: czar status | install | update | uninstall [--delete-memory] | pair <code> | objective <goal> [options] | daemon | config dump\n",
   );
   return 2;
 }
