@@ -16,3 +16,5 @@ export { macosPaths, LAUNCH_AGENT_LABEL } from "./paths.ts";
 export { readStatus, describe as describeStatus, STATUS_TEXT } from "./status.ts";
 export { pairDevice, PairingError } from "#src/pairing/pair-device";
 export type { PairDeviceInput, PairDeviceResult, PairingFetch } from "#src/pairing/pair-device";
+export { ackResult } from "#src/results/ack-result";
+export type { AckResultInput, ResultAckFetch } from "#src/results/ack-result";

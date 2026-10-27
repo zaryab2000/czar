@@ -16,7 +16,7 @@
     "start": "NEXT_TELEMETRY_DISABLED=1 next start --hostname localhost",
     "typecheck": "NEXT_TELEMETRY_DISABLED=1 next typegen && tsc -p tsconfig.json",
     "test": "vitest run",
-    "e2e": "playwright test"
+    "e2e": "CZAR_SERVER_URL=http://127.0.0.1:4310 NEXT_TELEMETRY_DISABLED=1 next build && playwright test"
   },
   "dependencies": {
     "@circle-fin/modular-wallets-core": "1.0.16",

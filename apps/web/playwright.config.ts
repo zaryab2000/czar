@@ -57,6 +57,7 @@ export default defineConfig({
       reuseExistingServer: false,
       env: {
         NEXT_TELEMETRY_DISABLED: "1",
+        PORT: String(PORT),
         CZAR_SERVER_URL: "http://127.0.0.1:4310",
       },
     },
