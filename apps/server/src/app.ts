@@ -651,14 +651,37 @@ async function getRoute(context: ServerContext, deps: AppDependencies): Promise<
   if (!auth.principal) return problemResponse(context, 401, auth.code ?? "validation");
   const objectiveId = parseObjectiveId(context.req.param("objectiveId") ?? "");
   const found = await deps.pool.query(
-    "SELECT objective_id,state,updated_at FROM objectives WHERE objective_id=$1 AND device_id=$2",
+    `SELECT o.objective_id,o.state,o.updated_at,p.plan_id,p.plan->>'cap' AS plan_cap,
+            p.plan->>'category' AS plan_category,
+            jsonb_array_length(p.plan->'steps') AS plan_step_count
+     FROM objectives o LEFT JOIN plans p ON p.plan_id=o.plan_id
+     WHERE o.objective_id=$1 AND o.device_id=$2`,
     [objectiveId, auth.principal.deviceId],
   );
   if (!found.rowCount) return problemResponse(context, 404, "validation");
-  const row = found.rows[0] as { objective_id: string; state: string; updated_at: Date };
+  const row = found.rows[0] as {
+    objective_id: string;
+    state: string;
+    updated_at: Date;
+    plan_id: string | null;
+    plan_cap: string | null;
+    plan_category: string | null;
+    plan_step_count: number | null;
+  };
   const response = {
     objectiveId: row.objective_id,
     status: row.state,
+    ...(row.plan_id
+      ? {
+          planSummary: {
+            planId: row.plan_id,
+            cap: row.plan_cap,
+            category: row.plan_category,
+            stepCount: row.plan_step_count,
+            spent: "0",
+          },
+        }
+      : {}),
     updatedAt: row.updated_at.toISOString(),
   };
   assertExchange("getObjective", undefined, 200, response);

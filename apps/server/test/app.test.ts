@@ -282,6 +282,53 @@ describe("CZ-12 daemon routes", () => {
     expectRateHeaders(response);
   });
 
+  it("getObjective_includesPlanSummaryWhenAwaitingApproval", async () => {
+    const pool = getPool();
+    const objectiveId = "obj_01K7ZT9P4N5Q6R7S8T9V0W1X2P";
+    const planId = "pln_01K7ZT9P4N5Q6R7S8T9V0W1X2P";
+    const submission = makeObjectiveSubmission(objectiveId);
+    await pool.query(
+      `INSERT INTO objectives (objective_id,user_id,device_id,submission,objective_hash,state,plan_id)
+       VALUES ($1,$2,$3,$4::jsonb,$5,'awaiting-approval',$6)`,
+      [
+        objectiveId,
+        TEST_USER_ID,
+        submission.deviceId,
+        JSON.stringify(submission),
+        submission.objectiveHash,
+        planId,
+      ],
+    );
+    await pool.query(
+      `INSERT INTO plans (plan_id,objective_id,plan,plan_hash,payee_root,state)
+       VALUES ($1,$2,$3::jsonb,$4,$5,'offered')`,
+      [
+        planId,
+        objectiveId,
+        JSON.stringify({ cap: "2500000", category: "research", steps: [{}, {}] }),
+        `0x${"3".repeat(64)}`,
+        `0x${"4".repeat(64)}`,
+      ],
+    );
+
+    const response = await context.app.request(`/v1/objectives/${objectiveId}`, {
+      headers: { Authorization: `Bearer ${TEST_TOKEN}` },
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      objectiveId,
+      status: "awaiting-approval",
+      planSummary: {
+        planId,
+        cap: "2500000",
+        category: "research",
+        stepCount: 2,
+        spent: "0",
+      },
+    });
+  });
+
   it("auth_unknownRevokedAndForeignDevice", async () => {
     const response = await context.app.request("/v1/objectives", {
       headers: { Authorization: "Bearer unknown-token" },
