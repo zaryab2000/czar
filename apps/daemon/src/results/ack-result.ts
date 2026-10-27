@@ -7,12 +7,12 @@ const OBJECTIVE_ID = /^obj_[0-9A-HJKMNP-TV-Z]{26}$/;
 const DEVICE_TOKEN = /^[A-Za-z0-9_-]{43}$/;
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MILLISECONDS_PER_SECOND = 1000;
+const ACK_MAX_RETRIES = 3;
 
 export type ResultAckFetch = (input: URL, init: RequestInit) => Promise<Response>;
 export type ResultAckSleep = (milliseconds: number) => Promise<void>;
 
 interface RetryPolicy {
-  readonly retryCount: number;
   readonly baseDelayMs: number;
   readonly maximumDelayMs: number;
 }
@@ -52,22 +52,22 @@ async function sendWithRetries(context: {
   const fetcher = context.input.fetcher ?? defaultFetch;
   const sleep = context.input.sleep ?? defaultSleep;
   const request = createRequest(context);
-  for (let retry = 0; retry <= policy.retryCount; retry += 1) {
+  for (let retry = 0; retry <= ACK_MAX_RETRIES; retry += 1) {
     let response: Response;
     try {
       response = await fetcher(request.url, request.init);
     } catch {
-      if (retry === policy.retryCount) {
+      if (retry === ACK_MAX_RETRIES) {
         throw new Error(
           `Could not send the result acknowledgement to Czar at ${context.serverOrigin.origin} ` +
-            `after ${policy.retryCount} retries.`,
+            `after ${ACK_MAX_RETRIES} retries.`,
         );
       }
       await sleep(retryDelayMs(policy, retry));
       continue;
     }
     if (response.status === 204) return;
-    if (response.status < 500 || response.status > 599 || retry === policy.retryCount) {
+    if (response.status < 500 || response.status > 599 || retry === ACK_MAX_RETRIES) {
       throw new Error(`Czar did not accept the result acknowledgement (HTTP ${response.status}).`);
     }
     await sleep(retryDelayMs(policy, retry));
@@ -98,12 +98,9 @@ function createRequest(context: {
 }
 
 function readRetryPolicy(config: Config): RetryPolicy {
-  const retryCount = Number(config.get("writeback.ackRetryCount"));
   const baseDelayMs = Number(config.get("daemon.outboxRetryBaseS")) * MILLISECONDS_PER_SECOND;
   const maximumDelayMs = Number(config.get("writeback.ackRetryMaxS")) * MILLISECONDS_PER_SECOND;
   if (
-    !Number.isSafeInteger(retryCount) ||
-    retryCount < 0 ||
     !Number.isSafeInteger(baseDelayMs) ||
     baseDelayMs < MILLISECONDS_PER_SECOND ||
     !Number.isSafeInteger(maximumDelayMs) ||
@@ -111,7 +108,7 @@ function readRetryPolicy(config: Config): RetryPolicy {
   ) {
     throw new Error("Result acknowledgement retry settings are invalid; check the Czar config.");
   }
-  return { retryCount, baseDelayMs, maximumDelayMs };
+  return { baseDelayMs, maximumDelayMs };
 }
 
 function retryDelayMs(policy: RetryPolicy, retry: number): number {

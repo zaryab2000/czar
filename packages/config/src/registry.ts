@@ -2771,15 +2771,6 @@ export const PARAMETERS = [
     notes: "also line 289",
   },
   {
-    key: "writeback.ackRetryCount",
-    type: "integer",
-    default: 3,
-    unit: "count",
-    reason: "retry transient result acknowledgments three times",
-    source: "docs/specs/04-components/local/local-agent-surfaces.md:334",
-    notes: "architect decision 2026-10-27; retries follow the configured outbox backoff",
-  },
-  {
     key: "writeback.ackRetryMaxS",
     type: "integer",
     default: 3600,

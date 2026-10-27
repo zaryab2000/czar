@@ -11,7 +11,6 @@ const IDEMPOTENCY_KEY = "7bd0c9be-b78e-4b24-a06c-7be2be7ef019";
 const CONFIG = loadConfig({
   envFile: {
     "daemon.outboxRetryBaseS": 1,
-    "writeback.ackRetryCount": 3,
     "writeback.ackRetryMaxS": 4,
   },
 });
