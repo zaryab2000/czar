@@ -1,6 +1,6 @@
 # M3 local thin slice report — T-050a
 
-**Status:** NOT RUN / DEFERRED pending Zaryab's explicit local-stack approval and local-key setup.
+**Status:** NOT RUN. Local-stack startup and this CLEAN run were approved by Zaryab on 2026-10-27 (SCR-146 §3.2); the run waits for operator key creation (T-105 local mode, G0-13) and a healthy CLEAN stack. No result below is recorded until the run executes.
 **Task:** T-050a / M3-d. **Decision:** D92 local Arc and D94 acceptance boundary.
 
 Before any server or merchant request, database query, or transaction, the runner requires
