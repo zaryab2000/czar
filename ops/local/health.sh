@@ -165,7 +165,7 @@ NODE
 check_server_migrations() {
 	local expected actual
 	expected="$(rg --files apps/server/migrations -g '*.sql' | sed 's#^.*/##' | LC_ALL=C sort)"
-	actual="$(psql 'postgresql://postgres@127.0.0.1:15433/postgres' -Atc \
+	actual="$(docker compose -f ops/local/compose.yaml exec -T postgres psql -U postgres -d postgres -Atc \
 		'SELECT filename FROM schema_migrations ORDER BY filename')"
 	[ "$expected" = "$actual" ] || {
 		printf 'applied migrations do not match the server migration files\n' >&2
@@ -231,7 +231,7 @@ try {
 NODE
 }
 
-check "Postgres" pg_isready -h 127.0.0.1 -p 15433 -U postgres
+check "Postgres" docker compose -f ops/local/compose.yaml exec -T postgres pg_isready -U postgres
 check_output "fork block" check_fork_block
 check "Arc fork RPC and anvil_nodeInfo" check_fork_rpc
 check_output "deployment manifest contract count" check_manifest_contract_count
