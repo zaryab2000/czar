@@ -101,7 +101,7 @@ async function acknowledgeWithinTransaction(
   if (!resultId || resultId !== input.body.resultId) return "not-found";
 
   const fingerprint = fingerprintRequest(input.rawBody);
-  const scope = `ackResult:${input.userId}:${input.objectiveId}`;
+  const scope = `ackResult:${input.userId}:${input.body.resultId}`;
   const saved = await findOrCreateIdempotency(client, config, {
     scope,
     key: input.key,
@@ -122,6 +122,16 @@ async function acknowledgeWithinTransaction(
   }
 
   assertExchange("ackResult", input.body, 204);
+  const priorAck = await client.query(
+    `SELECT event_id FROM outbox_events
+     WHERE name='result.acknowledged' AND objective_id=$1 AND payload->>'resultId'=$2
+     LIMIT 1`,
+    [input.objectiveId, input.body.resultId],
+  );
+  if ((priorAck.rowCount ?? 0) > 0) {
+    await storeIdempotency(client, scope, input.key);
+    return "accepted";
+  }
   await client.query(
     `INSERT INTO outbox_events(name,objective_id,payload)
      VALUES('result.acknowledged',$1,$2::jsonb)`,

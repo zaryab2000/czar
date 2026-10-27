@@ -97,6 +97,7 @@ describe("result routes", () => {
 
     expect((await request(OBJECTIVE_ID, body, key)).status).toBe(204);
     expect((await request(OBJECTIVE_ID, body, key)).status).toBe(204);
+    expect((await request(OBJECTIVE_ID, body, randomUUID())).status).toBe(204);
     expect((await request(OBJECTIVE_ID, { ...body, surface: "pr-comment" }, key)).status).toBe(409);
     expect(
       (await pool.query("SELECT event_id FROM outbox_events WHERE name='result.acknowledged'"))
