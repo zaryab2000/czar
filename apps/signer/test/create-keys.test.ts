@@ -164,6 +164,31 @@ describe("local deployment signer roles", () => {
     }
   });
 
+  it("preserves concurrent merchant K10 manifest updates", async () => {
+    const root = await mkdtemp(join(tmpdir(), "czar-merchant-manifest-race-"));
+    const path = join(root, "local-keys.json");
+    await writeFile(path, JSON.stringify(localSample()));
+    try {
+      const loaded = await readLocalManifest(path);
+      await Promise.all([
+        writeLocalManifest(path, loaded, {
+          "czar-search": getAddress("0x0000000000000000000000000000000000000008"),
+        }),
+        writeLocalManifest(path, loaded, {
+          "czar-food": getAddress("0x0000000000000000000000000000000000000009"),
+        }),
+      ]);
+      const updated = JSON.parse(await readFile(path, "utf8")) as Record<
+        string,
+        { address?: string; ref?: string }
+      >;
+      expect(updated["K10:czar-search"]?.ref).toBe("K10:czar-search");
+      expect(updated["K10:czar-food"]?.ref).toBe("K10:czar-food");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("passes the new manifest to Deploy.s.sol and funds only the local relayer", async () => {
     const manifest = localSample();
     const fixture = await localDeployFixture(manifest);

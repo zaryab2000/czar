@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import process from "node:process";
-import { readFile, rename, writeFile } from "node:fs/promises";
+import { readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { loadConfig } from "@czar/config";
@@ -93,25 +93,59 @@ export async function writeLocalManifest(
   localManifest: Awaited<ReturnType<typeof readLocalManifest>>,
   addresses: Readonly<Record<string, string>>,
 ) {
-  const currentManifest = localManifest.parseLocalKeysManifest(
-    JSON.parse(await readFile(path, "utf8")),
-  );
-  const updated = localManifest.addMerchantKeysToLocalManifest(currentManifest, addresses);
-  const temporary = `${path}.${process.pid}.tmp`;
+  const release = await acquireLocalManifestLock(path);
   try {
-    await writeFile(temporary, `${JSON.stringify(updated, null, 2)}\n`, {
-      flag: "wx",
-      mode: 0o600,
-    });
-    await rename(temporary, path);
-  } catch (error) {
-    throw new Error(
-      `could not update local key manifest at ${path}; preserve generated K10 keys and inspect ${temporary}`,
-      {
-        cause: error,
-      },
+    const currentManifest = localManifest.parseLocalKeysManifest(
+      JSON.parse(await readFile(path, "utf8")),
     );
+    const updated = localManifest.addMerchantKeysToLocalManifest(currentManifest, addresses);
+    const temporary = `${path}.${process.pid}.tmp`;
+    try {
+      await writeFile(temporary, `${JSON.stringify(updated, null, 2)}\n`, {
+        flag: "wx",
+        mode: 0o600,
+      });
+      await rename(temporary, path);
+    } catch (error) {
+      throw new Error(
+        `could not update local key manifest at ${path}; preserve generated K10 keys and inspect ${temporary}`,
+        {
+          cause: error,
+        },
+      );
+    }
+  } finally {
+    await release();
   }
+}
+
+async function acquireLocalManifestLock(path: string): Promise<() => Promise<void>> {
+  const lockPath = `${path}.lock`;
+  const deadline = Date.now() + 5_000;
+  while (true) {
+    try {
+      await writeFile(lockPath, `${process.pid}\n`, { flag: "wx", mode: 0o600 });
+      return async () => unlink(lockPath);
+    } catch (error) {
+      if (!isFileExistsError(error)) {
+        throw new Error(`could not lock local key manifest at ${path}`, { cause: error });
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(`timed out waiting for local key manifest lock ${lockPath}`, {
+          cause: error,
+        });
+      }
+      await delay(20);
+    }
+  }
+}
+
+function isFileExistsError(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "EEXIST";
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds));
 }
 
 function truncateAddress(address: string): string {
