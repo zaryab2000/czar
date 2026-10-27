@@ -3,11 +3,15 @@
   "chainId": 5042002,
   "backend": "local-keystore",
   "createdAt": "1970-01-01T00:00:00.000Z",
-  "K3": { "address": "REPLACE_AFTER_APPROVED_KEY_CREATION", "ref": "K3" },
-  "K5": { "address": "REPLACE_AFTER_APPROVED_KEY_CREATION", "ref": "K5" },
-  "K6": { "address": "REPLACE_AFTER_APPROVED_KEY_CREATION", "ref": "K6" },
-  "K7": { "address": "REPLACE_AFTER_APPROVED_KEY_CREATION", "ref": "K7" },
-  "K8": { "address": "REPLACE_AFTER_APPROVED_KEY_CREATION", "ref": "K8" },
-  "relayer": { "address": "REPLACE_AFTER_APPROVED_KEY_CREATION", "ref": "relayer" },
-  "K20": { "address": "REPLACE_AFTER_APPROVED_KEY_CREATION", "ref": "K20" }
+  "K3": { "address": "0x0000000000000000000000000000000000000000", "ref": "K3" },
+  "K5": { "address": "0x0000000000000000000000000000000000000000", "ref": "K5" },
+  "K6": { "address": "0x0000000000000000000000000000000000000000", "ref": "K6" },
+  "K7": { "address": "0x0000000000000000000000000000000000000000", "ref": "K7" },
+  "K8": { "address": "0x0000000000000000000000000000000000000000", "ref": "K8" },
+  "relayer": { "address": "0x0000000000000000000000000000000000000000", "ref": "relayer" },
+  "K20": { "address": "0x0000000000000000000000000000000000000000", "ref": "K20" },
+  "K10:czar-search": {
+    "address": "0x0000000000000000000000000000000000000000",
+    "ref": "K10:czar-search"
+  }
 }

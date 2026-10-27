@@ -8,6 +8,7 @@ import {
   PHASE1_KEYS,
   validateKeysFile,
 } from "../scripts/create-keys.ts";
+import { readLocalManifest, writeLocalManifest } from "../scripts/create-merchant-keys.ts";
 import { existsSync } from "node:fs";
 import { chmod, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
@@ -112,14 +113,24 @@ describe("deployments/arc-testnet-keys.json validation", () => {
 describe("local deployment signer roles", () => {
   it("parses the T-105 local key/ref manifest and requires all seven entries", async () => {
     const parserPath = resolve(import.meta.dirname, "../../../ops/local/parse-local-keys.mjs");
-    const { parseLocalKeysManifest } = await import(pathToFileURL(parserPath).href);
+    const { addMerchantKeysToLocalManifest, parseLocalKeysManifest } = await import(
+      pathToFileURL(parserPath).href
+    );
     const manifest = localSample();
     expect(parseLocalKeysManifest(manifest).relayer.ref).toBe("relayer");
+    const merchantAddress = getAddress("0x0000000000000000000000000000000000000008");
+    const withMerchant = addMerchantKeysToLocalManifest(manifest, {
+      "czar-search": merchantAddress,
+    });
+    expect(withMerchant["K10:czar-search"].ref).toBe("K10:czar-search");
+    expect(() =>
+      addMerchantKeysToLocalManifest(withMerchant, { "czar-search": merchantAddress }),
+    ).toThrow(/already has or rejects K10:czar-search/);
     const withoutRelayer = Object.fromEntries(
       Object.entries(manifest).filter(([key]) => key !== "relayer"),
     );
     expect(() => parseLocalKeysManifest(withoutRelayer)).toThrow(
-      /exactly the seven T-105 key entries/,
+      /seven T-105 entries and valid K10 entries/,
     );
     const placeholder = JSON.parse(
       await readFile(
@@ -128,6 +139,29 @@ describe("local deployment signer roles", () => {
       ),
     ) as Record<string, unknown>;
     expect(() => parseLocalKeysManifest(placeholder)).toThrow(/invalid K3 address\/ref/);
+  });
+
+  it("adds merchant K10 public refs to the generated local manifest", async () => {
+    const root = await mkdtemp(join(tmpdir(), "czar-merchant-manifest-"));
+    const path = join(root, "local-keys.json");
+    const manifest = localSample();
+    await writeFile(path, JSON.stringify(manifest));
+    try {
+      const loaded = await readLocalManifest(path);
+      await writeLocalManifest(path, loaded, {
+        "czar-search": getAddress("0x0000000000000000000000000000000000000008"),
+      });
+      const updated = JSON.parse(await readFile(path, "utf8")) as Record<
+        string,
+        { address?: string; ref?: string }
+      >;
+      expect(updated["K10:czar-search"]).toEqual({
+        address: getAddress("0x0000000000000000000000000000000000000008"),
+        ref: "K10:czar-search",
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("passes the new manifest to Deploy.s.sol and funds only the local relayer", async () => {
@@ -189,14 +223,20 @@ describe("local deployment signer roles", () => {
     expect(deployScript).not.toContain(".arc-local-addresses.");
   });
 
-  it("keeps the committed manifest as a non-address placeholder", async () => {
+  it("keeps every committed manifest address as the zero placeholder", async () => {
+    const parserPath = resolve(import.meta.dirname, "../../../ops/local/parse-local-keys.mjs");
+    const { parseLocalKeysManifest } = await import(pathToFileURL(parserPath).href);
     const example = await readFile(
       resolve(import.meta.dirname, "../../../deployments/local-keys.example.json"),
       "utf8",
     );
-    expect(example).not.toMatch(/0x[0-9a-fA-F]{40}/);
+    const template = JSON.parse(example) as Record<string, { address?: string; ref?: string }>;
+    const entries = Object.entries(template).filter(([key]) => key.startsWith("K"));
+    expect(entries.map(([key]) => key)).toContain("K10:czar-search");
+    expect(entries.every(([, entry]) => entry.address === `0x${"0".repeat(40)}`)).toBe(true);
     expect(example).toContain('"relayer"');
     expect(example).toContain('"ref": "K3"');
+    expect(() => parseLocalKeysManifest(template)).toThrow(/invalid K3 address\/ref/);
   });
 });
 

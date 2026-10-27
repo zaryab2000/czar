@@ -4,6 +4,7 @@ export const LOCAL_KEY_IDS = ["K3", "K5", "K6", "K7", "K8", "relayer", "K20"];
 
 const METADATA_KEYS = ["network", "chainId", "backend", "createdAt"];
 const ADDRESS_PATTERN = /^0x[0-9a-fA-F]{40}$/;
+const MERCHANT_KEY_PATTERN = /^K10:[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 /** Validates the public T-105 local manifest and returns its key entries. */
 export function parseLocalKeysManifest(value) {
@@ -19,13 +20,21 @@ export function parseLocalKeysManifest(value) {
   ) {
     throw new Error("local signer key manifest must target Arc local chain 5042002");
   }
-  const expectedKeys = [...METADATA_KEYS, ...LOCAL_KEY_IDS].toSorted();
-  if (Object.keys(value).toSorted().join("\n") !== expectedKeys.join("\n")) {
-    throw new Error("local signer key manifest must contain exactly the seven T-105 key entries");
+  const expectedKeys = [...METADATA_KEYS, ...LOCAL_KEY_IDS];
+  const extraKeys = Object.keys(value).filter(
+    (key) => !expectedKeys.includes(key) && !MERCHANT_KEY_PATTERN.test(key),
+  );
+  if (extraKeys.length > 0 || expectedKeys.some((key) => !(key in value))) {
+    throw new Error(
+      "local signer key manifest must contain the seven T-105 entries and valid K10 entries",
+    );
   }
 
   const seenAddresses = new Set();
-  for (const keyId of LOCAL_KEY_IDS) {
+  const keyIds = Object.keys(value).filter(
+    (key) => LOCAL_KEY_IDS.includes(key) || MERCHANT_KEY_PATTERN.test(key),
+  );
+  for (const keyId of keyIds) {
     const entry = value[keyId];
     if (
       typeof entry !== "object" ||
@@ -46,6 +55,19 @@ export function parseLocalKeysManifest(value) {
     seenAddresses.add(normalizedAddress);
   }
   return value;
+}
+
+export function addMerchantKeysToLocalManifest(value, addresses) {
+  const manifest = parseLocalKeysManifest(value);
+  const updated = { ...manifest };
+  for (const [service, address] of Object.entries(addresses)) {
+    const keyRef = `K10:${service}`;
+    if (!MERCHANT_KEY_PATTERN.test(keyRef) || keyRef in updated) {
+      throw new Error(`local signer key manifest already has or rejects ${keyRef}`);
+    }
+    updated[keyRef] = { address, ref: keyRef };
+  }
+  return parseLocalKeysManifest(updated);
 }
 
 async function main(args) {
