@@ -49,12 +49,28 @@ async function savedPinFailureReason(fetchFn, rpcUrl, previousPin) {
   }
   const latestTag = `0x${BigInt(await rpc(fetchFn, rpcUrl, "eth_blockNumber", [])).toString(16)}`;
   for (const address of Object.values(FORK_CODE_ADDRESSES)) {
-    const savedCode = await rpc(fetchFn, rpcUrl, "eth_getCode", [address, savedTag]);
+    const savedCode = await savedCodeAtPin(fetchFn, rpcUrl, address, savedTag);
     if (!isCode(savedCode)) return "historical_state_unavailable";
     const latestCode = await rpc(fetchFn, rpcUrl, "eth_getCode", [address, latestTag]);
     if (savedCode !== latestCode) return "required_contract_code_changed";
   }
   return null;
+}
+
+async function savedCodeAtPin(fetchFn, rpcUrl, address, blockTag) {
+  try {
+    return await rpc(fetchFn, rpcUrl, "eth_getCode", [address, blockTag]);
+  } catch (error) {
+    if (isPrunedStateError(error)) return "0x";
+    throw error;
+  }
+}
+
+function isPrunedStateError(error) {
+  if (!(error instanceof ArcRpcError) || error.method !== "eth_getCode") return false;
+  return /missing trie node|(?:historical )?state.{0,20}(unavailable|not available|pruned)|pruned state/i.test(
+    error.message,
+  );
 }
 
 async function checkContractCode(fetchFn, rpcUrl, block) {
@@ -136,10 +152,25 @@ async function rpc(fetchFn, url, method, params) {
   });
   if (!response.ok) throw new Error(`Arc RPC ${method} failed with HTTP ${response.status}`);
   const payload = await response.json();
-  if (typeof payload !== "object" || payload === null || "error" in payload) {
+  if (typeof payload !== "object" || payload === null) {
     throw new Error(`Arc RPC ${method} returned an invalid response`);
   }
+  if ("error" in payload) throw new ArcRpcError(method, payload.error);
   return payload.result;
+}
+
+class ArcRpcError extends Error {
+  constructor(method, error) {
+    const message =
+      typeof error === "object" &&
+      error !== null &&
+      "message" in error &&
+      typeof error.message === "string"
+        ? error.message
+        : "unknown JSON-RPC error";
+    super(`Arc RPC ${method} returned an error: ${message}`);
+    this.method = method;
+  }
 }
 
 function runChild(executable, args) {

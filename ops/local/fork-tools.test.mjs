@@ -21,11 +21,13 @@ import {
 const HOLDER = "0x0000000000000000000000000000000000000001";
 const RECIPIENT = "0x0000000000000000000000000000000000000002";
 
-function rpcMock(handler) {
+function rpcMock(handler, errorHandler = () => null) {
   const calls = [];
   const fetchFn = async (_url, options) => {
     const request = JSON.parse(options.body);
     calls.push(request);
+    const error = errorHandler(request);
+    if (error !== null) return Response.json({ jsonrpc: "2.0", id: request.id, error });
     return Response.json({ jsonrpc: "2.0", id: request.id, result: await handler(request) });
   };
   return { calls, fetchFn };
@@ -91,6 +93,52 @@ test("repins to latest minus 100 when saved historical state is unavailable", as
     pinReason: "initial_pin",
   });
   assert.deepEqual(pin, { block: 4252n, reason: "historical_state_unavailable" });
+});
+
+test("repins when saved eth_getCode reports pruned historical state", async () => {
+  const mock = rpcMock(
+    async ({ method, params }) => {
+      if (method === "eth_chainId") return "0x4cef52";
+      if (method === "eth_getBlockByNumber") return { number: params[0] };
+      if (method === "eth_blockNumber") return "0x1100";
+      if (method === "eth_getCode") return "0x6000";
+      throw new Error(`unexpected RPC method ${method}`);
+    },
+    ({ method, params }) =>
+      method === "eth_getCode" && params[1] === "0xf9c"
+        ? { code: -32000, message: "historical state is not available because it was pruned" }
+        : null,
+  );
+  const pin = await resolveForkPin(mock.fetchFn, undefined, {
+    chainId: 5042002,
+    forkBlock: "3996",
+    pinReason: "initial_pin",
+  });
+  assert.deepEqual(pin, { block: 4252n, reason: "historical_state_unavailable" });
+});
+
+test("propagates unrelated errors while checking saved historical code", async () => {
+  const mock = rpcMock(
+    async ({ method, params }) => {
+      if (method === "eth_chainId") return "0x4cef52";
+      if (method === "eth_getBlockByNumber") return { number: params[0] };
+      if (method === "eth_blockNumber") return "0x1100";
+      if (method === "eth_getCode") return "0x6000";
+      throw new Error(`unexpected RPC method ${method}`);
+    },
+    ({ method, params }) =>
+      method === "eth_getCode" && params[1] === "0xf9c"
+        ? { code: -32000, message: "execution reverted" }
+        : null,
+  );
+  await assert.rejects(
+    resolveForkPin(mock.fetchFn, undefined, {
+      chainId: 5042002,
+      forkBlock: "3996",
+      pinReason: "initial_pin",
+    }),
+    /execution reverted/,
+  );
 });
 
 test("repins when EntryPoint code changes after the saved fork block", async () => {
