@@ -1,4 +1,4 @@
-# T-126 SCR correction request: manual result write-back
+# T-126 SCR correction request: served result body field
 
 **Status:** pending architect ruling. This is a builder report, not a canonical spec edit.
 
@@ -8,12 +8,12 @@ SCR-147 §"After submitting" line 62 requires the daemon to write
 `renderedBody`, and sets `additionalProperties: false`. A schema-valid `getResult`
 response therefore cannot provide the named field.
 
-SCR-147 line 63 requires `Idempotency-Key=resultId` for `ackResult`. OpenAPI's
-`IdempotencyKey` at `api/openapi.yaml:72-79` requires UUID v4, and the ack route
-references it at line 1112. `resultId` instead has the `res_<ULID>` form at line
-264. PR #106's daemon acknowledgment client also rejects non-UUID keys.
+SCR-148 (PR #109) resolves the separate acknowledgment-key conflict: OpenAPI's
+UUID v4 rule wins. T-126 must persist one key and one request body per result
+before sending, then reuse both for retries and later `czar result` calls. PR
+#106 remains the result route and acknowledgment client dependency.
 
-The architect needs to reconcile each field and key requirement with the
-canonical API and PR #106. Until then, T-126 includes submission, redaction,
-status polling, and approval output, while result write-back and `czar result`
-remain unimplemented. No server, schema, OpenAPI, or other-lane file was changed.
+The architect still needs to reconcile `renderedBody` with the canonical
+`Result.body` field. Until then, T-126 includes submission, redaction, status
+polling, and approval output, while result write-back and `czar result` remain
+unimplemented. No server, schema, OpenAPI, or other-lane file was changed.
