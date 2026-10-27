@@ -8,6 +8,9 @@ import { decodeEventLog, encodeFunctionData, numberToHex } from "viem";
 
 const RPC_URL = process.env["CZAR_ARC_RPC_URL"] ?? "http://127.0.0.1:8549";
 const PORT = Number(process.env["CZAR_MOCK_BUNDLER_PORT"] ?? 4337);
+const CORS_ORIGINS = parseLocalOrigins(
+  process.env["CZAR_MOCK_BUNDLER_CORS_ORIGINS"] ?? "http://localhost:3100,http://localhost:3001",
+);
 const CHAIN_ID = 5042002;
 const ENTRY_POINT = "0x0000000071727De22E5E9d8BAf0edAc6f37da032";
 const BENEFICIARY = "0x000000000000000000000000000000000000b001";
@@ -46,7 +49,11 @@ const userOperations = new Map();
 const seenMethods = new Set();
 
 const server = createServer(async (request, response) => {
-  response.setHeader("Access-Control-Allow-Origin", "http://localhost:3100");
+  const origin = request.headers.origin;
+  response.setHeader("Vary", "Origin");
+  if (origin && CORS_ORIGINS.has(origin)) {
+    response.setHeader("Access-Control-Allow-Origin", origin);
+  }
   response.setHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
   response.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, X-AppInfo");
   if (request.method === "OPTIONS") {
@@ -80,6 +87,19 @@ const server = createServer(async (request, response) => {
 });
 
 server.listen(PORT, "127.0.0.1");
+
+function parseLocalOrigins(value) {
+  const origins = value.split(",").map((origin) => origin.trim());
+  if (origins.length === 0 || origins.some((origin) => !isLocalOrigin(origin))) {
+    throw new Error("CZAR_MOCK_BUNDLER_CORS_ORIGINS must contain local http://localhost origins.");
+  }
+  return new Set(origins);
+}
+
+function isLocalOrigin(origin) {
+  const match = /^http:\/\/localhost:([1-9]\d{0,4})$/.exec(origin);
+  return match !== null && Number(match[1]) <= 65_535;
+}
 
 async function dispatch(method, params) {
   switch (method) {
