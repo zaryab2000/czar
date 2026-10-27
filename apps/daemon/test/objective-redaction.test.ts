@@ -74,4 +74,27 @@ describe("manual objective redaction", () => {
     expect(message).not.toContain(secret);
     expect(calls).toBe(0);
   });
+
+  it.each(["subject", "field"])("refuses a planted secret in a TaskSpec %s", async (place) => {
+    let calls = 0;
+    const client: Layer2Client = {
+      async redact(text) {
+        calls += 1;
+        return { text, entities: [], forcedReview: false };
+      },
+    };
+    const secret = "ghp_123456789012345678901234567890123456";
+    const planted = parseObjectiveOptions(
+      [
+        "Find prices",
+        "--subject",
+        place === "subject" ? secret : "Acme",
+        "--field",
+        place === "field" ? secret : "monthly price",
+      ],
+      ["web-search"],
+    );
+    await expect(redactObjectiveInput(planted, client)).rejects.toThrow(/Secret detected/);
+    expect(calls).toBe(0);
+  });
 });
