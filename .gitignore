@@ -48,6 +48,7 @@ contracts/broadcast/*/31337/
 contracts/slither-out.json
 deployments/local.json
 deployments/arc-local.json
+deployments/local-keys.json
 
 deployments/.vault-client-test*.json
 contracts/broadcast

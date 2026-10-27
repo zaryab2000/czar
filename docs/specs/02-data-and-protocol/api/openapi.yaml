@@ -234,7 +234,7 @@ components:
           description: "Counts only for the in-place fill (D85). No values, no paths."
           required: [status]
           properties:
-            status: { type: string, enum: [filled, partial, none-filled, off, file-missing] }
+            status: { type: string, enum: [filled, partial, none-filled, "off", file-missing] }
             cellsFilled: { type: integer, minimum: 0 }
             cellsSkippedClash: { type: integer, minimum: 0 }
             cellsNotFound: { type: integer, minimum: 0 }

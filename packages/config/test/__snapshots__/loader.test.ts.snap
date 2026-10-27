@@ -410,6 +410,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 3600,
   },
   {
+    "key": "daemon.serverOrigin",
+    "source": "default",
+    "unit": "url",
+    "value": null,
+  },
+  {
     "key": "daemon.socketPath",
     "source": "default",
     "unit": "path",
