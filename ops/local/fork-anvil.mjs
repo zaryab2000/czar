@@ -39,7 +39,9 @@ export async function resolveForkPin(fetchFn = fetch, rpcUrl = FORK_RPC_URL, pre
 }
 
 async function savedPinFailureReason(fetchFn, rpcUrl, previousPin) {
-  if (previousPin.chainId !== FORK_CHAIN_ID || !/^[1-9][0-9]*$/.test(previousPin.forkBlock)) {
+  // Accepts the SCR-151 decimal-string chain ID and the earlier numeric form.
+  const savedChainId = String(previousPin.chainId);
+  if (savedChainId !== String(FORK_CHAIN_ID) || !/^[1-9][0-9]*$/.test(previousPin.forkBlock)) {
     throw new Error("saved Arc fork pin metadata is invalid");
   }
   const savedBlock = BigInt(previousPin.forkBlock);
@@ -112,16 +114,25 @@ export async function runForkAnvil(options = {}) {
   return runChild(executable, args);
 }
 
-async function recordForkPin(pin) {
-  const path = forkPinPath();
+/**
+ * SCR-151 §1: decimal strings, written atomically with mode 0600. Every arc-anvil start is a
+ * fresh chain (--mnemonic-random, no state load), so any indexerStartBlock from an earlier chain
+ * is dropped here; the FORK deploy step records the new one (ops/local/record-start-block.mjs).
+ */
+export function forkPinRecord(pin) {
+  return { chainId: String(FORK_CHAIN_ID), forkBlock: pin.block.toString(), pinReason: pin.reason };
+}
+
+async function recordForkPin(pin, path = forkPinPath()) {
   const temporaryPath = `${path}.${process.pid}.tmp`;
-  await writeFile(
-    temporaryPath,
-    `${JSON.stringify({ chainId: FORK_CHAIN_ID, forkBlock: pin.block.toString(), pinReason: pin.reason }, null, 2)}\n`,
-    { flag: "wx", mode: 0o600 },
-  );
+  await writeFile(temporaryPath, `${JSON.stringify(forkPinRecord(pin), null, 2)}\n`, {
+    flag: "wx",
+    mode: 0o600,
+  });
   await rename(temporaryPath, path);
 }
+
+export { recordForkPin };
 
 export function forkAnvilArguments(block, rpcUrl = FORK_RPC_URL) {
   const args = [

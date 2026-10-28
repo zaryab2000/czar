@@ -50,6 +50,7 @@ deployments/local.json
 deployments/arc-local.json
 deployments/local-keys.json
 deployments/.arc-fork-pin.json
+deployments/.arc-chain-session.json
 
 deployments/.vault-client-test*.json
 contracts/broadcast
