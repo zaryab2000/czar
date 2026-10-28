@@ -41,6 +41,8 @@ const CIRCLE: Address = "0x0747EEf0706327138c69792bF28Cd525089e4583";
 const GATEWAY_WALLET: Address = "0x0077777d7EBA4688BDeF3E311b846F25870A19B9";
 const GATEWAY_MINTER: Address = "0x0022222ABE238Cc2C7Bb1f21003F0a260052475B";
 const USDC: Address = "0x3600000000000000000000000000000000000000";
+/** Arc Gateway domain (Deploy.s.sol ARC_GATEWAY_DOMAIN, A2-01). */
+const GATEWAY_DOMAIN = 26;
 const SYSTEM_EMITTER: Address = "0xfffffffffffffffffffffffffffffffffffffffe";
 const SENDER: Address = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
 const ACTORS = {
@@ -399,6 +401,14 @@ async function indexedMirrors(): Promise<{
   steps: Record<string, unknown>[];
 }> {
   pgliteDir = mkdtempSync(join(tmpdir(), "czar-t031-replay-"));
+  // src/index.ts loads register-external-events, which reads the Gateway fields of the deployment manifest at
+  // import time even when the external poll is disabled; give it the local values instead of the absent
+  // deployments/arc-testnet.json.
+  const deploymentPath = join(pgliteDir, "deployment.json");
+  writeFileSync(
+    deploymentPath,
+    `${JSON.stringify({ gatewayWallet: GATEWAY_WALLET, usdc: USDC, gatewayDomain: GATEWAY_DOMAIN })}\n`,
+  );
   const ponderProcess = spawn(
     PONDER,
     ["--root", PONDER_ROOT, "start", "--port", String(API_PORT), "--schema", "t031_replay"],
@@ -410,6 +420,7 @@ async function indexedMirrors(): Promise<{
         CZAR_TEST_OPEN_EVIDENCE: openEvidenceAddress,
         CZAR_TEST_PGLITE_DIR: pgliteDir,
         CZAR_INDEXER_DISABLE_EXTERNAL_POLL: "1",
+        CZAR_INDEXER_DEPLOYMENT_PATH: deploymentPath,
       },
       stdio: ["ignore", "pipe", "pipe"],
     },
