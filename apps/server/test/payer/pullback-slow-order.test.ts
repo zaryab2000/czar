@@ -58,6 +58,11 @@ interface SimulatedPocket {
   crashAt(step: Step, when: CrashWhen): void;
 }
 
+function stepOf(request: SignRequest): Step {
+  if (request.kind === "pocket-return") return "return";
+  return (request.payload as { step: "initiate" | "withdraw" }).step;
+}
+
 function simulatedPocket(input: {
   readonly available: bigint;
   readonly eoa?: bigint;
@@ -88,10 +93,6 @@ function simulatedPocket(input: {
       apiConsecutiveFailures: state.api === "fresh" ? 0 : 3,
     };
   };
-  const stepOf = (request: SignRequest): Step =>
-    request.kind === "pocket-return"
-      ? "return"
-      : ((request.payload as { step: "initiate" | "withdraw" }).step ?? "initiate");
   const apply = (request: SignRequest, hash: string): SlowPullbackReceipt => {
     const step = stepOf(request);
     state.eoa -= GAS_COST;
