@@ -14,7 +14,7 @@ import { derivedNonce } from "@czar/hashing";
 import { czarVaultAbi } from "@czar/vault-client";
 import { setupDatabase } from "#test/db";
 import { getExecutionTrace } from "#src/payer/executions";
-import { MIN_RESERVATION_TTL_SECONDS } from "#src/payer/vault-direct";
+import { MIN_RESERVATION_TTL_SECONDS, STALE_RESERVE_MESSAGE } from "#src/payer/vault-direct";
 import {
   ARC_USDC,
   GATEWAY_MINTER,
@@ -37,12 +37,6 @@ import {
 const BASE_PORT = 18630;
 const UNIT_AMOUNT = 1_000n;
 const CALLS = 2;
-/**
- * The seller's `maxTimeoutSeconds` for the case whose lease wait must outlive `validBefore`: above the vault's
- * `MIN_RESERVATION_TTL` (30 s), so a reserve mined a few seconds after it was signed is still inside the TTL
- * window, and below `payer.leaseSeconds` (60 s).
- */
-const SHORT_TIMEOUT_SECONDS = 45;
 /**
  * An envelope that expires soon after the reserve is signed, so `validBefore` = `envelope.expiresAt` and a
  * resume near expiry leaves the step-2 formula no room above `MIN_RESERVATION_TTL` (SCR-153 §2).
@@ -124,7 +118,7 @@ describe.skipIf(!localChainEnabled)(
         expect(await attemptPhases(plan, 0)).toEqual(["reserve.sent", "reserve.mined"]);
         expect((await getExecutionTrace(getPool(), plan.planId, 0, 0))[1]?.payload).toEqual({
           txHash: saved.txHash,
-          error: "BadTtl",
+          message: STALE_RESERVE_MESSAGE,
         });
         const fresh = await getExecutionTrace(getPool(), plan.planId, 0, 1);
         expect(fresh.filter((row) => row.phase === "reserve.sent")).toHaveLength(1);
@@ -156,14 +150,13 @@ describe.skipIf(!localChainEnabled)(
           errorCode: "reserve-failed",
         });
         expect((await getExecutionTrace(getPool(), plan.planId, 0, 0))[1]?.payload).toMatchObject({
-          error: "BadTtl",
+          message: STALE_RESERVE_MESSAGE,
         });
         const failed = await getExecutionTrace(getPool(), plan.planId, 0, 1);
         expect(failed.map((row) => row.phase)).toEqual(["step.failed"]);
         expect(failed[0]?.payload).toMatchObject({
           errorCode: "reserve-failed",
-          detail: "BadTtl",
-          stepError: { code: "reserve-failed", retryable: false },
+          stepError: { code: "reserve-failed", message: STALE_RESERVE_MESSAGE, retryable: false },
         });
         expect(await reservedEvents(plan)).toHaveLength(0);
         expect(await authorizationsUsed(plan)).toHaveLength(0);
@@ -217,7 +210,7 @@ describe.skipIf(!localChainEnabled)(
       });
 
       it("after a lease that outlived validBefore, settles the paid call once and releases the other", async () => {
-        const plan = await x402Plan(SHORT_TIMEOUT_SECONDS);
+        const plan = await x402Plan(shortTimeoutSeconds());
         await killWithLeaseHeld(plan);
         await waitOutLease();
         expect(await executeX402(harness, plan, "fresh-worker")).toEqual({
@@ -280,6 +273,19 @@ describe.skipIf(!localChainEnabled)(
     });
   },
 );
+
+/**
+ * The seller's `maxTimeoutSeconds` for the case whose lease wait must outlive `validBefore`: midway between
+ * the vault's `MIN_RESERVATION_TTL`, so a reserve mined a few seconds after signing is still inside the TTL
+ * window, and `payer.leaseSeconds`, so `validBefore` passes before the killed worker's lease expires.
+ */
+function shortTimeoutSeconds(): number {
+  const leaseSeconds = Number(harness.config.get("payer.leaseSeconds"));
+  const seconds = Math.floor((MIN_RESERVATION_TTL_SECONDS + leaseSeconds) / 2);
+  expect(seconds).toBeGreaterThan(MIN_RESERVATION_TTL_SECONDS);
+  expect(seconds).toBeLessThan(leaseSeconds);
+  return seconds;
+}
 
 /** Every other case: the seller offers the spec's `merchants.maxTimeoutSeconds` (supply side §6). */
 function defaultTimeoutSeconds(): number {

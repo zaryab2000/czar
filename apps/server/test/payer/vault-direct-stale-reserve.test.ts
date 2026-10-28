@@ -11,6 +11,7 @@ import {
   executeVaultDirectStep,
   MIN_RESERVATION_TTL_SECONDS,
   ReserveReverted,
+  STALE_RESERVE_MESSAGE,
   type VaultDirectChain,
   type VaultDirectDependencies,
   type VaultDirectInput,
@@ -69,6 +70,10 @@ beforeEach(async () => {
 });
 
 describe("vault-direct stale saved reserve (SCR-153 §2)", () => {
+  it("names the decoded vault error in the stale-reserve message", () => {
+    expect(STALE_RESERVE_MESSAGE).toBe("vault reverted BadTtl()");
+  });
+
   it("records the BadTtl revert and pays once through a new attempt with a fresh reserve", async () => {
     await seedStaleReserveSent();
     const run = paidRun({ outcome: { status: "reverted", errorName: "BadTtl" } });
@@ -106,7 +111,7 @@ describe("vault-direct stale saved reserve (SCR-153 §2)", () => {
       stepIndex: 0,
       attempt: 0,
       phase: "reserve.mined",
-      payload: { txHash: STALE_TX_HASH, error: "BadTtl" },
+      payload: { txHash: STALE_TX_HASH, message: STALE_RESERVE_MESSAGE },
     });
     const run = paidRun({ outcome: { status: "reverted", errorName: "BadTtl" } });
 
@@ -137,11 +142,10 @@ describe("vault-direct stale saved reserve (SCR-153 §2)", () => {
     expect(fresh.map((row) => row.phase)).toEqual(["step.failed"]);
     expect(fresh[0]?.payload).toEqual({
       errorCode: "reserve-failed",
-      detail: "BadTtl",
       stepError: {
         schemaVersion: "1.0",
         code: "reserve-failed",
-        message: expect.any(String),
+        message: STALE_RESERVE_MESSAGE,
         retryable: false,
       },
     });
@@ -271,7 +275,7 @@ async function seedStaleReserveSent(): Promise<void> {
 async function expectStaleAttemptClosed(): Promise<void> {
   const stale = await getExecutionTrace(getPool(), PLAN_ID, 0, 0);
   expect(stale.map((row) => row.phase)).toEqual(["reserve.sent", "reserve.mined"]);
-  expect(stale[1]?.payload).toEqual({ txHash: STALE_TX_HASH, error: "BadTtl" });
+  expect(stale[1]?.payload).toEqual({ txHash: STALE_TX_HASH, message: STALE_RESERVE_MESSAGE });
 }
 
 async function expectFreshAttemptPaid(run: ReturnType<typeof paidRun>): Promise<void> {
