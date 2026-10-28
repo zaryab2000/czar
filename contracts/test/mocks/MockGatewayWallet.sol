@@ -42,6 +42,17 @@ contract MockGatewayWallet {
     mapping(address token => mapping(address depositor => uint256)) internal _withdrawing;
     mapping(address token => mapping(address depositor => uint256)) internal _withdrawalBlock;
 
+    /// @dev SCR-150 §4 (PR #122 P1): one burn per transfer spec, so stand-in retries, concurrent requests and
+    ///      stand-in restarts never debit the depositor twice. The chain, not the stand-in process, is the record.
+    struct BurnRecord {
+        address token;
+        address depositor;
+        uint256 value;
+        address recipient;
+    }
+
+    mapping(bytes32 transferSpecHash => BurnRecord) internal _burns;
+
     // Deposits.sol line 45.
     event Deposited(address indexed token, address indexed depositor, address indexed sender, uint256 value);
     // Delegation.sol lines 47, 54.
@@ -67,6 +78,7 @@ contract MockGatewayWallet {
     error WithdrawalValueMustBePositive();
     error NoWithdrawingBalance();
     error AlreadyInitialized();
+    error BurnRecordMismatch(bytes32 transferSpecHash);
 
     modifier whenNotPaused() {
         if (paused) revert EnforcedPause();
@@ -124,6 +136,43 @@ contract MockGatewayWallet {
 
     /// @notice Stands in for a minted burn intent: debits `depositor` and sends `value` to `recipient` (A2-16).
     function testBurn(address token, address depositor, uint256 value, address recipient) external onlyController {
+        _burn(token, depositor, value, recipient);
+    }
+
+    /// @notice SCR-150 §4: the stand-in's burn for one attested transfer spec. The first call debits `depositor`
+    ///         and records the burn under `transferSpecHash`; a repeat with identical arguments is a no-op (no second
+    ///         debit), and a repeat with different arguments reverts `BurnRecordMismatch`.
+    function testBurnForTransferSpec(
+        bytes32 transferSpecHash,
+        address token,
+        address depositor,
+        uint256 value,
+        address recipient
+    ) external onlyController {
+        if (depositor == address(0) || recipient == address(0)) revert InvalidAddress();
+        BurnRecord storage existing = _burns[transferSpecHash];
+        if (existing.depositor != address(0)) {
+            if (
+                existing.token != token || existing.depositor != depositor || existing.value != value
+                    || existing.recipient != recipient
+            ) revert BurnRecordMismatch(transferSpecHash);
+            return;
+        }
+        _burns[transferSpecHash] = BurnRecord(token, depositor, value, recipient);
+        _burn(token, depositor, value, recipient);
+    }
+
+    /// @notice The recorded burn for `transferSpecHash`; all zero when none exists.
+    function burnRecord(bytes32 transferSpecHash)
+        external
+        view
+        returns (address token, address depositor, uint256 value, address recipient)
+    {
+        BurnRecord storage record = _burns[transferSpecHash];
+        return (record.token, record.depositor, record.value, record.recipient);
+    }
+
+    function _burn(address token, address depositor, uint256 value, address recipient) internal {
         if (_available[token][depositor] < value) revert InsufficientBalance();
         _available[token][depositor] -= value;
         IERC20Minimal(token).transfer(recipient, value);

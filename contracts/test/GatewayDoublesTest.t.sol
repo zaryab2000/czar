@@ -2,6 +2,7 @@
 pragma solidity 0.8.30;
 
 import {Test} from "forge-std/Test.sol";
+import {Vm} from "forge-std/Vm.sol";
 import {MockUSDC3009} from "./mocks/MockUSDC3009.sol";
 import {MockGatewayWallet} from "./mocks/MockGatewayWallet.sol";
 import {MockGatewayMinter} from "./mocks/MockGatewayMinter.sol";
@@ -145,7 +146,9 @@ contract GatewayDoublesTest is Test {
         // The stand-in moves value + fee from the depositor into the minter with testBurn before the mint.
         gw.testBurn(address(usdc), pocket, ONE_USDC, address(minter));
         vm.expectEmit(true, true, true, true, address(minter));
-        emit MockGatewayMinter.AttestationUsed(specHash, vault, ONE_USDC, pocket);
+        emit MockGatewayMinter.AttestationUsed(
+            address(usdc), vault, specHash, 26, bytes32(uint256(uint160(pocket))), bytes32(0), ONE_USDC
+        );
         minter.gatewayMint(_attestation(specHash, ONE_USDC), new bytes(65));
         assertEq(usdc.balanceOf(vault), ONE_USDC);
         assertTrue(minter.isTransferSpecHashUsed(specHash));
@@ -167,6 +170,61 @@ contract GatewayDoublesTest is Test {
         vm.prank(address(0xA11));
         minter.gatewayMint(_attestation(specHash, ONE_USDC), "");
         assertEq(usdc.balanceOf(vault), ONE_USDC);
+    }
+
+    /// @dev PR #122 P2: the indexer's registered Circle ABI (`apps/indexer/src/external-abis.ts`) decodes this topic.
+    function test_mint_attestationUsedTopicMatchesCircleAbi() public {
+        bytes32 specHash = keccak256("spec-topic");
+        gw.testBurn(address(usdc), pocket, ONE_USDC, address(minter));
+        vm.recordLogs();
+        minter.gatewayMint(_attestation(specHash, ONE_USDC), "");
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 circleTopic = keccak256("AttestationUsed(address,address,bytes32,uint32,bytes32,bytes32,uint256)");
+        bool found;
+        for (uint256 i; i < logs.length; ++i) {
+            if (logs[i].emitter != address(minter)) continue;
+            assertEq(logs[i].topics[0], circleTopic);
+            assertEq(logs[i].topics[3], specHash);
+            found = true;
+        }
+        assertTrue(found);
+    }
+
+    // ─────────────── Per-spec idempotent burn (SCR-150 §4, PR #122 P1) ───────────────
+
+    function test_burnForSpec_debitsOnceAndRecords() public {
+        bytes32 specHash = keccak256("burn-1");
+        gw.testBurnForTransferSpec(specHash, address(usdc), pocket, ONE_USDC, address(minter));
+        gw.testBurnForTransferSpec(specHash, address(usdc), pocket, ONE_USDC, address(minter));
+        assertEq(gw.availableBalance(address(usdc), pocket), 4 * ONE_USDC);
+        assertEq(usdc.balanceOf(address(minter)), ONE_USDC);
+        (address token, address depositor, uint256 value, address recipient) = gw.burnRecord(specHash);
+        assertEq(token, address(usdc));
+        assertEq(depositor, pocket);
+        assertEq(value, ONE_USDC);
+        assertEq(recipient, address(minter));
+    }
+
+    function test_burnForSpec_mismatchReverts() public {
+        bytes32 specHash = keccak256("burn-2");
+        gw.testBurnForTransferSpec(specHash, address(usdc), pocket, ONE_USDC, address(minter));
+        vm.expectRevert(abi.encodeWithSelector(MockGatewayWallet.BurnRecordMismatch.selector, specHash));
+        gw.testBurnForTransferSpec(specHash, address(usdc), pocket, 2 * ONE_USDC, address(minter));
+        assertEq(gw.availableBalance(address(usdc), pocket), 4 * ONE_USDC);
+    }
+
+    function test_burnForSpec_repeatSucceedsAfterBalanceDrained() public {
+        bytes32 specHash = keccak256("burn-3");
+        gw.testBurnForTransferSpec(specHash, address(usdc), pocket, 5 * ONE_USDC, address(minter));
+        assertEq(gw.availableBalance(address(usdc), pocket), 0);
+        gw.testBurnForTransferSpec(specHash, address(usdc), pocket, 5 * ONE_USDC, address(minter));
+        assertEq(usdc.balanceOf(address(minter)), 5 * ONE_USDC);
+    }
+
+    function test_burnForSpec_onlyController() public {
+        vm.prank(address(0xBAD));
+        vm.expectRevert("MockGatewayWallet: caller is not the controller");
+        gw.testBurnForTransferSpec(keccak256("burn-4"), address(usdc), pocket, ONE_USDC, address(minter));
     }
 
     function test_mint_uninitializedMinterReverts() public {
