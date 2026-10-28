@@ -78,7 +78,9 @@ export async function pollPocketBalance(
   }
 
   try {
-    const block = await dependencies.chain.getBlockNumber();
+    // Uncached head: viem caches eth_blockNumber for the client's polling interval, which would pin these reads
+    // to a block older than the API figure read just before.
+    const block = await dependencies.chain.getBlockNumber({ cacheTime: 0 });
     const [withdrawing, withdrawalBlock, usdcBalance] = await Promise.all([
       dependencies.chain.readContract({
         address: input.gatewayWallet,
