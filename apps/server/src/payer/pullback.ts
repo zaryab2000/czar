@@ -367,7 +367,7 @@ async function sendSlowWithdrawal(
     let signed;
     try {
       signed = await dependencies.signer.sign("cz-15", {
-        keyId: `K4:${input.pocket}`,
+        keyId: "K4",
         kind: "pocket-slow-withdraw",
         payload: {
           pocket: input.pocket,
@@ -510,7 +510,7 @@ async function signPocketReturn(
   let signed;
   try {
     signed = await dependencies.signer.sign("cz-15", {
-      keyId: `K4:${input.pocket}`,
+      keyId: "K4",
       kind: "pocket-return",
       payload: { pocket: input.pocket, kind: "usdc", amount: amount.toString() },
     });
