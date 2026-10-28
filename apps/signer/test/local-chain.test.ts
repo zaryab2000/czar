@@ -18,6 +18,8 @@ import { runGasRefill } from "../src/gas-refill.ts";
 import { harness, NETWORK } from "./helpers.ts";
 
 const enabled = process.env["CZAR_LOCAL_CHAIN"] === "1";
+/** Circle's ERC-8183 escrow that `contracts/script/Deploy.s.sol` records as `jobEscrow` (A4-01). */
+const CIRCLE_JOB_ESCROW: Address = "0x0747EEf0706327138c69792bF28Cd525089e4583";
 const localRpc = process.env["CZAR_LOCAL_CHAIN_RPC"] ?? "http://127.0.0.1:8545";
 const deployments = resolve(process.cwd(), "../../deployments");
 const outputPath = join(deployments, "arc-local.json");
@@ -56,12 +58,18 @@ describe.skipIf(!enabled)("K8 local arc-anvil acceptance", () => {
     const t = await createLocalSigner(publicClient);
     const deployment = await deployLocalContracts(t, sender);
     expect(deployment.chainId).toBe(31337);
-    expect(deployment).toMatchObject({
-      usdc: NETWORK.usdc,
-      gatewayWallet: NETWORK.gatewayWallet,
-      gatewayMinter: NETWORK.gatewayMinter,
+    expect({
+      usdc: deployment.usdc.toLowerCase(),
+      gatewayWallet: deployment.gatewayWallet.toLowerCase(),
+      gatewayMinter: deployment.gatewayMinter.toLowerCase(),
+      gatewayDomain: deployment.gatewayDomain,
+      jobEscrow: deployment.jobEscrow.toLowerCase(),
+    }).toEqual({
+      usdc: NETWORK.usdc.toLowerCase(),
+      gatewayWallet: NETWORK.gatewayWallet.toLowerCase(),
+      gatewayMinter: NETWORK.gatewayMinter.toLowerCase(),
       gatewayDomain: NETWORK.gatewayDomain,
-      jobEscrow: NETWORK.jobEscrow,
+      jobEscrow: CIRCLE_JOB_ESCROW.toLowerCase(),
     });
     await assertK8Commit(t, testClient, publicClient, deployment);
     await assertGasRefill(t, testClient, publicClient);
