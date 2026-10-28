@@ -1,6 +1,7 @@
 // SCR-146 §3.3 run 5 (SCR-150 §5): kill and resume the CZ-15 payer on a CLEAN pinned arc-anvil with the
-// SCR-150 Gateway doubles, the real CZ-27 signer and the D92 stand-ins. Kill points: reserve.sent, call.sent,
-// before settle, between /v1/transfer and gatewayMint, and after an expired lease.
+// SCR-150 Gateway doubles, the real CZ-27 signer and the D92 stand-ins. Kill points: reserve.sent (also with
+// the resume past the saved reserve's TTL window, SCR-153 §2), call.sent, before settle, between /v1/transfer
+// and gatewayMint, and after an expired lease.
 // "Kill" is in-process: the executor is aborted at an injected point (a raw transaction is dropped before the
 // node or the payer dies right after it is mined; the seller or `/v1/transfer` answers and the payer dies
 // before reading it), the instance is dropped, and a fresh executor resumes over the same database and chain.
@@ -8,11 +9,12 @@
 // transfer per index, one Settled per index, one burn and one AttestationUsed per pullback.
 // Run: CZAR_LOCAL_CHAIN=1 pnpm --filter @czar/server exec vitest run test/local-pocket/crash-restart-arc.test.ts
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { getAbiItem, parseAbi, toFunctionSelector, type Address } from "viem";
+import { getAbiItem, parseAbi, toFunctionSelector, type Address, type Hex } from "viem";
 import { derivedNonce } from "@czar/hashing";
 import { czarVaultAbi } from "@czar/vault-client";
 import { setupDatabase } from "#test/db";
 import { getExecutionTrace } from "#src/payer/executions";
+import { MIN_RESERVATION_TTL_SECONDS } from "#src/payer/vault-direct";
 import {
   ARC_USDC,
   GATEWAY_MINTER,
@@ -42,11 +44,10 @@ const CALLS = 2;
  */
 const SHORT_TIMEOUT_SECONDS = 45;
 /**
- * Every other case. A reserve that is re-sent after a kill must still satisfy
- * `validBefore >= block.timestamp + MIN_RESERVATION_TTL`; with a 30 s seller timeout it has no slack and
- * reverts `BadTtl` if it mines a second later.
+ * An envelope that expires soon after the reserve is signed, so `validBefore` = `envelope.expiresAt` and a
+ * resume near expiry leaves the step-2 formula no room above `MIN_RESERVATION_TTL` (SCR-153 §2).
  */
-const LONG_TIMEOUT_SECONDS = 300;
+const NEAR_EXPIRY_LIFETIME_SECONDS = 120n;
 /** viem wraps the transport error, so match the injected crash by message. */
 const KILLED = "injected crash";
 const FUNDED_STEP_CAP = 400_000n;
@@ -103,6 +104,79 @@ describe.skipIf(!localChainEnabled)(
 
         expect((await executeX402(harness, plan)).state).toBe("done");
         await expectPaidExactlyOnce(plan);
+      });
+
+      it("starts one new attempt when the saved reserve re-sent after the kill reverts BadTtl", async () => {
+        const plan = await x402Plan();
+        harness.chain.crash.arm({
+          name: "reserve-unsent-stale",
+          when: "before-send",
+          match: sentTo(plan, reserveSelector),
+        });
+        await expect(executeX402(harness, plan)).rejects.toThrow(KILLED);
+        const saved = await savedReserve(plan);
+        expect(await reservedEvents(plan)).toHaveLength(0);
+        await advanceChainTimeTo(saved.validBefore - BigInt(MIN_RESERVATION_TTL_SECONDS) + 1n);
+
+        expect((await executeX402(harness, plan)).state).toBe("done");
+        const stale = await harness.chain.reader.getTransactionReceipt({ hash: saved.txHash });
+        expect(stale.status).toBe("reverted");
+        expect(await attemptPhases(plan, 0)).toEqual(["reserve.sent", "reserve.mined"]);
+        expect((await getExecutionTrace(getPool(), plan.planId, 0, 0))[1]?.payload).toEqual({
+          txHash: saved.txHash,
+          error: "BadTtl",
+        });
+        const fresh = await getExecutionTrace(getPool(), plan.planId, 0, 1);
+        expect(fresh.filter((row) => row.phase === "reserve.sent")).toHaveLength(1);
+        expect(fresh.at(-1)?.phase).toBe("step.done");
+        expect(await getExecutionTrace(getPool(), plan.planId, 0, 2)).toEqual([]);
+        const reserved = await reservedEvents(plan);
+        expect(reserved).toHaveLength(1);
+        expect(reserved[0]?.transactionHash).not.toBe(saved.txHash);
+        expect(fresh.find((row) => row.phase === "reserve.mined")?.payload["reservationId"]).toBe(
+          reserved[0]?.args.reservationId?.toString(),
+        );
+        await expectPaidExactlyOnce(plan);
+      });
+
+      it("ends reserve-failed / BadTtl when envelope.expiresAt leaves no room for a fresh reserve", async () => {
+        const plan = await x402Plan(defaultTimeoutSeconds(), NEAR_EXPIRY_LIFETIME_SECONDS);
+        harness.chain.crash.arm({
+          name: "reserve-unsent-near-expiry",
+          when: "before-send",
+          match: sentTo(plan, reserveSelector),
+        });
+        await expect(executeX402(harness, plan)).rejects.toThrow(KILLED);
+        const expiresAt = (await envelopeOf(plan)).expiresAt;
+        expect((await savedReserve(plan)).validBefore).toBe(expiresAt);
+        await advanceChainTimeTo(expiresAt - BigInt(MIN_RESERVATION_TTL_SECONDS / 2));
+
+        expect(await executeX402(harness, plan)).toEqual({
+          state: "failed",
+          errorCode: "reserve-failed",
+        });
+        expect((await getExecutionTrace(getPool(), plan.planId, 0, 0))[1]?.payload).toMatchObject({
+          error: "BadTtl",
+        });
+        const failed = await getExecutionTrace(getPool(), plan.planId, 0, 1);
+        expect(failed.map((row) => row.phase)).toEqual(["step.failed"]);
+        expect(failed[0]?.payload).toMatchObject({
+          errorCode: "reserve-failed",
+          detail: "BadTtl",
+          stepError: { code: "reserve-failed", retryable: false },
+        });
+        expect(await reservedEvents(plan)).toHaveLength(0);
+        expect(await authorizationsUsed(plan)).toHaveLength(0);
+        expect(await usdcTransfers(plan.vault.vault, plan.merchant.payTo)).toHaveLength(0);
+        expect(plan.merchant.settlements()).toBe(0);
+        const envelope = await envelopeOf(plan);
+        expect(envelope.spent).toBe(0n);
+        expect(envelope.reserved).toBe(0n);
+        const step = await getPool().query<{ state: string; calls_used: number }>(
+          "SELECT state,calls_used FROM steps WHERE plan_id=$1 AND step_index=0",
+          [plan.planId],
+        );
+        expect(step.rows[0]).toEqual({ state: "failed", calls_used: 0 });
       });
 
       it("resumes after a kill at call.sent once the seller has settled the payment", async () => {
@@ -207,12 +281,45 @@ describe.skipIf(!localChainEnabled)(
   },
 );
 
-async function x402Plan(maxTimeoutSeconds = LONG_TIMEOUT_SECONDS): Promise<X402Plan> {
+/** Every other case: the seller offers the spec's `merchants.maxTimeoutSeconds` (supply side §6). */
+function defaultTimeoutSeconds(): number {
+  return Number(harness.config.get("merchants.maxTimeoutSeconds"));
+}
+
+async function x402Plan(
+  maxTimeoutSeconds = defaultTimeoutSeconds(),
+  envelopeLifetimeSeconds?: bigint,
+): Promise<X402Plan> {
   return openX402Plan(harness, await harness.createVault(), {
     unitAmount: UNIT_AMOUNT,
     calls: CALLS,
     maxTimeoutSeconds,
+    ...(envelopeLifetimeSeconds === undefined ? {} : { envelopeLifetimeSeconds }),
   });
+}
+
+/** The `reserve.sent` the killed payer saved: its transaction hash and `validBefore`. */
+async function savedReserve(plan: X402Plan): Promise<{ txHash: Hex; validBefore: bigint }> {
+  const sent = (await getExecutionTrace(getPool(), plan.planId, 0, 0)).find(
+    (row) => row.phase === "reserve.sent",
+  );
+  const txHash = sent?.payload["txHash"];
+  const validBefore = sent?.payload["validBefore"];
+  if (typeof txHash !== "string" || typeof validBefore !== "string")
+    throw new Error("The killed payer saved no reserve.sent phase.");
+  return { txHash: txHash as Hex, validBefore: BigInt(validBefore) };
+}
+
+/** Moves the payer clock and chain time together until the latest block is at least `timestamp`. */
+async function advanceChainTimeTo(timestamp: bigint): Promise<void> {
+  const block = await harness.chain.reader.getBlock();
+  const seconds = timestamp - block.timestamp;
+  if (seconds > 0n) await harness.clock.advance(Number(seconds) * MS_PER_SECOND);
+  expect((await harness.chain.reader.getBlock()).timestamp).toBeGreaterThanOrEqual(timestamp);
+}
+
+async function attemptPhases(plan: X402Plan, attempt: number): Promise<string[]> {
+  return (await getExecutionTrace(getPool(), plan.planId, 0, attempt)).map((row) => row.phase);
 }
 
 /** Kill after the seller settled call 0, leaving the lease the killed worker held (no `finally` on SIGKILL). */
@@ -268,7 +375,7 @@ function sentTo(plan: X402Plan, selector: string) {
 }
 
 async function phases(plan: X402Plan): Promise<string[]> {
-  return (await getExecutionTrace(getPool(), plan.planId, 0, 0)).map((row) => row.phase);
+  return attemptPhases(plan, 0);
 }
 
 async function reservedEvents(plan: X402Plan) {
