@@ -209,6 +209,11 @@ async function assertK8Commit(
   expect(count).toBe(1n);
 }
 
+/** Arc native balances are 18-decimal wei; `signer.gas.*` targets are USDC 6-decimal atomic. */
+const WEI_PER_ATOMIC = 10n ** 12n;
+/** One USDC of native gas for the relayer's three refill transactions on arc-anvil. */
+const RELAYER_GAS_HEADROOM_WEI = 1_000_000n * WEI_PER_ATOMIC;
+
 async function assertGasRefill(
   signer: LocalSigner,
   testClient: AnvilRpc,
@@ -217,12 +222,20 @@ async function assertGasRefill(
   const keys = ["K3", "K7", "K8"] as const;
   for (const key of keys) await testClient.setBalance({ address: signer.address(key), value: 0n });
   const relayer = signer.address("relayer");
-  await testClient.setBalance({ address: relayer, value: 1_000_000_000_000_000_000n });
+  const config = loadConfig();
+  const targetWei = (key: (typeof keys)[number]) =>
+    BigInt(config.get(`signer.gas.${key}.targetAtomic` as never) as number) * WEI_PER_ATOMIC;
+  const relayerFundingWei =
+    keys.reduce((sum, key) => sum + targetWei(key), 0n) + RELAYER_GAS_HEADROOM_WEI;
+  await testClient.setBalance({ address: relayer, value: relayerFundingWei });
   const alerts: string[] = [];
   const results = await runGasRefill(localGasRefillOptions(signer, publicClient, alerts));
   expect(results.map(({ key, status }) => [key, status])).toEqual(
     keys.map((key) => [key, "refilled"]),
   );
+  for (const key of keys) {
+    expect(await publicClient.getBalance({ address: signer.address(key) })).toBe(targetWei(key));
+  }
   expect(alerts).toEqual([]);
 
   await testClient.setBalance({ address: signer.address("K3"), value: 0n });
