@@ -34,6 +34,12 @@
   | Gateway clear, `return_tx` mined with `Transfer(pocket → vault)` and EOA empty | terminal (below) |
   | Gateway clear, `returnable ≤ 0`, no `return_tx` | terminal with `returned_amount = 0` (nothing to send) |
 
+- **Return mined but the pocket isn't empty (G5, amendment 2026-10-28).**
+  - "Empty" is always SCR-152's `returnable ≤ 0`, never USDC balance = 0. The gas dust left after a return is expected and counts as empty.
+  - If a `return_tx` is mined and a fresh read still shows `returnable > 0`, new money reached the EOA after the return (a late mint or a transfer in).
+  - CZ-15 sends nothing automatically. The row stays `pending`. Completion (d) fails, and so does SCR-145 predicate 5, so the money is never written off.
+  - It stays visible to the operator as a pending row past `payer.manualReturnHoldHours`.
+  - Phase 1 has no automatic second return: a row stores one `return_tx`. A multi-return design is stage 2.
 - **Never `pocket-return` while the row isn't Gateway clear.** A K4 `pocket-return` request for a row that isn't Gateway clear is a CZ-15 bug. The test below asserts that it never happens.
 - **Completion rule.** It replaces SCR-144 §1 and SCR-152 §2. A row is terminal only when all of these hold:
   - (a) Gateway clear
@@ -69,9 +75,12 @@
   - the step is stuck
 
 ### Ruling: a new attempt with a fresh reserve (the builder's option b)
-- **Trigger:** the saved `reserve.sent` transaction has a receipt with status 0, and the decoded revert is `BadTtl()`.
+- **Trigger:** the saved `reserve.sent` transaction has a receipt with status 0, and the saved `validBefore < block.timestamp + MIN_RESERVATION_TTL` for the block that mined it. That is exactly the vault's `BadTtl()` condition.
+  - Decide by this condition, using only the receipt and that block's header.
+  - Don't decode the revert with `eth_call` and block overrides: the Arc testnet RPC may not support them.
+  - A status-0 receipt where the condition doesn't hold is any other revert (below).
 - **Action:**
-  - CZ-15 writes `reserve.mined` for the old attempt with the decoded error. This uses the existing phase; no new phase.
+  - CZ-15 writes `reserve.mined` for the old attempt with `BadTtl` as the outcome. This uses the existing phase; no new phase.
   - It then starts the step again from §5.2 step 1 (pre-check) as `attempt + 1` in `step_executions`, with a fresh `validBefore` computed by the step-2 formula and the nonces derived for the new reservation.
 - **Why this is safe:**
   - The old reservation never existed on chain.
@@ -79,15 +88,20 @@
   - Nothing can double-reserve or double-pay.
 - **Bound: no counter, no new key.**
   - The new attempt's reserve is sent live, so it can only hit `BadTtl()` again through another crash that outlasts the window.
-  - If the step-2 formula can't produce a `validBefore ≥ now + MIN_RESERVATION_TTL`, because `envelope.expiresAt` is too close, the step ends `failed` with `StepError.code = "reserve-failed"`, `detail = "BadTtl"` and `retryable = false` (cross-cutting §5.2). The envelope then closes by the normal path.
+  - If the step-2 formula can't produce a `validBefore ≥ now + MIN_RESERVATION_TTL`, because `envelope.expiresAt` is too close, the step ends `failed` with `StepError {code: "reserve-failed", message: "BadTtl", retryable: false}` (02 §4.16; cross-cutting §5.2). `StepError` has no `detail` field: the decoded error name goes in `message`, which never holds user text. The envelope then closes by the normal path.
 - **Any other revert** of a saved reserve follows the existing `reserve-failed` path. This SCR doesn't change it.
 - **Tests (run 5):**
   - Advance time past the window with `evm_increaseTime` or `anvil_setNextBlockTimestamp` before the resume.
   - The step makes exactly one new attempt with a new `reservationId`, pays once, and finalizes.
-  - A second case with `envelope.expiresAt` inside the window ends `reserve-failed` / `BadTtl` with no reservation and no payment.
+  - A second case with `envelope.expiresAt` inside the window ends `reserve-failed` with `message = "BadTtl"`, no reservation and no payment.
 - **Owner:** the builder, in the same stacked PR as §1 or a separate build-v1 PR.
 
-## 3. Merge order (no ruling needed)
+## 3. Signer block reads (G5 follow-up)
+- The signer's on-chain reads (`postgres-projection.ts`, the block-number reads used for the withdraw and return predicates) must bypass viem's block cache (`getBlockNumber({ cacheTime: 0 })`), the same fix as `gateway-balances.ts` (#122) and the CZ-15 slow-path reader (#146).
+- A cached block number can deny `withdraw` right after `withdrawalBlock`.
+- Owner: the builder, as a small signer PR with a test that reads a block mined after the cached one.
+
+## 4. Merge order (no ruling needed)
 - #137 still sends `keyId: "K4:${pocket}"`. The signer accepts only `"K4"`, which #133 fixes.
 - Order:
   1. Zaryab merges #133.
