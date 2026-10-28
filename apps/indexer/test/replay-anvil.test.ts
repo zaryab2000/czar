@@ -94,12 +94,14 @@ ajv.addSchema(pocketProjectionSchema, "pocket-projection");
 let anvil: ChildProcess | undefined;
 let ponder: ChildProcess | undefined;
 let pgliteDir: string | undefined;
+let manifestDir: string | undefined;
 let ponderLogs = "";
 
 afterAll(() => {
   ponder?.kill();
   anvil?.kill();
   if (pgliteDir) rmSync(pgliteDir, { recursive: true, force: true });
+  if (manifestDir) rmSync(manifestDir, { recursive: true, force: true });
   for (const path of [KEYS_FILE, OUT_FILE]) {
     rmSync(fileURLToPath(new URL(path, ROOT)), { force: true });
   }
@@ -403,8 +405,10 @@ async function indexedMirrors(): Promise<{
   pgliteDir = mkdtempSync(join(tmpdir(), "czar-t031-replay-"));
   // src/index.ts loads register-external-events, which reads the Gateway fields of the deployment manifest at
   // import time even when the external poll is disabled; give it the local values instead of the absent
-  // deployments/arc-testnet.json.
-  const deploymentPath = join(pgliteDir, "deployment.json");
+  // deployments/arc-testnet.json. The manifest lives outside pgliteDir: PGlite treats a non-empty data
+  // directory as an existing cluster and fails every query.
+  manifestDir = mkdtempSync(join(tmpdir(), "czar-t031-manifest-"));
+  const deploymentPath = join(manifestDir, "deployment.json");
   writeFileSync(
     deploymentPath,
     `${JSON.stringify({ gatewayWallet: GATEWAY_WALLET, usdc: USDC, gatewayDomain: GATEWAY_DOMAIN })}\n`,
