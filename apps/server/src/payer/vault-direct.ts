@@ -50,6 +50,11 @@ export const FINALIZE_CHUNK = 32;
 /** The vault's `MIN_RESERVATION_TTL` (`CzarConstants.sol`): `validBefore ≥ block.timestamp + this`. */
 export const MIN_RESERVATION_TTL_SECONDS = 30;
 const BAD_TTL = "BadTtl";
+/**
+ * The decoded revert of a stale saved reserve. `StepError` and `reserve.mined` have no field for a decoded
+ * error name (SCR-153 §2 `detail` is an open spec gap), so it travels in a message.
+ */
+export const STALE_RESERVE_MESSAGE = `vault reverted ${BAD_TTL}()`;
 const RESERVE_FAILED = "reserve-failed";
 /** Marks an attempt whose saved reserve reverted `BadTtl()`: no reservation exists and its nonce is spent. */
 const STALE_RESERVE = Symbol("stale-reserve");
@@ -298,7 +303,10 @@ async function currentAttempt(
 }
 
 function staleReserve(trace: readonly ExecutionPhaseRow[]): boolean {
-  return trace.findLast((row) => row.phase === "reserve.mined")?.payload["error"] === BAD_TTL;
+  return (
+    trace.findLast((row) => row.phase === "reserve.mined")?.payload["message"] ===
+    STALE_RESERVE_MESSAGE
+  );
 }
 
 async function remainingExpectedCalls(
@@ -464,11 +472,10 @@ async function failStaleReserve(
     stepIndex: input.step.stepIndex,
     attempt: input.attempt ?? 0,
     errorCode: RESERVE_FAILED,
-    detail: BAD_TTL,
     stepError: {
       schemaVersion: "1.0",
       code: RESERVE_FAILED,
-      message: "The envelope expires too soon for a new reservation to meet the vault minimum TTL.",
+      message: STALE_RESERVE_MESSAGE,
       retryable: false,
     },
   });
@@ -600,7 +607,7 @@ async function recordStaleReserve(
     stepIndex: input.step.stepIndex,
     attempt,
     phase: "reserve.mined",
-    payload: { txHash, error: BAD_TTL },
+    payload: { txHash, message: STALE_RESERVE_MESSAGE },
   });
   return STALE_RESERVE;
 }
