@@ -170,6 +170,8 @@ test("binds the fork to loopback with the verified Arc block pin", () => {
     "--host",
     "127.0.0.1",
     "--mnemonic-random",
+    "--block-time",
+    "1",
     "--quiet",
     "--port",
     "8545",

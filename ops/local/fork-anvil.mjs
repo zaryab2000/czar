@@ -147,6 +147,8 @@ export function forkAnvilArguments(block, rpcUrl = FORK_RPC_URL) {
     "--host",
     "127.0.0.1",
     "--mnemonic-random",
+    "--block-time",
+    "1",
     "--quiet",
     "--port",
     "8545",

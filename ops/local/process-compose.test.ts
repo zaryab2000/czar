@@ -55,6 +55,9 @@ describe("local process composition", () => {
     const cleanArc = processSection("arc-anvil").join("\n");
     expect(cleanArc).toContain("arc-anvil --network arc --chain-id 5042002");
     expect(cleanArc).not.toContain("--fork-url");
+    // The signer fails closed when the latest block is older than signer.freezeStateMaxAgeSec, so
+    // the local chain mines on an interval like Arc instead of only when a transaction arrives.
+    expect(cleanArc).toContain("--block-time 1");
     expect(forkComposition).toContain("command: node ops/local/fork-anvil.mjs");
     expect(forkLauncher).toContain("latest - FORK_BLOCK_OFFSET");
     expect(forkLauncher).toContain('"--host",\n    "127.0.0.1"');
