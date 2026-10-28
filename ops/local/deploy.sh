@@ -49,7 +49,7 @@ RELAYER_ADDRESS="$(node "$ROOT/ops/local/parse-local-keys.mjs" --cli "$KEYS_FILE
 SENDER_LOWER="$(printf '%s' "$SENDER" | tr '[:upper:]' '[:lower:]')"
 RELAYER_LOWER="$(printf '%s' "$RELAYER_ADDRESS" | tr '[:upper:]' '[:lower:]')"
 if [ "$RELAYER_LOWER" != "$SENDER_LOWER" ]; then
-	TX="{\"from\":\"$SENDER\",\"to\":\"$RELAYER_ADDRESS\",\"value\":\"0xDE0B6B3A7640000\"}"
+	TX="{\"from\":\"$SENDER\",\"to\":\"$RELAYER_ADDRESS\",\"value\":\"0x8AC7230489E80000\"}"
 	arc-cast rpc eth_sendTransaction "$TX" --rpc-url "$RPC_URL" >/dev/null
 fi
 

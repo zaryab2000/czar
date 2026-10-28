@@ -55,3 +55,15 @@ printf '%s\\n' "$*" >> "$FORGE_CALLS"
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("the clean deploy funds the relayer with the same service amount as the fork funding", async () => {
+  // The relayer refills K3, K7 and K8 to their signer.gas.*.targetAtomic (2 + 0.5 + 0.5 USDC) and
+  // pays its own gas, so one native unit cannot cover it.
+  const { SERVICE_NATIVE_AMOUNT } = await import("./fund-fork.mjs");
+  const deploy = await readFile(resolve(import.meta.dirname, "deploy.sh"), "utf8");
+  const value = `0x${SERVICE_NATIVE_AMOUNT.toString(16).toUpperCase()}`;
+  assert.match(
+    deploy,
+    new RegExp(`\\\\"to\\\\":\\\\"\\$RELAYER_ADDRESS\\\\",\\\\"value\\\\":\\\\"${value}\\\\"`),
+  );
+});
