@@ -3,22 +3,18 @@
 // parameters). Audit rows go to the server `audit` table through `postgresAudit`, as in production.
 // The projection reads the local chain and the server tables directly; it mirrors
 // `apps/signer/src/postgres-projection.ts`, whose indexer tables are not populated without Ponder.
-// It has no `overdueManualReturnFacts`, so a stale-figure write-off is refused (`gateway-balance-stale`).
 import { randomBytes } from "node:crypto";
 import { dirname } from "node:path";
-import {
-  parseAbi,
-  type Address,
-  type PublicClient,
-  type TransactionSerializableEIP1559,
-} from "viem";
+import { decodeEventLog, parseAbi, type Address, type Hash, type PublicClient } from "viem";
 import type { Config } from "@czar/config";
 import type { Hash32 } from "@czar/hashing";
 import {
+  createRpcTransactionPreparer,
   createSigner,
   openLocalKeystore,
   postgresAudit,
   type KeystoreFs,
+  type OverdueManualReturnFacts,
   type PlanLeaf,
   type PocketBalances,
   type Projection,
@@ -38,16 +34,18 @@ import type { IndexerStandin } from "#test/local-pocket/indexer-standin";
 
 const KEYSTORE_PATH = "/czar-local-pocket-keystore";
 const TEST_KDF = { N: 1024, r: 8, p: 1 } as const;
-const PRIORITY_FEE_WEI = 1_000_000_000n;
-const FEE_MULTIPLIER = 2n;
 const MS_PER_SECOND = 1000;
+const SECONDS_PER_HOUR = 3600;
 /** A live chain mines continuously; an idle anvil does not, so the projection mines before a stale read. */
 const IDLE_BLOCK_SECONDS = 5;
 const gatewayAbi = parseAbi([
   "function withdrawingBalance(address token, address depositor) view returns (uint256)",
   "function withdrawalBlock(address token, address depositor) view returns (uint256)",
 ]);
-const usdcAbi = parseAbi(["function balanceOf(address account) view returns (uint256)"]);
+const usdcAbi = parseAbi([
+  "function balanceOf(address account) view returns (uint256)",
+  "event Transfer(address indexed from, address indexed to, uint256 value)",
+]);
 
 export interface SignerHarness {
   readonly signer: Signer;
@@ -111,7 +109,11 @@ export function createSignerHarness(input: {
     config: input.config,
     audit: postgresAudit(input.pool),
     callers: { "cz-15": ["K3", "K4", "relayer"] },
-    prepareTransaction: (from, call) => prepareTransaction(input.reader, from, call),
+    // The preparer the signer process signs with; CZ-15 derives the SCR-152 returnable value with the same.
+    prepareTransaction: createRpcTransactionPreparer({
+      chainId: ARC_CHAIN_ID,
+      client: input.reader,
+    }),
     nowMs: input.nowMs,
     alert: async () => undefined,
   });
@@ -121,24 +123,6 @@ export function createSignerHarness(input: {
     k3: input.keys.k3,
     relayer: input.keys.relayer,
     leaves,
-  };
-}
-
-async function prepareTransaction(
-  reader: PublicClient,
-  from: Address,
-  call: { to: Address; data: `0x${string}`; value: bigint },
-): Promise<TransactionSerializableEIP1559> {
-  return {
-    type: "eip1559",
-    chainId: ARC_CHAIN_ID,
-    nonce: await reader.getTransactionCount({ address: from, blockTag: "pending" }),
-    gas: await reader.estimateGas({ account: from, ...call }),
-    maxFeePerGas: (await reader.getGasPrice()) * FEE_MULTIPLIER,
-    maxPriorityFeePerGas: PRIORITY_FEE_WEI,
-    to: call.to,
-    data: call.data,
-    value: call.value,
   };
 }
 
@@ -288,6 +272,8 @@ function chainProjection(input: ProjectionInput): Projection {
     slowWithdrawTrigger: (pocket) => slowWithdrawTrigger(input, pocket),
     pocketSpendAfterObservation: (pocket, observedAt) =>
       pocketSpendAfterObservation(input, pocket, observedAt),
+    overdueManualReturnFacts: (pocket, vault, now) =>
+      overdueManualReturnFacts(input, pocket, vault, now),
   };
 }
 
@@ -390,4 +376,136 @@ async function pocketSpendAfterObservation(
     [JSON.stringify([{ keyRef: `K4:${pocket.toLowerCase()}` }]), new Date(observedAt - maxAgeMs)],
   );
   return result.rows.length > 0;
+}
+
+async function hasPocketAudit(pool: Pool, pocket: Address, kind: string): Promise<boolean> {
+  const result = await pool.query(
+    `SELECT 1 FROM audit
+     WHERE action=$1 AND outcome='signed'
+       AND EXISTS (
+         SELECT 1 FROM jsonb_array_elements(object_ids) AS ids
+         WHERE lower(ids->>'keyRef')=lower($2)
+       )
+     LIMIT 1`,
+    [`signer:${kind}`, `K4:${pocket}`],
+  );
+  return result.rows.length > 0;
+}
+
+async function overdueManualReturnFacts(
+  input: ProjectionInput,
+  pocket: Address,
+  vault: Address,
+  now: number,
+): Promise<OverdueManualReturnFacts> {
+  const record = await input.reader.readContract({
+    address: vault,
+    abi: czarVaultAbi,
+    functionName: "getPocket",
+    args: [pocket],
+  });
+  const envelope = await input.reader.readContract({
+    address: vault,
+    abi: czarVaultAbi,
+    functionName: "getEnvelope",
+    args: [record.envelopeId],
+  });
+  const balances = await pocketBalances(input, pocket);
+  const row = (
+    await input.pool.query<{
+      state: string;
+      closed_pocket: boolean;
+      return_tx: string | null;
+      return_block: string | null;
+      return_log_index: number | null;
+      returned_amount: string | null;
+    }>(
+      `SELECT state,closed_pocket,return_tx,return_block::text AS return_block,
+              return_log_index,returned_amount::text AS returned_amount
+       FROM payer_pullback_gateway_failures
+       WHERE lower(pocket)=lower($1) AND lower(vault_address)=lower($2)
+       ORDER BY manual_return_required_at DESC NULLS LAST LIMIT 1`,
+      [pocket, vault],
+    )
+  ).rows[0];
+  const base = {
+    pocketStateValid: record.state === 2 || record.state === 3,
+    envelopeOpen: envelope.state === 1,
+    pendingPullbackZero: record.pendingPullback === 0n,
+    gatewayWithdrawingZero: balances.gatewayWithdrawing === 0n,
+    slowWithdrawAudited: await hasPocketAudit(input.pool, pocket, "pocket-slow-withdraw"),
+    pocketReturnAudited: await hasPocketAudit(input.pool, pocket, "pocket-return"),
+  };
+  const rowValid =
+    row !== undefined &&
+    row.state === "manual-return-required" &&
+    !row.closed_pocket &&
+    row.return_tx !== null &&
+    row.return_block !== null &&
+    row.return_log_index !== null &&
+    row.returned_amount !== null;
+  if (!rowValid)
+    return {
+      ...base,
+      manualReturnRowValid: false,
+      returnReceiptValid: false,
+      returnOverdue: false,
+      manualReturnRecordedAfter: false,
+    };
+  const receipt = await returnReceiptFacts(input, pocket, vault, row, now);
+  return { ...base, manualReturnRowValid: true, ...receipt };
+}
+
+async function returnReceiptFacts(
+  input: ProjectionInput,
+  pocket: Address,
+  vault: Address,
+  row: {
+    return_tx: string | null;
+    return_block: string | null;
+    return_log_index: number | null;
+    returned_amount: string | null;
+  },
+  now: number,
+) {
+  const receipt = await input.reader.getTransactionReceipt({ hash: row.return_tx as Hash });
+  const transfer = receipt.logs.find((log) => {
+    if (log.address.toLowerCase() !== ARC_USDC.toLowerCase()) return false;
+    try {
+      const event = decodeEventLog({ abi: usdcAbi, data: log.data, topics: log.topics });
+      return (
+        event.eventName === "Transfer" &&
+        event.args.from.toLowerCase() === pocket.toLowerCase() &&
+        event.args.to.toLowerCase() === vault.toLowerCase() &&
+        event.args.value === BigInt(row.returned_amount ?? "0")
+      );
+    } catch {
+      return false;
+    }
+  });
+  const block = await input.reader.getBlock({ blockNumber: receipt.blockNumber });
+  const returnBlock = BigInt(row.return_block ?? "0");
+  const logIndex = row.return_log_index ?? -1;
+  const valid =
+    receipt.status === "success" &&
+    receipt.blockNumber === returnBlock &&
+    transfer !== undefined &&
+    transfer.logIndex === logIndex;
+  const holdSeconds = Number(input.config.get("payer.manualReturnHoldHours")) * SECONDS_PER_HOUR;
+  const recorded = await input.reader.getContractEvents({
+    address: vault,
+    abi: czarVaultAbi,
+    eventName: "ManualReturnRecorded",
+    args: { pocket },
+    fromBlock: 0n,
+  });
+  return {
+    returnReceiptValid: valid,
+    returnOverdue: valid && Number(block.timestamp) <= now - holdSeconds,
+    manualReturnRecordedAfter: recorded.some(
+      (event) =>
+        event.blockNumber > returnBlock ||
+        (event.blockNumber === returnBlock && event.logIndex > logIndex),
+    ),
+  };
 }

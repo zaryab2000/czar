@@ -249,7 +249,8 @@ describe("slow pullback scheduler", () => {
   it("recovers a mined withdrawal after restart and records the verified vault return", async () => {
     await getPool().query(
       `UPDATE payer_pullback_gateway_failures
-       SET closed_pocket=true,unavailable_since=$2 WHERE plan_id=$1`,
+       SET closed_pocket=true,unavailable_since=$2,initiate_tx='initiate-tx',
+           withdraw_tx='withdraw-tx' WHERE plan_id=$1`,
       [PLAN_ID, NOW],
     );
     for (const phase of [
@@ -322,7 +323,8 @@ describe("slow pullback scheduler", () => {
   it("recognizes a mined pocket return after restart without sending it twice", async () => {
     await getPool().query(
       `UPDATE payer_pullback_gateway_failures
-       SET closed_pocket=true,unavailable_since=$2,return_tx='return-tx'
+       SET closed_pocket=true,unavailable_since=$2,initiate_tx='initiate-tx',
+           withdraw_tx='withdraw-tx',return_tx='return-tx'
        WHERE plan_id=$1`,
       [PLAN_ID, NOW],
     );
