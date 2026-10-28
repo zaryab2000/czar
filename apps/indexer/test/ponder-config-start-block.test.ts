@@ -32,8 +32,7 @@ async function loadConfiguredStartBlock(
   );
 
   const configUrl = pathToFileURL(resolve(import.meta.dirname, "../ponder.config.ts")).href;
-  const script =
-    `import config from ${JSON.stringify(configUrl)};` + `process.stdout.write(${expression});`;
+  const script = `import config from ${JSON.stringify(configUrl)};process.stdout.write(${expression});`;
   const env: NodeJS.ProcessEnv = {
     PATH: process.env["PATH"],
     HOME: process.env["HOME"],
