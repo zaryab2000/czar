@@ -72,8 +72,8 @@ export default createConfig({
     },
   },
   blocks: {
-    GatewayPoll: { chain: "arcTestnet" },
-    IndexerLag: { chain: "arcTestnet" },
+    GatewayPoll: { chain: "arcTestnet", startBlock },
+    IndexerLag: { chain: "arcTestnet", startBlock },
   },
   contracts: {
     CzarVaultFactory: {
