@@ -93,6 +93,35 @@ node -e 'const m=require("./deployments/local-keys.json");console.log(Object.key
 
 Expected: `K3,K5,K6,K7,K8,relayer,K20,K10:czar-search`.
 
+**Step 4: create the signer socket tokens (only if absent).** The signer authenticates
+each caller with its own keychain token (SCR-126): item
+`dev.czar.signer.keystore.token.<service>`, account `<service>`, for `server`,
+`merchants` and `relayer-jobs` (`apps/signer/src/socket.ts:14,330-345`). The signer
+loads all three at startup, and each token must be at least 32 characters. Without them
+the server exits with `signer keychain token missing or too short for server`.
+
+Check first (never prints a token):
+
+```sh
+for s in server merchants relayer-jobs; do
+  security find-generic-password -s "dev.czar.signer.keystore.token.$s" -a "$s" >/dev/null 2>&1 \
+    && echo "token $s: exists" || echo "token $s: absent"
+done
+```
+
+For each `absent` service, create the item. `security` prompts for the value because `-w`
+is the last option. Paste a fresh random value of at least 32 characters (for example,
+one line of `openssl rand -hex 32` run in a separate terminal). Never put the value in an
+argument, environment variable, log, chat or committed file:
+
+```sh
+security add-generic-password -s dev.czar.signer.keystore.token.server -a server -w
+security add-generic-password -s dev.czar.signer.keystore.token.merchants -a merchants -w
+security add-generic-password -s dev.czar.signer.keystore.token.relayer-jobs -a relayer-jobs -w
+```
+
+Report back only `token <service>: exists` for all three, from the check above.
+
 ## Start and readiness
 
 For the clean chain, start the existing stack from the repository root:
