@@ -8,6 +8,7 @@ import {
   validateLocalOnlyConfig,
   type Config,
 } from "../../../packages/config/src/index.ts";
+import { transferSpecHash, type TransferSpec } from "../../../packages/hashing/src/eip712.ts";
 
 const TRANSFER_SELECTOR = "cf092995";
 const BALANCE_FIXTURE_PATH = new URL("./fixtures/balances.json", import.meta.url);
@@ -15,6 +16,24 @@ const FIXTURE_PATH = new URL("./fixtures/transfers.json", import.meta.url);
 const MAX_BODY_BYTES = 1_048_576;
 const RECEIPT_ATTEMPTS = 20;
 const RECEIPT_RETRY_MS = 250;
+// SCR-150 §4 selectors (keccak256 of the signature, first 4 bytes).
+const AVAILABLE_BALANCE_SELECTOR = "3ccb64ae"; // availableBalance(address,address)
+// testBurnForTransferSpec(bytes32,address,address,uint256,address): one burn per transfer spec (PR #122 P1).
+const TEST_BURN_FOR_SPEC_SELECTOR = "18508587";
+const BURN_RECORD_SELECTOR = "4f1a276d"; // burnRecord(bytes32)
+const BURN_RECORD_WORDS = 4;
+const HEX_PER_WORD = 64;
+const USDC_DECIMALS = 6;
+/** contracts/script/Deploy.s.sol:21 (A2-01); equals the placement helper's canonical GatewayWallet. */
+export const STANDIN_GATEWAY_WALLET = "0x0077777d7eba4688bdef3e311b846f25870a19b9";
+const LOCAL_SIGNATURE = `0x${"22".repeat(65)}`;
+const BYTES32 = /^0x[\da-fA-F]{64}$/;
+const UNSIGNED = /^(0|[1-9]\d*)$/;
+
+export type GatewayStandinOptions = {
+  /** `routing.gatewayFeeAtomic`: the fee Gateway debits on top of `value` (A2-17). */
+  readonly gatewayFeeAtomic?: bigint;
+};
 
 export type StandinOptions = {
   readonly config: Config;
@@ -47,6 +66,7 @@ export async function handleStandinRequest(
   request: Request,
   rpc: RpcCall,
   usdcAddress = "0x3600000000000000000000000000000000000000",
+  gateway: GatewayStandinOptions = {},
 ): Promise<Response> {
   const url = new URL(request.url);
   if (url.pathname === "/health" && request.method === "GET") return json({ status: "ok" });
@@ -56,8 +76,12 @@ export async function handleStandinRequest(
   if (url.pathname === "/settle" && request.method === "POST") {
     return settle(request, rpc, usdcAddress);
   }
-  if (url.pathname === "/v1/balances" && request.method === "POST") return balances(request);
-  if (url.pathname === "/v1/transfer" && request.method === "POST") return transfer(request);
+  if (url.pathname === "/v1/balances" && request.method === "POST") {
+    return balances(request, rpc, usdcAddress);
+  }
+  if (url.pathname === "/v1/transfer" && request.method === "POST") {
+    return transfer(request, rpc, usdcAddress, gateway.gatewayFeeAtomic ?? 0n);
+  }
   if (url.pathname === "/v1/x402/transfers" && request.method === "GET") {
     return transfers(url);
   }
@@ -74,6 +98,7 @@ export async function createStandinServer(options: StandinOptions) {
         request,
         rpc,
         options.config.get("chain.usdcAddress") as string,
+        { gatewayFeeAtomic: BigInt(options.config.get("routing.gatewayFeeAtomic") as number) },
       );
       await writeResponse(response, outgoing);
     } catch {
@@ -158,7 +183,12 @@ async function settle(request: Request, rpc: RpcCall, usdcAddress: string): Prom
   }
 }
 
-async function balances(request: Request): Promise<Response> {
+/**
+ * Fixture balances, unless the SCR-150 Gateway double (or a real GatewayWallet on a fork) is at the canonical
+ * address: then the depositor's `availableBalance` is read from the chain, so pocket balances follow deposits,
+ * burns and withdrawals.
+ */
+async function balances(request: Request, rpc: RpcCall, usdcAddress: string): Promise<Response> {
   const body = await readJson(request);
   const fixture = JSON.parse(await readFile(BALANCE_FIXTURE_PATH, "utf8")) as {
     token: string;
@@ -169,25 +199,267 @@ async function balances(request: Request): Promise<Response> {
     : isRecord(body) && Array.isArray(body["balances"])
       ? body["balances"]
       : [body];
-  const balanceRows = depositors.flatMap((item) => {
-    if (!isRecord(item) || typeof item["depositor"] !== "string") return [];
+  const chainBacked = await hasCode(rpc, STANDIN_GATEWAY_WALLET);
+  const balanceRows: Record<string, unknown>[] = [];
+  for (const item of depositors) {
+    if (!isRecord(item) || typeof item["depositor"] !== "string") continue;
     const domain = item["domain"] ?? 26;
     const recorded = fixture.balances.find((candidate) => candidate["domain"] === domain);
-    return recorded ? [{ ...recorded, depositor: item["depositor"] }] : [];
-  });
+    if (!recorded) continue;
+    if (!chainBacked) {
+      balanceRows.push({ ...recorded, depositor: item["depositor"] });
+      continue;
+    }
+    if (!isAddress(item["depositor"])) return json({ error: "invalid_request" }, 400);
+    let available: bigint;
+    try {
+      available = await availableBalance(rpc, usdcAddress, item["depositor"]);
+    } catch {
+      return json({ error: "rpc_unavailable" }, 502);
+    }
+    balanceRows.push({
+      ...recorded,
+      depositor: item["depositor"],
+      balance: formatUsdc(available),
+      pendingBatch: formatUsdc(0n),
+    });
+  }
   return json({ token: fixture.token, balances: balanceRows });
 }
 
-async function transfer(request: Request): Promise<Response> {
+/**
+ * SCR-150 §4: the local `/v1/transfer`. Recomputes the replay `transferSpecHash` exactly as the payer does
+ * (`@czar/hashing` `transferSpecHash`, the hash the vault stores on `requestPullback`), debits value + fee from
+ * the depositor in the Gateway double into the minter double, and returns the local attestation
+ * `abi.encode(transferSpecHash, recipient, value, depositor)` that the minter double accepts.
+ *
+ * Idempotent by `transferSpecHash` (PR #122 P1): the burn is recorded on chain by the Gateway double
+ * (`testBurnForTransferSpec`), so a payer retry after a crash, two concurrent requests, or a restarted stand-in
+ * all return the same attestation with exactly one debit. Requests for one hash are also serialized in-process.
+ * A request whose spec hash was already burned with different arguments gets `transfer_spec_conflict`, no burn.
+ */
+async function transfer(
+  request: Request,
+  rpc: RpcCall,
+  usdcAddress: string,
+  feeAtomic: bigint,
+): Promise<Response> {
   const body = await readJson(request);
   if (!Array.isArray(body) || body.length !== 1) {
     return json({ error: "invalid_request" }, 400);
   }
+  const parsed = burnIntent(body[0]);
+  if (!parsed) return json({ error: "invalid_request" }, 400);
+  const { spec, maxFee } = parsed;
+  const token = bytes32ToAddress(spec.sourceToken);
+  if (token !== usdcAddress.toLowerCase() || bytes32ToAddress(spec.destinationToken) !== token) {
+    return json({ error: "unsupported_token" }, 400);
+  }
+  if (maxFee < feeAtomic) return json({ error: "max_fee_too_low" }, 400);
+  const hash = transferSpecHash(spec);
+  const burn: BurnArguments = {
+    wallet: bytes32ToAddress(spec.sourceContract),
+    token,
+    depositor: bytes32ToAddress(spec.sourceDepositor),
+    debit: spec.value + feeAtomic,
+    minter: bytes32ToAddress(spec.destinationContract),
+  };
+  const recipient = bytes32ToAddress(spec.destinationRecipient);
+  const outcome = await serializedByHash(hash, () => burnOnce(rpc, hash, burn));
+  if (outcome !== "burned") return outcome;
   return json({
-    transferId: "d863fd6a-6e1c-4ab6-ac61-22966d41529a",
-    attestation: `0x${"11".repeat(32)}`,
-    signature: `0x${"22".repeat(65)}`,
+    transferId: transferIdForAddress(hash, burn.depositor),
+    attestation: `0x${hash.slice(2)}${wordAddress(recipient)}${wordNumber(spec.value.toString())}${wordAddress(burn.depositor)}`,
+    signature: LOCAL_SIGNATURE,
   });
+}
+
+type BurnArguments = {
+  readonly wallet: string;
+  readonly token: string;
+  readonly depositor: string;
+  readonly debit: bigint;
+  readonly minter: string;
+};
+
+type BurnRecordRead = {
+  readonly token: string;
+  readonly depositor: string;
+  readonly value: bigint;
+  readonly recipient: string;
+};
+
+const pendingBurns = new Map<string, Promise<unknown>>();
+
+/** Runs `task` after any in-flight task for the same spec hash, in this process. */
+async function serializedByHash<T>(hash: string, task: () => Promise<T>): Promise<T> {
+  const previous = pendingBurns.get(hash) ?? Promise.resolve();
+  const current = previous.then(task, task);
+  const settled = current.then(
+    () => undefined,
+    () => undefined,
+  );
+  pendingBurns.set(hash, settled);
+  try {
+    return await current;
+  } finally {
+    if (pendingBurns.get(hash) === settled) pendingBurns.delete(hash);
+  }
+}
+
+/** Reads the on-chain burn record first; burns only when none exists. */
+async function burnOnce(
+  rpc: RpcCall,
+  hash: string,
+  burn: BurnArguments,
+): Promise<"burned" | Response> {
+  try {
+    if (!(await hasCode(rpc, burn.wallet)) || !(await hasCode(rpc, burn.minter))) {
+      return json({ error: "gateway_double_missing" }, 503);
+    }
+    const existing = await readBurnRecord(rpc, burn.wallet, hash);
+    if (existing) return matchesBurn(existing, burn) ? "burned" : transferSpecConflict();
+    if ((await availableBalance(rpc, burn.token, burn.depositor, burn.wallet)) < burn.debit) {
+      return json({ error: "insufficient_balance" }, 400);
+    }
+    const accounts = await rpc("eth_accounts", []);
+    if (!Array.isArray(accounts) || typeof accounts[0] !== "string" || !isAddress(accounts[0])) {
+      return json({ error: "no_unlocked_account" }, 503);
+    }
+    const transaction = await rpc("eth_sendTransaction", [
+      {
+        from: accounts[0],
+        to: burn.wallet,
+        data: `0x${TEST_BURN_FOR_SPEC_SELECTOR}${hash.slice(2).toLowerCase()}${wordAddress(burn.token)}${wordAddress(burn.depositor)}${wordNumber(burn.debit.toString())}${wordAddress(burn.minter)}`,
+      },
+    ]);
+    if (typeof transaction !== "string" || !BYTES32.test(transaction)) {
+      return json({ error: "invalid_rpc_response" }, 502);
+    }
+    const receipt = await waitForReceipt(rpc, transaction);
+    if (isRecord(receipt) && receipt["status"] === "0x1") return "burned";
+    // A reverted burn may have lost a race with another process; the chain record decides.
+    const raced = await readBurnRecord(rpc, burn.wallet, hash);
+    if (raced) return matchesBurn(raced, burn) ? "burned" : transferSpecConflict();
+    return json({ error: "burn_failed" }, 502);
+  } catch {
+    return json({ error: "rpc_unavailable" }, 502);
+  }
+}
+
+async function readBurnRecord(
+  rpc: RpcCall,
+  wallet: string,
+  hash: string,
+): Promise<BurnRecordRead | null> {
+  const result = await rpc("eth_call", [
+    { to: wallet, data: `0x${BURN_RECORD_SELECTOR}${hash.slice(2).toLowerCase()}` },
+    "latest",
+  ]);
+  if (typeof result !== "string" || !/^0x[\da-fA-F]*$/.test(result)) {
+    throw new Error("burnRecord read failed");
+  }
+  const hex = result.slice(2);
+  if (hex.length !== BURN_RECORD_WORDS * HEX_PER_WORD) throw new Error("burnRecord read failed");
+  const word = (index: number) => hex.slice(index * HEX_PER_WORD, (index + 1) * HEX_PER_WORD);
+  const record = {
+    token: `0x${word(0).slice(-40)}`,
+    depositor: `0x${word(1).slice(-40)}`,
+    value: BigInt(`0x${word(2)}`),
+    recipient: `0x${word(3).slice(-40)}`,
+  };
+  return /^0x0{40}$/.test(record.depositor) ? null : record;
+}
+
+function matchesBurn(record: BurnRecordRead, burn: BurnArguments): boolean {
+  return (
+    record.token === burn.token.toLowerCase() &&
+    record.depositor === burn.depositor.toLowerCase() &&
+    record.value === burn.debit &&
+    record.recipient === burn.minter.toLowerCase()
+  );
+}
+
+function transferSpecConflict(): Response {
+  return json({ error: "transfer_spec_conflict" }, 409);
+}
+
+function burnIntent(item: unknown): { spec: TransferSpec; maxFee: bigint } | null {
+  if (!isRecord(item) || !isRecord(item["burnIntent"])) return null;
+  const intent = item["burnIntent"];
+  const raw = intent["spec"];
+  if (!isRecord(raw) || typeof intent["maxFee"] !== "string" || !UNSIGNED.test(intent["maxFee"])) {
+    return null;
+  }
+  const words = [
+    "sourceContract",
+    "destinationContract",
+    "sourceToken",
+    "destinationToken",
+    "sourceDepositor",
+    "destinationRecipient",
+    "sourceSigner",
+    "destinationCaller",
+    "salt",
+  ] as const;
+  if (words.some((key) => typeof raw[key] !== "string" || !BYTES32.test(raw[key] as string)))
+    return null;
+  const integers = ["version", "sourceDomain", "destinationDomain"] as const;
+  if (integers.some((key) => typeof raw[key] !== "number" || !Number.isInteger(raw[key])))
+    return null;
+  if (typeof raw["value"] !== "string" || !UNSIGNED.test(raw["value"])) return null;
+  if (typeof raw["hookData"] !== "string" || !/^0x(?:[\da-fA-F]{2})*$/.test(raw["hookData"]))
+    return null;
+  const spec = {
+    version: raw["version"],
+    sourceDomain: raw["sourceDomain"],
+    destinationDomain: raw["destinationDomain"],
+    sourceContract: raw["sourceContract"],
+    destinationContract: raw["destinationContract"],
+    sourceToken: raw["sourceToken"],
+    destinationToken: raw["destinationToken"],
+    sourceDepositor: raw["sourceDepositor"],
+    destinationRecipient: raw["destinationRecipient"],
+    sourceSigner: raw["sourceSigner"],
+    destinationCaller: raw["destinationCaller"],
+    value: BigInt(raw["value"]),
+    salt: raw["salt"],
+    hookData: raw["hookData"],
+  } as TransferSpec;
+  if (spec.value === 0n) return null;
+  return { spec, maxFee: BigInt(intent["maxFee"]) };
+}
+
+async function hasCode(rpc: RpcCall, address: string): Promise<boolean> {
+  const code = await rpc("eth_getCode", [address, "latest"]);
+  return typeof code === "string" && code !== "0x" && code.length > 2;
+}
+
+async function availableBalance(
+  rpc: RpcCall,
+  token: string,
+  depositor: string,
+  wallet = STANDIN_GATEWAY_WALLET,
+): Promise<bigint> {
+  const result = await rpc("eth_call", [
+    {
+      to: wallet,
+      data: `0x${AVAILABLE_BALANCE_SELECTOR}${wordAddress(token)}${wordAddress(depositor)}`,
+    },
+    "latest",
+  ]);
+  if (typeof result !== "string" || !BYTES32.test(result))
+    throw new Error("availableBalance read failed");
+  return BigInt(result);
+}
+
+function bytes32ToAddress(value: string): string {
+  return `0x${value.slice(-40)}`.toLowerCase();
+}
+
+function formatUsdc(atomic: bigint): string {
+  const scale = 10n ** BigInt(USDC_DECIMALS);
+  return `${atomic / scale}.${(atomic % scale).toString().padStart(USDC_DECIMALS, "0")}`;
 }
 
 async function transfers(url: URL): Promise<Response> {
