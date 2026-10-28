@@ -52,7 +52,7 @@
 ### 4. Local attestation format (stand-in ↔ mock minter)
 - `attestation = abi.encode(bytes32 transferSpecHash, address recipient, uint256 value, address depositor)`.
 - **The stand-in's `/v1/transfer`:**
-  - computes `transferSpecHash` from the request's burn intent with `@czar/hashing` `transferSpecStructHash` (the same helper the payer uses)
+  - computes `transferSpecHash` from the request's burn intent with `@czar/hashing` `transferSpecHash` (keccak256 of the encoded spec; the helper the payer uses at `apps/server/src/payer/pullback.ts:685`, and the value the vault stores)
   - debits the depositor in the mock wallet via its existing controller `testBurn`, sent from the node's unlocked account
   - returns `{transferId, attestation, signature}`, where `signature` is any 65 bytes
   - returns a JSON error (no attestation) if the burn exceeds the mock available balance
@@ -78,3 +78,6 @@
 
 ## Decision
 - Architect ruling under Zaryab's delegation. Recorded by his merge.
+
+## Erratum (2026-10-27)
+- §4 named `transferSpecStructHash`. The payer and vault use `transferSpecHash` (`packages/hashing/src/eip712.ts:297`). §4 now names that helper. No other change.

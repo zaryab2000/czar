@@ -17,6 +17,17 @@ import {
 } from "#src/external-abis";
 import { EXTERNAL_ADDRESSES } from "#src/external-events";
 
+const startBlockValue = process.env["CZAR_INDEXER_START_BLOCK"];
+if (startBlockValue !== undefined && !/^\d+$/.test(startBlockValue)) {
+  throw new Error(
+    "CZAR_INDEXER_START_BLOCK must contain only decimal digits; leave it unset to use 0.",
+  );
+}
+const startBlock = startBlockValue === undefined ? 0 : Number(startBlockValue);
+if (!Number.isSafeInteger(startBlock)) {
+  throw new Error("CZAR_INDEXER_START_BLOCK must be a safe integer block number.");
+}
+
 const localConfigPath =
   process.env["CZAR_LOCAL_CONFIG"] ?? new URL("../../../env/local.toml", import.meta.url);
 const config = loadConfig({
@@ -43,7 +54,6 @@ if (
 }
 const factoryAddress = deployment.CzarVaultFactory as `0x${string}`;
 const openEvidenceAddress = deployment.OpenEvidenceLog as `0x${string}`;
-const startBlock = Number(process.env["CZAR_INDEXER_START_BLOCK"] ?? "0");
 
 export default createConfig({
   chains: {
