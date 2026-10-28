@@ -30,6 +30,8 @@ const SLOW_WITHDRAW_RETRY_RULES = new Set([
   "pocket-spend-after-observation",
   "slow-withdraw-value-mismatch",
 ]);
+/** SCR-152 §1: the signer's prepared transaction governs the returnable value; re-read and retry. */
+const POCKET_RETURN_RETRY_RULES = new Set(["pocket-return-value-mismatch", "pocket-empty"]);
 
 export interface PullbackValueInput {
   readonly outstanding: bigint;
@@ -159,7 +161,11 @@ export interface SlowPullbackDependencies {
     getBlockNumber(): Promise<bigint>;
     withdrawalBlock(pocket: Address): Promise<bigint>;
     withdrawingBalance(pocket: Address): Promise<bigint>;
-    pocketUsdcBalance(pocket: Address): Promise<bigint>;
+    /**
+     * SCR-152 `returnable = balanceOf(USDC, pocket) − gasReserve` of a `pocket-return` to `vault`, from fresh
+     * reads; `≤ 0` means the pocket EOA is empty.
+     */
+    pocketReturnable(pocket: Address, vault: Address): Promise<bigint>;
     sendPocketTransaction(transaction: `0x${string}`, kind: string): Promise<string>;
     transactionReceipt(hash: string): Promise<SlowPullbackReceipt | null>;
   };
@@ -265,8 +271,8 @@ async function runSlowPullback(
     await sendSlowWithdrawal(input, dependencies, attempt, "withdraw", assertLeaseHeld);
     return { state: "waiting-return" };
   }
-  const pocketBalance = await dependencies.chain.pocketUsdcBalance(input.pocket);
-  if (pocketBalance === 0n)
+  const returnable = await dependencies.chain.pocketReturnable(input.pocket, input.vault);
+  if (returnable <= 0n)
     return await recoverEmptySlowPath(input, dependencies, attempt, trace, assertLeaseHeld);
   return await returnSlowWithdrawalBalance(input, dependencies, attempt, assertLeaseHeld);
 }
@@ -428,8 +434,8 @@ async function returnSlowWithdrawalBalance(
   | { readonly state: "manual-return-required"; readonly amount: string }
   | { readonly state: "returned-to-vault"; readonly amount: string }
 > {
-  let amount = await dependencies.chain.pocketUsdcBalance(input.pocket);
-  if (amount === 0n) return { state: "waiting-return" };
+  let amount = await dependencies.chain.pocketReturnable(input.pocket, input.vault);
+  if (amount <= 0n) return { state: "waiting-return" };
   const trace = await getExecutionTrace(dependencies.pool, input.planId, input.stepIndex, attempt);
   const prior = trace.findLast((row) => row.phase === "pullback.slow.return.sent");
   let transaction = prior?.payload["transaction"];
@@ -448,8 +454,8 @@ async function returnSlowWithdrawalBalance(
     const transfer = verifiedVaultTransfer(receipt, input);
     if (receipt.status === "success") {
       if (!transfer) return { state: "waiting-return" };
-      amount = await dependencies.chain.pocketUsdcBalance(input.pocket);
-      if (amount === 0n)
+      amount = await dependencies.chain.pocketReturnable(input.pocket, input.vault);
+      if (amount <= 0n)
         return await recordVerifiedReturn(
           input,
           dependencies,
@@ -462,14 +468,9 @@ async function returnSlowWithdrawalBalance(
     transaction = undefined;
   }
   if (typeof transaction !== "string") {
-    const signed = await dependencies.signer.sign("cz-15", {
-      keyId: `K4:${input.pocket}`,
-      kind: "pocket-return",
-      payload: { pocket: input.pocket, kind: "usdc", amount: amount.toString() },
-    });
-    if (!("signedTransaction" in signed))
-      throw new Error("K4 did not sign the USDC pocket return.");
-    transaction = signed.signedTransaction;
+    const signed = await signPocketReturn(input, dependencies, attempt, amount);
+    if (signed === null) return { state: "waiting-return" };
+    transaction = signed;
     await writeSlowPhase(dependencies, input, attempt, "pullback.slow.return.sent", {
       amount: amount.toString(),
       transaction,
@@ -497,6 +498,31 @@ async function returnSlowWithdrawalBalance(
   const transfer = verifiedVaultTransfer(receipt, input);
   if (!transfer) return { state: "waiting-return" };
   return await recordVerifiedReturn(input, dependencies, attempt, txHash, receipt, transfer);
+}
+
+/** Signs the USDC return; on a SCR-152 value denial records it and leaves the retry to the next pass. */
+async function signPocketReturn(
+  input: SlowPullbackInput,
+  dependencies: SlowPullbackDependencies,
+  attempt: number,
+  amount: bigint,
+): Promise<`0x${string}` | null> {
+  let signed;
+  try {
+    signed = await dependencies.signer.sign("cz-15", {
+      keyId: `K4:${input.pocket}`,
+      kind: "pocket-return",
+      payload: { pocket: input.pocket, kind: "usdc", amount: amount.toString() },
+    });
+  } catch (error) {
+    if (!(error instanceof Denied) || !POCKET_RETURN_RETRY_RULES.has(error.rule)) throw error;
+    await writeSlowPhase(dependencies, input, attempt, `pullback.slow.${error.rule}`, {
+      pocket: input.pocket,
+    });
+    return null;
+  }
+  if (!("signedTransaction" in signed)) throw new Error("K4 did not sign the USDC pocket return.");
+  return signed.signedTransaction;
 }
 
 async function ensureSlowPathRow(
@@ -606,11 +632,12 @@ async function recordVerifiedReturn(
   | { readonly state: "waiting-return" }
   | { readonly state: "manual-return-required" | "returned-to-vault"; readonly amount: string }
 > {
-  const [pocketBalance, withdrawingBalance] = await Promise.all([
-    dependencies.chain.pocketUsdcBalance(input.pocket),
+  const [returnable, withdrawingBalance] = await Promise.all([
+    dependencies.chain.pocketReturnable(input.pocket, input.vault),
     dependencies.chain.withdrawingBalance(input.pocket),
   ]);
-  if (pocketBalance !== 0n || withdrawingBalance !== 0n) return { state: "waiting-return" };
+  // SCR-144 completion as amended by SCR-152 §2: the EOA is empty, not at zero (its gas remainder stays).
+  if (returnable > 0n || withdrawingBalance !== 0n) return { state: "waiting-return" };
   const state =
     input.closedPocketRecovery || input.trigger === "closed-dust"
       ? "returned-to-vault"

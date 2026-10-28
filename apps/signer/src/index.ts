@@ -5,7 +5,14 @@ export * from "./local-backend.ts";
 export * from "./passphrase.ts";
 export * from "./gas-refill.ts";
 export * from "./postgres-audit.ts";
-export { decide, Denied, SELLER_PROOF_LIFETIME_SEC } from "./policy.ts";
+export {
+  decide,
+  Denied,
+  gasReserveAtomic,
+  returnableAtomic,
+  SELLER_PROOF_LIFETIME_SEC,
+  usdcPaysGas,
+} from "./policy.ts";
 export type { Decision, PolicyContext, PurposeIds, SignerNetwork } from "./policy.ts";
 export type * from "./projection.ts";
 export { coerceArgs, parseRequest, SHAPES, ShapeError } from "./requests.ts";

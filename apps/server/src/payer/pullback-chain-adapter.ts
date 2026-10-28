@@ -8,6 +8,12 @@ import {
   type PublicClient,
   type WalletClient,
 } from "viem";
+import {
+  createRpcTransactionPreparer,
+  pocketReturnGasReserve,
+  returnableAtomic,
+  type TransactionPreparer,
+} from "@czar/signer";
 import type { SlowPullbackDependencies } from "#src/payer/pullback";
 import type { SlowPullbackReceipt } from "#src/payer/pullback";
 
@@ -43,6 +49,21 @@ const usdcTransferAbi = parseAbi([
 export interface PullbackChainAdapterOptions {
   readonly config?: Config;
   readonly logger?: Logger;
+  /**
+   * Prepares the `pocket-return` transfers the SCR-152 returnable value is computed from; defaults to the RPC
+   * preparer the signer process signs with, so both sides derive `gasReserve` the same way.
+   */
+  readonly transactionPreparer?: TransactionPreparer;
+}
+
+const CAIP2_EIP155 = /^eip155:(\d+)$/;
+
+function paymentChainId(config: Config): number {
+  const network = String(config.get("selection.paymentNetwork"));
+  const match = CAIP2_EIP155.exec(network);
+  if (match?.[1] === undefined)
+    throw new Error(`selection.paymentNetwork ${network} is not eip155`);
+  return Number(match[1]);
 }
 
 export function createPullbackChainAdapter(
@@ -54,6 +75,11 @@ export function createPullbackChainAdapter(
   const config = options.config ?? loadConfig();
   const logger = options.logger ?? createLogger({ service: "server", component: "CZ-15" });
   const usdc = config.get("chain.usdcAddress") as Address;
+  let prepare = options.transactionPreparer;
+  const preparer = (): TransactionPreparer => {
+    prepare ??= createRpcTransactionPreparer({ chainId: paymentChainId(config), client });
+    return prepare;
+  };
   return {
     getBlockNumber: () => client.getBlockNumber(),
     withdrawalBlock: (pocket) =>
@@ -70,13 +96,17 @@ export function createPullbackChainAdapter(
         functionName: "withdrawingBalance",
         args: [usdc, pocket],
       }),
-    async pocketUsdcBalance(pocket) {
-      return client.readContract({
+    async pocketReturnable(pocket, vault) {
+      const balance = await client.readContract({
         address: usdc,
         abi: USDC_ABI,
         functionName: "balanceOf",
         args: [pocket],
       });
+      const { returnable } = await returnableAtomic(balance, (amount) =>
+        pocketReturnGasReserve(preparer(), { usdc, pocket, vault, amount }),
+      );
+      return returnable;
     },
     async sendPocketTransaction(transaction, kind) {
       const hash = await walletClient.sendRawTransaction({ serializedTransaction: transaction });
