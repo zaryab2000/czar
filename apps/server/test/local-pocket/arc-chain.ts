@@ -1,6 +1,7 @@
 // SCR-146 §3.3 runs 4–5: a CLEAN pinned `arc-anvil --network arc` chain with the Czar contracts deployed by
 // `contracts/script/deploy.sh` and the SCR-150 Gateway doubles placed at Circle's canonical addresses.
-// Test-only.
+// Test-only. Every transaction the payer broadcasts goes through `crashTransport`, so a test can kill the
+// payer exactly before a chosen transaction is sent or right after it is mined.
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -9,8 +10,13 @@ import {
   createTestClient,
   createWalletClient,
   http,
+  custom,
+  parseTransaction,
+  recoverTransactionAddress,
   type Address,
+  type Hex,
   type PublicClient,
+  type TransactionSerialized,
   type WalletClient,
 } from "viem";
 import type { PrivateKeyAccount } from "viem/accounts";
@@ -26,6 +32,8 @@ export const ANVIL_DEPLOYER: Address = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb922
 const POLLING_MS = 50;
 const RPC_START_ATTEMPTS = 200;
 const RPC_START_RETRY_MS = 50;
+/** `0x` plus the four-byte function selector. */
+const SELECTOR_HEX_LENGTH = 10;
 const ROOT = new URL("../../../../", import.meta.url);
 const CONTRACTS = fileURLToPath(new URL("contracts/", ROOT));
 const DEPLOYMENTS = fileURLToPath(new URL("deployments/", ROOT));
@@ -42,16 +50,49 @@ export function arcChain(rpcUrl: string) {
   } as const;
 }
 
+/** A raw transaction the payer is about to broadcast, decoded for crash-point matching. */
+export interface OutgoingTransaction {
+  readonly from: Address;
+  readonly to: Address | null;
+  readonly selector: Hex | null;
+}
+
+export class InjectedCrash extends Error {
+  constructor(point: string) {
+    super(`injected crash: ${point}`);
+    this.name = "InjectedCrash";
+  }
+}
+
+/** One armed crash point; it fires once, for the first matching transaction. */
+export interface CrashPoint {
+  readonly name: string;
+  /** `before-send`: the payer dies before the transaction reaches the node. `after-mined`: right after. */
+  readonly when: "before-send" | "after-mined";
+  readonly match: (transaction: OutgoingTransaction) => boolean;
+}
+
+export interface CrashSwitch {
+  arm(point: CrashPoint): void;
+  readonly fired: readonly string[];
+}
+
 export interface ArcChain {
   readonly rpcUrl: string;
   readonly chain: ArcChainDefinition;
+  /** Plain client for setup and assertions; never crashes. */
   readonly reader: PublicClient;
-  /** Wallet client without an account: the slow-path adapter broadcasts signed transactions through it. */
-  readonly wallet: WalletClient;
+  /** The payer's client: `eth_sendRawTransaction` honours the armed crash point. */
+  readonly payerClient: PublicClient;
+  /** Wallet client on the same crash-aware transport (the slow-path adapter broadcasts through it). */
+  readonly payerWallet: WalletClient;
+  readonly crash: CrashSwitch;
   readonly testClient: ReturnType<typeof createTestClient>;
   readonly factory: Address;
   rpc(method: string, params: readonly unknown[]): Promise<unknown>;
   mine(blocks: number): Promise<void>;
+  /** Advances chain time with `evm_increaseTime` and mines one block. */
+  increaseTime(seconds: number): Promise<void>;
   stop(): void;
 }
 
@@ -85,22 +126,27 @@ export async function startArcChain(options: ArcChainOptions): Promise<ArcChain>
     const rpc = jsonRpc(rpcUrl);
     const factory = deployCzar(rpcUrl, options.port, options.keyAddresses);
     await placeGatewayDoubles({ rpcUrl });
-    const wallet = createWalletClient({
-      chain,
-      transport: http(rpcUrl),
-      pollingInterval: POLLING_MS,
-    });
+    const crash = createCrashSwitch();
+    const transport = crashTransport(rpc, crash);
+    const payerClient = createPublicClient({ chain, transport, pollingInterval: POLLING_MS });
+    const payerWallet = createWalletClient({ chain, transport, pollingInterval: POLLING_MS });
     const testClient = createTestClient({ chain, transport: http(rpcUrl), mode: "anvil" });
     return {
       rpcUrl,
       chain,
       reader,
-      wallet,
+      payerClient,
+      payerWallet,
+      crash,
       testClient,
       factory,
       rpc,
       async mine(blocks) {
         await rpc("anvil_mine", [`0x${blocks.toString(16)}`]);
+      },
+      async increaseTime(seconds) {
+        await rpc("evm_increaseTime", [seconds]);
+        await rpc("evm_mine", []);
       },
       stop: () => node.kill(),
     };
@@ -157,6 +203,71 @@ function deployCzar(
     rmSync(`${DEPLOYMENTS}${keysName}`, { force: true });
     rmSync(`${DEPLOYMENTS}${outName}`, { force: true });
   }
+}
+
+function createCrashSwitch(): CrashSwitch & {
+  take(transaction: OutgoingTransaction, when: CrashPoint["when"]): CrashPoint | null;
+} {
+  let armed: CrashPoint | null = null;
+  const fired: string[] = [];
+  return {
+    fired,
+    arm(point) {
+      armed = point;
+    },
+    take(transaction, when) {
+      if (!armed || armed.when !== when || !armed.match(transaction)) return null;
+      const point = armed;
+      armed = null;
+      fired.push(point.name);
+      return point;
+    },
+  };
+}
+
+function crashTransport(
+  rpc: (method: string, params: readonly unknown[]) => Promise<unknown>,
+  crash: ReturnType<typeof createCrashSwitch>,
+) {
+  return custom({
+    async request({ method, params }: { method: string; params?: unknown }) {
+      const list = (Array.isArray(params) ? params : []) as readonly unknown[];
+      if (method !== "eth_sendRawTransaction") return rpc(method, list);
+      const raw = list[0] as TransactionSerialized;
+      const outgoing = await decodeOutgoing(raw);
+      const before = crash.take(outgoing, "before-send");
+      if (before) throw new InjectedCrash(before.name);
+      const hash = (await rpc(method, list)) as Hex;
+      const after = crash.take(outgoing, "after-mined");
+      if (after) {
+        await waitForReceipt(rpc, hash);
+        throw new InjectedCrash(after.name);
+      }
+      return hash;
+    },
+  });
+}
+
+async function decodeOutgoing(raw: TransactionSerialized): Promise<OutgoingTransaction> {
+  const parsed = parseTransaction(raw);
+  const data = (parsed.data ?? "0x") as Hex;
+  return {
+    from: await recoverTransactionAddress({ serializedTransaction: raw }),
+    to: parsed.to ?? null,
+    selector:
+      data.length >= SELECTOR_HEX_LENGTH ? (data.slice(0, SELECTOR_HEX_LENGTH) as Hex) : null,
+  };
+}
+
+async function waitForReceipt(
+  rpc: (method: string, params: readonly unknown[]) => Promise<unknown>,
+  hash: Hex,
+): Promise<void> {
+  for (let attempt = 0; attempt < RPC_START_ATTEMPTS; attempt += 1) {
+    if (await rpc("eth_getTransactionReceipt", [hash])) return;
+    await new Promise((resolve) => setTimeout(resolve, RPC_START_RETRY_MS));
+  }
+  throw new Error(`Crash-point transaction ${hash} was not mined.`);
 }
 
 function jsonRpc(rpcUrl: string) {

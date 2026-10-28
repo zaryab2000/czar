@@ -2,7 +2,8 @@
 // (Gateway routing stays off) against a CLEAN pinned arc-anvil with the Czar contracts and the SCR-150
 // Gateway doubles, the real CZ-27 signer, the D92 `/v1/transfer` stand-in (in-process) and a chain-backed
 // stand-in for the CZ-19 pocket routes. `recovery()` builds the CZ-15 recovery operations as
-// `apps/server/src/main.ts` does (`createDefaultPocketRecovery`), fresh on every call.
+// `apps/server/src/main.ts` does (`createDefaultPocketRecovery`), fresh on every call, so a test restarts the
+// payer after an injected kill by calling it again over the same database and chain.
 import { randomBytes } from "node:crypto";
 import { loadConfig, type Config } from "@czar/config";
 import {
@@ -41,6 +42,7 @@ import {
   GATEWAY_DOMAIN,
   GATEWAY_MINTER,
   GATEWAY_WALLET,
+  InjectedCrash,
   startArcChain,
   walletFor,
   type ArcChain,
@@ -54,6 +56,7 @@ import {
 
 export const localChainEnabled = process.env["CZAR_LOCAL_CHAIN"] === "1";
 
+const MS_PER_SECOND = 1000;
 const ENVELOPE_LIFETIME_SECONDS = 30n * 86_400n;
 const NATIVE_FUNDING = parseEther("100");
 const POCKET_CAP_BPS = 2500;
@@ -102,7 +105,7 @@ export interface PlanJson {
   readonly cap: string;
   readonly steps: readonly {
     readonly [field: string]: unknown;
-    readonly kind: "gateway-nano";
+    readonly kind: "gateway-nano" | "x402-exact";
     readonly stepIndex: number;
     readonly stepCap: string;
   }[];
@@ -115,9 +118,25 @@ export interface ChainLog {
   readonly transactionHash: Hex;
 }
 
+export interface HarnessClock {
+  now(): Date;
+  /** Advances the payer clock, the signer clock and chain time together. */
+  advance(ms: number): Promise<void>;
+}
+
+export interface TransferCrash {
+  /** The next `/v1/transfer` reaches the stand-in (so the burn happens); then the payer dies. */
+  armAfterResponse(): void;
+  fired(): number;
+}
+
 export interface LocalPocketHarness {
   readonly chain: ArcChain;
   readonly config: Config;
+  readonly clock: HarnessClock;
+  readonly pool: Pool;
+  readonly signer: SignerHarness;
+  readonly transferCrash: TransferCrash;
   readonly guardian: PrivateKeyAccount;
   readonly logger: Logger;
   /** Payer runtime operations reported through `onError`. */
@@ -154,12 +173,13 @@ export async function startLocalPocketHarness(input: {
       K20: unusedKey(),
     },
   });
+  const clock = createClock(chain);
   let standin: IndexerStandin | undefined;
   try {
     standin = await startIndexerStandin({
       port: input.basePort + 1,
       reader: chain.reader,
-      now,
+      now: clock.now,
     });
     for (const address of [keys.k3, keys.relayer, guardian.address])
       await chain.testClient.setBalance({ address, value: NATIVE_FUNDING });
@@ -171,9 +191,9 @@ export async function startLocalPocketHarness(input: {
       factory: chain.factory,
       standin,
       mine: () => chain.mine(1),
-      nowMs: () => now().getTime(),
+      nowMs: () => clock.now().getTime(),
     });
-    return composeHarness({ pool: input.pool, config, chain, now, signer, standin, guardian });
+    return composeHarness({ pool: input.pool, config, chain, clock, signer, standin, guardian });
   } catch (error) {
     await standin?.stop();
     chain.stop();
@@ -186,15 +206,23 @@ function unusedKey(): Address {
   return privateKeyToAccount(generatePrivateKey()).address;
 }
 
-function now(): Date {
-  return new Date();
+/** Wall time plus an offset the tests advance; chain time is advanced by the same amount. */
+function createClock(chain: ArcChain): HarnessClock {
+  let offsetMs = 0;
+  return {
+    now: () => new Date(Date.now() + offsetMs),
+    async advance(ms) {
+      offsetMs += ms;
+      await chain.increaseTime(Math.ceil(ms / MS_PER_SECOND));
+    },
+  };
 }
 
-interface HarnessParts {
+export interface HarnessParts {
   readonly pool: Pool;
   readonly config: Config;
   readonly chain: ArcChain;
-  readonly now: () => Date;
+  readonly clock: HarnessClock;
   readonly signer: SignerHarness;
   readonly standin: IndexerStandin;
   readonly guardian: PrivateKeyAccount;
@@ -203,7 +231,7 @@ interface HarnessParts {
 function composeHarness(parts: HarnessParts): LocalPocketHarness {
   const errors: string[] = [];
   const logger = createLogger({ service: "server", component: "CZ-15", sink: () => undefined });
-  const safeFetch = standinTransferFetch(
+  const transfer = standinTransferFetch(
     parts.chain,
     BigInt(Number(parts.config.get("routing.gatewayFeeAtomic"))),
   );
@@ -212,6 +240,7 @@ function composeHarness(parts: HarnessParts): LocalPocketHarness {
     ...parts,
     logger,
     errors,
+    transferCrash: transfer.crash,
     ...fixtures,
     preparePocket: (plan) =>
       executePocketPreparation(
@@ -227,12 +256,12 @@ function composeHarness(parts: HarnessParts): LocalPocketHarness {
           config: parts.config,
           signer: parts.signer.signer,
           chain: createPocketPreparationChain({
-            client: parts.chain.reader,
+            client: parts.chain.payerClient,
             vault: plan.vault.vault,
             usdc: ARC_USDC,
             gatewayWallet: GATEWAY_WALLET,
           }),
-          now: parts.now,
+          now: parts.clock.now,
         },
       ),
     recovery: () =>
@@ -241,14 +270,14 @@ function composeHarness(parts: HarnessParts): LocalPocketHarness {
         config: parts.config,
         logger,
         signer: parts.signer.signer,
-        publicClient: parts.chain.reader,
-        walletClient: parts.chain.wallet,
-        safeFetch,
+        publicClient: parts.chain.payerClient,
+        walletClient: parts.chain.payerWallet,
+        safeFetch: transfer.safeFetch,
         indexerUrl: parts.standin.url,
         gatewayMinter: GATEWAY_MINTER,
         gatewayDomain: GATEWAY_DOMAIN,
         gatewayTransferUrl: STANDIN_TRANSFER_URL,
-        now: parts.now,
+        now: parts.clock.now,
       }),
     stop: async () => {
       await parts.standin.stop();
@@ -261,8 +290,13 @@ function composeHarness(parts: HarnessParts): LocalPocketHarness {
 const STANDIN_TRANSFER_URL = "http://127.0.0.1:4999/v1/transfer";
 
 /** The D92 stand-in's `/v1/transfer` handler, called in-process with the fee `createStandinServer` uses. */
-function standinTransferFetch(chain: ArcChain, gatewayFeeAtomic: bigint): SafeFetch {
-  return async (url, options) => {
+function standinTransferFetch(
+  chain: ArcChain,
+  gatewayFeeAtomic: bigint,
+): { readonly safeFetch: SafeFetch; readonly crash: TransferCrash } {
+  let armed = false;
+  let fired = 0;
+  const safeFetch: SafeFetch = async (url, options) => {
     if (new URL(url).pathname !== "/v1/transfer")
       throw new Error("The local pocket harness only routes the Gateway /v1/transfer stand-in.");
     const response = await handleStandinRequest(
@@ -275,12 +309,27 @@ function standinTransferFetch(chain: ArcChain, gatewayFeeAtomic: bigint): SafeFe
       ARC_USDC,
       { gatewayFeeAtomic },
     );
+    const body = new Uint8Array(await response.arrayBuffer());
+    if (armed) {
+      armed = false;
+      fired += 1;
+      throw new InjectedCrash("after /v1/transfer");
+    }
     return {
       status: response.status,
       url,
       headers: Object.fromEntries(response.headers.entries()),
-      body: new Uint8Array(await response.arrayBuffer()),
+      body,
     };
+  };
+  return {
+    safeFetch,
+    crash: {
+      armAfterResponse() {
+        armed = true;
+      },
+      fired: () => fired,
+    },
   };
 }
 
@@ -371,11 +420,11 @@ function toChainLogs(
   });
 }
 
-async function fees(parts: HarnessParts) {
+async function fees(parts: Pick<HarnessParts, "chain">) {
   return withFeeFloor({ maxFeePerGas: (await parts.chain.reader.getGasPrice()) * 2n });
 }
 
-async function send(parts: HarnessParts, pending: Promise<Hex>): Promise<Hex> {
+async function send(parts: Pick<HarnessParts, "chain">, pending: Promise<Hex>): Promise<Hex> {
   const hash = await pending;
   const receipt = await parts.chain.reader.waitForTransactionReceipt({ hash });
   if (receipt.status !== "success") throw new Error("A harness setup transaction reverted.");
@@ -444,6 +493,7 @@ async function openPocketPlan(
   const objectiveHash = keccak256(randomBytes(32)) as Hash32;
   const envelopeId = await openEnvelope(parts, vault, {
     ...sizes,
+    pocketCapBps: POCKET_CAP_BPS,
     planHash,
     objectiveHash,
     payeeRoot,
@@ -518,12 +568,14 @@ function planJson(input: {
   };
 }
 
-async function openEnvelope(
-  parts: HarnessParts,
+/** The owner opens the envelope for a stored plan; returns its id from `EnvelopeOpened`. */
+export async function openEnvelope(
+  parts: Pick<HarnessParts, "chain">,
   vault: VaultFixture,
   input: {
     stepCap: bigint;
     cap: bigint;
+    pocketCapBps: number;
     planHash: Hash32;
     objectiveHash: Hash32;
     payeeRoot: Hash32;
@@ -541,7 +593,7 @@ async function openEnvelope(
         {
           cap: input.cap,
           maxStepAmount: input.stepCap,
-          pocketCapBps: POCKET_CAP_BPS,
+          pocketCapBps: input.pocketCapBps,
           expiresAt: block.timestamp + ENVELOPE_LIFETIME_SECONDS,
           categoryId: keccak256(toBytes("research")),
           objectiveHash: input.objectiveHash,
@@ -565,8 +617,9 @@ async function openEnvelope(
   throw new Error("openEnvelope emitted no EnvelopeOpened event.");
 }
 
-async function seedPlanRows(
-  parts: HarnessParts,
+/** The objective, plan and step rows CZ-15 reads for a plan (one step, index 0). */
+export async function seedPlanRows(
+  parts: Pick<HarnessParts, "pool">,
   vault: VaultFixture,
   input: { plan: PlanJson; envelopeRef: string; objectiveHash: Hash32; planHash: Hash32 },
 ): Promise<string> {
