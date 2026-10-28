@@ -143,12 +143,13 @@ describe("czar-search 402", () => {
     });
     if (!read.ok) throw new Error(`402 did not parse: ${read.reason}`);
     const bazaar = read.extensions.bazaar;
+    if (bazaar === undefined) throw new Error("402 declares no sanitized bazaar extension");
     expect(read.extensions.dropped).toEqual([]);
-    expect(bazaar?.info).toEqual({
+    expect(bazaar.info).toEqual({
       input: { type: "http", method: "GET", queryParams: { q: expect.any(String) } },
     });
     const queryParams = (
-      bazaar?.schema as {
+      bazaar.schema as {
         properties: { input: { properties: { queryParams: Record<string, unknown> } } };
       }
     ).properties.input.properties.queryParams;
@@ -158,7 +159,7 @@ describe("czar-search 402", () => {
       required: ["q"],
     });
 
-    const example = (bazaar?.info as { input: { queryParams: { q: string } } }).input.queryParams.q;
+    const example = (bazaar.info as { input: { queryParams: { q: string } } }).input.queryParams.q;
     const exampleChallenge = await route(get(example));
     expect(exampleChallenge.status).toBe(402);
     expect(calls).toEqual([]);
