@@ -24,6 +24,8 @@ process.stdout.write(manifest.CzarVaultFactory);
 NODE
 	)"
 	if [ "$(arc-cast code "$FACTORY" --rpc-url "$RPC_URL")" != "0x" ]; then
+		# SCR-151 A1: an existing FORK deployment must already have a valid recorded start block.
+		node "$ROOT/ops/local/record-start-block.mjs" --existing-deployment
 		exit 0
 	fi
 fi
@@ -51,9 +53,14 @@ if [ "$RELAYER_LOWER" != "$SENDER_LOWER" ]; then
 	arc-cast rpc eth_sendTransaction "$TX" --rpc-url "$RPC_URL" >/dev/null
 fi
 
+DEPLOY_STARTED_MS="$(node -e 'process.stdout.write(String(Date.now()))')"
 cd "$ROOT/contracts"
 ARC_FORGE=arc-forge script/deploy.sh \
 	"$RPC_URL" \
 	"../deployments/local-keys.json" \
 	../deployments/arc-local.json \
 	--broadcast --unlocked --sender "$SENDER"
+
+# SCR-151 A1: on a fork, record the first successful deployment receipt block as the indexer
+# start block. Records nothing on a clean chain; fails and records nothing on any violation.
+node "$ROOT/ops/local/record-start-block.mjs" --deploy-started-ms "$DEPLOY_STARTED_MS"

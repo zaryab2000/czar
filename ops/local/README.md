@@ -107,9 +107,47 @@ stand-ins, indexer, signer, server, merchant, mock bundler, and web app. Keep th
 terminal open while using the browser:
 
 ```sh
-fnm exec --using=22.22.0 process-compose \
+CZAR_LOCAL_MODE=fork fnm exec --using=22.22.0 process-compose \
   -f ops/local/process-compose.yaml -f ops/local/process-compose.fork.yaml up
 ```
+
+`CZAR_LOCAL_MODE=fork` is required for the fork overlay. The clean command above needs no
+mode (the default is `clean`). The chain-session launcher refuses a mismatch: clean mode on
+a fork node, or fork mode on a clean node, stops before anything starts.
+
+### Chain sessions (SCR-151)
+
+Both local chains are ephemeral: every `arc-anvil` start is a new chain. The indexer,
+server, signer and merchants therefore start through `ops/local/chain-session.mjs`, which:
+
+- checks the local node before writing or starting anything: loopback RPC,
+  `anvil_nodeInfo`, chain ID 5042002, and in fork mode the pin file
+  `deployments/.arc-fork-pin.json` (decimal strings; `forkBlock` must equal the node's fork
+  block; `indexerStartBlock` must be after `forkBlock` and not past the head);
+- starts the indexer at block 0 in clean mode, and in fork mode at `indexerStartBlock`:
+  the first successful Czar deployment receipt block, recorded by `ops/local/deploy.sh`
+  through `ops/local/record-start-block.mjs` (SCR-151 amendment A1);
+- derives the session key `S` from the first 8 hex characters of that block's hash, and
+  routes all four processes to database `czar_<mode>_<S>`. Ponder uses the same name as its
+  schema (`DATABASE_SCHEMA`). The database is created only when absent and is never dropped;
+- records the session in ignored `deployments/.arc-chain-session.json`. The indexer starts
+  first and records it; the server, signer and merchants refuse to start if the live node
+  gives a different `S` (amendment A2).
+
+Restarting one process on the same running chain reuses its session database. A fresh
+chain, or a new fork pin, gets a new `S` and new databases; earlier ones stay until you
+remove them yourself.
+
+**Cleanup (operator only, never automatic).** List the session databases, then drop the
+ones you no longer need **by explicit name**, never by pattern:
+
+```sh
+docker compose -f ops/local/compose.yaml exec -T postgres \
+  psql -U postgres -Atc "SELECT datname FROM pg_database WHERE datname LIKE 'czar\_%' ORDER BY datname"
+docker compose -f ops/local/compose.yaml exec -T postgres dropdb -U postgres czar_fork_<S>
+```
+
+Do not drop the session database of a stack that is running.
 
 The fork launcher checks Arc testnet chain ID, pins the first run at latest block minus
 100, and checks nonempty code at that block for EntryPoint, the wallet's MSCA factory,
@@ -163,6 +201,12 @@ Run the health gate after deployment and before browser acceptance. `health.sh` 
 those lines report `FAIL` by design. In clean mode use the process-compose readiness
 probes (`ops/local/process-compose.yaml`) plus `curl --fail http://127.0.0.1:3000/health`
 and `curl --fail http://127.0.0.1:8787/health`.
+
+The health output includes the SCR-151 lines `chain session: mode=<m> S=<8hex>
+startBlock=<n>`, `indexer start: <n>` (it must equal the session and, in fork mode, the
+pin's `indexerStartBlock`), `database: czar_<mode>_<S> reachable`, and the indexer lag
+against `indexer.maxLagBlocks` (120). The session and database lines also apply in clean
+mode.
 
 ```sh
 fnm exec --using=22.22.0 bash ops/local/health.sh
@@ -220,6 +264,7 @@ pairing and submission wait for the healthy stack and browser flow.
 | Key creation flags and refusals | `apps/signer/scripts/create-keys.ts`, `create-merchant-keys.ts` |
 | Keychain service and account | `packages/config/src/registry.ts` `signer.keychainService`; `apps/signer/src/passphrase.ts:49` |
 | Clean and fork process graphs | `ops/local/process-compose.yaml`, `ops/local/process-compose.fork.yaml` |
+| Chain session, database routing, indexer start block | `ops/local/chain-session.mjs`, `ops/local/record-start-block.mjs`, `ops/local/deploy.sh` |
 | Fork pin and contract checks | `ops/local/fork-anvil.mjs` |
 | Funding | `ops/local/fund-fork.mjs` |
 | Health gate (fork) | `ops/local/health.sh` |

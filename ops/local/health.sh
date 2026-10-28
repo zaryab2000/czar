@@ -63,7 +63,7 @@ check_fork_block() {
 import { readFile } from "node:fs/promises";
 try {
   const pin = JSON.parse(await readFile("deployments/.arc-fork-pin.json", "utf8"));
-  if (pin.chainId !== 5042002 || !/^[1-9][0-9]*$/.test(pin.forkBlock)) {
+  if (String(pin.chainId) !== "5042002" || !/^[1-9][0-9]*$/.test(pin.forkBlock)) {
     throw new Error("fork pin metadata is invalid");
   }
   process.stdout.write(`forkBlock=${pin.forkBlock}`);
@@ -162,10 +162,85 @@ try {
 NODE
 }
 
+session_field() {
+	node --input-type=module -e '
+import { readFileSync } from "node:fs";
+const session = JSON.parse(readFileSync("deployments/.arc-chain-session.json", "utf8"));
+const value = session[process.argv[1]];
+if (typeof value !== "string" || !/^[a-z0-9_]+$/.test(value)) process.exit(1);
+process.stdout.write(value);
+' "$1"
+}
+
+# SCR-151 §4: the recorded chain session must match what the live node gives now.
+check_chain_session() {
+	node --input-type=module <<'NODE'
+import { readFile } from "node:fs/promises";
+import { parseSessionFile, resolveSession } from "./ops/local/chain-session.mjs";
+try {
+  const session = parseSessionFile(await readFile("deployments/.arc-chain-session.json", "utf8"));
+  const live = await resolveSession({
+    mode: session.mode,
+    rpcUrl: "http://127.0.0.1:8545",
+    readPinText: () => readFile("deployments/.arc-fork-pin.json", "utf8"),
+  });
+  if (live.S !== session.S || live.startBlock.toString() !== session.startBlock) {
+    throw new Error(`recorded ${session.mode}/${session.S} does not match live ${live.mode}/${live.S}`);
+  }
+  process.stdout.write(`mode=${session.mode} S=${session.S} startBlock=${session.startBlock}`);
+} catch (error) {
+  process.stderr.write(`${error instanceof Error ? error.message : "chain session check failed"}\n`);
+  process.exitCode = 1;
+}
+NODE
+}
+
+# SCR-151 §4: the start block the launcher gave the indexer equals the session (and, in FORK
+# mode, the pin's indexerStartBlock).
+check_indexer_start() {
+	node --input-type=module <<'NODE'
+import { readFile } from "node:fs/promises";
+try {
+  const session = JSON.parse(await readFile("deployments/.arc-chain-session.json", "utf8"));
+  if (session.indexerStartBlock !== session.startBlock) {
+    throw new Error(`indexer started at ${session.indexerStartBlock}; session start is ${session.startBlock}`);
+  }
+  if (session.mode === "fork") {
+    const pin = JSON.parse(await readFile("deployments/.arc-fork-pin.json", "utf8"));
+    if (pin.indexerStartBlock !== session.startBlock) {
+      throw new Error(`pin indexerStartBlock ${pin.indexerStartBlock} differs from session ${session.startBlock}`);
+    }
+  }
+  process.stdout.write(session.indexerStartBlock);
+} catch (error) {
+  process.stderr.write(`${error instanceof Error ? error.message : "indexer start check failed"}\n`);
+  process.exitCode = 1;
+}
+NODE
+}
+
+check_session_database() {
+	local database
+	database="$(session_field database)" || {
+		printf 'no chain session recorded\n' >&2
+		return 1
+	}
+	docker compose -f ops/local/compose.yaml exec -T postgres psql -U postgres -d "$database" -Atc 'SELECT 1' >/dev/null || {
+		printf '%s is not reachable\n' "$database" >&2
+		return 1
+	}
+	printf '%s reachable' "$database"
+}
+
 check_server_migrations() {
 	local expected actual
 	expected="$(rg --files apps/server/migrations -g '*.sql' | sed 's#^.*/##' | LC_ALL=C sort)"
-	actual="$(docker compose -f ops/local/compose.yaml exec -T postgres psql -U postgres -d postgres -Atc \
+	local database
+	database="$(session_field database)" || {
+		printf 'no chain session recorded\n' >&2
+		return 1
+	}
+	actual="$(docker compose -f ops/local/compose.yaml exec -T postgres psql -U postgres -d "$database" -Atc \
 		'SELECT filename FROM schema_migrations ORDER BY filename')"
 	[ "$expected" = "$actual" ] || {
 		printf 'applied migrations do not match the server migration files\n' >&2
@@ -233,6 +308,9 @@ NODE
 
 check "Postgres" docker compose -f ops/local/compose.yaml exec -T postgres pg_isready -U postgres
 check_output "fork block" check_fork_block
+check_output "chain session" check_chain_session
+check_output "indexer start" check_indexer_start
+check_output "database" check_session_database
 check "Arc fork RPC and anvil_nodeInfo" check_fork_rpc
 check_output "deployment manifest contract count" check_manifest_contract_count
 check "EntryPoint, MSCA factory and USDC code" check_external_contract_code

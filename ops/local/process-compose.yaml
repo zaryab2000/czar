@@ -1,4 +1,8 @@
 version: "0.5"
+# SCR-151: the indexer, server, signer and merchants start through ops/local/chain-session.mjs,
+# which routes each to the per-chain-session database czar_<mode>_<S>. The *_DATABASE_URL values
+# below are base URLs; the launcher replaces only the database name. Mode comes from
+# CZAR_LOCAL_MODE (default clean; the FORK bring-up sets CZAR_LOCAL_MODE=fork).
 processes:
   arc-anvil:
     command: arc-anvil --network arc --chain-id 5042002 --mnemonic-random --quiet --port 8545
@@ -49,7 +53,7 @@ processes:
       arc-anvil:
         condition: process_healthy
   indexer:
-    command: pnpm --filter @czar/indexer start:local
+    command: node ops/local/chain-session.mjs --role indexer -- pnpm --filter @czar/indexer start:local
     working_dir: .
     environment:
       - CZAR_LOCAL_CONFIG=../../env/local.toml
@@ -74,7 +78,7 @@ processes:
       period_seconds: 3
       timeout_seconds: 2
   server:
-    command: pnpm --filter @czar/server start:local
+    command: node ops/local/chain-session.mjs --role server -- pnpm --filter @czar/server start:local
     working_dir: .
     environment:
       - CZAR_LOCAL_CONFIG=../../env/local.toml
@@ -100,7 +104,7 @@ processes:
       period_seconds: 3
       timeout_seconds: 2
   signer:
-    command: pnpm --filter @czar/signer start:local
+    command: node ops/local/chain-session.mjs --role signer -- pnpm --filter @czar/signer start:local
     working_dir: .
     environment:
       - CZAR_LOCAL_CONFIG=../../env/local.toml
@@ -140,11 +144,12 @@ processes:
       signer:
         condition: process_healthy
   merchants:
-    command: pnpm --filter @czar/merchants start:local
+    command: node ops/local/chain-session.mjs --role merchants -- pnpm --filter @czar/merchants start:local
     working_dir: .
     environment:
       - CZAR_MERCHANT_PORT=8787
       - CZAR_LOCAL_CONFIG=../../env/local.toml
+      - CZAR_DATABASE_URL=postgres://postgres@127.0.0.1:15433/postgres
     depends_on:
       circle-standins:
         condition: process_healthy

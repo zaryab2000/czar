@@ -104,6 +104,38 @@ describe("local process composition", () => {
     expect(k3Readiness).toContain('keyAddress("cz-15", "K3")');
   });
 
+  it("routes every database consumer through the SCR-151 chain-session launcher", () => {
+    for (const [process, pkg] of [
+      ["indexer", "@czar/indexer"],
+      ["server", "@czar/server"],
+      ["signer", "@czar/signer"],
+      ["merchants", "@czar/merchants"],
+    ] as const) {
+      const section = processSection(process).join("\n");
+      expect(section).toContain(
+        `command: node ops/local/chain-session.mjs --role ${process} -- pnpm --filter ${pkg} start:local`,
+      );
+      expect(section).toMatch(
+        /(CZAR_)?DATABASE_URL=postgres:\/\/postgres@127\.0\.0\.1:15433\/postgres/,
+      );
+    }
+    // The indexer establishes the session; server, signer and merchants start after it (A2).
+    expectDependency(processSection("server"), "indexer", "process_healthy");
+    expectDependency(processSection("signer"), "server", "process_healthy");
+    expectDependency(processSection("merchants"), "server", "process_healthy");
+    expect(composition).not.toMatch(/\bDROP\b/);
+    expect(forkComposition).not.toContain("chain-session.mjs");
+  });
+
+  it("records the A1 indexer start block from the deploy step on both deploy paths", () => {
+    const deploy = readFileSync(new URL("./deploy.sh", import.meta.url), "utf8");
+    expect(deploy).toContain('node "$ROOT/ops/local/record-start-block.mjs" --existing-deployment');
+    expect(deploy).toContain(
+      'node "$ROOT/ops/local/record-start-block.mjs" --deploy-started-ms "$DEPLOY_STARTED_MS"',
+    );
+    expect(deploy.indexOf("DEPLOY_STARTED_MS=")).toBeLessThan(deploy.indexOf("script/deploy.sh"));
+  });
+
   it("documents the single local stack start command", () => {
     expect(readme).toContain("process-compose -f ops/local/process-compose.yaml up");
   });
