@@ -51,6 +51,8 @@ const WAIT_TIMEOUT_MS = 60_000;
 const WAIT_STEP_MS = 100;
 const MS_PER_HOUR = 3_600_000;
 const MARGIN_MS = 60_000;
+/** 18-decimal native units per 6-decimal USDC base unit on Arc (A1-05). */
+const NATIVE_PER_USDC_UNIT = 10n ** 12n;
 const withdrawSelector = toFunctionSelector("withdraw(address)");
 const initiateSelector = toFunctionSelector("initiateWithdrawal(address,uint256)");
 const transferSelector = toFunctionSelector("transfer(address,uint256)");
@@ -148,7 +150,12 @@ describe.skipIf(!localChainEnabled)("pocket path on a local Arc chain (SCR-146 r
       await recoveryPass();
       expect(harness.chain.crash.fired).toContain("after-withdraw-mined");
       expect(await harness.gatewayEvents("WithdrawalCompleted", plan.pocket)).toHaveLength(1);
-      expect(await harness.usdcBalance(plan.pocket)).toBe(gasLeft + DUST_STEP_CAP);
+      // One ledger (SCR-152): the withdraw paid its own gas out of the USDC it brought in.
+      const withdrawFee = gasLeft + DUST_STEP_CAP - (await harness.usdcBalance(plan.pocket));
+      expect(withdrawFee).toBeGreaterThan(0n);
+      expect(withdrawFee).toBeLessThanOrEqual(
+        await feeInUsdc((await harness.row(plan))?.withdraw_tx),
+      );
       expect(await harness.gatewayAvailable(plan.pocket)).toBe(0n);
       const listed = await indexerReader().closedPocketsWithBalance();
       expect(listed.some((entry) => sameAddress(entry.pocket, plan.pocket))).toBe(false);
@@ -413,9 +420,10 @@ describe.skipIf(!localChainEnabled)("pocket path on a local Arc chain (SCR-146 r
         `SELECT pocket,withdraw_tx FROM payer_pullback_gateway_failures
          WHERE initiate_tx IS NOT NULL OR return_tx IS NOT NULL ORDER BY pocket`,
       );
-      // Every slow-path row in this run started with a Gateway figure above 0 (dust or a funded step):
-      // three SCR-144 restarts, three manual returns, one clean dust return and two crash walks.
-      expect(rows.rows).toHaveLength(9);
+      // Every slow-path row in this run started with a Gateway figure above 0: three SCR-144 restarts,
+      // three manual returns, one clean dust return, two crash walks, and the late-funds pocket's
+      // remaining dust, which a later recovery pass withdraws and returns.
+      expect(rows.rows).toHaveLength(10);
       expect(returnRequests.length).toBeGreaterThanOrEqual(rows.rows.length);
       expect(returnRequests.filter((request) => !request.withdrawMined)).toEqual([]);
       for (const row of rows.rows) {
@@ -742,7 +750,7 @@ async function crashWalk(plan: PocketPlan, pass: () => Promise<unknown>): Promis
   const crashed = async (name: string, when: "before-send" | "after-mined", selector: Hex) => {
     harness.chain.crash.arm({ name, when, match: fromPocket(selector) });
     await pass().catch((error: unknown) => {
-      if (!(error instanceof InjectedCrash)) throw error;
+      if (!isInjectedCrash(error)) throw error;
     });
     expect(harness.chain.crash.fired).toContain(name);
     return harness.row(plan);
@@ -793,4 +801,19 @@ async function crashWalk(plan: PocketPlan, pass: () => Promise<unknown>): Promis
     nonceBefore + 3,
   );
   expect(await k4Order(plan.pocket)).toEqual(["initiate/withdraw", "initiate/withdraw", "return"]);
+}
+
+/** viem wraps transport errors; the injected kill is somewhere on the `cause` chain. */
+function isInjectedCrash(error: unknown): boolean {
+  for (let current = error; current instanceof Error; current = current.cause)
+    if (current instanceof InjectedCrash) return true;
+  return false;
+}
+
+/** A mined transaction's fee in USDC base units (18-decimal native / 10^12, rounded up; A1-05). */
+async function feeInUsdc(hash: string | null | undefined): Promise<bigint> {
+  if (!hash) throw new Error("No transaction hash to price.");
+  const receipt = await harness.chain.reader.getTransactionReceipt({ hash: hash as Hash });
+  const native = receipt.gasUsed * receipt.effectiveGasPrice;
+  return (native + NATIVE_PER_USDC_UNIT - 1n) / NATIVE_PER_USDC_UNIT;
 }

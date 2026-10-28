@@ -230,7 +230,7 @@ function chainProjection(input: ProjectionInput): Projection {
         state: row.state === 1 ? "Pending" : row.state === 2 ? "Confirmed" : "Cancelled",
       };
     },
-    blockNumber: () => input.reader.getBlockNumber(),
+    blockNumber: () => input.reader.getBlockNumber({ cacheTime: 0 }),
     storedPlan: async () => undefined,
     envelope: async (vault, envelopeId) => {
       const envelope = await input.reader.readContract({
@@ -279,7 +279,7 @@ function chainProjection(input: ProjectionInput): Projection {
 
 async function pocketBalances(input: ProjectionInput, pocket: Address): Promise<PocketBalances> {
   const observation = await input.standin.observe(pocket);
-  const block = await input.reader.getBlockNumber();
+  const block = await input.reader.getBlockNumber({ cacheTime: 0 });
   const read = (functionName: "withdrawingBalance" | "withdrawalBlock") =>
     input.reader.readContract({
       address: GATEWAY_WALLET,
