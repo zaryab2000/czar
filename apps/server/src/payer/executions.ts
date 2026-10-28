@@ -202,6 +202,8 @@ export async function markStepFailed(
     readonly stepIndex: number;
     readonly attempt: number;
     readonly errorCode: string;
+    /** The decoded vault error name for `reserve-failed` (cross-cutting §5.2). */
+    readonly detail?: string;
     readonly stepError?: StepError;
   },
 ): Promise<void> {
@@ -224,6 +226,7 @@ export async function markStepFailed(
         input.attempt,
         JSON.stringify({
           errorCode: input.errorCode,
+          ...(input.detail === undefined ? {} : { detail: input.detail }),
           ...(input.stepError ? { stepError: input.stepError } : {}),
         }),
       ],
