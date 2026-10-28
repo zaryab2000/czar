@@ -12,7 +12,10 @@ interface IERC20Transfer {
 /// @dev SCR-150 §3, §4: `gatewayMint` accepts the LOCAL attestation the D92 stand-in returns,
 ///      `abi.encode(bytes32 transferSpecHash, address recipient, uint256 value, address depositor)`. The signature
 ///      is NOT verified: this is a test double for a CLEAN local chain; real attestation verification is first
-///      exercised in M8 (D92). The `AttestationUsed` shape below is local and not verified against Circle's source.
+///      exercised in M8 (D92). `AttestationUsed` uses Circle's canonical signature, the one the indexer registers in
+///      `apps/indexer/src/external-abis.ts` (`GatewayMinter` ABI), so the local indexer marks the pullback attested.
+///      The local attestation carries no source domain or signer: `sourceDomain` is the Arc Gateway domain (26,
+///      `Deploy.s.sol` `ARC_GATEWAY_DOMAIN`, A2-01) and `sourceSigner` is zero.
 contract MockGatewayMinter {
     address public immutable controller;
     address public usdc;
@@ -23,7 +26,19 @@ contract MockGatewayMinter {
     error NotInitialized();
     error InvalidAddress();
 
-    event AttestationUsed(bytes32 indexed transferSpecHash, address indexed recipient, uint256 value, address depositor);
+    /// @dev Arc's Gateway domain (A2-01, `Deploy.s.sol` `ARC_GATEWAY_DOMAIN`): the only source domain on a local chain.
+    uint32 public constant LOCAL_SOURCE_DOMAIN = 26;
+
+    /// @dev Circle's canonical event; must match `apps/indexer/src/external-abis.ts` exactly (topic0 included).
+    event AttestationUsed(
+        address indexed token,
+        address indexed recipient,
+        bytes32 indexed transferSpecHash,
+        uint32 sourceDomain,
+        bytes32 sourceDepositor,
+        bytes32 sourceSigner,
+        uint256 value
+    );
 
     constructor() {
         controller = msg.sender;
@@ -47,7 +62,9 @@ contract MockGatewayMinter {
         if (recipient == address(0)) revert InvalidAddress();
         _usedHashes[transferSpecHash] = true;
         require(IERC20Transfer(usdc).transfer(recipient, value), "MockGatewayMinter: transfer failed");
-        emit AttestationUsed(transferSpecHash, recipient, value, depositor);
+        emit AttestationUsed(
+            usdc, recipient, transferSpecHash, LOCAL_SOURCE_DOMAIN, bytes32(uint256(uint160(depositor))), bytes32(0), value
+        );
     }
 
     /// @notice TransferSpecHashes.sol line 35.
