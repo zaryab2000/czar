@@ -27,7 +27,9 @@ import type { PaymentRef } from "@czar/schemas";
 import { czarVaultAbi, withFeeFloor } from "@czar/vault-client";
 import { CANONICAL_GATEWAY_WALLET } from "../../../ops/local/gateway-doubles.ts";
 import { runGasRefill } from "#src/gas-refill";
-import type { Denied } from "#src/policy";
+import { returnableAtomic, type Denied } from "#src/policy";
+import { createRpcTransactionPreparer } from "#src/runtime-adapters";
+import { pocketReturnGasReserve } from "#src/service";
 import { harness, NETWORK } from "#test/helpers";
 import {
   chainNow,
@@ -39,6 +41,7 @@ import {
 } from "#test/local-chain/arc-node";
 import {
   CALL_COUNT,
+  CHAIN_ID,
   ENVELOPE_ID,
   k3VaultCall,
   k4Transaction,
@@ -69,9 +72,17 @@ const API_DOWN_HOURS = Number(config.get("payer.pullbackApiDownHours"));
 const WRITE_OFF_DUST =
   BigInt(config.get("payer.pullbackMaxFeeAtomic") as number) +
   BigInt(config.get("payer.pullbackSafetyAtomic") as number);
-/** One atomic USDC unit in Arc's 18-decimal native balance. */
-const NATIVE_PER_ATOMIC = 10n ** 12n;
+/** One USDC in Arc's 18-decimal native balance. */
+const ONE_USDC_NATIVE = 10n ** 18n;
+/** Returns CZ-15 may need when the fee falls between them; each round can only shrink the remainder. */
+const MAX_RETURN_ROUNDS = 5;
 const RULE = "writeoff-manual-return-overdue";
+const RETURN_VAULT: Address = "0x00000000000000000000000000000000000c2a21";
+const POCKET_START_NATIVE = 1_234_567_891_234_567_891n;
+const ARC_USDC_ABI = parseAbi([
+  "function balanceOf(address account) view returns (uint256)",
+  "function transfer(address to, uint256 value) returns (bool)",
+]);
 const USDC_ABI = parseAbi([
   "function transferWithAuthorization(address from,address to,uint256 value,uint256 validAfter,uint256 validBefore,bytes32 nonce,bytes signature)",
   "function approve(address spender,uint256 value) returns (bool)",
@@ -272,11 +283,16 @@ describe.skipIf(!enabled)("SCR-146 §3.3 run 2: signer against real chain reads"
           ),
       },
       {
-        name: "5: the pocket EOA holds USDC",
+        name: "5: the pocket EOA is not empty (USDC is returnable)",
         denial: "gateway-balance-stale",
         breakOnly: async (r) => {
-          await r.node.testClient.setBalance({ address: r.pocket, value: NATIVE_PER_ATOMIC });
-          return () => r.node.testClient.setBalance({ address: r.pocket, value: 0n });
+          const remainder = await r.node.publicClient.getBalance({ address: r.pocket });
+          await r.node.testClient.setBalance({
+            address: r.pocket,
+            value: remainder + ONE_USDC_NATIVE,
+          });
+          expect(await r.pocketReturnable()).toBeGreaterThan(0n);
+          return () => r.node.testClient.setBalance({ address: r.pocket, value: remainder });
         },
       },
       {
@@ -307,7 +323,8 @@ describe.skipIf(!enabled)("SCR-146 §3.3 run 2: signer against real chain reads"
       {
         name: "7: returned_amount does not match the Transfer value",
         denial: "gateway-balance-stale",
-        breakOnly: (r) => setFailureRow(r, "returned_amount", (POCKET_FUNDING + 1n).toString()),
+        breakOnly: (r, manual) =>
+          setFailureRow(r, "returned_amount", (manual.returnedAmount + 1n).toString()),
       },
       {
         name: "7: the return is not yet older than payer.manualReturnHoldHours",
@@ -402,11 +419,100 @@ describe.skipIf(!enabled)("SCR-146 §3.3 run 2: signer against real chain reads"
   });
 });
 
+describe.skipIf(!enabled)("SCR-152 pocket return on a real arc-anvil", () => {
+  let node: ArcNode | undefined;
+  afterAll(() => node?.stop());
+
+  it("signs only balance - gasReserve; the return mines and leaves an empty remainder", async () => {
+    node = await startArcNode({ port: PORTS.pocketReturnChain, chainId: CHAIN_ID });
+    const client = node.publicClient;
+    const testClient = node.testClient;
+    const usdcOf = (address: Address) =>
+      client.readContract({
+        address: NETWORK.usdc,
+        abi: ARC_USDC_ABI,
+        functionName: "balanceOf",
+        args: [address],
+      });
+    const prepare = createRpcTransactionPreparer({
+      chainId: CHAIN_ID,
+      rpcUrl: node.rpcUrl,
+      client,
+    });
+    const t = await harness({
+      prepareTransaction: prepare,
+      projection: {
+        pocket: async () => ({
+          vault: RETURN_VAULT,
+          envelopeId: 1n,
+          state: "Funded",
+          funded: 0n,
+          pendingPullback: 0n,
+          slowWithdrawalOpen: false,
+        }),
+        pocketBalances: async (pocket) => ({
+          ...t.state.balances,
+          usdc: await usdcOf(pocket),
+          native: await client.getBalance({ address: pocket }),
+        }),
+      },
+    });
+    await testClient.setBalance({ address: t.pocket, value: POCKET_START_NATIVE });
+    const sign = (amount: bigint) =>
+      t.signer.sign("cz-15", {
+        keyId: "K4",
+        kind: "pocket-return",
+        payload: { pocket: t.pocket, kind: "usdc", amount: amount.toString() },
+      });
+
+    // What CZ-15 computes from fresh reads, with the same preparer the signer signs with.
+    const reserveFor = (amount: bigint) =>
+      pocketReturnGasReserve(prepare, {
+        usdc: NETWORK.usdc,
+        pocket: t.pocket,
+        vault: RETURN_VAULT,
+        amount,
+      });
+    const balance = await usdcOf(t.pocket);
+    const first = await returnableAtomic(balance, reserveFor);
+    expect(first.returnable).toBeGreaterThan(0n);
+    for (const amount of [balance, first.returnable + 1n, first.returnable - 1n]) {
+      await expect(sign(amount)).rejects.toMatchObject({ rule: "pocket-return-value-mismatch" });
+    }
+
+    // Each signed return mines and leaves at most its gasReserve. The fee can fall after a block, which makes part
+    // of that remainder returnable again (SCR-152 §2: "empty" is judged at the current fee), so CZ-15 returns
+    // until nothing is returnable.
+    let returned = 0n;
+    for (let round = 0; round < MAX_RETURN_ROUNDS; round += 1) {
+      const before = await usdcOf(t.pocket);
+      const { returnable } = await returnableAtomic(before, reserveFor);
+      if (returnable <= 0n) break;
+      const signed = await sign(returnable);
+      if (!("signedTransaction" in signed))
+        throw new Error("pocket-return returned no transaction");
+      const hash = await client.sendRawTransaction({
+        serializedTransaction: signed.signedTransaction,
+      });
+      const receipt = await client.waitForTransactionReceipt({ hash });
+      expect(receipt.status).toBe("success");
+      returned += returnable;
+      expect(await usdcOf(RETURN_VAULT)).toBe(returned);
+      expect(await usdcOf(t.pocket)).toBeLessThanOrEqual(before - returnable);
+    }
+    const remainder = await usdcOf(t.pocket);
+    expect((await returnableAtomic(remainder, reserveFor)).returnable).toBeLessThanOrEqual(0n);
+    expect(remainder + returned).toBeLessThanOrEqual(balance);
+    await expect(sign(1n)).rejects.toMatchObject({ rule: "pocket-empty" });
+  }, 120_000);
+});
+
 const POCKET_STATE_REGISTERED = 1n;
 const POCKET_STATE_FUNDED = 2;
 const ENVELOPE_STATE_CLOSED = 2n;
 
 type ManualReturn = {
+  readonly returnedAmount: bigint;
   readonly returnTx: Hex;
   readonly withdrawTx: Hex;
   readonly returnTimestamp: number;
@@ -599,15 +705,8 @@ async function runSlowRouteToOverdueReturn(run: Run2): Promise<ManualReturn> {
     pocket: run.pocket,
     step: "withdraw",
   });
-  const returned = await k4Transaction(run, "pocket-return", {
-    pocket: run.pocket,
-    kind: "usdc",
-    amount: POCKET_FUNDING.toString(),
-  });
-  // Arc pays gas in USDC, so the pocket EOA keeps its unspent gas as a USDC balance after the return; predicate 5
-  // needs it at zero (see the PR's open issue on SCR-145 predicate 5 and Arc gas).
-  await run.node.testClient.setBalance({ address: run.pocket, value: 0n });
-  const transfer = vaultTransferLog(run, returned);
+  const { receipt: returned, amount: returnedAmount } = await returnUntilEmpty(run);
+  const transfer = vaultTransferLog(run, returned, returnedAmount);
   await run.db.pool.query(
     `UPDATE payer_pullback_gateway_failures
      SET state='manual-return-required', initiate_tx=NULL, withdraw_tx=$2, return_tx=$3,
@@ -619,7 +718,7 @@ async function runSlowRouteToOverdueReturn(run: Run2): Promise<ManualReturn> {
       returned.transactionHash,
       returned.blockNumber.toString(),
       transfer.logIndex,
-      POCKET_FUNDING.toString(),
+      returnedAmount.toString(),
     ],
   );
   const block = await run.node.publicClient.getBlock({ blockNumber: returned.blockNumber });
@@ -629,10 +728,36 @@ async function runSlowRouteToOverdueReturn(run: Run2): Promise<ManualReturn> {
     returnTx: returned.transactionHash,
     withdrawTx: withdrawn.transactionHash,
     returnTimestamp: Number(block.timestamp),
+    returnedAmount,
   };
 }
 
-function vaultTransferLog(run: Run2, receipt: TransactionReceipt) {
+/**
+ * CZ-15's SCR-152 return: K4 returns `balance − gasReserve` until the EOA is empty. The fee can fall after a block,
+ * which makes part of the remaining gas reserve returnable again, so more than one return can be needed. The CZ-15
+ * row records the last one.
+ */
+async function returnUntilEmpty(
+  run: Run2,
+): Promise<{ receipt: TransactionReceipt; amount: bigint }> {
+  let last: { receipt: TransactionReceipt; amount: bigint } | undefined;
+  for (let round = 0; round < MAX_RETURN_ROUNDS; round += 1) {
+    await nextBlockVisible(run);
+    const amount = await run.pocketReturnable();
+    if (amount <= 0n) break;
+    const receipt = await k4Transaction(run, "pocket-return", {
+      pocket: run.pocket,
+      kind: "usdc",
+      amount: amount.toString(),
+    });
+    last = { receipt, amount };
+  }
+  if (last === undefined) throw new Error("the pocket had nothing returnable after the withdrawal");
+  expect(await run.pocketReturnable()).toBeLessThanOrEqual(0n);
+  return last;
+}
+
+function vaultTransferLog(run: Run2, receipt: TransactionReceipt, amount: bigint) {
   const transfer = parseEventLogs({
     abi: USDC_ABI,
     eventName: "Transfer",
@@ -644,7 +769,7 @@ function vaultTransferLog(run: Run2, receipt: TransactionReceipt) {
       log.args.to.toLowerCase() === run.vault.toLowerCase(),
   );
   if (transfer === undefined) throw new Error("pocket return has no pocket-to-vault Transfer");
-  expect(transfer.args.value).toBe(POCKET_FUNDING);
+  expect(transfer.args.value).toBe(amount);
   return transfer;
 }
 

@@ -24,6 +24,17 @@ const PLAN_ID = "pln_01K7ZT9P4N5Q6R7S8T9V0W1X2Y";
 const SLOW_POCKET = "0x0000000000000000000000000000000000000002" as const;
 const SLOW_VAULT = "0x0000000000000000000000000000000000000001" as const;
 const SLOW_USDC = "0x3600000000000000000000000000000000000000" as const;
+const slowInput = () =>
+  ({
+    planId: PLAN_ID,
+    stepIndex: 0,
+    envelopeRef: "eip155:5042002:0x0000000000000000000000000000000000000001:1",
+    pocket: SLOW_POCKET,
+    vault: SLOW_VAULT,
+    usdc: SLOW_USDC,
+    apiUnavailableSince: new Date("2026-10-20T00:00:00Z"),
+    value: 825_000n,
+  }) as const;
 
 beforeAll(async () => {
   await seedDevice(getPool());
@@ -1316,7 +1327,7 @@ describe("pullback values", () => {
       getBlockNumber: vi.fn(async () => head),
       withdrawalBlock: vi.fn(async () => (initiated ? 200n : 0n)),
       withdrawingBalance: vi.fn(async () => withdrawingBalance),
-      pocketUsdcBalance: vi.fn(async () => usdc),
+      pocketReturnable: vi.fn(async () => usdc),
       transactionReceipt: vi.fn(async () => ({
         status: "success" as const,
         blockNumber: 200n,
@@ -1377,6 +1388,101 @@ describe("pullback values", () => {
     expect(usdc).toBe(0n);
   });
 
+  it("returns balance - gasReserve and completes with the gas remainder left in the pocket (SCR-152)", async () => {
+    // The pocket holds 825,000 after the withdrawal; returning it costs a 1,000 reserve, so 824,000 is returnable.
+    let returnable = 824_000n;
+    const sign = vi.fn(async (_caller: string, _request: SignRequest) => ({
+      signedTransaction: "0x1234" as const,
+    }));
+    const chain = {
+      getBlockNumber: vi.fn(async () => 300n),
+      withdrawalBlock: vi.fn(async () => 0n),
+      withdrawingBalance: vi.fn(async () => 0n),
+      pocketReturnable: vi.fn(async () => returnable),
+      transactionReceipt: vi.fn(async () => ({
+        status: "success" as const,
+        blockNumber: 301n,
+        logs: [
+          { address: SLOW_USDC, from: SLOW_POCKET, to: SLOW_VAULT, value: 824_000n, logIndex: 2 },
+        ],
+      })),
+      sendPocketTransaction: vi.fn(async (transaction: `0x${string}`) => {
+        // The remainder (at most the reserve) is less than one more transfer costs: nothing is returnable.
+        returnable = -150n;
+        return keccak256(transaction);
+      }),
+    };
+    const dependencies = {
+      pool: getPool(),
+      config: loadConfig(),
+      signer: { sign },
+      chain,
+      now: () => new Date("2026-10-22T00:00:00Z"),
+    };
+
+    await expect(executeSlowPullbackFallback(slowInput(), dependencies)).resolves.toMatchObject({
+      state: "manual-return-required",
+      amount: "824000",
+    });
+    expect(sign.mock.calls.map(([, request]) => request.payload)).toEqual([
+      { pocket: SLOW_POCKET, kind: "usdc", amount: "824000" },
+    ]);
+    expect(chain.pocketReturnable).toHaveBeenCalledWith(SLOW_POCKET, SLOW_VAULT);
+  });
+
+  it("re-reads and retries the return after pocket-return-value-mismatch (SCR-152)", async () => {
+    let returnable = 824_000n;
+    let denials = 0;
+    const sign = vi.fn(async (_caller: string, request: SignRequest) => {
+      if (denials === 0) {
+        denials += 1;
+        // The signer's prepared transaction carried a higher fee: its returnable value is lower.
+        returnable = 823_900n;
+        throw new Denied("pocket-return-value-mismatch");
+      }
+      expect(request.payload).toEqual({ pocket: SLOW_POCKET, kind: "usdc", amount: "823900" });
+      return { signedTransaction: "0x1234" as const };
+    });
+    const sendPocketTransaction = vi.fn(async (transaction: `0x${string}`) => {
+      returnable = 0n;
+      return keccak256(transaction);
+    });
+    const dependencies = {
+      pool: getPool(),
+      config: loadConfig(),
+      signer: { sign },
+      chain: {
+        getBlockNumber: vi.fn(async () => 300n),
+        withdrawalBlock: vi.fn(async () => 0n),
+        withdrawingBalance: vi.fn(async () => 0n),
+        pocketReturnable: vi.fn(async () => returnable),
+        transactionReceipt: vi.fn(async () => ({
+          status: "success" as const,
+          blockNumber: 301n,
+          logs: [
+            { address: SLOW_USDC, from: SLOW_POCKET, to: SLOW_VAULT, value: 823_900n, logIndex: 0 },
+          ],
+        })),
+        sendPocketTransaction,
+      },
+      now: () => new Date("2026-10-22T00:00:00Z"),
+    };
+
+    await expect(executeSlowPullbackFallback(slowInput(), dependencies)).resolves.toMatchObject({
+      state: "waiting-return",
+    });
+    expect(sendPocketTransaction).not.toHaveBeenCalled();
+    const phases = await getExecutionTrace(getPool(), PLAN_ID, 0, 0);
+    expect(phases.map((phase) => phase.phase)).toContain(
+      "pullback.slow.pocket-return-value-mismatch",
+    );
+    await expect(executeSlowPullbackFallback(slowInput(), dependencies)).resolves.toMatchObject({
+      state: "manual-return-required",
+      amount: "823900",
+    });
+    expect(sign).toHaveBeenCalledTimes(2);
+  });
+
   it("does not initiate another slow withdrawal when the Gateway already has one open", async () => {
     const sendPocketTransaction = vi.fn(async () => "unexpected-tx");
     const sign = vi.fn(async () => ({ signedTransaction: "0x1234" as const }));
@@ -1388,7 +1494,7 @@ describe("pullback values", () => {
         getBlockNumber: vi.fn(async () => 100n),
         withdrawalBlock: vi.fn(async () => 200n),
         withdrawingBalance: vi.fn(async () => 1n),
-        pocketUsdcBalance: vi.fn(async () => 0n),
+        pocketReturnable: vi.fn(async () => 0n),
         transactionReceipt: vi.fn(async () => null),
         sendPocketTransaction,
       },
@@ -1432,7 +1538,7 @@ describe("pullback values", () => {
         getBlockNumber: vi.fn(async () => 100n),
         withdrawalBlock: vi.fn(async () => 0n),
         withdrawingBalance: vi.fn(async () => 0n),
-        pocketUsdcBalance: vi.fn(async () => 0n),
+        pocketReturnable: vi.fn(async () => 0n),
         transactionReceipt: vi.fn(async () => null),
         sendPocketTransaction,
       },
@@ -1483,7 +1589,7 @@ describe("pullback values", () => {
         getBlockNumber: vi.fn(async () => head),
         withdrawalBlock: vi.fn(async () => withdrawalBlock),
         withdrawingBalance: vi.fn(async () => withdrawingBalance),
-        pocketUsdcBalance: vi.fn(async () => usdc),
+        pocketReturnable: vi.fn(async () => usdc),
         transactionReceipt: vi.fn(async () => ({
           status: "success" as const,
           blockNumber: 200n,
@@ -1568,7 +1674,7 @@ describe("pullback values", () => {
             getBlockNumber: async () => 100n,
             withdrawalBlock: async () => 0n,
             withdrawingBalance: async () => 0n,
-            pocketUsdcBalance: async () => 0n,
+            pocketReturnable: async () => 0n,
             transactionReceipt: async () => null,
             sendPocketTransaction: send,
           },
@@ -1621,7 +1727,7 @@ describe("pullback values", () => {
         getBlockNumber: async () => 100n,
         withdrawalBlock: async () => 0n,
         withdrawingBalance: async () => 0n,
-        pocketUsdcBalance: async () => 0n,
+        pocketReturnable: async () => 0n,
         transactionReceipt: async () => null,
         sendPocketTransaction,
       },

@@ -6,6 +6,7 @@ import {
   createWalletClient,
   http,
   keccak256,
+  parseAbi,
   parseEventLogs,
   toBytes,
   type Address,
@@ -19,7 +20,9 @@ import { czarVaultAbi, czarVaultFactoryAbi, withFeeFloor } from "@czar/vault-cli
 import { placeGatewayDoubles } from "../../../../ops/local/gateway-doubles.ts";
 import { createPostgresProjection } from "#src/postgres-projection";
 import { postgresAudit } from "#src/postgres-audit";
-import type { SignRequest, SignResult } from "#src/service";
+import { returnableAtomic } from "#src/policy";
+import { createRpcTransactionPreparer } from "#src/runtime-adapters";
+import { pocketReturnGasReserve, type SignRequest, type SignResult } from "#src/service";
 import { harness, NETWORK } from "#test/helpers";
 import {
   chainNow,
@@ -39,7 +42,13 @@ import {
 } from "#test/local-chain/stack";
 
 /** Ports reserved for this suite (18610-18619); other local suites use 8545-8549 and 18546-18559. */
-export const PORTS = { chain: 18610, indexer: 18611, gatewayApi: 18612, k8Chain: 18613 } as const;
+export const PORTS = {
+  chain: 18610,
+  indexer: 18611,
+  gatewayApi: 18612,
+  k8Chain: 18613,
+  pocketReturnChain: 18614,
+} as const;
 export const CHAIN_ID = 5_042_002;
 export const PAYEE: Address = "0x000000000000000000000000000000000000bEEF";
 export const UNIT_AMOUNT = 100_000n;
@@ -54,6 +63,7 @@ const ENVELOPE_LIFETIME_SEC = 7n * 86_400n;
 const GAS_FUNDING = 10n * 10n ** 18n;
 /** Vault USDC: 5 USDC in native units (the ERC-20 at 0x3600… reads native / 1e12). */
 const VAULT_FUNDING = 5n * 10n ** 18n;
+const USDC_BALANCE_ABI = parseAbi(["function balanceOf(address account) view returns (uint256)"]);
 const USER_ID = "usr_01K7ZT9P4N5Q6R7S8T9V0W1X2Y";
 const DEVICE_ID = "dev_01K7ZT9P4N5Q6R7S8T9V0W1X2Y";
 const OBJECTIVE_ID = "obj_01K7ZT9P4N5Q6R7S8T9V0W1X2Y";
@@ -75,6 +85,11 @@ export type Run2 = {
   readonly prepared: TransactionSerializableEIP1559[];
   /** Signs with the signer clock set to the latest block's time. */
   sign(caller: string, request: SignRequest): Promise<SignResult>;
+  /**
+   * SCR-152 returnable value of the pocket EOA right now (balance − gasReserve of its `pocket-return`), computed as
+   * CZ-15 does with the signer's preparer; `≤ 0` means empty.
+   */
+  pocketReturnable(): Promise<bigint>;
   /** Overrides the signer clock (Unix seconds); `undefined` follows the chain again. */
   pinClock(seconds: number | undefined): void;
   stop(): Promise<void>;
@@ -113,7 +128,34 @@ export async function startRun2(): Promise<Run2> {
     stops.push(() => indexer.stop());
     const vaultSetup = await openVaultEnvelope(node, deployment, wired.t);
     await seedServerRows(db, vaultSetup);
-    return { node, db, gatewayApi, indexer, deployment, ...wired, ...vaultSetup, stop };
+    const pocketReturnable = async () => {
+      const balance = await node.publicClient.readContract({
+        address: NETWORK.usdc,
+        abi: USDC_BALANCE_ABI,
+        functionName: "balanceOf",
+        args: [vaultSetup.pocket],
+      });
+      const { returnable } = await returnableAtomic(balance, (amount) =>
+        pocketReturnGasReserve(wired.rpcPreparer, {
+          usdc: NETWORK.usdc,
+          pocket: vaultSetup.pocket,
+          vault: vaultSetup.vault,
+          amount,
+        }),
+      );
+      return returnable;
+    };
+    return {
+      node,
+      db,
+      gatewayApi,
+      indexer,
+      deployment,
+      ...wired,
+      ...vaultSetup,
+      pocketReturnable,
+      stop,
+    };
   } catch (error) {
     await stop();
     throw error;
@@ -125,6 +167,12 @@ async function wireSigner(node: ArcNode, db: TestDatabase) {
   let clockSec: number | undefined;
   let chainSec = 0;
   const prepared: TransactionSerializableEIP1559[] = [];
+  // The signer process's own preparer (runtime-adapters), so gas and fees are derived as in production.
+  const rpcPreparer = createRpcTransactionPreparer({
+    chainId: CHAIN_ID,
+    rpcUrl: node.rpcUrl,
+    client: node.publicClient,
+  });
   const projection = createPostgresProjection({
     config: loadConfig(),
     database: db.pool,
@@ -140,16 +188,7 @@ async function wireSigner(node: ArcNode, db: TestDatabase) {
     auditSink: postgresAudit(db.pool),
     nowMs: () => (clockSec ?? chainSec) * 1000,
     prepareTransaction: async (from, call) => {
-      const tx: TransactionSerializableEIP1559 = {
-        type: "eip1559",
-        chainId: CHAIN_ID,
-        nonce: await node.publicClient.getTransactionCount({ address: from, blockTag: "pending" }),
-        gas: await node.publicClient.estimateGas({ account: from, ...call }),
-        ...withFeeFloor({ maxFeePerGas: await node.publicClient.getGasPrice() }),
-        to: call.to,
-        data: call.data,
-        value: call.value,
-      };
+      const tx = await rpcPreparer(from, call);
       prepared.push(tx);
       return tx;
     },
@@ -159,6 +198,7 @@ async function wireSigner(node: ArcNode, db: TestDatabase) {
   return {
     t,
     prepared,
+    rpcPreparer,
     setFactory: (address: Address) => {
       factory = address;
     },
