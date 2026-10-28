@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import { loadConfig } from "@czar/config";
 import { buildTree, payeeLeaf, verifyProof } from "@czar/hashing";
-import { USDC_ADDRESS, type PaymentRequirements } from "@czar/x402";
+import { encodeBase64Json, USDC_ADDRESS, type PaymentRequirements } from "@czar/x402";
 import { describe, expect, it } from "vitest";
 import {
   computeObjectiveGatewayVolume,
@@ -9,6 +9,7 @@ import {
   recomputePlanHash,
 } from "#src/planner/index";
 import { createSafeProber } from "#src/planner/probe";
+import { createRegisteredSelection } from "#src/selection/registered/index";
 import { createPlannerProfileSource } from "#src/main";
 import { localTemplateProfile } from "#src/acceptance/profile";
 import { route, routingParamsFromConfig, cVd, pocketWorthIt } from "#src/router/index";
@@ -433,6 +434,71 @@ describe("planner fallback", () => {
         server.close((error) => (error ? reject(error) : resolve())),
       );
     }
+  });
+
+  it("plans a web-search step for a registered service that declares a Bazaar q input", async () => {
+    const resourceUrl = "https://merchant.example/v1/search";
+    const challenge = {
+      x402Version: 2,
+      resource: { url: resourceUrl },
+      accepts: [offer],
+      extensions: {
+        bazaar: {
+          info: { input: { type: "http", method: "GET", queryParams: { q: "czar probe" } } },
+          schema: {
+            type: "object",
+            properties: {
+              input: {
+                type: "object",
+                properties: {
+                  type: { type: "string", const: "http" },
+                  method: { type: "string", enum: ["GET", "HEAD", "DELETE"] },
+                  queryParams: {
+                    type: "object",
+                    properties: { q: { type: "string" } },
+                    required: ["q"],
+                  },
+                },
+                required: ["type", "method"],
+                additionalProperties: false,
+              },
+            },
+            required: ["input"],
+          },
+        },
+      },
+    };
+    const selection = createRegisteredSelection({
+      config: loadConfig({
+        envFile: {
+          "selection.czarRegisteredServices": {
+            [serviceId]: {
+              serviceName: "czar-search",
+              resource: { url: resourceUrl, method: "GET" },
+              probeInput: { query: { q: "czar probe" } },
+              capabilities: ["web-search"],
+            },
+          },
+        },
+      }),
+      safeFetch: async () => ({
+        status: 402,
+        url: resourceUrl,
+        headers: { "payment-required": encodeBase64Json(challenge) },
+        body: Buffer.from(""),
+      }),
+      pool: {} as never,
+    });
+    const service = await selection.directory.get(serviceId);
+    if (!service) throw new Error("registered service probe failed");
+
+    const built = await makePlanner({ service, subjects: 2 });
+
+    expect(built?.plan.steps.map((step) => step.capability)).toEqual(["web-search"]);
+    expect(built?.plan.steps[0]?.callInputs?.map((call) => call.input)).toEqual([
+      { q: "Subject 0 Pricing Price" },
+      { q: "Subject 1 Pricing Price" },
+    ]);
   });
 
   it("planner_p03Input_noSellerText keeps seller text out of structured planner inputs", async () => {
