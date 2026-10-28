@@ -319,7 +319,12 @@ async function writeAtomic(path, value) {
   await rename(temporaryPath, path);
 }
 
-export function sessionEnvironment(env, live) {
+// The signer reads Ponder's tables by SQL (apps/signer/src/postgres-projection.ts), and Ponder writes
+// them into the session schema, so the signer alone searches that schema before public. The other
+// roles keep the default path: server migrations must create their tables in public.
+const PONDER_SQL_READERS = Object.freeze(["signer"]);
+
+export function sessionEnvironment(env, live, role) {
   const base = env["CZAR_DATABASE_URL"] ?? env["DATABASE_URL"];
   if (base === undefined)
     throw new ChainSessionError("databaseUrl", "CZAR_DATABASE_URL or DATABASE_URL is required");
@@ -333,6 +338,9 @@ export function sessionEnvironment(env, live) {
     DATABASE_SCHEMA: live.schema,
     CZAR_INDEXER_START_BLOCK: live.startBlock.toString(),
     CZAR_CHAIN_SESSION: live.S,
+    ...(PONDER_SQL_READERS.includes(role)
+      ? { PGOPTIONS: `-c search_path=${live.schema},public` }
+      : {}),
   };
 }
 
@@ -360,7 +368,7 @@ export async function prepare({
       throw new ChainSessionError("session", "session file is unreadable");
   }
   const update = reconcileSession({ role, live, recordedText });
-  const childEnv = sessionEnvironment(env, live);
+  const childEnv = sessionEnvironment(env, live, role);
   // Writes happen only after every check above has passed.
   const database = ensureDatabase(live.database, sql);
   if (update !== null) await write(SESSION_PATH, update);
