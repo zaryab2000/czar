@@ -18,8 +18,10 @@ interface IERC20Transfer {
 ///      `Deploy.s.sol` `ARC_GATEWAY_DOMAIN`, A2-01) and `sourceSigner` is zero.
 contract MockGatewayMinter {
     address public immutable controller;
-    address public usdc;
+    // Storage layout: `_usedHashes` stays at slot 0 as before SCR-150, because replay-anvil.test.ts marks a transfer
+    // spec used with anvil_setStorageAt at keccak256(abi.encode(hash, 0)). SCR-150 state is appended after it.
     mapping(bytes32 => bool) internal _usedHashes;
+    address public usdc;
 
     error TransferSpecHashUsed(bytes32 transferSpecHash);
     error AlreadyInitialized();

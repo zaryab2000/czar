@@ -46,6 +46,14 @@ contract GatewayDoublesTest is Test {
         assertTrue(placed.isTokenSupported(address(usdc)));
     }
 
+    /// @dev `_usedHashes` must stay at slot 0: replay-anvil.test.ts writes keccak256(abi.encode(hash, 0)).
+    function test_layout_minterUsedHashesStaysAtSlot0() public {
+        bytes32 specHash = keccak256("layout");
+        assertFalse(minter.isTransferSpecHashUsed(specHash));
+        vm.store(address(minter), keccak256(abi.encode(specHash, uint256(0))), bytes32(uint256(1)));
+        assertTrue(minter.isTransferSpecHashUsed(specHash));
+    }
+
     // ─────────────── Placement (SCR-150 §1) ───────────────
 
     function test_placement_copiedCodeNeedsInitializeOnce() public {
