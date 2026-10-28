@@ -57,7 +57,7 @@
    - Acceptance tests, on pinned arc-anvil `--network arc` with the real signer and preparer:
      - The closed dust pocket and the three API-down funded pockets end with Gateway available + withdrawing = 0, the funds in the vault (directly, or as a manual-return credit), and the EOA empty.
      - No K4 `pocket-return` audit row precedes a mined `withdraw_tx` for a row whose Gateway figure was > 0.
-     - A crash and restart after each of `initiate.sent`, `initiate.mined`, `withdraw.sent`, `withdraw.mined` and `return.sent` resumes in this order and sends nothing twice.
+     - A crash and restart at each point (after `initiate_tx` is recorded, after it is mined, after `withdraw_tx` is recorded, after it is mined, after `return_tx` is recorded) resumes in this order and sends nothing twice.
 
 ## 2. G2: a saved reserve that reverted `BadTtl()`
 
