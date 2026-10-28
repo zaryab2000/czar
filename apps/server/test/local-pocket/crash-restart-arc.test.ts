@@ -35,9 +35,17 @@ import {
 const BASE_PORT = 18630;
 const UNIT_AMOUNT = 1_000n;
 const CALLS = 2;
-/** The seller's `maxTimeoutSeconds`, so `validBefore` = now + 30 s; shorter than `payer.leaseSeconds`. */
-const SHORT_TIMEOUT_SECONDS = 30;
-/** Long enough that waiting out a killed worker's lease leaves every authorization valid. */
+/**
+ * The seller's `maxTimeoutSeconds` for the case whose lease wait must outlive `validBefore`: above the vault's
+ * `MIN_RESERVATION_TTL` (30 s), so a reserve mined a few seconds after it was signed is still inside the TTL
+ * window, and below `payer.leaseSeconds` (60 s).
+ */
+const SHORT_TIMEOUT_SECONDS = 45;
+/**
+ * Every other case. A reserve that is re-sent after a kill must still satisfy
+ * `validBefore >= block.timestamp + MIN_RESERVATION_TTL`; with a 30 s seller timeout it has no slack and
+ * reverts `BadTtl` if it mines a second later.
+ */
 const LONG_TIMEOUT_SECONDS = 300;
 /** viem wraps the transport error, so match the injected crash by message. */
 const KILLED = "injected crash";
@@ -127,7 +135,7 @@ describe.skipIf(!localChainEnabled)(
       });
 
       it("waits out the killed worker's lease, then resumes exactly once", async () => {
-        const plan = await x402Plan(LONG_TIMEOUT_SECONDS);
+        const plan = await x402Plan();
         await killWithLeaseHeld(plan);
         await waitOutLease();
         expect((await executeX402(harness, plan, "fresh-worker")).state).toBe("done");
@@ -199,7 +207,7 @@ describe.skipIf(!localChainEnabled)(
   },
 );
 
-async function x402Plan(maxTimeoutSeconds = SHORT_TIMEOUT_SECONDS): Promise<X402Plan> {
+async function x402Plan(maxTimeoutSeconds = LONG_TIMEOUT_SECONDS): Promise<X402Plan> {
   return openX402Plan(harness, await harness.createVault(), {
     unitAmount: UNIT_AMOUNT,
     calls: CALLS,
