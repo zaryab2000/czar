@@ -125,7 +125,9 @@ processes:
     readiness_probe:
       exec:
         command: >-
-          test -S "$HOME/Library/Application Support/Czar/signer/signer.sock"
+          node -e 'require("node:net").connect(process.env.HOME + "/Library/Application Support/Czar/signer/signer.sock")
+          .on("connect", function () { this.end(); process.exit(0); })
+          .on("error", () => process.exit(1))'
       initial_delay_seconds: 5
       period_seconds: 3
       timeout_seconds: 2
