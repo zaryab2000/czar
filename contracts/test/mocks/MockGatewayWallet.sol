@@ -31,14 +31,17 @@ contract MockGatewayWallet {
     uint256 public constant DEFAULT_WITHDRAWAL_DELAY_BLOCKS = 10;
 
     address public immutable controller;
-    bool public initialized;
+    // Storage layout: the first five slots keep the pre-SCR-150 order (paused, isTokenSupported, isDenylisted,
+    // _available, _delegates) so tests that write `isTokenSupported` at slot 1 with `anvil_setStorageAt`
+    // (apps/indexer/test/replay-anvil.test.ts) keep working. SCR-150 state is appended below.
     bool public paused;
-    uint256 public withdrawalDelay;
     mapping(address => bool) public isTokenSupported;
     mapping(address => bool) public isDenylisted;
     mapping(address token => mapping(address depositor => uint256)) internal _available;
     mapping(address token => mapping(address depositor => mapping(address delegate => AuthorizationStatus)))
         internal _delegates;
+    bool public initialized;
+    uint256 public withdrawalDelay;
     mapping(address token => mapping(address depositor => uint256)) internal _withdrawing;
     mapping(address token => mapping(address depositor => uint256)) internal _withdrawalBlock;
 

@@ -34,6 +34,18 @@ contract GatewayDoublesTest is Test {
         vm.stopPrank();
     }
 
+    // ─────────────── Storage layout ───────────────
+
+    /// @dev `isTokenSupported` must stay at slot 1: replay-anvil.test.ts writes keccak256(abi.encode(token, 1))
+    ///      with anvil_setStorageAt after copying the runtime code, and SCR-150 state is appended after it.
+    function test_layout_isTokenSupportedStaysAtSlot1() public {
+        vm.etch(CANONICAL_GATEWAY_WALLET, address(gw).code);
+        MockGatewayWallet placed = MockGatewayWallet(CANONICAL_GATEWAY_WALLET);
+        assertFalse(placed.isTokenSupported(address(usdc)));
+        vm.store(CANONICAL_GATEWAY_WALLET, keccak256(abi.encode(address(usdc), uint256(1))), bytes32(uint256(1)));
+        assertTrue(placed.isTokenSupported(address(usdc)));
+    }
+
     // ─────────────── Placement (SCR-150 §1) ───────────────
 
     function test_placement_copiedCodeNeedsInitializeOnce() public {
