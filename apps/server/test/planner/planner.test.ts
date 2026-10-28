@@ -492,7 +492,7 @@ describe("planner fallback", () => {
     const service = await selection.directory.get(serviceId);
     if (!service) throw new Error("registered service probe failed");
 
-    const built = await makePlanner({ service, subjects: 2 });
+    const built = await makePlanner({ service, subjects: 2, proberOffers: [offer] });
 
     expect(built?.plan.steps.map((step) => step.capability)).toEqual(["web-search"]);
     expect(built?.plan.steps[0]?.callInputs?.map((call) => call.input)).toEqual([

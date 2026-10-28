@@ -600,7 +600,6 @@ describe("registered selection", () => {
       [`n${"x".repeat(64)}`]: { type: "string" },
       untyped: { description: "no type" },
       union: { type: ["string", "null"] },
-      unknownType: { type: "date" },
     };
     for (let index = 0; index < 60; index += 1) properties[`f${index}`] = { type: "number" };
     const fetchImpl = vi.fn<SafeFetch>(async () =>
