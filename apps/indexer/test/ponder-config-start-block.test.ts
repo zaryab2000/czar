@@ -11,7 +11,15 @@ afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true })));
 });
 
-async function loadConfiguredStartBlock(value?: string): Promise<ReturnType<typeof spawnSync>> {
+const FACTORY_START_BLOCK = "String(config.contracts.CzarVaultFactory.startBlock)";
+const ALL_START_BLOCKS =
+  "JSON.stringify([...Object.values(config.contracts), ...Object.values(config.blocks)]" +
+  ".map((source) => source.startBlock))";
+
+async function loadConfiguredStartBlock(
+  value?: string,
+  expression = FACTORY_START_BLOCK,
+): Promise<ReturnType<typeof spawnSync>> {
   const directory = await mkdtemp(join(tmpdir(), "czar-indexer-config-"));
   temporaryDirectories.push(directory);
   const deploymentPath = join(directory, "deployment.json");
@@ -25,8 +33,7 @@ async function loadConfiguredStartBlock(value?: string): Promise<ReturnType<type
 
   const configUrl = pathToFileURL(resolve(import.meta.dirname, "../ponder.config.ts")).href;
   const script =
-    `import config from ${JSON.stringify(configUrl)};` +
-    "process.stdout.write(String(config.contracts.CzarVaultFactory.startBlock));";
+    `import config from ${JSON.stringify(configUrl)};` + `process.stdout.write(${expression});`;
   const env: NodeJS.ProcessEnv = {
     PATH: process.env["PATH"],
     HOME: process.env["HOME"],
@@ -53,6 +60,14 @@ describe("CZAR_INDEXER_START_BLOCK config", () => {
     const result = await loadConfiguredStartBlock();
     expect(result.status).toBe(0);
     expect(result.stdout).toBe("0");
+  });
+
+  it("applies the start block to every contract and block source", async () => {
+    const result = await loadConfiguredStartBlock("69431745", ALL_START_BLOCKS);
+    expect(result.status).toBe(0);
+    const startBlocks = JSON.parse(String(result.stdout)) as unknown[];
+    expect(startBlocks.length).toBeGreaterThan(0);
+    expect(new Set(startBlocks)).toEqual(new Set([69431745]));
   });
 
   it.each(["abc", "-1", "1.5"])("rejects malformed value %s", async (value) => {
