@@ -88,3 +88,31 @@
 
 ## Decision
 - Architect ruling under Zaryab's delegation. Recorded by his merge.
+
+## Amendment 2026-10-28 (resolves the two P2 findings on PR #125)
+
+### A1. `indexerStartBlock` is the first Czar deployment receipt block (replaces §1's "read `eth_blockNumber` just before sending")
+- **Why:** a read taken before the first Czar transaction on a fresh fork returns `forkBlock`, which fails §2's rule `indexerStartBlock > forkBlock`. Its hash also belongs to the shared remote fork block, so it can't identify a session.
+- **Rule:**
+  - `indexerStartBlock` = the minimum `blockNumber` across the `receipts` of the broadcast run file that this deploy's broadcasting pass writes (`contracts/broadcast/Deploy.s.sol/5042002/run-latest.json`).
+  - Every receipt counted must have `status = 1`.
+- **Who writes it:** the FORK deploy step writes it into `deployments/.arc-fork-pin.json` atomically (temp file then rename, mode 0600), after the deploy succeeds.
+- **The deploy step fails, and records nothing, if:**
+  - the run file is missing or has no receipts
+  - any receipt failed
+  - the minimum is ≤ `forkBlock`
+  - the chain ID in the run file isn't `5042002`
+- **Consequence:** the block was mined locally after the pin, so its hash depends on the local chain. `S` = the first 8 hex characters of that hash, which is fresh for every new chain. §2's range and hash checks stay unchanged.
+- **CLEAN mode is unchanged:** start `0`, and `S` comes from block 0's hash. That hash is fresh per start because `--mnemonic-random` changes genesis.
+
+### A2. Every local database consumer routes through the session database (extends §2)
+- The **signer** writes audit rows to the server's `audit` table and reads server tables for its projection (`apps/signer/src/local-main.ts:17-43`). It must therefore use the **same** `czar_<mode>_<S>` database as the server.
+- **The rule:** every local process that reads `CZAR_DATABASE_URL` or `DATABASE_URL` starts through `ops/local/chain-session.mjs`, and receives the same derived database. Today that's the indexer (Ponder schema `czar_<mode>_<S>` in that database), the server, the signer and the merchants.
+- **One session per stack run:** all of them derive `S` from the same node at start. If any process gets an `S` different from the one recorded for the running stack, it exits non-zero naming both values. The launcher records the first derived `S` in `deployments/.arc-chain-session.json` (gitignored, mode 0600) and checks later starts against the live node.
+- **Migrations:**
+  - The signer and merchants start only after the server's health check passes, so the server's migrations have created `audit` and the other server tables in the session database first.
+  - The launcher only creates the database. It never migrates and never drops.
+- **Tests:**
+  - the signer, server and merchants get identical database URLs on one chain
+  - a mismatched recorded `S` makes the launcher exit
+  - the compose dependency order (signer and merchants after server healthy) is asserted by the existing process-compose test
