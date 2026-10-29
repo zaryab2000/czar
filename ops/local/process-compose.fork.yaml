@@ -31,7 +31,7 @@ processes:
       period_seconds: 2
       timeout_seconds: 2
   web:
-    command: pnpm --filter @czar/web dev -- --port 3001
+    command: pnpm --filter @czar/web dev --port 3001
     working_dir: .
     environment:
       - CZAR_SERVER_URL=http://127.0.0.1:3000

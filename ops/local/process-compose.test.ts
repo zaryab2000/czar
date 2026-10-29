@@ -69,6 +69,8 @@ describe("local process composition", () => {
     );
     expect(forkComposition).toContain("CZAR_SERVER_URL=http://127.0.0.1:3000");
     expect(forkComposition).toContain("port: 3001");
+    expect(forkComposition).toContain("command: pnpm --filter @czar/web dev --port 3001");
+    expect(forkComposition).not.toContain("dev -- --port");
   });
 
   it("waits for migration and successful merchant K10 lookup before listen", () => {
