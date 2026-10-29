@@ -490,6 +490,13 @@ describe("vault-direct executor", () => {
       signedTransaction: "0x1234",
     });
     expect(chain.finalize).toHaveBeenCalledTimes(2);
+    const finalizeRanges = sign.mock.calls
+      .map(([, request]) => request.payload as Record<string, unknown>)
+      .filter((payload) => payload["selector"] === "finalize")
+      .map((payload) => payload["args"]);
+    expect(finalizeRanges).toHaveLength(2);
+    for (const range of finalizeRanges)
+      expect(range).toEqual({ reservationId: "4", fromIndex: "0", toIndex: "1" });
     expect(boundary).toHaveBeenCalledOnce();
     expect(recordReceipt).toHaveBeenCalledTimes(2);
     expect(recordReceipt.mock.calls[0]?.[0].paymentRef).toMatchObject({
