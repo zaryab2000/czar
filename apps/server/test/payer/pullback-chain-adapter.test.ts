@@ -35,7 +35,8 @@ describe("createPullbackChainAdapter", () => {
     await expect(adapter.getBlockNumber()).resolves.toBe(42n);
     await expect(adapter.withdrawalBlock(POCKET)).resolves.toBe(123_456n);
     await expect(adapter.withdrawingBalance(POCKET)).resolves.toBe(123_456n);
-    expect(getBlockNumber).toHaveBeenCalledOnce();
+    // The head decides wait vs. K4 withdraw on every pass (SCR-153 §1): never a cached value.
+    expect(getBlockNumber).toHaveBeenCalledExactlyOnceWith({ cacheTime: 0 });
     expect(readContract).toHaveBeenCalledWith({
       address: GATEWAY_WALLET,
       abi: [

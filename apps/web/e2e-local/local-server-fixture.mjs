@@ -1,12 +1,18 @@
 // SCR-150 §5 run 6: the real Czar server (createApp), the real indexer API router and a real
 // Postgres database, seeded with manual-return rows for three users, so the manual-return UI is
 // exercised through the real `GET /v1/pockets/manual-returns` route with AppSession auth.
-// Chain reads go to a pinned clean `arc-anvil` (USDC is predeployed there). The vault factory is
-// not deployed on a clean chain, so its single read used here (`predictVault`) is answered by a
-// constant-return code double placed with `anvil_setCode`; no vault state is read in this run.
+// Chain reads go to a pinned clean `arc-anvil` (USDC is predeployed there). The Czar contracts are
+// deployed on it with contracts/script/deploy.sh, and owners A and B get real vaults from the
+// deployed CzarVaultFactory, so `/v1/me` reads real factory and vault state. Every seeded vault
+// address is the factory's `predictVault(msca)` for that owner.
+import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
+import { createWalletClient, http, keccak256 } from "viem";
+import { czarVaultFactoryAbi, withFeeFloor } from "@czar/vault-client";
 import { createApp } from "../../server/src/app.ts";
 import { migrate } from "../../server/src/db/migrate.ts";
 import { digest } from "../../server/src/http/auth.ts";
@@ -14,12 +20,26 @@ import { createIndexerApi } from "../../indexer/src/api/router.ts";
 import { loadConfig } from "../../server/node_modules/@czar/config/src/index.ts";
 import { RUN6 } from "./run6-data.ts";
 
+const CONTRACTS_DIR = fileURLToPath(new URL("../../../contracts/", import.meta.url));
+const KEYS_PATH = fileURLToPath(new URL("../../../deployments/.run6-keys.json", import.meta.url));
+// arc-anvil's first unlocked development account deploys and creates the vaults.
+const ANVIL_SENDER = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
+// Public addresses only: no Czar role signs anything in run 6.
+const ROLE_ADDRESSES = {
+  K3: "0x0000000000000000000000000000000000006003",
+  K5: "0x0000000000000000000000000000000000006005",
+  K6: "0x0000000000000000000000000000000000006006",
+  K7: "0x0000000000000000000000000000000000006007",
+  K20: "0x0000000000000000000000000000000000006020",
+};
+
 const serverRequire = createRequire(new URL("../../server/package.json", import.meta.url));
 const { Pool } = serverRequire("pg");
 
 const databaseRoot =
   process.env["CZAR_TEST_DATABASE_URL"] ?? "postgres://postgres@127.0.0.1:15432/postgres";
-const rpcUrl = process.env["CZAR_RUN6_RPC_URL"] ?? RUN6.rpcUrl;
+const rpcUrl = RUN6.rpcUrl;
+const arcForge = process.env["ARC_FORGE"] ?? "arc-forge";
 const sessionTokens = {
   ownerA: process.env["CZAR_RUN6_TOKEN_A"],
   ownerB: process.env["CZAR_RUN6_TOKEN_B"],
@@ -42,15 +62,14 @@ async function rpc(method, params) {
   return body.result;
 }
 
-// Refuse anything but a local arc-anvil node, and never overwrite deployed code.
+// Refuse anything but a fresh local arc-anvil node: deploy.sh never runs against existing state.
 await rpc("anvil_nodeInfo", []);
-const existingFactoryCode = await rpc("eth_getCode", [RUN6.factoryAddress, "latest"]);
-if (existingFactoryCode !== "0x") {
-  throw new Error("Refusing to replace existing code at the vault factory address.");
+if ((await rpc("eth_blockNumber", [])) !== "0x0") {
+  throw new Error("Refusing to deploy the Czar contracts on an arc-anvil that already has blocks.");
 }
-// PUSH32 <predicted vault word> PUSH1 0 MSTORE PUSH1 32 PUSH1 0 RETURN
-const predictedWord = RUN6.ownerA.predictedVault.slice(2).toLowerCase().padStart(64, "0");
-await rpc("anvil_setCode", [RUN6.factoryAddress, `0x7f${predictedWord}60005260206000f3`]);
+const deployment = await deployContracts();
+const vaults = await RUN6.deployedVaults(deployment.factory);
+await createVaults(deployment.factory, [RUN6.ownerA, RUN6.ownerB]);
 
 const databaseName = `czar_run6_${randomBytes(8).toString("hex")}`;
 const admin = new Pool({ connectionString: databaseRoot });
@@ -63,11 +82,13 @@ await seed(pool);
 
 const indexerStore = {
   async vaultByOwner(owner) {
-    const user = [RUN6.ownerB].find((candidate) => candidate.msca === owner.toLowerCase());
+    const user = [RUN6.ownerA, RUN6.ownerB].find(
+      (candidate) => candidate.msca === owner.toLowerCase(),
+    );
     if (!user) return null;
     return {
-      id: user.vault,
-      vault: user.vault,
+      id: vaultOf(user.msca),
+      vault: vaultOf(user.msca),
       owner: user.msca,
       version: 1,
       agentSigner: RUN6.zero,
@@ -77,7 +98,8 @@ const indexerStore = {
     };
   },
   async envelopeByRef(envelopeRef) {
-    return envelopeRef === RUN6.ownerB.envelopeRef ? RUN6.envelopeDetailB : null;
+    const vaultB = vaultOf(RUN6.ownerB.msca);
+    return envelopeRef === RUN6.envelopeRef(vaultB, 1) ? RUN6.envelopeDetail(vaultB) : null;
   },
   async envelopesForVault() {
     return [];
@@ -111,7 +133,7 @@ const app = createApp({
   random: { bytes: randomBytes },
   appReadOptions: {
     rpcUrl,
-    factoryAddress: RUN6.factoryAddress,
+    factoryAddress: deployment.factory,
     indexerUrl: `http://127.0.0.1:${RUN6.indexerPort}`,
   },
 });
@@ -155,8 +177,86 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
     await pool.end();
     await admin.query(`DROP DATABASE IF EXISTS "${databaseName}"`);
     await admin.end();
+    rmSync(RUN6.deploymentPath, { force: true });
     process.exit(0);
   });
+}
+
+/** Runs contracts/script/deploy.sh on the run 6 arc-anvil and checks the factory's runtime code. */
+async function deployContracts() {
+  rmSync(RUN6.deploymentPath, { force: true });
+  writeFileSync(KEYS_PATH, `${JSON.stringify(roleKeys())}\n`, { mode: 0o600 });
+  try {
+    execFileSync(
+      "bash",
+      [
+        "script/deploy.sh",
+        rpcUrl,
+        KEYS_PATH,
+        RUN6.deploymentPath,
+        "--offline",
+        "--broadcast",
+        "--unlocked",
+        "--sender",
+        ANVIL_SENDER,
+      ],
+      {
+        cwd: CONTRACTS_DIR,
+        stdio: ["ignore", "ignore", "inherit"],
+        env: { ...process.env, ARC_FORGE: arcForge },
+      },
+    );
+  } finally {
+    rmSync(KEYS_PATH, { force: true });
+  }
+  const deployed = RUN6.readDeployment();
+  const runtime = await RUN6.chainClient.getCode({ address: deployed.factory });
+  if (runtime === undefined || keccak256(runtime) !== deployed.factoryRuntimeHash) {
+    throw new Error("The deployed CzarVaultFactory runtime code does not match deploy.sh output.");
+  }
+  return deployed;
+}
+
+function roleKeys() {
+  return Object.fromEntries(
+    Object.entries(ROLE_ADDRESSES).map(([role, address]) => [
+      role,
+      { address, ref: `run6-${role}` },
+    ]),
+  );
+}
+
+async function createVaults(factory, owners) {
+  const wallet = createWalletClient({
+    chain: RUN6.chainClient.chain,
+    transport: http(rpcUrl),
+    account: ANVIL_SENDER,
+  });
+  for (const owner of owners) {
+    const hash = await wallet.writeContract({
+      address: factory,
+      abi: czarVaultFactoryAbi,
+      functionName: "createVault",
+      args: [owner.msca],
+      ...withFeeFloor({ maxFeePerGas: await RUN6.chainClient.getGasPrice() }),
+    });
+    await RUN6.chainClient.waitForTransactionReceipt({ hash });
+    const created = await RUN6.chainClient.readContract({
+      address: factory,
+      abi: czarVaultFactoryAbi,
+      functionName: "vaultOf",
+      args: [owner.msca],
+    });
+    if (created.toLowerCase() !== vaultOf(owner.msca)) {
+      throw new Error(`createVault for ${owner.msca} did not land at predictVault.`);
+    }
+  }
+}
+
+function vaultOf(msca) {
+  const vault = vaults[msca];
+  if (vault === undefined) throw new Error(`No predicted vault for seeded owner ${msca}.`);
+  return vault;
 }
 
 async function seed(db) {
@@ -192,11 +292,11 @@ async function seed(db) {
         [
           user.planId,
           index,
-          row.envelopeRef,
+          RUN6.envelopeRef(vaultOf(row.envelopeOwner ?? user.msca), 1),
           row.pocket,
           row.returnedAmount,
           row.state,
-          user.vault,
+          vaultOf(user.msca),
           row.returnTx,
           100 + index,
           index,

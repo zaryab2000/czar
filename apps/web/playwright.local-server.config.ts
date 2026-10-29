@@ -1,6 +1,6 @@
 // SCR-150 §5 run 6: the manual-return UI against the real local server, with no route stub.
-// Run: pnpm --filter @czar/web e2e:local-server (needs Postgres on 127.0.0.1:15432 and the
-// pinned arc-anvil on PATH or in CZAR_ARC_ANVIL_BIN).
+// Run: pnpm --filter @czar/web e2e:local-server (needs Postgres on 127.0.0.1:15432, the pinned
+// arc-anvil on PATH or in CZAR_ARC_ANVIL_BIN, and the pinned arc-forge on PATH or in ARC_FORGE).
 import { randomBytes } from "node:crypto";
 import { defineConfig, devices } from "@playwright/test";
 import { RUN6 } from "./e2e-local/run6-data.ts";
@@ -8,6 +8,9 @@ import { RUN6 } from "./e2e-local/run6-data.ts";
 const DESKTOP_VIEWPORT = { width: 1440, height: 900 };
 const chromiumPath = process.env["CZAR_CHROMIUM_PATH"];
 const arcAnvil = process.env["CZAR_ARC_ANVIL_BIN"] ?? "arc-anvil";
+// The fixture drops its database and deletes its deployment file on SIGTERM; without a graceful
+// shutdown Playwright sends SIGKILL and both are left behind.
+const FIXTURE_SHUTDOWN_TIMEOUT_MS = 10_000;
 
 // One session token per seeded owner, shared with the spec through the worker environment.
 process.env["CZAR_RUN6_TOKEN_A"] ??= randomBytes(32).toString("base64url");
@@ -31,7 +34,7 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: `${arcAnvil} --network arc --host 127.0.0.1 --port ${RUN6.anvilPort} --silent`,
+      command: `${arcAnvil} --network arc --chain-id ${RUN6.chainId} --host 127.0.0.1 --port ${RUN6.anvilPort} --silent`,
       port: RUN6.anvilPort,
       reuseExistingServer: false,
     },
@@ -40,6 +43,7 @@ export default defineConfig({
         "node --experimental-strip-types --disable-warning=ExperimentalWarning e2e-local/local-server-fixture.mjs",
       url: `http://127.0.0.1:${RUN6.serverPort}/health`,
       reuseExistingServer: false,
+      gracefulShutdown: { signal: "SIGTERM", timeout: FIXTURE_SHUTDOWN_TIMEOUT_MS },
       env: {
         CZAR_RUN6_TOKEN_A: process.env["CZAR_RUN6_TOKEN_A"],
         CZAR_RUN6_TOKEN_B: process.env["CZAR_RUN6_TOKEN_B"],

@@ -81,7 +81,7 @@ export function createPullbackChainAdapter(
     return prepare;
   };
   return {
-    getBlockNumber: () => client.getBlockNumber(),
+    getBlockNumber: () => client.getBlockNumber({ cacheTime: 0 }),
     withdrawalBlock: (pocket) =>
       client.readContract({
         address: gatewayWalletAddress,

@@ -35,6 +35,13 @@ const slowInput = () =>
     apiUnavailableSince: new Date("2026-10-20T00:00:00Z"),
     value: 825_000n,
   }) as const;
+/** The SCR-141 Gateway figure CZ-15 reads for "Gateway clear" (SCR-153 §1), observed at the test clock. */
+const observedFigure = (available: bigint) => async () => ({
+  gatewayAvailableAtomic: available,
+  gatewayWithdrawingAtomic: 0n,
+  apiObservedAt: new Date("2026-10-22T00:00:00Z"),
+  apiConsecutiveFailures: 0,
+});
 
 beforeAll(async () => {
   await seedDevice(getPool());
@@ -1358,6 +1365,7 @@ describe("pullback values", () => {
     const dependencies = {
       pool: getPool(),
       config: loadConfig(),
+      readGatewayBalance: observedFigure(825_000n),
       signer: { sign: vi.fn(async () => ({ signedTransaction: "0x1234" as const })) },
       chain,
       now: () => new Date("2026-10-22T00:00:00Z"),
@@ -1415,6 +1423,7 @@ describe("pullback values", () => {
     const dependencies = {
       pool: getPool(),
       config: loadConfig(),
+      readGatewayBalance: observedFigure(0n),
       signer: { sign },
       chain,
       now: () => new Date("2026-10-22T00:00:00Z"),
@@ -1450,6 +1459,7 @@ describe("pullback values", () => {
     const dependencies = {
       pool: getPool(),
       config: loadConfig(),
+      readGatewayBalance: observedFigure(0n),
       signer: { sign },
       chain: {
         getBlockNumber: vi.fn(async () => 300n),
@@ -1489,6 +1499,7 @@ describe("pullback values", () => {
     const dependencies = {
       pool: getPool(),
       config: loadConfig(),
+      readGatewayBalance: observedFigure(825_000n),
       signer: { sign },
       chain: {
         getBlockNumber: vi.fn(async () => 100n),
@@ -1529,6 +1540,7 @@ describe("pullback values", () => {
     const dependencies = {
       pool: getPool(),
       config: loadConfig(),
+      readGatewayBalance: observedFigure(825_000n),
       signer: {
         sign: vi.fn(async () => {
           throw new Denied(rule);
@@ -1584,6 +1596,7 @@ describe("pullback values", () => {
     const dependencies = {
       pool: getPool(),
       config: loadConfig(),
+      readGatewayBalance: observedFigure(8_000n),
       signer: { sign: vi.fn(async () => ({ signedTransaction: "0x1234" as const })) },
       chain: {
         getBlockNumber: vi.fn(async () => head),
@@ -1669,6 +1682,7 @@ describe("pullback values", () => {
         {
           pool: getPool(),
           config: loadConfig(),
+          readGatewayBalance: observedFigure(8_000n),
           signer: { sign },
           chain: {
             getBlockNumber: async () => 100n,
@@ -1722,6 +1736,7 @@ describe("pullback values", () => {
     const dependencies = {
       pool: interruptedPool,
       config: loadConfig(),
+      readGatewayBalance: observedFigure(8_000n),
       signer,
       chain: {
         getBlockNumber: async () => 100n,

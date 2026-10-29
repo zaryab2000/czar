@@ -9,6 +9,7 @@ import {
   readPaymentSignature,
   type PaymentRequiredV2,
 } from "@czar/x402";
+import { bazaarResourceServerExtension, declareDiscoveryExtension } from "@x402/extensions/bazaar";
 import { extractAndValidatePaymentIdentifier } from "@x402/extensions/payment-identifier";
 import { FacilitatorUnavailable, type Facilitator } from "@czar/merchants/facilitator";
 import {
@@ -20,6 +21,7 @@ import { search } from "./index-data.ts";
 
 export const SEARCH_PATH = "/v1/search";
 export const MAX_QUERY_CHARS = 200;
+const EXAMPLE_QUERY = "x402 payment";
 const RETRY_AFTER_SECONDS = "30";
 
 export interface SearchRouteOptions {
@@ -56,10 +58,28 @@ const json = (status: number, body: unknown, headers: Record<string, string> = {
 const same = (a: unknown, b: unknown) =>
   typeof a === "string" && typeof b === "string" && a.toLowerCase() === b.toLowerCase();
 
+/**
+ * The buyer input as `extensions.bazaar` (CZ-20 §4, 02 §12.2): `GET` with one string query parameter
+ * `q`. The SDK's own request-time enrichment adds the fixed method, so it runs once for this route.
+ */
+function searchInputDeclaration(): unknown {
+  const { bazaar } = declareDiscoveryExtension({
+    input: { q: EXAMPLE_QUERY },
+    inputSchema: {
+      properties: { q: { type: "string", minLength: 1, maxLength: MAX_QUERY_CHARS } },
+      required: ["q"],
+      additionalProperties: false,
+    },
+  });
+  const enrich = bazaarResourceServerExtension.enrichDeclaration;
+  if (enrich === undefined) throw new Error("@x402/extensions bazaar has no enrichDeclaration");
+  return enrich(bazaar, { method: "GET", adapter: { getPath: () => SEARCH_PATH } });
+}
+
 export function createSearchRoute(
   options: SearchRouteOptions,
 ): (request: Request) => Promise<Response> {
-  const paymentRequired: PaymentRequiredV2 = buildPaymentRequired({
+  const offered = buildPaymentRequired({
     url: options.resourceUrl,
     description: "Search a fixed index of protocol documentation",
     serviceName: "czar-search",
@@ -69,6 +89,10 @@ export function createSearchRoute(
     payTo: options.payTo,
     maxTimeoutSeconds: options.maxTimeoutSeconds,
   });
+  const paymentRequired: PaymentRequiredV2 = {
+    ...offered,
+    extensions: { ...offered.extensions, bazaar: searchInputDeclaration() },
+  };
   const offer = paymentRequired.accepts[0] as PaymentRequiredV2["accepts"][number];
   const emit = options.emit ?? (() => undefined);
   const handler = options.handler ?? (async (q: string) => search(q));

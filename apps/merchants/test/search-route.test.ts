@@ -133,6 +133,38 @@ describe("czar-search 402", () => {
     expect(await response.json()).toEqual(pr);
   });
 
+  it("declares the q input as a bazaar extension that passes the @czar/x402 sanitizer", async () => {
+    const { route, calls } = setup();
+    const response = await route(get("eip"));
+    const read = readPaymentRequired({
+      status: response.status,
+      headers: response.headers,
+      body: await response.clone().text(),
+    });
+    if (!read.ok) throw new Error(`402 did not parse: ${read.reason}`);
+    const bazaar = read.extensions.bazaar;
+    if (bazaar === undefined) throw new Error("402 declares no sanitized bazaar extension");
+    expect(read.extensions.dropped).toEqual([]);
+    expect(bazaar.info).toEqual({
+      input: { type: "http", method: "GET", queryParams: { q: expect.any(String) } },
+    });
+    const queryParams = (
+      bazaar.schema as {
+        properties: { input: { properties: { queryParams: Record<string, unknown> } } };
+      }
+    ).properties.input.properties.queryParams;
+    expect(queryParams).toMatchObject({
+      type: "object",
+      properties: { q: { type: "string" } },
+      required: ["q"],
+    });
+
+    const example = (bazaar.info as { input: { queryParams: { q: string } } }).input.queryParams.q;
+    const exampleChallenge = await route(get(example));
+    expect(exampleChallenge.status).toBe(402);
+    expect(calls).toEqual([]);
+  });
+
   it("answers a v1 X-PAYMENT client with the v2 402 and 'x402 v2 required'", async () => {
     const { route, calls } = setup();
     const response = await route(get("eip", { "x-payment": "abc" }));

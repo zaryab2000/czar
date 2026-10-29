@@ -188,7 +188,7 @@ async function sweepPocketBalance(
   let transaction = phaseTransaction(trace, `pocket.return.${kind}.sent`);
   if (!transaction) {
     const signed = await dependencies.signer.sign("cz-15", {
-      keyId: `K4:${input.pocket}`,
+      keyId: "K4",
       kind: "pocket-return",
       payload: { pocket: input.pocket, kind, amount: amount.toString() },
     });
@@ -445,7 +445,7 @@ async function prepareDelegate(
   let transaction = phaseTransaction(trace, "pocket.delegate.sent");
   if (!transaction) {
     const signed = await dependencies.signer.sign("cz-15", {
-      keyId: `K4:${pocket}`,
+      keyId: "K4",
       kind: "pocket-delegate",
       payload: { pocket, vault: input.vault },
     });
@@ -646,7 +646,7 @@ async function sendGatewayCall(
       Math.floor(dependencies.now().getTime() / 1000) + offer.maxTimeoutSeconds,
     );
     const signed = await dependencies.signer.sign("cz-15", {
-      keyId: `K4:${input.pocket}`,
+      keyId: "K4",
       kind: "gateway-nano",
       payload: {
         pocket: input.pocket,
