@@ -387,6 +387,7 @@ async function executeReservedCalls(
     attempt,
     trace,
     callsUsedBefore,
+    count,
   );
 }
 
@@ -534,6 +535,7 @@ async function settleAndFinalize(
   attempt: number,
   trace: readonly ExecutionPhaseRow[],
   callsUsedBefore: number,
+  reservedCount: number,
 ): Promise<VaultDirectResult> {
   const completed: {
     index: number;
@@ -682,11 +684,12 @@ async function settleAndFinalize(
   }
   let start = 0;
   let final = false;
-  const finalizeCount = FINALIZE_CHUNK;
   if (dependencies.chain.reservationFinal)
     final = await dependencies.chain.reservationFinal(reservationId);
   if (!final) await waitUntilValidBefore(dependencies, validBefore);
-  while (!final) {
+  while (!final && start < reservedCount) {
+    // The vault refuses a range past the reservation's count (`BadParams`).
+    const finalizeCount = Math.min(FINALIZE_CHUNK, reservedCount - start);
     const signedTransaction = await signVaultCall(dependencies, input.vault, "finalize", {
       reservationId: reservationId.toString(),
       fromIndex: String(start),
@@ -716,6 +719,7 @@ async function settleAndFinalize(
     final = finalized.final;
     start += finalizeCount;
   }
+  if (!final) throw new Error("Reservation is not final after finalizing every reserved index.");
   if (authorized.length !== calls.length) {
     await markStepFailed(dependencies.pool, {
       planId: input.planId,
