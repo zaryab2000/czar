@@ -343,3 +343,21 @@ test("the fork pin is written atomically with mode 0600 and decimal strings, dro
   assert.deepEqual(await readdir(directory), [".arc-fork-pin.json"], "no temporary file is left");
   assert.equal("indexerStartBlock" in forkPinRecord({ block: 1n, reason: "x" }), false);
 });
+
+test("only the signer, which reads Ponder tables by SQL, gets the session schema on its search path", () => {
+  const live = {
+    database: "czar_clean_abcdef12",
+    schema: "czar_clean_abcdef12",
+    startBlock: 0n,
+    S: "abcdef12",
+  };
+  const base = { CZAR_DATABASE_URL: "postgres://postgres@127.0.0.1:15433/postgres" };
+  const signer = sessionEnvironment(base, live, "signer");
+  assert.equal(signer.PGOPTIONS, "-c search_path=czar_clean_abcdef12,public");
+  for (const role of ["indexer", "server", "merchants"]) {
+    const other = sessionEnvironment(base, live, role);
+    assert.equal(other.PGOPTIONS, undefined, role);
+    // A2: every role gets the identical session database URL.
+    assert.equal(other.CZAR_DATABASE_URL, signer.CZAR_DATABASE_URL, role);
+  }
+});
