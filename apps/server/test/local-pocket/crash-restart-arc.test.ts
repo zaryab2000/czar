@@ -14,7 +14,7 @@ import { derivedNonce } from "@czar/hashing";
 import { czarVaultAbi } from "@czar/vault-client";
 import { setupDatabase } from "#test/db";
 import { getExecutionTrace } from "#src/payer/executions";
-import { MIN_RESERVATION_TTL_SECONDS, STALE_RESERVE_MESSAGE } from "#src/payer/vault-direct";
+import { MIN_RESERVATION_TTL_SECONDS } from "#src/payer/vault-direct";
 import {
   ARC_USDC,
   GATEWAY_MINTER,
@@ -118,7 +118,7 @@ describe.skipIf(!localChainEnabled)(
         expect(await attemptPhases(plan, 0)).toEqual(["reserve.sent", "reserve.mined"]);
         expect((await getExecutionTrace(getPool(), plan.planId, 0, 0))[1]?.payload).toEqual({
           txHash: saved.txHash,
-          message: STALE_RESERVE_MESSAGE,
+          message: "BadTtl",
         });
         const fresh = await getExecutionTrace(getPool(), plan.planId, 0, 1);
         expect(fresh.filter((row) => row.phase === "reserve.sent")).toHaveLength(1);
@@ -150,13 +150,13 @@ describe.skipIf(!localChainEnabled)(
           errorCode: "reserve-failed",
         });
         expect((await getExecutionTrace(getPool(), plan.planId, 0, 0))[1]?.payload).toMatchObject({
-          message: STALE_RESERVE_MESSAGE,
+          message: "BadTtl",
         });
         const failed = await getExecutionTrace(getPool(), plan.planId, 0, 1);
         expect(failed.map((row) => row.phase)).toEqual(["step.failed"]);
         expect(failed[0]?.payload).toMatchObject({
           errorCode: "reserve-failed",
-          stepError: { code: "reserve-failed", message: STALE_RESERVE_MESSAGE, retryable: false },
+          stepError: { code: "reserve-failed", message: "BadTtl", retryable: false },
         });
         expect(await reservedEvents(plan)).toHaveLength(0);
         expect(await authorizationsUsed(plan)).toHaveLength(0);

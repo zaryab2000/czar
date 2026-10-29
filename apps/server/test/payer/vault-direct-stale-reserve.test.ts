@@ -1,6 +1,7 @@
 // SCR-153 §2: a saved `reserve.sent` whose transaction reverted `BadTtl()` gets a new attempt from CZ-15 §5.2
 // step 1; when the step-2 formula cannot reach the vault's MIN_RESERVATION_TTL it ends `reserve-failed`.
-// Any other revert keeps the existing path.
+// BadTtl is decided by the vault's condition on the mined block (saved validBefore < block.timestamp +
+// MIN_RESERVATION_TTL), from the receipt and that block's header only. Any other revert keeps the existing path.
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadConfig } from "@czar/config";
 import { buildTree, derivedNonce, PAYEE_KIND, payeeLeaf } from "@czar/hashing";
@@ -11,7 +12,6 @@ import {
   executeVaultDirectStep,
   MIN_RESERVATION_TTL_SECONDS,
   ReserveReverted,
-  STALE_RESERVE_MESSAGE,
   type VaultDirectChain,
   type VaultDirectDependencies,
   type VaultDirectInput,
@@ -36,6 +36,11 @@ const SIGNED_AT = new Date("2026-10-21T00:00:00Z");
 /** The resume runs ten minutes after the stale reserve was signed: far past its validBefore. */
 const RESUMED_AT = new Date(SIGNED_AT.getTime() + 600_000);
 const STALE_VALID_BEFORE = BigInt(SIGNED_AT.getTime() / 1000 + 30);
+/** The latest mined-block timestamp at which the vault still accepts `STALE_VALID_BEFORE`. */
+const LAST_TIMESTAMP_IN_TTL = STALE_VALID_BEFORE - BigInt(MIN_RESERVATION_TTL_SECONDS);
+/** One second later the vault's `BadTtl()` condition holds. */
+const FIRST_TIMESTAMP_PAST_TTL = LAST_TIMESTAMP_IN_TTL + 1n;
+const BAD_TTL_REVERT = { status: "reverted", blockTimestamp: FIRST_TIMESTAMP_PAST_TTL } as const;
 const LEAF = payeeLeaf(PAYEE, PAYEE_KIND.X402_PAY_TO, 0, UNIT_AMOUNT);
 const TREE = buildTree([LEAF]);
 
@@ -70,13 +75,9 @@ beforeEach(async () => {
 });
 
 describe("vault-direct stale saved reserve (SCR-153 §2)", () => {
-  it("names the decoded vault error in the stale-reserve message", () => {
-    expect(STALE_RESERVE_MESSAGE).toBe("vault reverted BadTtl()");
-  });
-
   it("records the BadTtl revert and pays once through a new attempt with a fresh reserve", async () => {
     await seedStaleReserveSent();
-    const run = paidRun({ outcome: { status: "reverted", errorName: "BadTtl" } });
+    const run = paidRun({ outcome: BAD_TTL_REVERT });
 
     await expect(executeVaultDirectStep(stepInput(), run.dependencies)).resolves.toMatchObject({
       state: "done",
@@ -91,7 +92,7 @@ describe("vault-direct stale saved reserve (SCR-153 §2)", () => {
     await seedStaleReserveSent();
     const run = paidRun({
       outcome: undefined,
-      firstReserve: new ReserveReverted(STALE_TX_HASH, "BadTtl"),
+      firstReserve: new ReserveReverted(STALE_TX_HASH, FIRST_TIMESTAMP_PAST_TTL),
     });
 
     await expect(executeVaultDirectStep(stepInput(), run.dependencies)).resolves.toMatchObject({
@@ -111,9 +112,9 @@ describe("vault-direct stale saved reserve (SCR-153 §2)", () => {
       stepIndex: 0,
       attempt: 0,
       phase: "reserve.mined",
-      payload: { txHash: STALE_TX_HASH, message: STALE_RESERVE_MESSAGE },
+      payload: { txHash: STALE_TX_HASH, message: "BadTtl" },
     });
-    const run = paidRun({ outcome: { status: "reverted", errorName: "BadTtl" } });
+    const run = paidRun({ outcome: BAD_TTL_REVERT });
 
     await expect(executeVaultDirectStep(stepInput(), run.dependencies)).resolves.toMatchObject({
       state: "done",
@@ -126,7 +127,7 @@ describe("vault-direct stale saved reserve (SCR-153 §2)", () => {
 
   it("fails reserve-failed / BadTtl when envelope.expiresAt leaves no room for a fresh reserve", async () => {
     await seedStaleReserveSent();
-    const run = paidRun({ outcome: { status: "reverted", errorName: "BadTtl" } });
+    const run = paidRun({ outcome: BAD_TTL_REVERT });
     const expiresAt = new Date(RESUMED_AT.getTime() + (MIN_RESERVATION_TTL_SECONDS - 1) * 1000);
 
     await expect(executeVaultDirectStep(stepInput(expiresAt), run.dependencies)).resolves.toEqual({
@@ -145,18 +146,18 @@ describe("vault-direct stale saved reserve (SCR-153 §2)", () => {
       stepError: {
         schemaVersion: "1.0",
         code: "reserve-failed",
-        message: STALE_RESERVE_MESSAGE,
+        message: "BadTtl",
         retryable: false,
       },
     });
     await expect(stepRow()).resolves.toEqual({ state: "failed", calls_used: 0 });
   });
 
-  it("keeps the existing path for a saved reserve that reverted with any other error", async () => {
+  it("keeps the existing path for a saved reserve whose mined block meets the TTL", async () => {
     await seedStaleReserveSent();
-    const reverted = new ReserveReverted(STALE_TX_HASH, "CapExceeded");
+    const reverted = new ReserveReverted(STALE_TX_HASH, LAST_TIMESTAMP_IN_TTL);
     const run = paidRun({
-      outcome: { status: "reverted", errorName: "CapExceeded" },
+      outcome: { status: "reverted", blockTimestamp: LAST_TIMESTAMP_IN_TTL },
       firstReserve: reverted,
     });
 
@@ -275,7 +276,7 @@ async function seedStaleReserveSent(): Promise<void> {
 async function expectStaleAttemptClosed(): Promise<void> {
   const stale = await getExecutionTrace(getPool(), PLAN_ID, 0, 0);
   expect(stale.map((row) => row.phase)).toEqual(["reserve.sent", "reserve.mined"]);
-  expect(stale[1]?.payload).toEqual({ txHash: STALE_TX_HASH, message: STALE_RESERVE_MESSAGE });
+  expect(stale[1]?.payload).toEqual({ txHash: STALE_TX_HASH, message: "BadTtl" });
 }
 
 async function expectFreshAttemptPaid(run: ReturnType<typeof paidRun>): Promise<void> {
