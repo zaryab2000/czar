@@ -95,7 +95,6 @@ function emptyProjection(): Projection {
       envelopeOpen: false,
       pendingPullbackZero: false,
       gatewayWithdrawingZero: false,
-      pocketUsdcZero: false,
       slowWithdrawAudited: false,
       pocketReturnAudited: false,
       manualReturnRowValid: false,

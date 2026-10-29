@@ -202,6 +202,21 @@ describe("public key address lookup (SCR-129)", () => {
   });
 });
 
+/** The harness preparer's gas (200,000) × maxFeePerGas (20 gwei) in USDC atomic units (SCR-152). */
+const GAS_RESERVE = (200_000n * 20_000_000_000n) / 10n ** 12n;
+const ZERO_BALANCES = {
+  gatewayApi: 0n,
+  gatewayAvailable: 0n,
+  gatewayApiObservedAt: null,
+  gatewayWithdrawing: 0n,
+  withdrawalBlock: 0n,
+  currentBlock: 0n,
+  usdc: 0n,
+  native: 0n,
+  pendingPullback: false,
+  gatewayApiFresh: true,
+};
+
 describe("pocket keys (K4, RV-004)", () => {
   it("creates a pocket key for CZ-15 only", async () => {
     const t = await harness();
@@ -218,40 +233,16 @@ describe("pocket keys (K4, RV-004)", () => {
       { gatewayApi: 1n },
       { gatewayAvailable: 1n },
       { gatewayWithdrawing: 1n },
-      { usdc: 1n },
-      { native: 500n },
+      { usdc: GAS_RESERVE + 1n },
       { pendingPullback: true },
     ];
     for (const change of cases) {
-      t.state.balances = {
-        gatewayApi: 0n,
-        gatewayAvailable: 0n,
-        gatewayApiObservedAt: null,
-        gatewayWithdrawing: 0n,
-        withdrawalBlock: 0n,
-        currentBlock: 0n,
-        usdc: 0n,
-        native: 0n,
-        pendingPullback: false,
-        gatewayApiFresh: true,
-        ...change,
-      };
+      t.state.balances = { ...ZERO_BALANCES, ...change };
       await expect(t.signer.retirePocketKey("cz-15", t.pocket)).rejects.toMatchObject({
         rule: "pocket-balance-not-zero",
       });
     }
-    t.state.balances = {
-      gatewayApi: 0n,
-      gatewayAvailable: 0n,
-      gatewayApiObservedAt: null,
-      gatewayWithdrawing: 0n,
-      withdrawalBlock: 0n,
-      currentBlock: 0n,
-      usdc: 0n,
-      native: 499n,
-      pendingPullback: false,
-      gatewayApiFresh: true,
-    };
+    t.state.balances = { ...ZERO_BALANCES };
     t.state.pocket = {
       ...(t.state.pocket as NonNullable<typeof t.state.pocket>),
       slowWithdrawalOpen: true,
@@ -259,6 +250,29 @@ describe("pocket keys (K4, RV-004)", () => {
     await expect(t.signer.retirePocketKey("cz-15", t.pocket)).rejects.toMatchObject({
       rule: "pocket-balance-not-zero",
     });
+  });
+
+  it("SCR-152: retires a pocket key on Arc when its EOA remainder is empty (returnable <= 0)", async () => {
+    const t = await harness();
+    // On Arc the native balance is the USDC balance (A1-05): the gas remainder is one check, not two.
+    t.state.balances = { ...ZERO_BALANCES, usdc: GAS_RESERVE, native: GAS_RESERVE * 10n ** 12n };
+    await expect(t.signer.retirePocketKey("cz-15", t.pocket)).resolves.toHaveProperty(
+      "destroyAfterMs",
+    );
+  });
+
+  it("keeps the USDC-zero and native-dust retirement checks where gas is not USDC", async () => {
+    const t = await harness({ network: { ...NETWORK, usdc: OTHER } });
+    for (const change of [{ usdc: 1n }, { native: 500n }]) {
+      t.state.balances = { ...ZERO_BALANCES, ...change };
+      await expect(t.signer.retirePocketKey("cz-15", t.pocket)).rejects.toMatchObject({
+        rule: "pocket-balance-not-zero",
+      });
+    }
+    t.state.balances = { ...ZERO_BALANCES, native: 499n };
+    await expect(t.signer.retirePocketKey("cz-15", t.pocket)).resolves.toHaveProperty(
+      "destroyAfterMs",
+    );
   });
 
   it("refuses pocket-key retirement when the Gateway API figure is stale", async () => {
@@ -302,7 +316,7 @@ describe("pocket keys (K4, RV-004)", () => {
   it("keeps the key when a balance reappears during the retain window", async () => {
     const t = await harness();
     await t.signer.retirePocketKey("cz-15", t.pocket);
-    t.state.balances = { ...t.state.balances, usdc: 5n };
+    t.state.balances = { ...t.state.balances, usdc: GAS_RESERVE + 1n };
     t.advance(24 * 3_600_000);
     expect(await t.signer.destroyRetiredPocketKeys()).toEqual([]);
     expect(t.backend.address(`K4:${t.pocket}`)).toBe(t.pocket);
