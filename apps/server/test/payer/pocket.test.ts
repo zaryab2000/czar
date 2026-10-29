@@ -12,6 +12,7 @@ import { setupDatabase } from "#test/db";
 import { makeObjectiveSubmission, seedDevice, TEST_USER_ID } from "#test/fixtures";
 import { loadConfig } from "@czar/config";
 import { buildTree, pocketLeaf } from "@czar/hashing";
+import { KEY_IDS } from "@czar/signer";
 import { buildPaymentRequired, decodeBase64Json, encodePaymentRequired } from "@czar/x402";
 
 const getPool = setupDatabase();
@@ -54,6 +55,51 @@ beforeEach(async () => {
 });
 
 describe("pocket funding", () => {
+  it("asks the signer for the K4 key id, not a pocket key reference", async () => {
+    await getPool().query("INSERT INTO plan_pocket_keys(plan_id,pocket_address) VALUES($1,$2)", [
+      PLAN_ID,
+      POCKET,
+    ]);
+    const sign = vi.fn(async (_caller: string, _request: { keyId: string; kind: string }) => ({
+      signedTransaction: "0x01" as const,
+    }));
+    await executePocketPreparation(
+      {
+        planId: PLAN_ID,
+        envelopeRef: "eip155:5042002:0x0000000000000000000000000000000000000002:1",
+        envelopeId: 1n,
+        vault: "0x0000000000000000000000000000000000000002",
+        plan: {
+          payeeRoot: buildTree([pocketLeaf(POCKET as `0x${string}`)]).root,
+          payeeLeaves: [{ payee: POCKET, kind: 4, stepIndex: 4294967295, stepCap: "0" }],
+          pocketCapBps: 2500,
+          cap: "1000000",
+          steps: [{ stepIndex: 0, kind: "gateway-nano", stepCap: "250000" }],
+        },
+      },
+      {
+        pool: getPool(),
+        config: loadConfig(),
+        signer: { sign },
+        chain: {
+          isRegistered: async () => true,
+          registerPocket: async () => "register",
+          pocketGasGranted: async () => 20_000n,
+          grantPocketGas: async () => "gas",
+          isDelegateReady: async () => false,
+          addDelegate: async () => "delegate",
+          isFunded: async () => true,
+          fundPocket: async () => "fund",
+        },
+        now: () => new Date("2026-10-22T00:00:00Z"),
+      },
+    );
+
+    const delegate = sign.mock.calls.find(([, request]) => request.kind === "pocket-delegate");
+    expect(delegate?.[1].keyId).toBe("K4");
+    expect(KEY_IDS).toContain(delegate?.[1].keyId);
+  });
+
   it("reuses a registration transaction when the first Gateway step is not step zero", async () => {
     await getPool().query("INSERT INTO plan_pocket_keys(plan_id,pocket_address) VALUES($1,$2)", [
       PLAN_ID,

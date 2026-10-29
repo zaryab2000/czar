@@ -47,6 +47,37 @@ import {
 import { MAX_AUTHORIZATIONS_PER_RESERVATION } from "#src/router/index";
 
 export const FINALIZE_CHUNK = 32;
+/** The vault's `MIN_RESERVATION_TTL` (`CzarConstants.sol`): `validBefore ≥ block.timestamp + this`. */
+export const MIN_RESERVATION_TTL_SECONDS = 30;
+/**
+ * The vault error name a stale saved reserve is closed with. It goes in `reserve.mined` and in the
+ * `StepError` `message`, which never holds user text (SCR-153 §2, SCR-154 G4).
+ */
+const BAD_TTL = "BadTtl";
+const RESERVE_FAILED = "reserve-failed";
+/** Marks an attempt whose saved reserve reverted `BadTtl()`: no reservation exists and its nonce is spent. */
+const STALE_RESERVE = Symbol("stale-reserve");
+
+/** A `reserve` transaction mined with status 0 in a block with timestamp `blockTimestamp`. */
+export class ReserveReverted extends Error {
+  readonly txHash: string;
+  readonly blockTimestamp: bigint;
+
+  constructor(txHash: string, blockTimestamp: bigint) {
+    super(`Vault reserve reverted in the block at ${blockTimestamp}: ${txHash}`);
+    this.name = "ReserveReverted";
+    this.txHash = txHash;
+    this.blockTimestamp = blockTimestamp;
+  }
+}
+
+/**
+ * The mined outcome of a sent `reserve`. A revert carries only its block's timestamp: a receipt has no revert
+ * data, and BadTtl is decided by the vault's condition on that block (SCR-153 §2).
+ */
+export type ReserveOutcome =
+  | { readonly status: "reserved"; readonly reservationId: bigint }
+  | { readonly status: "reverted"; readonly blockTimestamp: bigint };
 
 export interface VaultDirectInput {
   readonly planId: string;
@@ -116,7 +147,8 @@ export interface VaultDirectChain {
     readonly txHash: string;
     readonly final: boolean;
   }>;
-  reservationFromTransaction?(txHash: string): Promise<bigint | undefined>;
+  /** The mined outcome of a sent `reserve`; `undefined` while the transaction has no receipt. */
+  reserveOutcome?(txHash: string): Promise<ReserveOutcome | undefined>;
   reservationFinal?(reservationId: bigint): Promise<boolean>;
 }
 
@@ -217,8 +249,16 @@ async function executeStep(
     input.step.expectedCalls,
   );
   if (usage.remaining === 0) return { state: "done", stepResults: [] };
+  const startAttempt = input.attempt ?? 0;
+  const { attempt, trace } = await currentAttempt(
+    dependencies.pool,
+    input.planId,
+    input.step.stepIndex,
+    startAttempt,
+  );
   const executionInput = {
     ...input,
+    attempt,
     step: {
       ...input.step,
       expectedCalls: usage.remaining,
@@ -227,13 +267,6 @@ async function executeStep(
         : { callInputs: input.step.callInputs.slice(usage.used) }),
     },
   };
-  const attempt = input.attempt ?? 0;
-  const trace = await getExecutionTrace(
-    dependencies.pool,
-    input.planId,
-    input.step.stepIndex,
-    attempt,
-  );
   const prechecked = await precheckCalls(executionInput, dependencies);
   if (prechecked.errorCode) {
     await markStepFailed(dependencies.pool, {
@@ -244,7 +277,36 @@ async function executeStep(
     });
     return { state: "failed", errorCode: prechecked.errorCode };
   }
-  return executeReservedCalls(executionInput, dependencies, prechecked.calls, trace, usage.used);
+  const result = await executeReservedCalls(executionInput, dependencies, prechecked.calls, trace, {
+    callsUsedBefore: usage.used,
+    afterStaleReserve: attempt > startAttempt,
+  });
+  // SCR-153 §2: the saved reserve reverted BadTtl, so start again from step 1 as `attempt + 1`.
+  if (result === STALE_RESERVE) return executeStep(input, dependencies);
+  return result;
+}
+
+/**
+ * The attempt to run: the first one from `startAttempt` whose reserve did not revert `BadTtl()`. A stale
+ * attempt never reserved on chain and signed no authorization, so its successor starts from step 1.
+ */
+async function currentAttempt(
+  pool: Pool,
+  planId: string,
+  stepIndex: number,
+  startAttempt: number,
+): Promise<{ readonly attempt: number; readonly trace: readonly ExecutionPhaseRow[] }> {
+  let attempt = startAttempt;
+  let trace = await getExecutionTrace(pool, planId, stepIndex, attempt);
+  while (staleReserve(trace)) {
+    attempt += 1;
+    trace = await getExecutionTrace(pool, planId, stepIndex, attempt);
+  }
+  return { attempt, trace };
+}
+
+function staleReserve(trace: readonly ExecutionPhaseRow[]): boolean {
+  return trace.findLast((row) => row.phase === "reserve.mined")?.payload["message"] === BAD_TTL;
 }
 
 async function remainingExpectedCalls(
@@ -342,8 +404,8 @@ async function executeReservedCalls(
   dependencies: VaultDirectDependencies,
   calls: readonly PreparedCall[],
   trace: readonly ExecutionPhaseRow[],
-  callsUsedBefore: number,
-): Promise<VaultDirectResult> {
+  progress: { readonly callsUsedBefore: number; readonly afterStaleReserve: boolean },
+): Promise<VaultDirectResult | typeof STALE_RESERVE> {
   const first = calls[0];
   if (!first) return { state: "failed", errorCode: "unsupported-offer" };
   // On resume, the reservation's own arguments win over a fresh probe and the current clock:
@@ -363,6 +425,8 @@ async function executeReservedCalls(
   }
   const validBefore =
     stored?.validBefore ?? reservationExpiry(input, dependencies, first.offer.maxTimeoutSeconds);
+  if (!stored && progress.afterStaleReserve && !reservationTtlFits(dependencies, validBefore))
+    return failStaleReserve(input, dependencies);
   const proof = buildPayeeProof(input, payee);
   const attempt = input.attempt ?? 0;
   const existingReservation = await findOrCreateReservation(
@@ -376,6 +440,7 @@ async function executeReservedCalls(
     proof,
     attempt,
   );
+  if (existingReservation === STALE_RESERVE) return STALE_RESERVE;
   if (existingReservation === undefined) return { state: "failed", errorCode: "reserve-pending" };
   return settleAndFinalize(
     input,
@@ -386,8 +451,35 @@ async function executeReservedCalls(
     amount,
     attempt,
     trace,
-    callsUsedBefore,
+    progress.callsUsedBefore,
+    count,
   );
+}
+
+/** Whether a fresh reserve's `validBefore` clears the vault's `MIN_RESERVATION_TTL` from now. */
+function reservationTtlFits(dependencies: VaultDirectDependencies, validBefore: bigint): boolean {
+  const now = BigInt(Math.floor(dependencies.now().getTime() / 1000));
+  return validBefore >= now + BigInt(MIN_RESERVATION_TTL_SECONDS);
+}
+
+/** SCR-153 §2 bound: `envelope.expiresAt` leaves the step-2 formula no room above the minimum TTL. */
+async function failStaleReserve(
+  input: VaultDirectInput,
+  dependencies: VaultDirectDependencies,
+): Promise<VaultDirectResult> {
+  await markStepFailed(dependencies.pool, {
+    planId: input.planId,
+    stepIndex: input.step.stepIndex,
+    attempt: input.attempt ?? 0,
+    errorCode: RESERVE_FAILED,
+    stepError: {
+      schemaVersion: "1.0",
+      code: RESERVE_FAILED,
+      message: BAD_TTL,
+      retryable: false,
+    },
+  });
+  return { state: "failed", errorCode: RESERVE_FAILED };
 }
 
 async function newReservationCount(
@@ -424,18 +516,20 @@ async function findOrCreateReservation(
   validBefore: bigint,
   proof: readonly Hash32[],
   attempt: number,
-): Promise<bigint | undefined> {
+): Promise<bigint | undefined | typeof STALE_RESERVE> {
   const mined = trace.findLast((row) => row.phase === "reserve.mined");
   if (mined) return BigInt(String(mined.payload["reservationId"]));
   const sent = trace.findLast((row) => row.phase === "reserve.sent");
   if (sent) {
     const txHash = sent.payload["txHash"];
     if (typeof txHash !== "string") return undefined;
-    const existing = await dependencies.chain.reservationFromTransaction?.(txHash);
-    if (existing !== undefined) return existing;
+    const outcome = await dependencies.chain.reserveOutcome?.(txHash);
+    if (outcome?.status === "reserved") return outcome.reservationId;
+    if (outcome?.status === "reverted" && revertedBadTtl(validBefore, outcome.blockTimestamp))
+      return recordStaleReserve(input, dependencies, attempt, txHash);
     const savedTransaction = sent.payload["signedTransaction"];
     if (typeof savedTransaction !== "string") return undefined;
-    const reservation = await submitReserve(
+    const reservation = await submitReserveOrStale(
       input,
       dependencies,
       {
@@ -452,7 +546,7 @@ async function findOrCreateReservation(
       attempt,
       false,
     );
-    return reservation.reservationId;
+    return reservation === STALE_RESERVE ? reservation : reservation.reservationId;
   }
   const reserveArgs = {
     envelopeId: input.envelopeId.toString(),
@@ -465,25 +559,67 @@ async function findOrCreateReservation(
     validBefore: validBefore.toString(),
   };
   const signedTransaction = await signVaultCall(dependencies, input.vault, "reserve", reserveArgs);
-  return (
-    await submitReserve(
-      input,
-      dependencies,
-      {
-        envelopeId: input.envelopeId,
-        stepIndex: input.step.stepIndex,
-        payee,
-        stepCap: BigInt(input.step.stepCap),
-        proof,
-        unitAmount: amount,
-        count,
-        validBefore,
-        signedTransaction,
-      },
-      attempt,
-      true,
-    )
-  ).reservationId;
+  const reservation = await submitReserveOrStale(
+    input,
+    dependencies,
+    {
+      envelopeId: input.envelopeId,
+      stepIndex: input.step.stepIndex,
+      payee,
+      stepCap: BigInt(input.step.stepCap),
+      proof,
+      unitAmount: amount,
+      count,
+      validBefore,
+      signedTransaction,
+    },
+    attempt,
+    true,
+  );
+  return reservation === STALE_RESERVE ? reservation : reservation.reservationId;
+}
+
+async function submitReserveOrStale(
+  input: VaultDirectInput,
+  dependencies: VaultDirectDependencies,
+  reserve: ReserveInput & { readonly signedTransaction: Hex },
+  attempt: number,
+  recordSent: boolean,
+): Promise<{ readonly reservationId: bigint; readonly txHash: string } | typeof STALE_RESERVE> {
+  try {
+    return await submitReserve(input, dependencies, reserve, attempt, recordSent);
+  } catch (error) {
+    if (!(error instanceof ReserveReverted)) throw error;
+    if (!revertedBadTtl(reserve.validBefore, error.blockTimestamp)) throw error;
+    return recordStaleReserve(input, dependencies, attempt, error.txHash);
+  }
+}
+
+/**
+ * SCR-153 §2: a status-0 `reserve` reverted `BadTtl()` exactly when its `validBefore` is below the mined
+ * block's `timestamp + MIN_RESERVATION_TTL` (`ReservationLogic.sol`). Any other status-0 reserve is another
+ * revert.
+ */
+function revertedBadTtl(validBefore: bigint, blockTimestamp: bigint): boolean {
+  return validBefore < blockTimestamp + BigInt(MIN_RESERVATION_TTL_SECONDS);
+}
+
+/** SCR-153 §2: close the stale attempt with `reserve.mined` carrying `BadTtl` as its outcome. */
+async function recordStaleReserve(
+  input: VaultDirectInput,
+  dependencies: VaultDirectDependencies,
+  attempt: number,
+  txHash: string,
+): Promise<typeof STALE_RESERVE> {
+  dependencies.assertLeaseHeld?.();
+  await appendExecutionPhase(dependencies.pool, {
+    planId: input.planId,
+    stepIndex: input.step.stepIndex,
+    attempt,
+    phase: "reserve.mined",
+    payload: { txHash, message: BAD_TTL },
+  });
+  return STALE_RESERVE;
 }
 
 async function submitReserve(
@@ -534,6 +670,7 @@ async function settleAndFinalize(
   attempt: number,
   trace: readonly ExecutionPhaseRow[],
   callsUsedBefore: number,
+  reservedCount: number,
 ): Promise<VaultDirectResult> {
   const completed: {
     index: number;
@@ -682,11 +819,12 @@ async function settleAndFinalize(
   }
   let start = 0;
   let final = false;
-  const finalizeCount = FINALIZE_CHUNK;
   if (dependencies.chain.reservationFinal)
     final = await dependencies.chain.reservationFinal(reservationId);
   if (!final) await waitUntilValidBefore(dependencies, validBefore);
-  while (!final) {
+  while (!final && start < reservedCount) {
+    // The vault refuses a range past the reservation's count (`BadParams`).
+    const finalizeCount = Math.min(FINALIZE_CHUNK, reservedCount - start);
     const signedTransaction = await signVaultCall(dependencies, input.vault, "finalize", {
       reservationId: reservationId.toString(),
       fromIndex: String(start),
@@ -716,6 +854,7 @@ async function settleAndFinalize(
     final = finalized.final;
     start += finalizeCount;
   }
+  if (!final) throw new Error("Reservation is not final after finalizing every reserved index.");
   if (authorized.length !== calls.length) {
     await markStepFailed(dependencies.pool, {
       planId: input.planId,

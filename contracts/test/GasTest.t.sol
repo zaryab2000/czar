@@ -215,6 +215,7 @@ contract GasTest is VaultTestBase, PayeeTree {
         (bool ok, bytes memory out) = P256_VERIFY.staticcall(input);
         uint256 used = before - gasleft();
         assertTrue(ok, "precompile call");
+        assertEq(out.length, 32, "no P-256 precompile at 0x100: run the suite with FOUNDRY_PROFILE=arc");
         assertEq(abi.decode(out, (uint256)), 1, "valid signature");
         assertGe(used, P256_PRECOMPILE_GAS, "at least the precompile price");
         assertLe(used, P256_PRECOMPILE_GAS + P256_CALL_OVERHEAD_MAX, "precompile, not the Solidity fallback");

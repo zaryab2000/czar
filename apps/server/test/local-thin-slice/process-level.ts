@@ -318,7 +318,7 @@ async function notifySubmitted(session: string, planId: string, transaction: Hex
       "content-type": "application/json",
       "idempotency-key": randomUUID(),
     },
-    body: JSON.stringify({ userOpHash: transaction, bundler: "arc-anvil-test-owner" }),
+    body: JSON.stringify({ userOpHash: transaction }),
   });
   assert.equal(response.status, 202, `approval submission notice failed: ${response.status}`);
 }
