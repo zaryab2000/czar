@@ -49,32 +49,35 @@ import { MAX_AUTHORIZATIONS_PER_RESERVATION } from "#src/router/index";
 export const FINALIZE_CHUNK = 32;
 /** The vault's `MIN_RESERVATION_TTL` (`CzarConstants.sol`): `validBefore ≥ block.timestamp + this`. */
 export const MIN_RESERVATION_TTL_SECONDS = 30;
-const BAD_TTL = "BadTtl";
 /**
- * The decoded revert of a stale saved reserve. `StepError` and `reserve.mined` have no field for a decoded
- * error name (SCR-153 §2 `detail` is an open spec gap), so it travels in a message.
+ * The vault error name a stale saved reserve is closed with. It goes in `reserve.mined` and in the
+ * `StepError` `message`, which never holds user text (SCR-153 §2, SCR-154 G4).
  */
-export const STALE_RESERVE_MESSAGE = `vault reverted ${BAD_TTL}()`;
+const BAD_TTL = "BadTtl";
 const RESERVE_FAILED = "reserve-failed";
 /** Marks an attempt whose saved reserve reverted `BadTtl()`: no reservation exists and its nonce is spent. */
 const STALE_RESERVE = Symbol("stale-reserve");
 
-/** A `reserve` transaction mined with status 0; `errorName` is the decoded vault error (03 §9.2). */
+/** A `reserve` transaction mined with status 0 in a block with timestamp `blockTimestamp`. */
 export class ReserveReverted extends Error {
   readonly txHash: string;
-  readonly errorName: string;
+  readonly blockTimestamp: bigint;
 
-  constructor(txHash: string, errorName: string) {
-    super(`Vault reserve reverted ${errorName}: ${txHash}`);
+  constructor(txHash: string, blockTimestamp: bigint) {
+    super(`Vault reserve reverted in the block at ${blockTimestamp}: ${txHash}`);
     this.name = "ReserveReverted";
     this.txHash = txHash;
-    this.errorName = errorName;
+    this.blockTimestamp = blockTimestamp;
   }
 }
 
+/**
+ * The mined outcome of a sent `reserve`. A revert carries only its block's timestamp: a receipt has no revert
+ * data, and BadTtl is decided by the vault's condition on that block (SCR-153 §2).
+ */
 export type ReserveOutcome =
   | { readonly status: "reserved"; readonly reservationId: bigint }
-  | { readonly status: "reverted"; readonly errorName: string };
+  | { readonly status: "reverted"; readonly blockTimestamp: bigint };
 
 export interface VaultDirectInput {
   readonly planId: string;
@@ -303,10 +306,7 @@ async function currentAttempt(
 }
 
 function staleReserve(trace: readonly ExecutionPhaseRow[]): boolean {
-  return (
-    trace.findLast((row) => row.phase === "reserve.mined")?.payload["message"] ===
-    STALE_RESERVE_MESSAGE
-  );
+  return trace.findLast((row) => row.phase === "reserve.mined")?.payload["message"] === BAD_TTL;
 }
 
 async function remainingExpectedCalls(
@@ -475,7 +475,7 @@ async function failStaleReserve(
     stepError: {
       schemaVersion: "1.0",
       code: RESERVE_FAILED,
-      message: STALE_RESERVE_MESSAGE,
+      message: BAD_TTL,
       retryable: false,
     },
   });
@@ -525,7 +525,7 @@ async function findOrCreateReservation(
     if (typeof txHash !== "string") return undefined;
     const outcome = await dependencies.chain.reserveOutcome?.(txHash);
     if (outcome?.status === "reserved") return outcome.reservationId;
-    if (outcome?.status === "reverted" && outcome.errorName === BAD_TTL)
+    if (outcome?.status === "reverted" && revertedBadTtl(validBefore, outcome.blockTimestamp))
       return recordStaleReserve(input, dependencies, attempt, txHash);
     const savedTransaction = sent.payload["signedTransaction"];
     if (typeof savedTransaction !== "string") return undefined;
@@ -589,12 +589,22 @@ async function submitReserveOrStale(
   try {
     return await submitReserve(input, dependencies, reserve, attempt, recordSent);
   } catch (error) {
-    if (!(error instanceof ReserveReverted) || error.errorName !== BAD_TTL) throw error;
+    if (!(error instanceof ReserveReverted)) throw error;
+    if (!revertedBadTtl(reserve.validBefore, error.blockTimestamp)) throw error;
     return recordStaleReserve(input, dependencies, attempt, error.txHash);
   }
 }
 
-/** SCR-153 §2: close the stale attempt with `reserve.mined` carrying the decoded error. */
+/**
+ * SCR-153 §2: a status-0 `reserve` reverted `BadTtl()` exactly when its `validBefore` is below the mined
+ * block's `timestamp + MIN_RESERVATION_TTL` (`ReservationLogic.sol`). Any other status-0 reserve is another
+ * revert.
+ */
+function revertedBadTtl(validBefore: bigint, blockTimestamp: bigint): boolean {
+  return validBefore < blockTimestamp + BigInt(MIN_RESERVATION_TTL_SECONDS);
+}
+
+/** SCR-153 §2: close the stale attempt with `reserve.mined` carrying `BadTtl` as its outcome. */
 async function recordStaleReserve(
   input: VaultDirectInput,
   dependencies: VaultDirectDependencies,
@@ -607,7 +617,7 @@ async function recordStaleReserve(
     stepIndex: input.step.stepIndex,
     attempt,
     phase: "reserve.mined",
-    payload: { txHash, message: STALE_RESERVE_MESSAGE },
+    payload: { txHash, message: BAD_TTL },
   });
   return STALE_RESERVE;
 }

@@ -8,7 +8,7 @@ import {
 } from "viem";
 import { decodeEventLog } from "viem";
 import { derivedNonce } from "@czar/hashing";
-import { czarVaultAbi, decodeViemError, getVault } from "@czar/vault-client";
+import { czarVaultAbi, getVault } from "@czar/vault-client";
 import { ReserveReverted, type VaultDirectChain } from "#src/payer/vault-direct";
 
 const USDC_ABI = parseAbi([
@@ -35,30 +35,10 @@ export function createViemVaultDirectChain(input: {
     return vault.read.getReservation([reservationId]);
   }
 
-  /**
-   * A receipt carries no revert data, so the mined transaction is replayed with `eth_call` on the parent
-   * block's state under the mined block's number and timestamp, and the revert it raises is decoded.
-   */
-  async function revertName(receipt: TransactionReceipt): Promise<string> {
-    const transaction = await input.client.getTransaction({ hash: receipt.transactionHash });
+  /** The timestamp of the block that mined `receipt`, from that block's header (SCR-153 §2). */
+  async function minedAt(receipt: TransactionReceipt): Promise<bigint> {
     const block = await input.client.getBlock({ blockNumber: receipt.blockNumber });
-    try {
-      await input.client.call({
-        account: transaction.from,
-        to: transaction.to,
-        data: transaction.input,
-        gas: transaction.gas,
-        blockNumber: receipt.blockNumber - 1n,
-        blockOverrides: { number: receipt.blockNumber, time: block.timestamp },
-      });
-    } catch (error) {
-      const decoded = decodeViemError(error);
-      if (decoded) return decoded.name;
-      throw error;
-    }
-    throw new Error(
-      "Reverted reserve transaction did not revert on replay: " + receipt.transactionHash,
-    );
+    return block.timestamp;
   }
 
   function reservedId(receipt: TransactionReceipt): bigint | undefined {
@@ -99,8 +79,7 @@ export function createViemVaultDirectChain(input: {
         serializedTransaction: args.signedTransaction,
       });
       const receipt = await input.client.waitForTransactionReceipt({ hash: txHash });
-      if (receipt.status !== "success")
-        throw new ReserveReverted(txHash, await revertName(receipt));
+      if (receipt.status !== "success") throw new ReserveReverted(txHash, await minedAt(receipt));
       const reservationId = reservedId(receipt);
       if (reservationId === undefined)
         throw new Error("Mined reserve transaction did not emit Reserved.");
@@ -142,7 +121,7 @@ export function createViemVaultDirectChain(input: {
         throw error;
       }
       if (receipt.status !== "success")
-        return { status: "reverted", errorName: await revertName(receipt) };
+        return { status: "reverted", blockTimestamp: await minedAt(receipt) };
       const reservationId = reservedId(receipt);
       return reservationId === undefined ? undefined : { status: "reserved", reservationId };
     },
