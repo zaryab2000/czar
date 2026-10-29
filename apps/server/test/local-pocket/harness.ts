@@ -738,6 +738,8 @@ export async function openEnvelope(
     planHash: Hash32;
     objectiveHash: Hash32;
     payeeRoot: Hash32;
+    /** Seconds from the current block to `expiresAt`; 30 days unless a case needs an envelope near expiry. */
+    lifetimeSeconds?: bigint;
   },
 ): Promise<bigint> {
   const block = await parts.chain.reader.getBlock();
@@ -753,7 +755,7 @@ export async function openEnvelope(
           cap: input.cap,
           maxStepAmount: input.stepCap,
           pocketCapBps: input.pocketCapBps,
-          expiresAt: block.timestamp + ENVELOPE_LIFETIME_SECONDS,
+          expiresAt: block.timestamp + (input.lifetimeSeconds ?? ENVELOPE_LIFETIME_SECONDS),
           categoryId: keccak256(toBytes("research")),
           objectiveHash: input.objectiveHash,
           planHash: input.planHash,

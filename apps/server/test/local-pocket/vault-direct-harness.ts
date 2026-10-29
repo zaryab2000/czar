@@ -58,6 +58,7 @@ export async function openX402Plan(
     readonly unitAmount: bigint;
     readonly calls: number;
     readonly maxTimeoutSeconds: number;
+    readonly envelopeLifetimeSeconds?: bigint;
   },
 ): Promise<X402Plan> {
   const payTo = privateKeyToAccount(generatePrivateKey()).address;
@@ -73,6 +74,9 @@ export async function openX402Plan(
     planHash,
     objectiveHash,
     payeeRoot,
+    ...(sizes.envelopeLifetimeSeconds === undefined
+      ? {}
+      : { lifetimeSeconds: sizes.envelopeLifetimeSeconds }),
   });
   const envelopeRef = `eip155:${ARC_CHAIN_ID}:${vault.vault.toLowerCase()}:${envelopeId}`;
   const envelope = await harness.chain.reader.readContract({
