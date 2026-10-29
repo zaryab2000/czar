@@ -1,7 +1,16 @@
 import type { Address, Hash32 } from "@czar/hashing";
 import type { PaymentRef } from "@czar/schemas";
 import { loadConfig } from "@czar/config";
-import { encodeAbiParameters, encodeEventTopics, keccak256, parseAbi, stringToHex } from "viem";
+import {
+  createPublicClient,
+  custom,
+  encodeAbiParameters,
+  encodeEventTopics,
+  keccak256,
+  numberToHex,
+  parseAbi,
+  stringToHex,
+} from "viem";
 import { describe, expect, it } from "vitest";
 import { createPostgresProjection } from "../src/postgres-projection.ts";
 import type { AuditQueryExecutor } from "../src/postgres-audit.ts";
@@ -430,7 +439,45 @@ describe("Postgres signer projection", () => {
       ),
     ).resolves.toMatchObject({ returnReceiptValid: true, returnOverdue: false });
   });
+
+  // SCR-153 §3: a cached head can deny `withdraw` with slow-withdraw-not-allowed right after withdrawalBlock.
+  it("reads a block mined after the last read, not viem's cached block number", async () => {
+    const node = headChain(100n);
+    const projection = createPostgresProjection({
+      config: loadConfig(),
+      database: queryDatabase(() => []),
+      chain: node.client,
+      factory,
+    });
+
+    await expect(projection.blockNumber()).resolves.toBe(100n);
+    await expect(projection.pocketBalances(payee)).resolves.toMatchObject({ currentBlock: 100n });
+    node.mine();
+    await expect(projection.blockNumber()).resolves.toBe(101n);
+    await expect(projection.pocketBalances(payee)).resolves.toMatchObject({ currentBlock: 101n });
+  });
 });
+
+/** A viem client (default block-number cache) over a node whose head advances only on `mine()`. */
+function headChain(start: bigint) {
+  let head = start;
+  const client = createPublicClient({
+    transport: custom({
+      async request({ method }: { method: string }) {
+        if (method === "eth_blockNumber") return numberToHex(head);
+        if (method === "eth_call") return encodeAbiParameters([{ type: "uint256" }], [0n]);
+        if (method === "eth_getBalance") return "0x0";
+        throw new Error(`unexpected RPC method: ${method}`);
+      },
+    }),
+  });
+  return {
+    client,
+    mine() {
+      head += 1n;
+    },
+  };
+}
 
 function queryDatabase(rowsFor: (sql: string) => Record<string, unknown>[]): AuditQueryExecutor {
   return {

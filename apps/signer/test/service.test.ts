@@ -261,6 +261,14 @@ describe("pocket keys (K4, RV-004)", () => {
     );
   });
 
+  it("SCR-152: retires a pocket key on Arc holding only sub-unit native wei, never compared with pocketDustAtomic", async () => {
+    const t = await harness({ config: { "signer.pocketDustAtomic": 500 } });
+    t.state.balances = { ...ZERO_BALANCES, usdc: 0n, native: 999_999_999_999n };
+    await expect(t.signer.retirePocketKey("cz-15", t.pocket)).resolves.toHaveProperty(
+      "destroyAfterMs",
+    );
+  });
+
   it("keeps the USDC-zero and native-dust retirement checks where gas is not USDC", async () => {
     const t = await harness({ network: { ...NETWORK, usdc: OTHER } });
     for (const change of [{ usdc: 1n }, { native: 500n }]) {
