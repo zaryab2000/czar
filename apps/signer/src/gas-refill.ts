@@ -1,6 +1,7 @@
 import type { Config } from "@czar/config";
 import type { Address } from "@czar/hashing";
 import type { Hex } from "viem";
+import { NATIVE_PER_USDC_ATOMIC } from "./policy.ts";
 import type { SignResult } from "./service.ts";
 
 type RefillKey = "K3" | "K7" | "K8";
@@ -37,16 +38,17 @@ export async function runGasRefill(options: GasRefillOptions): Promise<GasRefill
   const results: GasRefillResult[] = [];
   for (const key of REFILL_KEYS) {
     const target = options.keyAddress(key);
+    // Balances are native wei; `signer.gas.*` and the request `amount` stay USDC atomic (A1-05).
     const balance = await options.getNativeBalance(target);
-    const min = readGasBound(options.config, key, "minAtomic");
-    const refillTarget = readGasBound(options.config, key, "targetAtomic");
-    const max = readGasBound(options.config, key, "maxAtomic");
+    const min = readGasBound(options.config, key, "minAtomic") * NATIVE_PER_USDC_ATOMIC;
+    const refillTarget = readGasBound(options.config, key, "targetAtomic") * NATIVE_PER_USDC_ATOMIC;
+    const max = readGasBound(options.config, key, "maxAtomic") * NATIVE_PER_USDC_ATOMIC;
     if (balance >= min) {
       results.push({ key, balance, status: "unchanged" });
       continue;
     }
-    const amount = refillTarget - balance;
-    if (amount <= 0n || balance + amount > max) {
+    const amount = (refillTarget - balance + NATIVE_PER_USDC_ATOMIC - 1n) / NATIVE_PER_USDC_ATOMIC;
+    if (amount <= 0n || balance + amount * NATIVE_PER_USDC_ATOMIC > max) {
       await options.alert(`Gas refill bounds invalid for ${key}; check signer.gas.${key} config.`);
       results.push({ key, balance, status: "failed" });
       continue;

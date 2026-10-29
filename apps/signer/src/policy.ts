@@ -101,7 +101,7 @@ export interface PolicyContext {
 }
 
 /** 18-decimal native units per 6-decimal USDC unit on Arc (A1-05). */
-const NATIVE_PER_USDC_ATOMIC = 10n ** 12n;
+export const NATIVE_PER_USDC_ATOMIC = 10n ** 12n;
 
 /** On Arc gas is paid in USDC: the native balance and USDC `balanceOf` are one ledger (A1-05, SCR-152). */
 export const usdcPaysGas = (network: SignerNetwork): boolean => eq(network.usdc, USDC_ADDRESS);
@@ -882,10 +882,12 @@ async function gasRefill(ctx: PolicyContext, req: Req): Promise<Decision> {
   const amount = req.amount as bigint;
   const key = (["K3", "K7", "K8"] as const).find((id) => eq(ctx.keyAddress(id), target));
   if (key === undefined) deny("target-not-allowed");
+  // `amount` and `maxAtomic` are USDC atomic; the balance and the transaction value are native wei.
   const balance = await ctx.projection.nativeBalance(target);
-  const max = ctx.gasMaxAtomic[key as "K3" | "K7" | "K8"];
-  if (balance + amount > max) deny("above-max");
-  return { type: "transaction", to: target, data: "0x", value: amount, purpose: {} };
+  const value = amount * NATIVE_PER_USDC_ATOMIC;
+  const max = ctx.gasMaxAtomic[key as "K3" | "K7" | "K8"] * NATIVE_PER_USDC_ATOMIC;
+  if (balance + value > max) deny("above-max");
+  return { type: "transaction", to: target, data: "0x", value, purpose: {} };
 }
 
 const HANDLERS: Readonly<Record<Kind, (ctx: PolicyContext, req: Req) => Promise<Decision>>> = {

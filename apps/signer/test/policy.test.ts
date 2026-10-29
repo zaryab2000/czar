@@ -35,6 +35,9 @@ import {
 
 type H = Awaited<ReturnType<typeof harness>>;
 
+/** Arc native balances are 18-decimal wei; config and payload amounts are USDC 6-decimal atomic. */
+const WEI_PER_ATOMIC = 10n ** 12n;
+
 async function expectDenied(t: H, promise: Promise<unknown>, rule: string) {
   const before = t.calls.length;
   await expect(promise).rejects.toMatchObject({ name: "Denied", rule });
@@ -1639,18 +1642,31 @@ describe("relayer-tx and gas-refill (relayer)", () => {
   it("signer_gasRefill_aboveMax_denied", async () => {
     const t = await harness();
     const k3 = t.address("K3");
-    t.state.native.set(k3, 4_000_000n);
-    await t.signer.sign("relayer", {
+    t.state.native.set(k3.toLowerCase(), 4_000_000n * WEI_PER_ATOMIC);
+    const { signedTransaction } = (await t.signer.sign("relayer", {
       keyId: "relayer",
       kind: "gas-refill",
       payload: { target: k3, amount: "1000000" },
-    });
+    })) as { signedTransaction: Hex };
+    const tx = parseTransaction(signedTransaction);
+    expect(tx.to?.toLowerCase()).toBe(k3.toLowerCase());
+    expect(tx.value).toBe(1_000_000n * WEI_PER_ATOMIC);
     await expectDenied(
       t,
       t.signer.sign("relayer", {
         keyId: "relayer",
         kind: "gas-refill",
         payload: { target: k3, amount: "1000001" },
+      }),
+      "above-max",
+    );
+    t.state.native.set(k3.toLowerCase(), 4_000_000n * WEI_PER_ATOMIC + 1n);
+    await expectDenied(
+      t,
+      t.signer.sign("relayer", {
+        keyId: "relayer",
+        kind: "gas-refill",
+        payload: { target: k3, amount: "1000000" },
       }),
       "above-max",
     );
