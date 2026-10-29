@@ -52,3 +52,4 @@ deployments/local-keys.json
 
 deployments/.vault-client-test*.json
 contracts/broadcast
+deployments/.run6-*
