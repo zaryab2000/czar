@@ -136,7 +136,7 @@ export async function startLocalServer() {
     });
     const server = createHttpServer(root, logger);
     try {
-      await listen(server, port);
+      await listenOnLoopback(server, port);
     } catch (error) {
       await root.close();
       throw error;
@@ -216,10 +216,10 @@ function createRunningServer(server: Server, pool: Pool, root: ServerMain) {
   return { root, server, stop };
 }
 
-function listen(server: Server, port: number): Promise<void> {
+export function listenOnLoopback(server: Server, port: number): Promise<void> {
   return new Promise((resolveListen, reject) => {
     server.once("error", reject);
-    server.listen(port, "localhost", () => {
+    server.listen(port, "127.0.0.1", () => {
       server.removeListener("error", reject);
       resolveListen();
     });

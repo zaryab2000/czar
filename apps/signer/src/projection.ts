@@ -105,7 +105,6 @@ export interface OverdueManualReturnFacts {
   readonly envelopeOpen: boolean;
   readonly pendingPullbackZero: boolean;
   readonly gatewayWithdrawingZero: boolean;
-  readonly pocketUsdcZero: boolean;
   readonly slowWithdrawAudited: boolean;
   readonly pocketReturnAudited: boolean;
   readonly manualReturnRowValid: boolean;

@@ -46,6 +46,9 @@ const ctx = (state = defaultState("0x000000000000000000000000000000000000b0c0"))
   keyAddress: () => VAULT,
   merchantKeyAddress: () => VAULT,
   gasMaxAtomic: { K3: 0n, K7: 0n, K8: 0n },
+  pocketReturnGasReserve: async () => {
+    throw new Error("vector replay prepares no pocket return");
+  },
 });
 
 describe("vector replay through the signer", () => {
