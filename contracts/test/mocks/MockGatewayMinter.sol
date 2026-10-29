@@ -47,7 +47,7 @@ contract MockGatewayMinter {
     }
 
     /// @notice SCR-150 §1: sets the USDC token once (constructor-free placement with `anvil_setCode`).
-    function initializeDouble(address token) external {
+    function testInitialize(address token) external {
         require(msg.sender == controller, "MockGatewayMinter: caller is not the controller");
         if (usdc != address(0)) revert AlreadyInitialized();
         if (token == address(0)) revert InvalidAddress();

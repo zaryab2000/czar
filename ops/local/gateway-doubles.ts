@@ -3,7 +3,7 @@
 // Arc Anvil, and canonical addresses that already hold code, so it can never overwrite Circle's contracts.
 //
 // Placement: deploy each mock normally (so immutables such as `controller` are baked into its runtime code), copy
-// the runtime code to the canonical address with `anvil_setCode`, then call the one-time `initializeDouble` from the
+// the runtime code to the canonical address with `anvil_setCode`, then call the one-time `testInitialize` from the
 // same deployer (the mock's `controller`), because `anvil_setCode` runs no constructor.
 //
 // Import from tests: `import { placeGatewayDoubles } from "<repo>/ops/local/gateway-doubles.ts"`.
@@ -22,7 +22,7 @@ export const CANONICAL_GATEWAY_MINTER = "0x0022222abe238cc2c7bb1f21003f0a2600524
 export const ARC_USDC = "0x3600000000000000000000000000000000000000";
 
 const DEFAULT_ARTIFACTS_DIR = fileURLToPath(new URL("../../contracts/out", import.meta.url));
-const INITIALIZE_SIGNATURE = "initializeDouble(address)";
+const TEST_INITIALIZE_SIGNATURE = "testInitialize(address)";
 const RECEIPT_ATTEMPTS = 40;
 const RECEIPT_RETRY_MS = 250;
 const RPC_TIMEOUT_MS = 10_000;
@@ -152,9 +152,9 @@ async function placeOne(
   if (typeof runtime !== "string" || runtime === "0x")
     throw new Error("Deployed mock has no runtime code.");
   await rpc("anvil_setCode", [canonical, runtime]);
-  const selector = artifact.methodIdentifiers[INITIALIZE_SIGNATURE];
+  const selector = artifact.methodIdentifiers[TEST_INITIALIZE_SIGNATURE];
   if (typeof selector !== "string" || !/^[\da-f]{8}$/.test(selector)) {
-    throw new Error(`Mock artifact has no ${INITIALIZE_SIGNATURE}.`);
+    throw new Error(`Mock artifact has no ${TEST_INITIALIZE_SIGNATURE}.`);
   }
   const initHash = await rpc("eth_sendTransaction", [
     { from: controller, to: canonical, data: `0x${selector}${word(usdc)}` },
