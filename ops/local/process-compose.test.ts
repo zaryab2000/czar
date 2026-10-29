@@ -129,6 +129,15 @@ describe("local process composition", () => {
     expect(forkComposition).not.toContain("chain-session.mjs");
   });
 
+  it("marks the signer ready only when its socket accepts a connection", () => {
+    // A stale socket file survives every signer exit, so a file-existence probe passes before the
+    // new signer listens and merchant-k10-ready then fails with ECONNREFUSED.
+    const signer = processSection("signer").join("\n");
+    expect(signer).not.toContain("test -S");
+    expect(signer).toContain('require("node:net").connect(');
+    expect(signer).toContain("Library/Application Support/Czar/signer/signer.sock");
+  });
+
   it("records the A1 indexer start block from the deploy step on both deploy paths", () => {
     const deploy = readFileSync(new URL("./deploy.sh", import.meta.url), "utf8");
     expect(deploy).toContain('node "$ROOT/ops/local/record-start-block.mjs" --existing-deployment');
