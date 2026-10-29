@@ -1,5 +1,7 @@
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { describe, expect, it } from "vitest";
-import { readLocalLauncherPointers } from "#src/local-main";
+import { listenOnLoopback, readLocalLauncherPointers } from "#src/local-main";
 
 describe("local server launcher pointers", () => {
   it("reads only the six approved local launcher variables", () => {
@@ -22,5 +24,20 @@ describe("local server launcher pointers", () => {
       objectStorePath: "/tmp/czar-objects",
       indexerUrl: "http://127.0.0.1:42069",
     });
+  });
+});
+
+describe("local server listener", () => {
+  it("accepts connections on the IPv4 loopback address its local clients use", async () => {
+    const server = createServer((_request, response) => response.end("ok"));
+    await listenOnLoopback(server, 0);
+    try {
+      const address = server.address() as AddressInfo;
+      expect(address.address).toBe("127.0.0.1");
+      const response = await fetch(`http://127.0.0.1:${address.port}/`);
+      expect(await response.text()).toBe("ok");
+    } finally {
+      await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
+    }
   });
 });
