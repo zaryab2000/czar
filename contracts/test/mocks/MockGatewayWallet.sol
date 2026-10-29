@@ -16,7 +16,7 @@ interface IERC20Minimal {
 ///         `src/modules/wallet/Deposits.sol` and `Delegation.sol`; event and error signatures are copied.
 /// @dev Burn intents are signed off-chain and attested by Circle's API (A2-16); `testBurn` stands in for the
 ///      on-chain `gatewayBurn` so tests can move a pocket balance after a pullback.
-///      SCR-150 adds the trustless withdrawal (A2-13 to A2-15) and `testInitialize`, so the runtime code can be
+///      SCR-150 adds the trustless withdrawal (A2-13 to A2-15) and `initializeDouble`, so the runtime code can be
 ///      copied to the canonical GatewayWallet address on a CLEAN local chain (`anvil_setCode` skips the
 ///      constructor). Withdrawal event names other than the A2-13 revert are local test names, not verified
 ///      against Circle's source.
@@ -112,7 +112,7 @@ contract MockGatewayWallet {
 
     /// @notice SCR-150 §1: sets the storage the constructor sets, once, after the runtime code was copied to the
     ///         canonical address with `anvil_setCode` (which runs no constructor).
-    function testInitialize(address usdc) external onlyController {
+    function initializeDouble(address usdc) external onlyController {
         _initialize(usdc);
     }
 

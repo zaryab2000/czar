@@ -8,7 +8,7 @@ import {MockGatewayWallet} from "./mocks/MockGatewayWallet.sol";
 import {MockGatewayMinter} from "./mocks/MockGatewayMinter.sol";
 
 /// @notice SCR-150 §1–§4: the Gateway test doubles used on a CLEAN local chain. Covers constructor-free placement
-///         (`testInitialize` after copying runtime code), the trustless withdrawal (A2-13 to A2-15) and the local
+///         (`initializeDouble` after copying runtime code), the trustless withdrawal (A2-13 to A2-15) and the local
 ///         attestation accepted by `gatewayMint`.
 contract GatewayDoublesTest is Test {
     uint256 internal constant ONE_USDC = 1_000_000;
@@ -26,7 +26,7 @@ contract GatewayDoublesTest is Test {
         usdc = new MockUSDC3009();
         gw = new MockGatewayWallet(address(usdc));
         minter = new MockGatewayMinter();
-        minter.testInitialize(address(usdc));
+        minter.initializeDouble(address(usdc));
         usdc.mint(pocket, 10 * ONE_USDC);
         vm.startPrank(pocket);
         usdc.approve(address(gw), 5 * ONE_USDC);
@@ -61,34 +61,34 @@ contract GatewayDoublesTest is Test {
         MockGatewayWallet placed = MockGatewayWallet(CANONICAL_GATEWAY_WALLET);
         assertFalse(placed.initialized());
         assertFalse(placed.isTokenSupported(address(usdc)));
-        placed.testInitialize(address(usdc));
+        placed.initializeDouble(address(usdc));
         assertTrue(placed.isTokenSupported(address(usdc)));
         assertEq(placed.withdrawalDelay(), placed.DEFAULT_WITHDRAWAL_DELAY_BLOCKS());
         vm.expectRevert(MockGatewayWallet.AlreadyInitialized.selector);
-        placed.testInitialize(address(usdc));
+        placed.initializeDouble(address(usdc));
     }
 
     function test_placement_onlyControllerInitializes() public {
         vm.etch(CANONICAL_GATEWAY_WALLET, address(gw).code);
         vm.prank(address(0xBAD));
         vm.expectRevert("MockGatewayWallet: caller is not the controller");
-        MockGatewayWallet(CANONICAL_GATEWAY_WALLET).testInitialize(address(usdc));
+        MockGatewayWallet(CANONICAL_GATEWAY_WALLET).initializeDouble(address(usdc));
 
         vm.etch(CANONICAL_GATEWAY_MINTER, address(new MockGatewayMinter()).code);
         vm.prank(address(0xBAD));
         vm.expectRevert("MockGatewayMinter: caller is not the controller");
-        MockGatewayMinter(CANONICAL_GATEWAY_MINTER).testInitialize(address(usdc));
+        MockGatewayMinter(CANONICAL_GATEWAY_MINTER).initializeDouble(address(usdc));
     }
 
     function test_placement_constructedWalletIsAlreadyInitialized() public {
         assertTrue(gw.initialized());
         vm.expectRevert(MockGatewayWallet.AlreadyInitialized.selector);
-        gw.testInitialize(address(usdc));
+        gw.initializeDouble(address(usdc));
     }
 
     function test_placement_minterInitializeOnce() public {
         vm.expectRevert(MockGatewayMinter.AlreadyInitialized.selector);
-        minter.testInitialize(address(usdc));
+        minter.initializeDouble(address(usdc));
     }
 
     // ─────────────── Trustless withdrawal (SCR-150 §2, A2-13 to A2-15) ───────────────
