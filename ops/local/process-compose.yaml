@@ -5,7 +5,7 @@ version: "0.5"
 # CZAR_LOCAL_MODE (default clean; the FORK bring-up sets CZAR_LOCAL_MODE=fork).
 processes:
   arc-anvil:
-    command: arc-anvil --network arc --chain-id 5042002 --mnemonic-random --quiet --port 8545
+    command: arc-anvil --network arc --chain-id 5042002 --mnemonic-random --block-time 1 --quiet --port 8545
     working_dir: .
     readiness_probe:
       exec:
