@@ -7,7 +7,7 @@ export interface OpeningEnvelope {
     readonly envelopeRef: string;
     readonly vault: string;
     readonly planHash: string;
-    readonly status: string;
+    readonly state: string;
   };
 }
 
@@ -55,7 +55,7 @@ function parseOpeningEnvelope(value: unknown): OpeningEnvelope {
     !/^0x[\da-fA-F]{40}$/.test(envelope["vault"]) ||
     typeof envelope["planHash"] !== "string" ||
     !/^0x[\da-fA-F]{64}$/.test(envelope["planHash"]) ||
-    typeof envelope["status"] !== "string"
+    typeof envelope["state"] !== "string"
   ) {
     throw new TypeError("Indexer envelope lookup returned an invalid envelope.");
   }
@@ -64,7 +64,7 @@ function parseOpeningEnvelope(value: unknown): OpeningEnvelope {
       envelopeRef: envelope["envelopeRef"],
       vault: envelope["vault"],
       planHash: envelope["planHash"],
-      status: envelope["status"],
+      state: envelope["state"],
     },
   };
 }
@@ -127,7 +127,7 @@ function matchesEnvelope(
   return Boolean(
     found &&
     row.vault &&
-    found.envelope.status === "Open" &&
+    found.envelope.state === "Open" &&
     found.envelope.vault.toLowerCase() === row.vault.toLowerCase() &&
     found.envelope.planHash.toLowerCase() === row.plan_hash.toLowerCase() &&
     found.envelope.envelopeRef.length > 0 &&

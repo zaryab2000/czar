@@ -1,7 +1,10 @@
 // SCR-150 §5 run 6 (SCR-146 §3.3): the manual-return UI (SCR-133, CZ-22 §12 wording) served by
 // the real server route `GET /v1/pockets/manual-returns` with AppSession auth. That route is never
-// stubbed. The Home test answers only `/v1/me` (a chain-state mirror; see the test comment).
+// stubbed, and neither is `/v1/me`: it reads the CzarVaultFactory and vaults the fixture deploys
+// on the run 6 arc-anvil with contracts/script/deploy.sh.
 import { expect, test, type Page } from "@playwright/test";
+import { keccak256, type Address } from "viem";
+import { czarVaultFactoryAbi } from "@czar/vault-client";
 import { RUN6 } from "./run6-data.ts";
 
 const SERVER = `http://127.0.0.1:${RUN6.serverPort}`;
@@ -23,6 +26,34 @@ async function signIn(page: Page, sessionToken: string): Promise<void> {
   );
 }
 
+async function vaults(): Promise<Record<string, string>> {
+  return RUN6.deployedVaults(RUN6.readDeployment().factory);
+}
+
+async function vaultFor(msca: string): Promise<string> {
+  const vault = (await vaults())[msca];
+  if (vault === undefined) throw new Error(`No predicted vault for seeded owner ${msca}.`);
+  return vault;
+}
+
+test("the vault factory is the deployed CzarVaultFactory", async () => {
+  const { factory, factoryRuntimeHash } = RUN6.readDeployment();
+  const code = await RUN6.chainClient.getCode({ address: factory });
+  expect(code === undefined ? undefined : keccak256(code)).toBe(factoryRuntimeHash);
+
+  const predicted = await vaults();
+  expect(new Set(Object.values(predicted)).size).toBe(3);
+  for (const owner of [RUN6.ownerA, RUN6.ownerB]) {
+    const created = await RUN6.chainClient.readContract({
+      address: factory,
+      abi: czarVaultFactoryAbi,
+      functionName: "vaultOf",
+      args: [owner.msca as Address],
+    });
+    expect(created.toLowerCase()).toBe(predicted[owner.msca]);
+  }
+});
+
 test("the route is AppSession-only and scoped to the signed-in owner", async ({ request }) => {
   const anonymous = await request.get(`${SERVER}/v1/pockets/manual-returns`);
   expect(anonymous.status()).toBe(401);
@@ -35,37 +66,14 @@ test("the route is AppSession-only and scoped to the signed-in owner", async ({ 
   expect(body.items.map((item) => item.returnTx).toSorted()).toEqual(
     RUN6.ownerA.manualReturns.map((row) => row.returnTx).toSorted(),
   );
-  expect(body.items.every((item) => item.vault === RUN6.ownerA.vault)).toBe(true);
+  const vaultA = await vaultFor(RUN6.ownerA.msca);
+  expect(body.items.every((item) => item.vault === vaultA)).toBe(true);
 });
 
 test("Home shows the count of returns waiting to be recorded", async ({ page }) => {
   await signIn(page, token("CZAR_RUN6_TOKEN_A"));
-  // Only /v1/me is answered here: it mirrors on-chain vault state, which needs deployed Czar
-  // contracts that this hermetic run does not have. The manual-returns route stays real.
-  await page.route("**/v1/me", (route) =>
-    route.fulfill({
-      contentType: "application/json",
-      body: JSON.stringify({
-        userId: RUN6.ownerA.userId,
-        msca: RUN6.ownerA.msca,
-        vault: RUN6.ownerA.vault,
-        vaultCreated: true,
-        network: RUN6.network,
-        mode: "live",
-        balances: {
-          vaultBalance: "0",
-          free: "0",
-          committed: "0",
-          mscaBalance: "0",
-          pocketOutstanding: "0",
-          asOfBlock: 1,
-        },
-        limits: [],
-        frozen: false,
-        paused: false,
-        displayCurrency: "USD",
-      }),
-    }),
+  const me = page.waitForResponse(
+    (response) => response.url().endsWith("/v1/me") && response.request().method() === "GET",
   );
   const manualReturns = page.waitForResponse(
     (response) =>
@@ -73,6 +81,13 @@ test("Home shows the count of returns waiting to be recorded", async ({ page }) 
       response.request().method() === "GET",
   );
   await page.goto("/home");
+  const meResponse = await me;
+  expect(meResponse.status()).toBe(200);
+  const meBody = (await meResponse.json()) as { vault: string; vaultCreated: boolean };
+  expect({ vault: meBody.vault.toLowerCase(), vaultCreated: meBody.vaultCreated }).toEqual({
+    vault: await vaultFor(RUN6.ownerA.msca),
+    vaultCreated: true,
+  });
   expect((await manualReturns).status()).toBe(200);
   // Owner A has two rows in manual-return-required; the other user's rows are not counted.
   await expect(page.getByText("2 pocket returns to record")).toBeVisible({ timeout: 20_000 });
@@ -82,7 +97,8 @@ test("the envelope shows pending, recorded and expired returns with CZ-22 wordin
   page,
 }) => {
   await signIn(page, token("CZAR_RUN6_TOKEN_B"));
-  await page.goto(`/envelopes/${encodeURIComponent(RUN6.ownerB.envelopeRef)}`);
+  const envelopeRef = RUN6.envelopeRef(await vaultFor(RUN6.ownerB.msca), 1);
+  await page.goto(`/envelopes/${encodeURIComponent(envelopeRef)}`);
 
   await expect(page.getByRole("heading", { name: "Money to record" })).toBeVisible({
     timeout: 20_000,

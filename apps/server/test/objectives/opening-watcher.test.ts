@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadConfig } from "@czar/config";
 import { setupDatabase } from "#test/db";
@@ -15,6 +16,15 @@ const PLAN_ID = "pln_01K7ZT9P4N5Q6R7S8T9V0W1X2Y";
 const VAULT = "0x0000000000000000000000000000000000000001";
 const OTHER_VAULT = "0x0000000000000000000000000000000000000002";
 const PLAN_HASH = `0x${"1".repeat(64)}`;
+const envelopeExample = JSON.parse(
+  readFileSync(
+    new URL(
+      "../../../../docs/specs/02-data-and-protocol/examples/envelope.example.json",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
+) as Record<string, unknown>;
 
 async function seedOpeningObjective(expiresAt: string): Promise<void> {
   const submission = makeObjectiveSubmission(OBJECTIVE);
@@ -71,23 +81,15 @@ describe("opening watcher", () => {
   });
 
   it("looks up an envelope by plan hash through the indexer query route", async () => {
+    // The indexer returns the 02 Envelope shape, whose lifecycle field is `state`.
+    const envelope = { ...envelopeExample, vault: VAULT, planHash: PLAN_HASH, state: "Open" };
     const fetcher = vi.fn(async () =>
-      Response.json({
-        envelope: {
-          envelopeRef: "eip155:5042002:0x0000000000000000000000000000000000000001:7",
-          vault: VAULT,
-          planHash: PLAN_HASH,
-          status: "Open",
-        },
-        reservations: [],
-        pockets: [],
-        jobs: [],
-      }),
+      Response.json({ envelope, reservations: [], pockets: [], jobs: [] }),
     );
     const lookup = createIndexerOpeningLookup("http://127.0.0.1:42069", 2_000, fetcher);
 
     await expect(lookup.envelopeByPlanHash(PLAN_HASH)).resolves.toMatchObject({
-      envelope: { vault: VAULT, planHash: PLAN_HASH, status: "Open" },
+      envelope: { vault: VAULT, planHash: PLAN_HASH, state: "Open" },
     });
     const [url, options] = fetcher.mock.calls[0] as unknown as [string, RequestInit];
     expect(new URL(url).href).toBe(`http://127.0.0.1:42069/envelopes/by-plan-hash/${PLAN_HASH}`);
@@ -102,7 +104,7 @@ describe("opening watcher", () => {
         envelopeRef: "eip155:5042002:0x0000000000000000000000000000000000000001:7",
         vault: OTHER_VAULT,
         planHash: PLAN_HASH,
-        status: "Open",
+        state: "Open",
       },
     }));
 
@@ -122,7 +124,7 @@ describe("opening watcher", () => {
         envelopeRef: "eip155:5042002:0x0000000000000000000000000000000000000001:7",
         vault: VAULT,
         planHash: PLAN_HASH,
-        status: "Closed",
+        state: "Closed",
       },
     });
     await pollOpeningObjectives(dependencies(lookup, new Date("2026-10-21T00:16:30Z")));
@@ -135,7 +137,7 @@ describe("opening watcher", () => {
         envelopeRef: "eip155:5042002:0x0000000000000000000000000000000000000001:7",
         vault: VAULT,
         planHash: PLAN_HASH,
-        status: "Open",
+        state: "Open",
       },
     });
     await pollOpeningObjectives(dependencies(lookup, new Date("2026-10-21T00:17:00Z")));
@@ -201,7 +203,7 @@ describe("opening watcher", () => {
         envelopeRef: "eip155:5042002:0x0000000000000000000000000000000000000001:7",
         vault: VAULT,
         planHash: PLAN_HASH,
-        status: "Open",
+        state: "Open",
       },
     });
     await stopping;

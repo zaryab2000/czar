@@ -1,7 +1,8 @@
-// Stand-in for the CZ-19 pocket routes the payer's pocket recovery reads (`createIndexerPocketReader`), answered from the
+// Stand-in for the four CZ-19 pocket routes the payer reads (`createIndexerPocketReader`), answered from the
 // local chain instead of a running Ponder indexer. The Gateway API figure is the Gateway double's
-// `availableBalance` (what the D92 `/v1/balances` stand-in returns on a chain with the doubles placed),
-// observed fresh on every read.
+// `availableBalance` (what the D92 `/v1/balances` stand-in returns on a chain with the doubles placed); a test
+// switches a pocket's API between `fresh` (observed now) and `down` (the last good figure is kept, the failure
+// count rises), which is how SCR-127 trigger (a) and the SCR-145 stale-figure exception are reached.
 import { createServer, type Server } from "node:http";
 import { parseAbi, type Address, type PublicClient } from "viem";
 import { czarVaultAbi } from "@czar/vault-client";
@@ -32,6 +33,8 @@ export interface IndexerStandin {
   readonly url: string;
   register(pocket: RegisteredPocket): void;
   vaultOf(pocket: Address): Address | undefined;
+  /** `fresh`: every read observes the double now. `down`: the API fails; the last good figure stays. */
+  setGatewayApi(pocket: Address, mode: "fresh" | "down"): void;
   observe(pocket: Address): Promise<GatewayObservation>;
   pocketState(pocket: Address): Promise<{
     readonly state: PocketState;
@@ -50,14 +53,32 @@ export async function startIndexerStandin(input: {
   readonly now: () => Date;
 }): Promise<IndexerStandin> {
   const pockets = new Map<string, RegisteredPocket>();
+  const modes = new Map<string, "fresh" | "down">();
+  const lastGood = new Map<string, { available: bigint; observedAt: Date }>();
+  const failures = new Map<string, number>();
+
   async function observe(pocket: Address): Promise<GatewayObservation> {
-    const available = await input.reader.readContract({
-      address: GATEWAY_WALLET,
-      abi: gatewayWalletAbi,
-      functionName: "availableBalance",
-      args: [ARC_USDC, pocket],
-    });
-    return { available, observedAt: input.now(), consecutiveFailures: 0 };
+    const key = pocket.toLowerCase();
+    if ((modes.get(key) ?? "fresh") === "fresh") {
+      const available = await input.reader.readContract({
+        address: GATEWAY_WALLET,
+        abi: gatewayWalletAbi,
+        functionName: "availableBalance",
+        args: [ARC_USDC, pocket],
+      });
+      const observedAt = input.now();
+      lastGood.set(key, { available, observedAt });
+      failures.set(key, 0);
+      return { available, observedAt, consecutiveFailures: 0 };
+    }
+    const count = (failures.get(key) ?? 0) + 1;
+    failures.set(key, count);
+    const good = lastGood.get(key);
+    return {
+      available: good?.available ?? 0n,
+      observedAt: good?.observedAt ?? null,
+      consecutiveFailures: count,
+    };
   }
 
   async function pocketState(pocket: Address) {
@@ -88,7 +109,7 @@ export async function startIndexerStandin(input: {
       args: [ARC_USDC, pocket],
     });
 
-  const routes = createRoutes({ pockets, observe, pocketState, withdrawing });
+  const routes = createRoutes({ pockets, observe, pocketState, withdrawing, reader: input.reader });
   const server = createServer((request, response) => {
     routes(new URL(request.url ?? "/", `http://127.0.0.1:${input.port}`))
       .then(([status, body]) => {
@@ -107,6 +128,9 @@ export async function startIndexerStandin(input: {
       pockets.set(pocket.pocket.toLowerCase(), pocket);
     },
     vaultOf: (pocket) => pockets.get(pocket.toLowerCase())?.vault,
+    setGatewayApi(pocket, mode) {
+      modes.set(pocket.toLowerCase(), mode);
+    },
     observe,
     pocketState,
     withdrawing,
@@ -119,6 +143,7 @@ function createRoutes(input: {
   readonly observe: IndexerStandin["observe"];
   readonly pocketState: IndexerStandin["pocketState"];
   readonly withdrawing: IndexerStandin["withdrawing"];
+  readonly reader: PublicClient;
 }) {
   return async (url: URL): Promise<[number, unknown]> => {
     const balance = /^\/pocket-balances\/(0x[\da-fA-F]{40})$/.exec(url.pathname);
@@ -138,6 +163,8 @@ function createRoutes(input: {
     if (url.pathname === "/pockets/funded") return [200, { items: await funded(input, url) }];
     if (url.pathname === "/pockets/closed-with-balance")
       return [200, { items: await closedWithBalance(input) }];
+    if (url.pathname === "/pockets/manual-returns")
+      return [200, { items: await manualReturns(input.reader, url) }];
     return [404, { error: "not_found" }];
   };
 }
@@ -179,6 +206,32 @@ async function closedWithBalance(input: Parameters<typeof createRoutes>[0]) {
     });
   }
   return items;
+}
+
+async function manualReturns(reader: PublicClient, url: URL) {
+  const vault = url.searchParams.get("vault") as Address | null;
+  if (!vault) return [];
+  const events = await reader.getContractEvents({
+    address: vault,
+    abi: czarVaultAbi,
+    eventName: "ManualReturnRecorded",
+    fromBlock: 0n,
+  });
+  return events
+    .map((event) => ({
+      pocket: event.args.pocket,
+      credit: (event.args.amount ?? 0n).toString(),
+      txHash: event.transactionHash,
+      block: event.blockNumber.toString(),
+      logIndex: event.logIndex,
+    }))
+    .toSorted((left, right) =>
+      BigInt(left.block) === BigInt(right.block)
+        ? left.logIndex - right.logIndex
+        : BigInt(left.block) < BigInt(right.block)
+          ? -1
+          : 1,
+    );
 }
 
 function listen(server: Server, port: number): Promise<void> {

@@ -28,10 +28,11 @@ describe("local signer runtime adapters", () => {
       gas: 21_000n,
     }));
     const getChainId = vi.fn(async () => 5042002);
+    const estimateGas = vi.fn(async () => 21_000n);
     const prepare = createRpcTransactionPreparer({
       chainId: 5042002,
       rpcUrl: "http://127.0.0.1:18545",
-      client: { getChainId, prepareTransactionRequest } as never,
+      client: { getChainId, estimateGas, prepareTransactionRequest } as never,
     });
 
     await expect(
@@ -59,6 +60,39 @@ describe("local signer runtime adapters", () => {
           rpcUrls: { default: { http: ["http://127.0.0.1:18545"] } },
         }),
       }),
+    );
+  });
+
+  it("estimates gas without a fee cap, then prepares the transaction with that gas (SCR-152)", async () => {
+    // On Arc a fee-capped estimate pre-charges gas × fee from the same USDC balance the call moves, so a
+    // pocket-return of balance − gasReserve would revert in estimation.
+    const estimateGas = vi.fn(async () => 74_409n);
+    const prepareTransactionRequest = vi.fn(async (request: Record<string, unknown>) => ({
+      ...request,
+      nonce: 0,
+      maxFeePerGas: 2n,
+      maxPriorityFeePerGas: 1n,
+    }));
+    const prepare = createRpcTransactionPreparer({
+      chainId: 5042002,
+      rpcUrl: "http://127.0.0.1:18545",
+      client: { getChainId: async () => 5042002, estimateGas, prepareTransactionRequest } as never,
+    });
+    const call = {
+      to: "0x0000000000000000000000000000000000000002",
+      data: "0x1234",
+      value: 0n,
+    } as const;
+
+    await expect(
+      prepare("0x0000000000000000000000000000000000000001", call),
+    ).resolves.toMatchObject({ gas: 74_409n });
+    expect(estimateGas).toHaveBeenCalledWith({
+      account: "0x0000000000000000000000000000000000000001",
+      ...call,
+    });
+    expect(prepareTransactionRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ gas: 74_409n }),
     );
   });
 

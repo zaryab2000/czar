@@ -2,6 +2,7 @@
 // backend → audit. A refusal returns `kms_denied` with the rule; nothing is signed and the backend is
 // never called.
 import {
+  encodeFunctionData,
   keccak256,
   serializeTransaction,
   type Hex,
@@ -21,9 +22,13 @@ import {
   type KeyId,
   type Kind,
 } from "./kinds.ts";
+import { USDC_ABI } from "./abi.ts";
 import {
   decide,
   Denied,
+  gasReserveAtomic,
+  pocketEmpty,
+  usdcPaysGas,
   type PolicyContext,
   type PurposeIds,
   type SignerNetwork,
@@ -62,6 +67,31 @@ export type TransactionPreparer = (
   from: Address,
   call: { to: Address; data: Hex; value: bigint },
 ) => Promise<TransactionSerializableEIP1559>;
+
+/**
+ * SCR-152 `gasReserve` of a `pocket-return` of `amount` USDC from `pocket` to its vault, from the transaction
+ * `prepare` builds for it (the same preparer the signer signs with).
+ */
+export async function pocketReturnGasReserve(
+  prepare: TransactionPreparer,
+  input: {
+    readonly usdc: Address;
+    readonly pocket: Address;
+    readonly vault: Address;
+    readonly amount: bigint;
+  },
+): Promise<bigint> {
+  const tx = await prepare(input.pocket, {
+    to: input.usdc,
+    data: encodeFunctionData({
+      abi: USDC_ABI,
+      functionName: "transfer",
+      args: [input.vault, input.amount],
+    }),
+    value: 0n,
+  });
+  return gasReserveAtomic(tx);
+}
 
 export interface SignRequest {
   readonly keyId: string;
@@ -150,6 +180,13 @@ export function createSigner(options: SignerOptions): Signer {
       K7: BigInt(config.get("signer.gas.K7.maxAtomic") as number),
       K8: BigInt(config.get("signer.gas.K8.maxAtomic") as number),
     },
+    pocketReturnGasReserve: (pocket, vault, amount) =>
+      pocketReturnGasReserve(options.prepareTransaction, {
+        usdc: network.usdc,
+        pocket,
+        vault,
+        amount,
+      }),
   };
 
   const owns = (caller: string, keyId: KeyId) => (callers[caller] ?? []).includes(keyId);
@@ -250,6 +287,7 @@ export function createSigner(options: SignerOptions): Signer {
       )
         throw new Denied("prepared-transaction-mismatch");
       digest = keccak256(serializeTransaction(tx)) as Hash32;
+      decision.checkPrepared?.(tx);
       const signedTransaction = await backend.signTransaction(keyRef, tx);
       await audit.write({
         at: nowMs(),
@@ -349,15 +387,28 @@ export function createSigner(options: SignerOptions): Signer {
     const b = await projection.pocketBalances(pocket);
     const view = await projection.pocket(pocket);
     if (!b.gatewayApiFresh) throw new Denied("gateway-balance-stale");
-    const dust = BigInt(config.get("signer.pocketDustAtomic") as number);
     const zero =
       b.gatewayApi === 0n &&
       b.gatewayAvailable === 0n &&
       b.gatewayWithdrawing === 0n &&
-      b.usdc === 0n &&
       !b.pendingPullback &&
-      b.native < dust &&
-      view?.slowWithdrawalOpen !== true;
+      view?.slowWithdrawalOpen !== true &&
+      (await eoaEmpty(pocket, view?.vault, b));
     if (!zero) throw new Denied("pocket-balance-not-zero");
+  }
+
+  /**
+   * CZ-27 §5.3 as amended by SCR-152 §2: on Arc the USDC-zero and native-dust checks are one check, the EOA is
+   * empty (nothing returnable at the current fee); elsewhere both stay, with `signer.pocketDustAtomic` as the floor.
+   */
+  async function eoaEmpty(
+    pocket: Address,
+    vault: Address | undefined,
+    b: Awaited<ReturnType<Projection["pocketBalances"]>>,
+  ): Promise<boolean> {
+    if (!usdcPaysGas(network))
+      return b.usdc === 0n && b.native < BigInt(config.get("signer.pocketDustAtomic") as number);
+    if (vault === undefined) return b.usdc === 0n;
+    return pocketEmpty(ctx, pocket, vault, b.usdc);
   }
 }
