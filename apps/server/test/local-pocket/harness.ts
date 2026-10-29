@@ -15,7 +15,7 @@ import {
   type Hash32,
 } from "@czar/hashing";
 import { createLogger, type Logger } from "@czar/logging";
-import type { PlanLeaf } from "@czar/signer";
+import type { PlanLeaf, Signer, SignRequest } from "@czar/signer";
 import { czarVaultAbi, czarVaultFactoryAbi, withFeeFloor } from "@czar/vault-client";
 import type { SafeFetch } from "@czar/x402";
 import type { Pool } from "pg";
@@ -32,6 +32,21 @@ import { generatePrivateKey, privateKeyToAccount, type PrivateKeyAccount } from 
 import { handleStandinRequest } from "../../../../ops/local/circle-standins/server.ts";
 import { executePocketPreparation, type PocketPreparationInput } from "#src/payer/pocket";
 import { createPocketPreparationChain } from "#src/payer/pocket-chain";
+import { createIndexerPocketReader } from "#src/payer/indexer-pocket";
+import {
+  cancelExpiredPullback,
+  writeOffOverdueManualReturn,
+  type CancelPullbackInput,
+} from "#src/payer/pullback";
+import { createPullbackChainAdapter } from "#src/payer/pullback-chain-adapter";
+import { createPullbackExecutionChain } from "#src/payer/pullback-execution-chain";
+import {
+  runManualReturnRecovery,
+  runPendingPullbackFallbacks,
+  type ManualReturnReceiptPosition,
+  type ManualReturnRow,
+  type ManualReturnWriteOffCandidate,
+} from "#src/payer/pullback-scheduler";
 import {
   createPocketRecoveryOperations,
   type PocketRecoveryOperations,
@@ -66,10 +81,13 @@ const SELLER: Address = "0x000000000000000000000000000000000000bEEF";
 const usdcAbi = parseAbi([
   "function approve(address spender, uint256 value) returns (bool)",
   "function balanceOf(address account) view returns (uint256)",
+  "event Transfer(address indexed from, address indexed to, uint256 value)",
 ]);
 const gatewayWalletAbi = parseAbi([
   "function depositFor(address token, address depositor, uint256 value)",
   "function availableBalance(address token, address depositor) view returns (uint256)",
+  "event WithdrawalInitiated(address indexed token, address indexed depositor, uint256 value, uint256 totalWithdrawing, uint256 availableAtBlock)",
+  "event WithdrawalCompleted(address indexed token, address indexed depositor, uint256 value)",
 ]);
 const gatewayMinterAbi = parseAbi([
   "event AttestationUsed(address indexed token, address indexed recipient, bytes32 indexed transferSpecHash, uint32 sourceDomain, bytes32 sourceDepositor, bytes32 sourceSigner, uint256 value)",
@@ -120,8 +138,34 @@ export interface ChainLog {
 
 export interface HarnessClock {
   now(): Date;
+  /** The signer's clock: the payer clock minus the lag set with `setSignerLag`. */
+  signerNowMs(): number;
   /** Advances the payer clock, the signer clock and chain time together. */
   advance(ms: number): Promise<void>;
+  /** The signer's clock trails the payer clock by `ms` (0 restores it). */
+  setSignerLag(ms: number): void;
+}
+
+export interface SignCrash {
+  /** The next matching signing request dies before the signer is called (nothing is signed). */
+  arm(point: { name: string; match: (request: SignRequest) => boolean }): void;
+  /** Runs before every payer signing request reaches the signer, to observe the chain at that moment. */
+  observe(listener: (request: SignRequest) => Promise<void>): void;
+  readonly fired: readonly string[];
+}
+
+export interface GatewayFailureRow {
+  readonly state: string;
+  readonly closed_pocket: boolean;
+  readonly initiate_tx: string | null;
+  readonly withdraw_tx: string | null;
+  readonly return_tx: string | null;
+  readonly return_block: string | null;
+  readonly return_log_index: number | null;
+  readonly returned_amount: string | null;
+  readonly recorded_credit: string | null;
+  readonly recorded_tx: string | null;
+  readonly manual_return_required_at: Date | null;
 }
 
 export interface TransferCrash {
@@ -136,25 +180,42 @@ export interface LocalPocketHarness {
   readonly clock: HarnessClock;
   readonly pool: Pool;
   readonly signer: SignerHarness;
+  readonly standin: IndexerStandin;
   readonly transferCrash: TransferCrash;
+  readonly signCrash: SignCrash;
   readonly guardian: PrivateKeyAccount;
   readonly logger: Logger;
-  /** Payer runtime operations reported through `onError`. */
+  /** Payer operations reported through `onError`, `onRowError` and `onWriteOffError`. */
   readonly errors: string[];
   createVault(): Promise<VaultFixture>;
   openPocketPlan(vault: VaultFixture, sizes: { stepCap: bigint; cap: bigint }): Promise<PocketPlan>;
   preparePocket(plan: PocketPlan): Promise<{ pocket: Address; funded: string }>;
   /** Fresh CZ-15 recovery operations over the shared database and chain. */
   recovery(): PocketRecoveryOperations;
+  /** One `runPendingPullbackFallbacks` pass, composed as `main.ts` composes it. */
+  runFallbacks(): Promise<number>;
+  /** One `runManualReturnRecovery` pass, composed as `main.ts` composes it. */
+  runManualReturnRecovery(): Promise<number>;
   depositFor(pocket: Address, value: bigint): Promise<void>;
   usdcBalance(address: Address): Promise<bigint>;
   gatewayAvailable(pocket: Address): Promise<bigint>;
   vaultEvents(vault: Address, eventName: VaultEventName, pocket?: Address): Promise<ChainLog[]>;
   attestations(recipient: Address): Promise<ChainLog[]>;
+  usdcTransfers(from: Address, to: Address): Promise<ChainLog[]>;
+  gatewayEvents(
+    eventName: "WithdrawalInitiated" | "WithdrawalCompleted",
+    depositor: Address,
+  ): Promise<ChainLog[]>;
+  row(plan: PocketPlan): Promise<GatewayFailureRow | undefined>;
   stop(): Promise<void>;
 }
 
-export type VaultEventName = "PullbackRequested" | "PullbackConfirmed" | "PocketClosed" | "Frozen";
+export type VaultEventName =
+  | "PullbackRequested"
+  | "PullbackConfirmed"
+  | "PocketClosed"
+  | "ManualReturnRecorded"
+  | "Frozen";
 
 export async function startLocalPocketHarness(input: {
   readonly pool: Pool;
@@ -191,7 +252,7 @@ export async function startLocalPocketHarness(input: {
       factory: chain.factory,
       standin,
       mine: () => chain.mine(1),
-      nowMs: () => clock.now().getTime(),
+      nowMs: () => clock.signerNowMs(),
     });
     return composeHarness({ pool: input.pool, config, chain, clock, signer, standin, guardian });
   } catch (error) {
@@ -209,13 +270,26 @@ function unusedKey(): Address {
 /** Wall time plus an offset the tests advance; chain time is advanced by the same amount. */
 function createClock(chain: ArcChain): HarnessClock {
   let offsetMs = 0;
+  let signerLagMs = 0;
   return {
     now: () => new Date(Date.now() + offsetMs),
+    signerNowMs: () => Date.now() + offsetMs - signerLagMs,
     async advance(ms) {
       offsetMs += ms;
       await chain.increaseTime(Math.ceil(ms / MS_PER_SECOND));
     },
+    setSignerLag(ms) {
+      signerLagMs = ms;
+    },
   };
+}
+
+interface PayerParts extends HarnessParts {
+  readonly logger: Logger;
+  readonly errors: string[];
+  /** The real signer behind the `signCrash` switch. */
+  readonly payerSigner: Pick<Signer, "sign">;
+  readonly transfer: ReturnType<typeof standinTransferFetch>;
 }
 
 export interface HarnessParts {
@@ -228,6 +302,35 @@ export interface HarnessParts {
   readonly guardian: PrivateKeyAccount;
 }
 
+function createSignCrash(signer: Signer): { signer: Pick<Signer, "sign">; crash: SignCrash } {
+  let armed: { name: string; match: (request: SignRequest) => boolean } | null = null;
+  const fired: string[] = [];
+  const listeners: ((request: SignRequest) => Promise<void>)[] = [];
+  return {
+    signer: {
+      async sign(caller, request) {
+        for (const listener of listeners) await listener(request);
+        if (armed?.match(request)) {
+          const name = armed.name;
+          armed = null;
+          fired.push(name);
+          throw new InjectedCrash(name);
+        }
+        return signer.sign(caller, request);
+      },
+    },
+    crash: {
+      fired,
+      arm(point) {
+        armed = point;
+      },
+      observe(listener) {
+        listeners.push(listener);
+      },
+    },
+  };
+}
+
 function composeHarness(parts: HarnessParts): LocalPocketHarness {
   const errors: string[] = [];
   const logger = createLogger({ service: "server", component: "CZ-15", sink: () => undefined });
@@ -236,12 +339,35 @@ function composeHarness(parts: HarnessParts): LocalPocketHarness {
     BigInt(Number(parts.config.get("routing.gatewayFeeAtomic"))),
   );
   const fixtures = createFixtures(parts);
+  const signCrash = createSignCrash(parts.signer.signer);
+  const payer: PayerParts = { ...parts, logger, errors, payerSigner: signCrash.signer, transfer };
+  const reader = createIndexerPocketReader(
+    parts.standin.url,
+    Number(parts.config.get("fetch.timeoutMs")),
+  );
   return {
     ...parts,
     logger,
     errors,
     transferCrash: transfer.crash,
+    signCrash: signCrash.crash,
     ...fixtures,
+    runFallbacks: () =>
+      runPendingPullbackFallbacks({
+        pool: parts.pool,
+        config: parts.config,
+        signer: payer.payerSigner,
+        cancelPendingPullback: (cancel) => cancelFallbackPullback(payer, cancel),
+        chain: createPullbackChainAdapter(
+          parts.chain.payerClient,
+          parts.chain.payerWallet,
+          GATEWAY_WALLET,
+          { config: parts.config, logger },
+        ),
+        readGatewayBalance: (pocket) => reader.pocketBalance(pocket),
+        now: parts.clock.now,
+      }),
+    runManualReturnRecovery: () => manualReturnRecovery(payer, reader),
     preparePocket: (plan) =>
       executePocketPreparation(
         {
@@ -269,7 +395,7 @@ function composeHarness(parts: HarnessParts): LocalPocketHarness {
         pool: parts.pool,
         config: parts.config,
         logger,
-        signer: parts.signer.signer,
+        signer: payer.payerSigner,
         publicClient: parts.chain.payerClient,
         walletClient: parts.chain.payerWallet,
         safeFetch: transfer.safeFetch,
@@ -387,6 +513,29 @@ function createFixtures(parts: HarnessParts) {
           fromBlock: 0n,
         }),
       ),
+    usdcTransfers: async (from: Address, to: Address) =>
+      toChainLogs(
+        await parts.chain.reader.getContractEvents({
+          address: ARC_USDC,
+          abi: usdcAbi,
+          eventName: "Transfer",
+          args: { from, to },
+          fromBlock: 0n,
+        }),
+      ),
+    gatewayEvents: async (
+      eventName: "WithdrawalInitiated" | "WithdrawalCompleted",
+      depositor: Address,
+    ) =>
+      toChainLogs(
+        await parts.chain.reader.getContractEvents({
+          address: GATEWAY_WALLET,
+          abi: gatewayWalletAbi,
+          eventName,
+          args: { depositor },
+          fromBlock: 0n,
+        }),
+      ),
     attestations: async (recipient: Address) =>
       toChainLogs(
         await parts.chain.reader.getContractEvents({
@@ -397,6 +546,16 @@ function createFixtures(parts: HarnessParts) {
           fromBlock: 0n,
         }),
       ),
+    async row(plan: PocketPlan) {
+      const result = await parts.pool.query<GatewayFailureRow>(
+        `SELECT state,closed_pocket,initiate_tx,withdraw_tx,return_tx,return_block::text AS return_block,
+                return_log_index,returned_amount::text AS returned_amount,
+                recorded_credit::text AS recorded_credit,recorded_tx,manual_return_required_at
+         FROM payer_pullback_gateway_failures WHERE plan_id=$1 AND step_index=$2`,
+        [plan.planId, plan.stepIndex],
+      );
+      return result.rows[0];
+    },
   };
 }
 
@@ -647,4 +806,158 @@ export async function seedPlanRows(
     [planId, JSON.stringify(input.plan.steps[0])],
   );
   return planId;
+}
+
+// ICzarVault.PocketState: None, Registered, Funded, Draining, Closed.
+const POCKET_STATE_CLOSED = 4;
+
+/** Mirrors the `runManualReturnRecovery` composition in `startProductionPayerRuntime` (`main.ts`). */
+function manualReturnRecovery(
+  parts: PayerParts,
+  reader: ReturnType<typeof createIndexerPocketReader>,
+): Promise<number> {
+  return runManualReturnRecovery({
+    pool: parts.pool,
+    config: parts.config,
+    manualReturnsForVault: (vault) => reader.manualReturnsForVault(vault),
+    manualReturnsAfterClosure: (vault, pocket, fromBlock) =>
+      manualReturnsAfterClosure(parts, vault, pocket, fromBlock),
+    recoverReturnPosition: (row) => recoverManualReturnPosition(parts, row),
+    isPocketClosed: async (vault, pocket) => {
+      const record = await parts.chain.reader.readContract({
+        address: vault,
+        abi: czarVaultAbi,
+        functionName: "getPocket",
+        args: [pocket],
+      });
+      return Number(record.state) === POCKET_STATE_CLOSED;
+    },
+    onRowError: () => parts.errors.push("manual-return-reconciliation"),
+    onWriteOffError: () => parts.errors.push("manual-return-writeoff"),
+    now: parts.clock.now,
+    writeOffManualReturn: (row) => writeOffManualReturn(parts, row),
+  });
+}
+
+/** Mirrors `cancelFallbackPullback` in `apps/server/src/main.ts`. */
+async function cancelFallbackPullback(parts: PayerParts, input: CancelPullbackInput) {
+  const chain = createPullbackExecutionChain({
+    client: parts.chain.payerClient,
+    pool: parts.pool,
+    vault: input.vault,
+    gatewayMinter: input.gatewayMinter,
+  });
+  const record = await chain.readPullback(input.pullbackId);
+  if (!record || record.state === "Confirmed")
+    throw new Error("Gateway pullback is not cancellable before slow withdrawal.");
+  if (record.state === "Cancelled") return;
+  return cancelExpiredPullback(input, {
+    pool: parts.pool,
+    config: parts.config,
+    signer: parts.payerSigner,
+    chain,
+    safeFetch: parts.transfer.safeFetch,
+    gatewayTransferUrl: STANDIN_TRANSFER_URL,
+    now: parts.clock.now,
+  });
+}
+
+/** Mirrors `writeOffManualReturn` in `apps/server/src/main.ts`. */
+function writeOffManualReturn(parts: PayerParts, row: ManualReturnWriteOffCandidate) {
+  if (!row.vault_address) throw new Error("Manual-return write-off row has no vault address.");
+  return writeOffOverdueManualReturn(
+    {
+      planId: row.plan_id,
+      stepIndex: row.step_index,
+      attempt: row.attempt ?? 0,
+      envelopeRef: row.envelope_ref,
+      vault: row.vault_address,
+      pocket: row.pocket,
+    },
+    {
+      pool: parts.pool,
+      config: parts.config,
+      signer: parts.payerSigner,
+      chain: createPullbackExecutionChain({
+        client: parts.chain.payerClient,
+        pool: parts.pool,
+        vault: row.vault_address,
+        gatewayMinter: row.gateway_minter ?? GATEWAY_MINTER,
+      }),
+      now: parts.clock.now,
+    },
+  );
+}
+
+/** Mirrors the `manualReturnsAfterClosure` closure in `apps/server/src/main.ts`. */
+async function manualReturnsAfterClosure(
+  parts: HarnessParts,
+  vault: Address,
+  pocket: Address,
+  fromBlock: bigint,
+) {
+  const events = await parts.chain.payerClient.getContractEvents({
+    address: vault,
+    abi: czarVaultAbi,
+    eventName: "ManualReturnRecorded",
+    args: { pocket },
+    fromBlock,
+  });
+  return events.flatMap((event) => {
+    if (
+      event.args.amount === undefined ||
+      event.blockNumber === null ||
+      event.logIndex === null ||
+      event.transactionHash === null
+    )
+      return [];
+    return [
+      {
+        pocket,
+        credit: event.args.amount.toString(),
+        block: event.blockNumber.toString(),
+        logIndex: event.logIndex,
+        txHash: event.transactionHash,
+      },
+    ];
+  });
+}
+
+/** Mirrors `recoverManualReturnPosition` in `apps/server/src/main.ts` for rows whose `return_tx` is set. */
+async function recoverManualReturnPosition(
+  parts: HarnessParts,
+  row: ManualReturnRow,
+): Promise<ManualReturnReceiptPosition | null> {
+  const vault = row.vault_address;
+  if (vault === null || !row.return_tx || !/^0x[\da-fA-F]{64}$/.test(row.return_tx)) return null;
+  const receipt = await parts.chain.payerClient.getTransactionReceipt({
+    hash: row.return_tx as Hex,
+  });
+  if (receipt.status !== "success") return null;
+  const matching = receipt.logs.flatMap((log) => {
+    if (log.address.toLowerCase() !== ARC_USDC.toLowerCase()) return [];
+    try {
+      const decoded = decodeEventLog({
+        abi: usdcAbi,
+        eventName: "Transfer",
+        data: log.data,
+        topics: log.topics,
+      });
+      return decoded.args.from.toLowerCase() === row.pocket.toLowerCase() &&
+        decoded.args.to.toLowerCase() === vault.toLowerCase() &&
+        decoded.args.value > 0n
+        ? [{ amount: decoded.args.value, logIndex: log.logIndex }]
+        : [];
+    } catch {
+      return [];
+    }
+  });
+  const transfer = matching.length === 1 ? matching[0] : undefined;
+  if (!transfer) return null;
+  return {
+    txHash: receipt.transactionHash,
+    amount: transfer.amount.toString(),
+    block: receipt.blockNumber.toString(),
+    logIndex: transfer.logIndex,
+  };
 }

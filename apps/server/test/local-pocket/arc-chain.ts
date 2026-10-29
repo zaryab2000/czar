@@ -64,13 +64,23 @@ export class InjectedCrash extends Error {
   }
 }
 
-/** One armed crash point; it fires once, for the first matching transaction. */
-export interface CrashPoint {
-  readonly name: string;
-  /** `before-send`: the payer dies before the transaction reaches the node. `after-mined`: right after. */
-  readonly when: "before-send" | "after-mined";
-  readonly match: (transaction: OutgoingTransaction) => boolean;
-}
+/**
+ * One armed point; it fires once, for the first matching transaction. `before-send`: the payer dies before the
+ * transaction reaches the node. `after-mined`: right after it is mined. `around-send`: the test sends the
+ * transaction itself through `forward`, so it can order other transactions into the same block.
+ */
+export type CrashPoint =
+  | {
+      readonly name: string;
+      readonly when: "before-send" | "after-mined";
+      readonly match: (transaction: OutgoingTransaction) => boolean;
+    }
+  | {
+      readonly name: string;
+      readonly when: "around-send";
+      readonly match: (transaction: OutgoingTransaction) => boolean;
+      around(forward: () => Promise<Hex>): Promise<Hex>;
+    };
 
 export interface CrashSwitch {
   arm(point: CrashPoint): void;
@@ -237,6 +247,9 @@ function crashTransport(
       const outgoing = await decodeOutgoing(raw);
       const before = crash.take(outgoing, "before-send");
       if (before) throw new InjectedCrash(before.name);
+      const around = crash.take(outgoing, "around-send");
+      if (around?.when === "around-send")
+        return around.around(async () => (await rpc(method, list)) as Hex);
       const hash = (await rpc(method, list)) as Hex;
       const after = crash.take(outgoing, "after-mined");
       if (after) {

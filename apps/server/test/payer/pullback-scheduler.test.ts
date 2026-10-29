@@ -82,7 +82,7 @@ describe("slow pullback scheduler", () => {
         getBlockNumber: async () => 1n,
         withdrawalBlock: async () => 0n,
         withdrawingBalance: async () => 0n,
-        pocketUsdcBalance: async () => 0n,
+        pocketReturnable: async () => 0n,
         transactionReceipt: async () => null,
         sendPocketTransaction: async (transaction: `0x${string}`, step: string) => {
           phases.push(step);
@@ -126,7 +126,7 @@ describe("slow pullback scheduler", () => {
           getBlockNumber: async () => 1n,
           withdrawalBlock: async () => 0n,
           withdrawingBalance: async () => 0n,
-          pocketUsdcBalance: async () => 0n,
+          pocketReturnable: async () => 0n,
           transactionReceipt: async () => null,
           sendPocketTransaction: async () => "tx",
         },
@@ -161,7 +161,7 @@ describe("slow pullback scheduler", () => {
           getBlockNumber: async () => 1n,
           withdrawalBlock: async () => 0n,
           withdrawingBalance: async () => 0n,
-          pocketUsdcBalance: async () => 0n,
+          pocketReturnable: async () => 0n,
           transactionReceipt: async () => null,
           sendPocketTransaction: async () => "tx",
         },
@@ -188,7 +188,7 @@ describe("slow pullback scheduler", () => {
     const signer = vi.fn(async () => ({ signedTransaction: "0x1234" as const }));
     const cancelPendingPullback = vi.fn();
     const sends: string[] = [];
-    let pocketUsdcBalance = 12_000n;
+    let pocketReturnable = 12_000n;
     let withdrawingBalance = 10_000n;
     const dependencies = {
       pool: getPool(),
@@ -205,7 +205,7 @@ describe("slow pullback scheduler", () => {
         getBlockNumber: async () => 100n,
         withdrawalBlock: async () => 100n,
         withdrawingBalance: async () => withdrawingBalance,
-        pocketUsdcBalance: async () => pocketUsdcBalance,
+        pocketReturnable: async () => pocketReturnable,
         transactionReceipt: async () => ({
           status: "success" as const,
           blockNumber: 400n,
@@ -221,9 +221,9 @@ describe("slow pullback scheduler", () => {
         }),
         sendPocketTransaction: async (transaction: `0x${string}`, kind: string) => {
           sends.push(kind);
-          if (kind === "pullback.slow.withdraw") pocketUsdcBalance = 12_000n;
+          if (kind === "pullback.slow.withdraw") pocketReturnable = 12_000n;
           if (kind === "pullback.slow.withdraw") withdrawingBalance = 0n;
-          if (kind === "pocket-return:usdc") pocketUsdcBalance = 0n;
+          if (kind === "pocket-return:usdc") pocketReturnable = 0n;
           return keccak256(transaction);
         },
       },
@@ -249,7 +249,8 @@ describe("slow pullback scheduler", () => {
   it("recovers a mined withdrawal after restart and records the verified vault return", async () => {
     await getPool().query(
       `UPDATE payer_pullback_gateway_failures
-       SET closed_pocket=true,unavailable_since=$2 WHERE plan_id=$1`,
+       SET closed_pocket=true,unavailable_since=$2,initiate_tx='initiate-tx',
+           withdraw_tx='withdraw-tx' WHERE plan_id=$1`,
       [PLAN_ID, NOW],
     );
     for (const phase of [
@@ -266,9 +267,9 @@ describe("slow pullback scheduler", () => {
         payload: { transaction: "0x1234", txHash: `${phase}-hash` },
       });
 
-    let pocketUsdcBalance = 12_000n;
+    let pocketReturnable = 12_000n;
     const send = vi.fn(async (transaction: `0x${string}`) => {
-      pocketUsdcBalance = 0n;
+      pocketReturnable = 0n;
       return keccak256(transaction);
     });
     const dependencies = {
@@ -283,7 +284,7 @@ describe("slow pullback scheduler", () => {
         getBlockNumber: async () => 400n,
         withdrawalBlock: async () => 0n,
         withdrawingBalance: async () => 0n,
-        pocketUsdcBalance: async () => pocketUsdcBalance,
+        pocketReturnable: async () => pocketReturnable,
         transactionReceipt: async () => ({
           status: "success" as const,
           blockNumber: 400n,
@@ -322,7 +323,8 @@ describe("slow pullback scheduler", () => {
   it("recognizes a mined pocket return after restart without sending it twice", async () => {
     await getPool().query(
       `UPDATE payer_pullback_gateway_failures
-       SET closed_pocket=true,unavailable_since=$2,return_tx='return-tx'
+       SET closed_pocket=true,unavailable_since=$2,initiate_tx='initiate-tx',
+           withdraw_tx='withdraw-tx',return_tx='return-tx'
        WHERE plan_id=$1`,
       [PLAN_ID, NOW],
     );
@@ -341,7 +343,7 @@ describe("slow pullback scheduler", () => {
         getBlockNumber: async () => 500n,
         withdrawalBlock: async () => 0n,
         withdrawingBalance: async () => 0n,
-        pocketUsdcBalance: async () => 0n,
+        pocketReturnable: async () => 0n,
         transactionReceipt: async () => ({
           status: "success" as const,
           blockNumber: 400n,
@@ -403,7 +405,7 @@ describe("slow pullback scheduler", () => {
           getBlockNumber: async () => 1n,
           withdrawalBlock: async () => 0n,
           withdrawingBalance: async () => 0n,
-          pocketUsdcBalance: async () => 0n,
+          pocketReturnable: async () => 0n,
           transactionReceipt: async () => null,
           sendPocketTransaction: send,
         },
@@ -456,7 +458,7 @@ describe("slow pullback scheduler", () => {
         getBlockNumber: async () => head,
         withdrawalBlock: async () => withdrawalBlock,
         withdrawingBalance: async () => withdrawingBalance,
-        pocketUsdcBalance: async () => pocketBalance,
+        pocketReturnable: async () => pocketBalance,
         transactionReceipt: async () => ({
           status: "success" as const,
           blockNumber: 200n,

@@ -1,4 +1,11 @@
 // Seed data shared by the run 6 fixture and spec (SCR-150 §5). Amounts are Amount6 strings.
+// Vault addresses are not seed data: they are the deployed CzarVaultFactory's `predictVault`
+// for each owner, read from the run 6 arc-anvil (see `deployedVaults`).
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { createPublicClient, defineChain, http, type Address, type Hex } from "viem";
+import { czarVaultFactoryAbi } from "@czar/vault-client";
+
 const ID_BODY = "01JRV6000000000000000000";
 
 function id(prefix: string, suffix: string): string {
@@ -23,25 +30,20 @@ const ownerA = {
   objectiveId: id("obj", "0A"),
   planId: id("pln", "0A"),
   msca: address("a1"),
-  vault: address("a2"),
-  predictedVault: address("a2"),
   manualReturns: [
     {
-      envelopeRef: envelopeRef(address("a2"), 1),
       pocket: address("a3"),
       returnedAmount: "1500000",
       returnTx: hash("a4"),
       state: "manual-return-required",
     },
     {
-      envelopeRef: envelopeRef(address("a2"), 1),
       pocket: address("a5"),
       returnedAmount: "2500000",
       returnTx: hash("a6"),
       state: "manual-return-required",
     },
     {
-      envelopeRef: envelopeRef(address("a2"), 1),
       pocket: address("a7"),
       returnedAmount: "700000",
       returnTx: hash("a8"),
@@ -58,18 +60,14 @@ const ownerB = {
   objectiveId: id("obj", "0B"),
   planId: id("pln", "0B"),
   msca: address("b1"),
-  vault: address("b2"),
-  envelopeRef: envelopeRef(address("b2"), 1),
   manualReturns: [
     {
-      envelopeRef: envelopeRef(address("b2"), 1),
       pocket: address("b3"),
       returnedAmount: "1234000",
       returnTx: hash("b4"),
       state: "manual-return-required",
     },
     {
-      envelopeRef: envelopeRef(address("b2"), 1),
       pocket: address("b5"),
       returnedAmount: "2000000",
       returnTx: hash("b6"),
@@ -78,7 +76,6 @@ const ownerB = {
       recordedTx: hash("b7"),
     },
     {
-      envelopeRef: envelopeRef(address("b2"), 1),
       pocket: address("b8"),
       returnedAmount: "500000",
       returnTx: hash("b9"),
@@ -94,17 +91,15 @@ const otherUser = {
   objectiveId: id("obj", "0C"),
   planId: id("pln", "0C"),
   msca: address("c1"),
-  vault: address("c2"),
   manualReturns: [
     {
-      envelopeRef: envelopeRef(address("b2"), 1),
+      envelopeOwner: ownerB.msca,
       pocket: address("c3"),
       returnedAmount: "9876000",
       returnTx: hash("c4"),
       state: "manual-return-required",
     },
     {
-      envelopeRef: envelopeRef(address("c2"), 1),
       pocket: address("c5"),
       returnedAmount: "3300000",
       returnTx: hash("c6"),
@@ -113,26 +108,59 @@ const otherUser = {
   ],
 };
 
-export const RUN6 = {
-  network: "eip155:5042002",
-  rpcUrl: "http://127.0.0.1:18549",
-  anvilPort: 18549,
-  serverPort: 4320,
-  indexerPort: 42080,
-  webPort: 3200,
-  webOrigin: "http://localhost:3200",
-  factoryAddress: "0xA624047E961D13bF49711e1383e7A3EBD3E25ef4",
-  sessionMinutes: 60,
-  zero: "0x0000000000000000000000000000000000000000",
-  hash,
-  ownerA,
-  ownerB,
-  otherUser,
-  envelopeDetailB: {
+const CHAIN_ID = 5_042_002;
+const RPC_URL = "http://127.0.0.1:18549";
+const DEPLOYMENT_PATH = fileURLToPath(
+  new URL("../../../deployments/.run6-deployment.json", import.meta.url),
+);
+
+export interface Run6Deployment {
+  readonly factory: Address;
+  readonly factoryRuntimeHash: Hex;
+}
+
+/** Reads the deploy.sh output the fixture wrote for this run's arc-anvil. */
+function readDeployment(): Run6Deployment {
+  const output = JSON.parse(readFileSync(DEPLOYMENT_PATH, "utf8")) as Record<string, unknown>;
+  const factory = output["CzarVaultFactory"];
+  const factoryRuntimeHash = output["factoryRuntimeHash"];
+  if (typeof factory !== "string" || typeof factoryRuntimeHash !== "string") {
+    throw new Error("Run 6 deployment output has no CzarVaultFactory or factoryRuntimeHash.");
+  }
+  return { factory: factory as Address, factoryRuntimeHash: factoryRuntimeHash as Hex };
+}
+
+const chainClient = createPublicClient({
+  chain: defineChain({
+    id: CHAIN_ID,
+    name: "arc-anvil (run 6)",
+    nativeCurrency: { name: "USDC", symbol: "USDC", decimals: 18 },
+    rpcUrls: { default: { http: [RPC_URL] } },
+  }),
+  transport: http(RPC_URL),
+});
+
+/** Each seeded owner's vault: the deployed factory's `predictVault(msca)`, lower-cased. */
+async function deployedVaults(factory: Address): Promise<Record<string, string>> {
+  const vaults: Record<string, string> = {};
+  for (const user of [ownerA, ownerB, otherUser]) {
+    const predicted = await chainClient.readContract({
+      address: factory,
+      abi: czarVaultFactoryAbi,
+      functionName: "predictVault",
+      args: [user.msca as Address],
+    });
+    vaults[user.msca] = predicted.toLowerCase();
+  }
+  return vaults;
+}
+
+function envelopeDetail(vault: string) {
+  return {
     envelope: {
       schemaVersion: "1.1",
-      envelopeRef: ownerB.envelopeRef,
-      vault: ownerB.vault,
+      envelopeRef: envelopeRef(vault, 1),
+      vault,
       envelopeId: 1,
       objectiveHash: hash("55"),
       planHash: hash("66"),
@@ -154,5 +182,28 @@ export const RUN6 = {
     reservations: [],
     pockets: [],
     jobs: [],
-  },
+  };
+}
+
+export const RUN6 = {
+  network: "eip155:5042002",
+  chainId: CHAIN_ID,
+  rpcUrl: RPC_URL,
+  anvilPort: 18549,
+  serverPort: 4320,
+  indexerPort: 42080,
+  webPort: 3200,
+  webOrigin: "http://localhost:3200",
+  deploymentPath: DEPLOYMENT_PATH,
+  sessionMinutes: 60,
+  zero: "0x0000000000000000000000000000000000000000",
+  hash,
+  envelopeRef,
+  envelopeDetail,
+  readDeployment,
+  deployedVaults,
+  chainClient,
+  ownerA,
+  ownerB,
+  otherUser,
 };

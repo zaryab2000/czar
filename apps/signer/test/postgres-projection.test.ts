@@ -387,7 +387,6 @@ describe("Postgres signer projection", () => {
       envelopeOpen: true,
       pendingPullbackZero: true,
       gatewayWithdrawingZero: true,
-      pocketUsdcZero: true,
       slowWithdrawAudited: true,
       pocketReturnAudited: true,
       manualReturnRowValid: true,

@@ -31,19 +31,28 @@ export function createLocalSignerPolicy(): Pick<
 /** Create the RPC-backed EIP-1559 transaction filler used by the signer process. */
 export function createRpcTransactionPreparer(input: {
   readonly chainId: number;
-  readonly rpcUrl: string;
-  readonly client: Pick<PublicClient, "getChainId" | "prepareTransactionRequest">;
+  /** Labels the chain only; requests go through `client`. */
+  readonly rpcUrl?: string;
+  readonly client: Pick<PublicClient, "estimateGas" | "getChainId" | "prepareTransactionRequest">;
 }): TransactionPreparer {
   const chain = defineChain({
     id: input.chainId,
     name: "Arc local",
     nativeCurrency: { name: "USDC", symbol: "USDC", decimals: 18 },
-    rpcUrls: { default: { http: [input.rpcUrl] } },
+    rpcUrls: { default: { http: input.rpcUrl === undefined ? [] : [input.rpcUrl] } },
   });
   return async (from, call) => {
     const connectedChainId = await input.client.getChainId();
     if (connectedChainId !== input.chainId)
       throw new Error(`RPC chain ${connectedChainId}; expected ${input.chainId}`);
+    // Estimate without a fee cap: on Arc a fee-capped estimate pre-charges gas × fee from the USDC the call
+    // moves, so a pocket-return of balance − gasReserve (SCR-152) would revert in estimation.
+    const gas = await input.client.estimateGas({
+      account: from as Address,
+      to: call.to,
+      data: call.data,
+      value: call.value,
+    });
     const prepared = await input.client.prepareTransactionRequest({
       account: from as Address,
       chain,
@@ -51,6 +60,7 @@ export function createRpcTransactionPreparer(input: {
       to: call.to,
       data: call.data,
       value: call.value,
+      gas,
     });
     return { ...prepared, chainId: input.chainId };
   };
@@ -79,6 +89,7 @@ export function createLocalSignerAdapters(input: {
   readonly postgres: AuditQueryExecutor;
   readonly client: Pick<
     PublicClient,
+    | "estimateGas"
     | "getChainId"
     | "prepareTransactionRequest"
     | "getBalance"
