@@ -12,7 +12,7 @@ import {
 const RPC_URL = "http://127.0.0.1:8545";
 const CONTROLLER = "0x00000000000000000000000000000000000000a1";
 const USDC = "0x3600000000000000000000000000000000000000";
-const INIT_SELECTOR = "19574439";
+const INIT_SELECTOR = "5858cf0d";
 
 function artifacts(): string {
   const dir = mkdtempSync(join(tmpdir(), "gateway-doubles-"));
@@ -22,7 +22,7 @@ function artifacts(): string {
       join(dir, `${name}.sol`, `${name}.json`),
       JSON.stringify({
         bytecode: { object: name === "MockGatewayWallet" ? "0x6001" : "0x6002" },
-        methodIdentifiers: { "testInitialize(address)": INIT_SELECTOR },
+        methodIdentifiers: { "initializeDouble(address)": INIT_SELECTOR },
       }),
     );
   }

@@ -1,9 +1,17 @@
-import { createServer } from "node:http";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { once } from "node:events";
 import { createHash } from "node:crypto";
-import type { Address } from "viem";
+import {
+  decodeFunctionData,
+  encodeFunctionResult,
+  parseAbi,
+  toHex,
+  type Address,
+  type Hex,
+} from "viem";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { validateRecordedExchange } from "@czar/api-contract";
+import { czarVaultFactoryAbi } from "@czar/vault-client";
 import type { AppPage, Envelope, EnvelopeDetail } from "@czar/schemas";
 import { setupDatabase } from "#test/db";
 import { createTestContext, seedDevice, TEST_USER_ID } from "#test/fixtures";
@@ -14,6 +22,12 @@ const APP_TOKEN = Buffer.alloc(32, 54).toString("base64url");
 const FACTORY = "0xA624047E961D13bF49711e1383e7A3EBD3E25ef4" as Address;
 const VAULT = "0x0000000000000000000000000000000000000011" as Address;
 const MSCA = "0x0000000000000000000000000000000000000022" as Address;
+const PREDICTED_VAULT = "0x0000000000000000000000000000000000000033" as Address;
+const ARC_CHAIN_ID = 5_042_002;
+const RPC_UNUSED_URL = "http://127.0.0.1:8549";
+const BLOCK_NUMBER = 7;
+const BLOCK_TIMESTAMP = 1_800_000_000;
+const usdcAbi = parseAbi(["function balanceOf(address account) view returns (uint256)"]);
 const HASH = `0x${"1".repeat(64)}` as `0x${string}`;
 const ENVELOPE_REF = `eip155:5042002:${VAULT.toLowerCase()}:1`;
 const envelope: Envelope = {
@@ -52,22 +66,33 @@ describe("app read routes", () => {
       if (url.pathname === "/vaults") return { status: 404, body: {} };
       return { status: 404, body: {} };
     });
+    const rpc = await startArcRpc();
     try {
       const pool = getPool();
       await seedAppSession(pool);
       await pool.query("UPDATE users SET msca=$2 WHERE user_id=$1", [TEST_USER_ID, MSCA]);
-      const { app } = createTestContext(pool, { appReadOptions: readOptions(indexer.url) });
+      const { app } = createTestContext(pool, {
+        appReadOptions: readOptions(indexer.url, rpc.url),
+      });
       const response = await app.request("/v1/me", { headers: appHeaders() });
       const body = await response.json();
       expect(response.status, JSON.stringify(body)).toBe(200);
       expect(response.headers.get("X-Czar-Bundler-Order")).toBeNull();
       expect(response.headers.get("X-Czar-Bundler-Endpoints")).toBeNull();
-      expect(body).toMatchObject({ vaultCreated: false, msca: MSCA, frozen: false, paused: false });
+      expect(body).toMatchObject({
+        vault: PREDICTED_VAULT,
+        vaultCreated: false,
+        msca: MSCA,
+        frozen: false,
+        paused: false,
+        balances: { mscaBalance: "0", vaultBalance: "0", asOfBlock: BLOCK_NUMBER },
+      });
       expect(
         validateRecordedExchange("getMe", { responseStatus: response.status, responseBody: body })
           .valid,
       ).toBe(true);
     } finally {
+      await rpc.close();
       await indexer.close();
     }
   });
@@ -90,7 +115,9 @@ describe("app read routes", () => {
       const pool = getPool();
       await seedAppSession(pool);
       await pool.query("UPDATE users SET msca=$2 WHERE user_id=$1", [TEST_USER_ID, MSCA]);
-      const { app } = createTestContext(pool, { appReadOptions: readOptions(indexer.url) });
+      const { app } = createTestContext(pool, {
+        appReadOptions: readOptions(indexer.url, RPC_UNUSED_URL),
+      });
       const headers = appHeaders();
       const list = await app.request("/v1/envelopes?limit=20", { headers });
       const listBody = (await list.json()) as AppPage<Envelope>;
@@ -169,23 +196,79 @@ function appHeaders(): Record<string, string> {
   return { Authorization: `Bearer ${APP_TOKEN}` };
 }
 
-function readOptions(indexerUrl: string) {
-  return { rpcUrl: "http://127.0.0.1:8549", factoryAddress: FACTORY, indexerUrl };
+function readOptions(indexerUrl: string, rpcUrl: string) {
+  return { rpcUrl, factoryAddress: FACTORY, indexerUrl };
+}
+
+async function startArcRpc(): Promise<{
+  readonly url: string;
+  readonly close: () => Promise<void>;
+}> {
+  return startHttpServer((request, response) => {
+    let payload = "";
+    request.on("data", (chunk: Buffer) => (payload += chunk.toString()));
+    request.on("end", () => {
+      const call = JSON.parse(payload) as { id: number; method: string; params: unknown[] };
+      const body = { jsonrpc: "2.0", id: call.id, result: arcRpcResult(call.method, call.params) };
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify(body));
+    });
+  });
+}
+
+function arcRpcResult(method: string, params: unknown[]): unknown {
+  if (method === "eth_chainId") return toHex(ARC_CHAIN_ID);
+  if (method === "eth_blockNumber") return toHex(BLOCK_NUMBER);
+  if (method === "eth_getBlockByNumber") {
+    return { number: toHex(BLOCK_NUMBER), hash: HASH, timestamp: toHex(BLOCK_TIMESTAMP) };
+  }
+  if (method === "eth_call") return ethCallResult((params[0] as { data: Hex }).data);
+  throw new Error(`Unexpected Arc RPC method ${method}.`);
+}
+
+function ethCallResult(data: Hex): Hex {
+  const factoryCall = tryDecode(czarVaultFactoryAbi, data);
+  if (factoryCall?.functionName === "predictVault") {
+    return encodeFunctionResult({
+      abi: czarVaultFactoryAbi,
+      functionName: "predictVault",
+      result: PREDICTED_VAULT,
+    });
+  }
+  const usdcCall = tryDecode(usdcAbi, data);
+  if (usdcCall?.functionName === "balanceOf") {
+    return encodeFunctionResult({ abi: usdcAbi, functionName: "balanceOf", result: 0n });
+  }
+  throw new Error("Unexpected Arc RPC eth_call.");
+}
+
+function tryDecode(abi: typeof czarVaultFactoryAbi | typeof usdcAbi, data: Hex) {
+  try {
+    return decodeFunctionData({ abi, data });
+  } catch {
+    return undefined;
+  }
 }
 
 async function startIndexer(
   respond: (url: URL) => { status: number; body: unknown },
 ): Promise<{ readonly url: string; readonly close: () => Promise<void> }> {
-  const server = createServer((request, response) => {
+  return startHttpServer((request, response) => {
     const result = respond(new URL(request.url ?? "/", "http://127.0.0.1"));
     response.writeHead(result.status, { "Content-Type": "application/json" });
     response.end(JSON.stringify(result.body));
   });
+}
+
+async function startHttpServer(
+  handler: (request: IncomingMessage, response: ServerResponse) => void,
+): Promise<{ readonly url: string; readonly close: () => Promise<void> }> {
+  const server = createServer(handler);
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   const address = server.address();
   if (address === null || typeof address === "string")
-    throw new Error("Indexer test server failed to bind.");
+    throw new Error("Test server failed to bind.");
   const url = `http://127.0.0.1:${address.port}`;
   return {
     url,
