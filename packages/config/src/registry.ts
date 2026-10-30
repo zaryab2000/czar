@@ -3473,7 +3473,8 @@ export const PARAMETERS = [
     type: "integer",
     default: 14,
     unit: "days",
-    reason: "F4-07; Airbnb's 14-day transaction-bound review window",
+    reason:
+      "F4-07; Airbnb's 14-day transaction-bound review window (x402 Market Unfairness Report §5.2.2)",
     source:
       "docs/specs/06-review/change-requests/SCR-160-flow-4a-ratings-health-facts-and-ranking.md:383",
   },
@@ -3482,7 +3483,8 @@ export const PARAMETERS = [
     type: "integer",
     default: 3,
     unit: "count",
-    reason: "F4-05; three unsettled failures in a row put a supplier behind approval",
+    reason:
+      "F4-05; three unsettled failures in a row put a supplier behind approval (each costs gas on Arc)",
     source:
       "docs/specs/06-review/change-requests/SCR-160-flow-4a-ratings-health-facts-and-ranking.md:384",
   },
