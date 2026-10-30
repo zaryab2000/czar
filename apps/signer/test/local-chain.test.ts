@@ -3,7 +3,7 @@
 // test/local-chain.test.ts` is one repeatable command. Needs `arc-anvil`/`arc-forge` on PATH, the Foundry
 // artifacts (`cd contracts && FOUNDRY_PROFILE=arc arc-forge build`) and Postgres on 127.0.0.1:15432.
 import { readFile } from "node:fs/promises";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   createWalletClient,
   encodeFunctionData,
@@ -26,9 +26,9 @@ import { derivedNonce, paymentRefHash, slReceiptDigest, type SlReceipt } from "@
 import type { PaymentRef } from "@czar/schemas";
 import { czarVaultAbi, withFeeFloor } from "@czar/vault-client";
 import { CANONICAL_GATEWAY_WALLET } from "../../../ops/local/gateway-doubles.ts";
-import { runGasRefill } from "#src/gas-refill";
+import { runGasRefill, startGasRefillJob } from "#src/gas-refill";
 import { returnableAtomic, type Denied } from "#src/policy";
-import { createRpcTransactionPreparer } from "#src/runtime-adapters";
+import { createRpcGasRefillAdapters, createRpcTransactionPreparer } from "#src/runtime-adapters";
 import { pocketReturnGasReserve } from "#src/service";
 import { harness, NETWORK } from "#test/helpers";
 import {
@@ -126,6 +126,7 @@ describe.skipIf(!enabled)("K8 local arc-anvil acceptance", () => {
       });
       await assertK8Commit(t, node, deployment.OpenEvidenceLog);
       await assertGasRefill(t, node);
+      await assertGasRefillAtStart(t, node);
     } finally {
       await deployment.remove();
     }
@@ -1080,6 +1081,39 @@ async function assertGasRefill(signer: K8Signer, node: ArcNode): Promise<void> {
   expect(failed[0]).toMatchObject({ key: "K3", status: "failed" });
   expect(alerts).toHaveLength(1);
   expect(alerts[0]).toContain("relayer");
+}
+
+/** Well under the five-minute refill interval: the first pass must not wait for it (SCR-155 §3). */
+const FIRST_PASS_WAIT_MS = 30_000;
+
+async function assertGasRefillAtStart(signer: K8Signer, node: ArcNode): Promise<void> {
+  const k3 = signer.address("K3");
+  const targetWei =
+    BigInt(config.get("signer.gas.K3.targetAtomic" as never) as number) * WEI_PER_ATOMIC;
+  await node.testClient.setBalance({ address: k3, value: 0n });
+  await node.testClient.setBalance({
+    address: signer.address("relayer"),
+    value: targetWei + RELAYER_GAS_HEADROOM_WEI,
+  });
+  const alerts: string[] = [];
+  const jobErrors: unknown[] = [];
+  const stop = startGasRefillJob(
+    {
+      ...localGasRefillOptions(signer, node, alerts),
+      ...createRpcGasRefillAdapters({ client: node.publicClient }),
+    },
+    (error) => jobErrors.push(error),
+  );
+  try {
+    await vi.waitFor(
+      async () => expect(await node.publicClient.getBalance({ address: k3 })).toBe(targetWei),
+      { timeout: FIRST_PASS_WAIT_MS, interval: 250 },
+    );
+  } finally {
+    stop();
+  }
+  expect(alerts).toEqual([]);
+  expect(jobErrors).toEqual([]);
 }
 
 function localGasRefillOptions(signer: K8Signer, node: ArcNode, alerts: string[]) {
