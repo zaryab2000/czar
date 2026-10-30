@@ -41,6 +41,7 @@ import {
   markStepHandedOff,
   releaseExecutorLease,
   startExecutorLeaseRenewal,
+  type CallError,
   type ExecutorLeaseGuard,
   type ExecutionPhaseRow,
 } from "#src/payer/executions";
@@ -60,6 +61,9 @@ const BAD_TTL = "BadTtl";
  */
 const NEW_ATTEMPTS_AFTER_BAD_TTL = 1;
 const RESERVE_FAILED = "reserve-failed";
+/** Cross-cutting §5.2 `StepError` codes for a call, or a step, without an accepted paid result (SCR-159 §3). */
+const UNPAID = "unpaid";
+const DELIVERY_FAILED = "delivery-failed";
 /** Marks an attempt whose saved reserve reverted `BadTtl()`: no reservation exists and its nonce is spent. */
 const STALE_RESERVE = Symbol("stale-reserve");
 
@@ -746,7 +750,6 @@ async function settleAndFinalize(
       });
     }
   }
-  const results: unknown[] = [];
   const completedResults: {
     index: number;
     subjectIndex?: number;
@@ -825,7 +828,6 @@ async function settleAndFinalize(
     if (!validateSchema("step-result", candidate))
       throw new TypeError("Boundary returned an invalid StepResult for the paid call.");
     const stepResult = candidate as StepResult;
-    results.push(stepResult);
     const call = input.step.callInputs?.find(
       (callCandidate) => callCandidate.callIndex === entry.index,
     );
@@ -890,24 +892,92 @@ async function settleAndFinalize(
     start += finalizeCount;
   }
   if (!final) throw new Error("Reservation is not final after finalizing every reserved index.");
-  if (authorized.length !== calls.length) {
-    await markStepFailed(dependencies.pool, {
+  return completeFinalizedStep(input, dependencies, {
+    calls,
+    reservationId,
+    attempt,
+    authorized,
+    completedResults,
+    receiptPending,
+    callsUsedBefore,
+  });
+}
+
+/**
+ * SCR-159 §3, after `finalize`: a call is paid when its index is settled on chain, and accepted when it is
+ * paid and its body passed the CZ-16 delivery check. The step ends `done` with the accepted calls' results;
+ * every other index is recorded per call as `delivery-failed` (paid) or `unpaid`. With no accepted call the
+ * step ends `failed`: `delivery-failed` when any call was paid, else `unpaid`.
+ */
+async function completeFinalizedStep(
+  input: VaultDirectInput,
+  dependencies: VaultDirectDependencies,
+  outcome: {
+    readonly calls: readonly PreparedCall[];
+    readonly reservationId: bigint;
+    readonly attempt: number;
+    readonly authorized: readonly number[];
+    readonly completedResults: readonly {
+      readonly index: number;
+      readonly subjectIndex?: number;
+      readonly stepResult: StepResult;
+    }[];
+    readonly receiptPending: boolean;
+    readonly callsUsedBefore: number;
+  },
+): Promise<VaultDirectResult> {
+  const { calls, reservationId, attempt, authorized } = outcome;
+  const accepted = outcome.completedResults.filter(({ stepResult }) => deliveredBody(stepResult));
+  const stepResults = accepted.map(({ stepResult }) => stepResult);
+  // A paid call's receipt is settlement evidence; the step stays open until every one is stored.
+  if (outcome.receiptPending) return { state: "pending", stepResults };
+  const callErrors: CallError[] = [];
+  let paid = 0;
+  for (const call of calls) {
+    const settled =
+      authorized.includes(call.index) ||
+      (await dependencies.chain.isSettled({ reservationId, index: call.index }));
+    if (settled) paid += 1;
+    if (accepted.some(({ index }) => index === call.index)) continue;
+    callErrors.push({ index: call.index, code: settled ? DELIVERY_FAILED : UNPAID });
+  }
+  const callsUsed = outcome.callsUsedBefore + paid;
+  if (accepted.length > 0) {
+    await markStepDoneWithResults(dependencies.pool, {
       planId: input.planId,
       stepIndex: input.step.stepIndex,
       attempt,
-      errorCode: "unpaid-index",
+      callsUsed,
+      results: accepted,
+      callErrors,
     });
-    return { state: "failed", errorCode: "unpaid-index" };
+    return { state: "done", stepResults };
   }
-  if (receiptPending) return { state: "pending", stepResults: results };
-  await markStepDoneWithResults(dependencies.pool, {
+  const errorCode = paid > 0 ? DELIVERY_FAILED : UNPAID;
+  await markStepFailed(dependencies.pool, {
     planId: input.planId,
     stepIndex: input.step.stepIndex,
     attempt,
-    callsUsed: callsUsedBefore + authorized.length,
-    results: completedResults,
+    errorCode,
+    stepError: {
+      schemaVersion: "1.0",
+      code: errorCode,
+      message: errorCode === UNPAID ? "No call was paid." : "Paid calls returned no usable body.",
+      retryable: false,
+    },
+    callsUsed,
+    callErrors,
   });
-  return { state: "done", stepResults: results };
+  return { state: "failed", errorCode };
+}
+
+/** False when the CZ-16 delivery check failed for a paid body (`http-error`, `timeout`, `no-response`). */
+function deliveredBody(stepResult: StepResult): boolean {
+  return (
+    stepResult.status !== "http-error" &&
+    stepResult.status !== "timeout" &&
+    stepResult.status !== "no-response"
+  );
 }
 
 /**
@@ -1021,14 +1091,16 @@ async function authorizeAndCall(
     phase: "call.sent",
     payload: { index: call.index, headerHash: keccak256(headers["payment-signature"] as Hex) },
   });
-  let response: SafeFetchResponse | undefined;
+  // SCR-159 §3: a merchant that settled and then answered without a 2xx body still took the payment. Its
+  // response is kept so the call reaches settle, the boundary (CZ-16 delivery fails) and the receipt.
+  let settledResponse: SafeFetchResponse | undefined;
   let errorCode = "unpaid";
   for (let retry = 0; retry < Number(dependencies.config.get("payer.callRetries")); retry += 1) {
     // 02 §7.5: retries only within validBefore, by chain time (SCR-157 §1); USDC refuses the authorization
     // once `block.timestamp ≥ validBefore`.
     if (retry > 0 && (await dependencies.chain.latestBlockTimestamp()) >= validBefore) break;
     dependencies.assertLeaseHeld?.();
-    response = await dependencies.safeFetch(call.request.url, {
+    const response = await dependencies.safeFetch(call.request.url, {
       ...requestOptions(call.request),
       headers,
       timeoutMs: Math.min(
@@ -1036,21 +1108,18 @@ async function authorizeAndCall(
         call.offer.maxTimeoutSeconds * 1000,
       ),
     });
+    const attemptSettlement = readSettlement(response.headers);
+    const moved = attemptSettlement.state === "settled" || attemptSettlement.state === "pending";
+    if (moved) settledResponse = response;
     if (response.status === 409) {
       errorCode = "idempotency-conflict";
       break;
     }
-    const settlement = readSettlement(response.headers);
-    if (settlement.state === "unpaid") break;
-    if (
-      response.status >= 200 &&
-      response.status < 300 &&
-      (settlement.state === "settled" || settlement.state === "pending")
-    )
-      break;
-    response = undefined;
+    if (attemptSettlement.state === "unpaid") break;
+    if (response.status >= 200 && response.status < 300 && moved) break;
   }
-  if (!response || response.status < 200 || response.status >= 300) return { errorCode };
+  const response = settledResponse;
+  if (!response) return { errorCode };
   const settlement = readSettlement(response.headers);
   if (settlement.state !== "settled" && settlement.state !== "pending")
     return { errorCode: "unpaid" };

@@ -260,8 +260,8 @@ function partialRun(modes: readonly MerchantMode[], options: { receiptStored?: b
     dependencies,
     chain,
     finalized: () => final,
-    settledIndices: () => [...settled].sort((left, right) => left - right),
-    receiptIndices: () => [...new Set(receipts)].sort((left, right) => left - right),
+    settledIndices: () => [...settled].toSorted((left, right) => left - right),
+    receiptIndices: () => [...new Set(receipts)].toSorted((left, right) => left - right),
   };
 }
 
