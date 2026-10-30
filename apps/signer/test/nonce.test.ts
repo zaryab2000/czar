@@ -3,7 +3,7 @@
 // (the dispatcher and the freeze handler's `lowerAutoLimit`, both K3) never get the same nonce.
 import { describe, expect, it } from "vitest";
 import { parseTransaction, type Hex, type TransactionSerializableEIP1559 } from "viem";
-import type { TransactionPreparer } from "../src/service.ts";
+import { memoryAudit, type AuditRow, type TransactionPreparer } from "../src/service.ts";
 import { archiveUri, h, harness, NETWORK, uriHash, VAULT } from "./helpers.ts";
 
 const closeEnvelope = (envelopeId: string) => ({
@@ -87,5 +87,27 @@ describe("signer transaction nonces (SCR-159 §2)", () => {
       }),
     ).rejects.toMatchObject({ name: "Denied" });
     expect(nonceOf(await t.signer.sign("cz-15", closeEnvelope("1")))).toBe(4);
+  });
+
+  it("leaves the next nonce unchanged when the signed audit write fails (review M1)", async () => {
+    const audit = memoryAudit();
+    let failSigned = true;
+    const t = await harness({
+      prepareTransaction: rpcPreparer(() => 5),
+      auditSink: {
+        write: async (row: AuditRow) => {
+          if (row.outcome === "signed" && failSigned) {
+            failSigned = false;
+            throw new Error("audit store unavailable");
+          }
+          await audit.write(row);
+        },
+      },
+    });
+
+    await expect(t.signer.sign("cz-15", closeEnvelope("1"))).rejects.toThrow(
+      "audit store unavailable",
+    );
+    expect(nonceOf(await t.signer.sign("cz-15", closeEnvelope("2")))).toBe(5);
   });
 });
