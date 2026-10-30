@@ -1107,9 +1107,8 @@ async function assertGasRefillAtStart(signer: K8Signer, node: ArcNode): Promise<
   });
   const alerts: string[] = [];
   const jobErrors: unknown[] = [];
-  const stop = startGasRefillJob(
-    localGasRefillOptions(signer, node, alerts),
-    (error) => jobErrors.push(error),
+  const stop = startGasRefillJob(localGasRefillOptions(signer, node, alerts), (error) =>
+    jobErrors.push(error),
   );
   try {
     await vi.waitFor(
