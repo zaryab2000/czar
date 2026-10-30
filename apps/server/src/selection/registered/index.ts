@@ -175,11 +175,8 @@ export function createRegisteredSelection(
           query,
           services,
           descriptor,
-          riskQuantile: Number(options.config.get("selection.riskQuantile")),
-          weights: {
-            cost: Number(options.config.get("selection.wCost")),
-            latency: Number(options.config.get("selection.wLatency")),
-          },
+          riskQuantile: 0.05,
+          weights: {},
           retentionDays: Number(options.config.get("selection.decisionRetentionDays")),
           pool: options.pool,
           now,
