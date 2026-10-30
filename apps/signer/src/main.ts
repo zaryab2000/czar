@@ -3,7 +3,8 @@ import { loadConfig } from "@czar/config";
 import type { SignerNetwork } from "./policy.ts";
 import { assertNoSecretInProcess, keychainPassphrase, type KeychainOpen } from "./passphrase.ts";
 import { gitProbe, guardKeystorePath, nodeKeystoreFs, openLocalKeystore } from "./local-backend.ts";
-import { startGasRefillJob, type GasRefillOptions } from "./gas-refill.ts";
+import { startGasRefillJob, type GasRefillChainAdapters } from "./gas-refill.ts";
+import { createSignerMetrics, type SignerMetrics } from "./metrics.ts";
 import { postgresAudit, type AuditQueryExecutor } from "./postgres-audit.ts";
 import type { Projection } from "./projection.ts";
 import {
@@ -22,7 +23,7 @@ export interface SignerProcessOptions {
   readonly callers: Readonly<Record<string, readonly KeyId[]>>;
   readonly prepareTransaction: TransactionPreparer;
   readonly auditExecutor: AuditQueryExecutor;
-  readonly refill: Omit<GasRefillOptions, "config" | "signer" | "keyAddress" | "alert">;
+  readonly refill: GasRefillChainAdapters;
   readonly alert: SignerAlertPort;
   readonly allowedCallers: Readonly<Record<string, readonly string[]>>;
   readonly keychainOpen?: KeychainOpen;
@@ -32,6 +33,8 @@ export interface SignerProcessOptions {
 
 export interface RunningSignerProcess {
   readonly signer: Signer;
+  /** The signer's counters (`czar_signer_gas_low`), rendered in Prometheus text form. */
+  readonly metrics: SignerMetrics;
   stop(): Promise<void>;
 }
 
@@ -70,12 +73,14 @@ export async function startSignerProcess(
     identity,
     allowedCallers: options.allowedCallers,
   });
+  const metrics = createSignerMetrics();
   const stopRefill = startGasRefillJob(
     {
       ...options.refill,
       config,
       signer,
       alert: options.alert,
+      metrics,
       keyAddress: (key) => {
         const address = backend.address(key);
         if (address === undefined) throw new Error(`local keystore has no ${key} key`);
@@ -88,6 +93,7 @@ export async function startSignerProcess(
   );
   return {
     signer,
+    metrics,
     async stop() {
       stopRefill();
       await stopSocket();

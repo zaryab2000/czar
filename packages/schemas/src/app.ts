@@ -20,6 +20,10 @@ export interface AppWalletConfig {
   readonly arcRpcUrl: string;
   readonly bundlerOrder: readonly AppBundler[];
   readonly bundlerEndpoints: Partial<Record<AppBundler, string>>;
+  /** CzarVaultFactory from the server's deployment manifest (SCR-157 §3). */
+  readonly vaultFactory: `0x${string}`;
+  /** The host name of `app.origin` (SCR-156, SCR-157 §3). */
+  readonly webauthnRpId: string;
 }
 
 export interface SessionRequest {

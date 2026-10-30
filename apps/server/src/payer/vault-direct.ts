@@ -153,8 +153,10 @@ export interface VaultDirectChain {
     readonly final: boolean;
   }>;
   /**
-   * The latest block's timestamp from a fresh read. It is "now" for a new reserve's `validBefore` and its TTL
-   * check (CZ-15 §5.2 step 2, SCR-155 §2); the server clock is never used there.
+   * The latest block's timestamp from a fresh read. It is "now" for every CZ-15 comparison against a deadline
+   * the chain enforces: a new reserve's `validBefore` and its TTL check (CZ-15 §5.2 step 2, SCR-155 §2), call
+   * retries within `validBefore`, the reconcile loop and the wait before `finalize` (SCR-157 §1). The server
+   * clock is never used there.
    */
   latestBlockTimestamp(): Promise<bigint>;
   /** The mined outcome of a sent `reserve`; `undefined` while the transaction has no receipt. */
@@ -908,14 +910,17 @@ async function settleAndFinalize(
   return { state: "done", stepResults: results };
 }
 
+/**
+ * SCR-157 §1: the vault finalizes only when `block.timestamp > validBefore` (`NotExpired`), so the wait ends
+ * once the latest block is past `validBefore`; every following block is too. Chain time is re-read after each
+ * `payer.reconcileSeconds` sleep; the server clock is never used.
+ */
 async function waitUntilValidBefore(
   dependencies: VaultDirectDependencies,
   validBefore: bigint,
 ): Promise<void> {
-  const pollMs = Number(dependencies.config.get("payer.reconcileSeconds")) * 1000;
-  while (Math.floor(dependencies.now().getTime() / 1000) < Number(validBefore)) {
-    const remainingMs = Number(validBefore) * 1000 - dependencies.now().getTime();
-    await (dependencies.sleep ?? delay)(Math.min(pollMs, remainingMs));
+  while ((await dependencies.chain.latestBlockTimestamp()) <= validBefore) {
+    await sleepReconcileInterval(dependencies);
   }
 }
 
@@ -1019,6 +1024,9 @@ async function authorizeAndCall(
   let response: SafeFetchResponse | undefined;
   let errorCode = "unpaid";
   for (let retry = 0; retry < Number(dependencies.config.get("payer.callRetries")); retry += 1) {
+    // 02 §7.5: retries only within validBefore, by chain time (SCR-157 §1); USDC refuses the authorization
+    // once `block.timestamp ≥ validBefore`.
+    if (retry > 0 && (await dependencies.chain.latestBlockTimestamp()) >= validBefore) break;
     dependencies.assertLeaseHeld?.();
     response = await dependencies.safeFetch(call.request.url, {
       ...requestOptions(call.request),
@@ -1307,14 +1315,18 @@ async function waitForAuthorization(
   validBefore: bigint,
 ): Promise<boolean> {
   const until =
-    Number(validBefore) + Number(dependencies.config.get("payer.reconcileGraceSeconds"));
-  while (Math.floor(dependencies.now().getTime() / 1000) <= until) {
+    validBefore + BigInt(Number(dependencies.config.get("payer.reconcileGraceSeconds")));
+  // CZ-15 §5.5 by chain time (SCR-157 §1): the deadline is the one USDC enforces on the authorization.
+  while ((await dependencies.chain.latestBlockTimestamp()) <= until) {
     if (await dependencies.chain.authorizationState({ reservationId, index })) return true;
-    await (dependencies.sleep ?? delay)(
-      Number(dependencies.config.get("payer.reconcileSeconds")) * 1000,
-    );
+    await sleepReconcileInterval(dependencies);
   }
   return false;
+}
+
+function sleepReconcileInterval(dependencies: VaultDirectDependencies): Promise<void> {
+  const milliseconds = Number(dependencies.config.get("payer.reconcileSeconds")) * 1000;
+  return (dependencies.sleep ?? delay)(milliseconds);
 }
 
 function delay(milliseconds: number): Promise<void> {

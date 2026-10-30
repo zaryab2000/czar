@@ -3,7 +3,7 @@ import type { KeyId } from "./kinds.ts";
 import type { SignerProcessOptions } from "./main.ts";
 import type { TransactionPreparer } from "./service.ts";
 import type { SignerAlertPort } from "./service.ts";
-import type { GasRefillOptions } from "./gas-refill.ts";
+import type { GasRefillChainAdapters } from "./gas-refill.ts";
 import type { AuditQueryExecutor } from "./postgres-audit.ts";
 
 const LOCAL_CALLERS: Readonly<Record<string, readonly KeyId[]>> = {
@@ -72,13 +72,17 @@ export function createRpcGasRefillAdapters(input: {
     PublicClient,
     "getBalance" | "sendRawTransaction" | "waitForTransactionReceipt"
   >;
-}): Omit<GasRefillOptions, "config" | "signer" | "keyAddress" | "alert"> {
+}): GasRefillChainAdapters {
   return {
-    getNativeBalance: (address) => input.client.getBalance({ address }),
+    getNativeBalance: (address, blockNumber) =>
+      blockNumber === undefined
+        ? input.client.getBalance({ address })
+        : input.client.getBalance({ address, blockNumber }),
     async submitTransaction(transaction: Hex) {
       const hash = await input.client.sendRawTransaction({ serializedTransaction: transaction });
       const receipt = await input.client.waitForTransactionReceipt({ hash });
       if (receipt.status !== "success") throw new Error(`refill transaction ${hash} reverted`);
+      return { blockNumber: receipt.blockNumber };
     },
   };
 }

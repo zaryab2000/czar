@@ -141,7 +141,52 @@ test("loads public wallet config from the same-origin server", async ({ page }) 
     arcRpcUrl: "http://127.0.0.1:8549",
     bundlerOrder: ["circle", "pimlico", "alchemy", "zerodev"],
     bundlerEndpoints: {},
+    webauthnRpId: "localhost",
   });
+  expect(config.body.vaultFactory).toMatch(/^0x[0-9a-fA-F]{40}$/);
+});
+
+test("disables Create vault while the MSCA holds no network fees (SCR-157 §3)", async ({
+  page,
+}) => {
+  await page.route("**/v1/me", (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        userId: "usr_01J00000000000000000000000",
+        msca: "0x0000000000000000000000000000000000000001",
+        vault: "0x0000000000000000000000000000000000000002",
+        vaultCreated: false,
+        network: "eip155:5042002",
+        balances: {
+          vaultBalance: "0",
+          free: "0",
+          committed: "0",
+          mscaBalance: "0",
+          pocketOutstanding: "0",
+          asOfBlock: 1,
+        },
+        limits: [],
+        frozen: false,
+        paused: false,
+        displayCurrency: "USD",
+      }),
+    }),
+  );
+  await page.route("**/v1/approvals**", (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      headers: { "X-Czar-Pending-Poll-Seconds": "15" },
+      body: JSON.stringify({ items: [], nextCursor: null }),
+    }),
+  );
+
+  await page.goto("/onboarding/vault");
+
+  await expect(page.getByRole("button", { name: "Create vault" })).toBeDisabled();
+  await expect(
+    page.getByText("Add a small amount to your MSCA for network fees, then try again."),
+  ).toBeVisible();
 });
 
 test("routes an unknown path to the not-found page with 404", async ({ page }) => {

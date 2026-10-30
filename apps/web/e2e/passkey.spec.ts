@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { createHash } from "node:crypto";
-import type { AppPlan, ApprovalIntent, Me } from "@czar/schemas";
+import type { AppPlan, AppWalletConfig, ApprovalIntent, Me } from "@czar/schemas";
 import {
   buildTree,
   categoryHash,
@@ -19,7 +19,6 @@ import {
 import { createPublicClient, defineChain, http, parseAbiItem, type Address, type Hex } from "viem";
 
 const ARC_RPC = "http://127.0.0.1:8549";
-const FACTORY = "0xA624047E961D13bF49711e1383e7A3EBD3E25ef4" as Address;
 const USDC = "0x3600000000000000000000000000000000000000" as Address;
 const CATEGORIES = ["research", "data", "creative", "general"] as const;
 
@@ -42,6 +41,9 @@ test("creates a passkey and later completes createSession", async ({ page, brows
   let assertions = 0;
   let submittedNotices = 0;
   let registeredMsca: Address | undefined;
+  // SCR-157 §3: the factory and RP ID come from the server's wallet-config, as the app reads them.
+  let vaultFactory: Address | undefined;
+  let webauthnRpId: string | undefined;
   let walletConfigRequests = 0;
   const requestPaths: string[] = [];
   const { plan, intent } = approvalFixture();
@@ -99,7 +101,7 @@ test("creates a passkey and later completes createSession", async ({ page, brows
   await page.route(`**/v1/approvals/${plan.planId}/intent`, async (route) => {
     const request = route.request().postDataJSON() as { fillInPlace?: boolean };
     expect(request.fillInPlace).toBe(true);
-    const account = await accountMe(registeredMsca!);
+    const account = await accountMe(registeredMsca!, vaultFactory!);
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify({ ...intent, vault: account.vault, to: account.vault }),
@@ -115,7 +117,7 @@ test("creates a passkey and later completes createSession", async ({ page, brows
   await page.route("**/v1/freeze/intent", async (route) => {
     const request = route.request().postDataJSON() as { action?: "freeze" | "unfreeze" };
     expect(request.action === "freeze" || request.action === "unfreeze").toBe(true);
-    const account = await accountMe(registeredMsca!);
+    const account = await accountMe(registeredMsca!, vaultFactory!);
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify({
@@ -146,18 +148,21 @@ test("creates a passkey and later completes createSession", async ({ page, brows
     requestPaths.indexOf("/v1/auth/challenge"),
   );
   expect(walletConfigResponse.headers()["cache-control"]).toBe("no-store");
-  await expect(walletConfigResponse.json()).resolves.toMatchObject({
+  const walletConfig = (await walletConfigResponse.json()) as AppWalletConfig;
+  expect(walletConfig).toMatchObject({
     circleClientUrl: "http://127.0.0.1:4337",
     circleClientKey: "e2e-public-client-key",
     arcRpcUrl: ARC_RPC,
   });
+  vaultFactory = walletConfig.vaultFactory as Address;
+  webauthnRpId = walletConfig.webauthnRpId;
   expect(registrations).toBe(1);
   expect(registeredMsca).toBeDefined();
   await rpc("anvil_setBalance", [registeredMsca, "0x3635c9adc5dea00000"]);
   await expect(page).toHaveURL(/\/home$/);
   await expect(page.getByRole("heading", { name: "Finish setting up your vault" })).toBeVisible();
   await page.getByRole("link", { name: "Continue setup" }).click();
-  const feeReserve = BigInt((await accountMe(registeredMsca!)).balances.mscaBalance);
+  const feeReserve = BigInt((await accountMe(registeredMsca!, vaultFactory!)).balances.mscaBalance);
   await expect(
     page.getByText(`Network fee reserve: ${formatAmount(feeReserve)} USDC`),
   ).toBeVisible();
@@ -171,14 +176,15 @@ test("creates a passkey and later completes createSession", async ({ page, brows
   await expect
     .poll(
       async () =>
-        (await accountMe(registeredMsca!)).limits.filter((limit) => limit.userMax === "1000000")
-          .length,
+        (await accountMe(registeredMsca!, vaultFactory!)).limits.filter(
+          (limit) => limit.userMax === "1000000",
+        ).length,
     )
     .toBe(4);
   await expect(page.getByText("Limits submitted. Waiting for LimitsSet to sync…")).toBeVisible();
   await expect
     .poll(async () => {
-      const account = await accountMe(registeredMsca!);
+      const account = await accountMe(registeredMsca!, vaultFactory!);
       const response = await page.request.get(
         `http://127.0.0.1:42070/__e2e/events?vault=${account.vault}`,
       );
@@ -190,7 +196,7 @@ test("creates a passkey and later completes createSession", async ({ page, brows
   await expect(page.getByRole("heading", { name: "Your Czar account" })).toBeVisible();
   await page.goto("/approvals");
   await expect(page.getByRole("heading", { name: "Approvals" })).toBeVisible();
-  const account = await accountMe(registeredMsca!);
+  const account = await accountMe(registeredMsca!, vaultFactory!);
   await rpc("anvil_setBalance", [account.vault, "0x3635c9adc5dea00000"]);
   const client = createPublicClient({
     chain: defineChain({
@@ -203,7 +209,9 @@ test("creates a passkey and later completes createSession", async ({ page, brows
   });
   const vaultPasskey = await getVault(account.vault as Address, client).read.getPasskey();
   expect(vaultPasskey.set).toBe(true);
-  expect(vaultPasskey.rpIdHash).toBe(`0x${createHash("sha256").update("localhost").digest("hex")}`);
+  expect(vaultPasskey.rpIdHash).toBe(
+    `0x${createHash("sha256").update(webauthnRpId!).digest("hex")}`,
+  );
   const beforeApproval = await client.getBlockNumber();
   await page.goto(`/approve/${plan.planId}`);
   await page.getByRole("button", { name: "Approve $1.00" }).click();
@@ -229,7 +237,7 @@ test("creates a passkey and later completes createSession", async ({ page, brows
   await expect(page.getByText(/Unfreezing…/)).toBeVisible({ timeout: 20_000 });
   await expect(page.getByRole("button", { name: "Freeze" })).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText(/Frozen\. No payments can start/)).toHaveCount(0);
-  expect((await accountMe(registeredMsca!)).frozen).toBe(false);
+  expect((await accountMe(registeredMsca!, vaultFactory!)).frozen).toBe(false);
   await cdp.send("WebAuthn.removeVirtualAuthenticator", {
     authenticatorId: authenticator.authenticatorId,
   });
@@ -240,7 +248,7 @@ function formatAmount(amount: bigint): string {
   return `${amount / 1_000_000n}.${(amount % 1_000_000n).toString().padStart(6, "0")}`;
 }
 
-async function accountMe(msca: Address): Promise<Me> {
+async function accountMe(msca: Address, vaultFactory: Address): Promise<Me> {
   const chain = defineChain({
     id: 5042002,
     name: "Arc Testnet",
@@ -250,7 +258,7 @@ async function accountMe(msca: Address): Promise<Me> {
   const client = createPublicClient({ chain, transport: http(ARC_RPC) });
   const blockNumber = await client.getBlockNumber();
   const block = await client.getBlock({ blockNumber });
-  const factory = getVaultFactory(FACTORY, client);
+  const factory = getVaultFactory(vaultFactory, client);
   const predicted = await factory.read.predictVault([msca], { blockNumber });
   const code = await client.getCode({ address: predicted, blockNumber });
   const vaultCreated = Boolean(code && code !== "0x");
@@ -258,7 +266,7 @@ async function accountMe(msca: Address): Promise<Me> {
   const state = vaultCreated
     ? await readPinnedVaultState({
         client,
-        factory: FACTORY,
+        factory: vaultFactory,
         usdc: USDC,
         msca,
         vault: predicted,

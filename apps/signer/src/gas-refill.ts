@@ -1,13 +1,16 @@
 import type { Config } from "@czar/config";
 import type { Address } from "@czar/hashing";
+import { createLogger, type Logger } from "@czar/logging";
 import type { Hex } from "viem";
+import type { GasLowKey, SignerMetrics } from "./metrics.ts";
 import { NATIVE_PER_USDC_ATOMIC } from "./policy.ts";
 import type { SignResult } from "./service.ts";
 
-type RefillKey = "K3" | "K7" | "K8";
+type RefillKey = Exclude<GasLowKey, "relayer">;
 
 export interface GasRefillResult {
   readonly key: RefillKey;
+  /** Native wei: the balance read at the refill receipt's block when a refill was mined. */
   readonly balance: bigint;
   readonly status: "unchanged" | "refilled" | "failed";
 }
@@ -24,28 +27,59 @@ export interface GasRefillOptions {
       },
     ): Promise<SignResult>;
   };
-  readonly keyAddress: (key: RefillKey) => Address;
-  readonly getNativeBalance: (address: Address) => Promise<bigint>;
-  readonly submitTransaction: (transaction: Hex) => Promise<void>;
+  readonly keyAddress: (key: GasLowKey) => Address;
+  /** Reads the latest balance, or the balance at `blockNumber` when given. */
+  readonly getNativeBalance: (address: Address, blockNumber?: bigint) => Promise<bigint>;
+  /** Sends a signed refill and resolves with the block of its successful receipt. */
+  readonly submitTransaction: (transaction: Hex) => Promise<{ readonly blockNumber: bigint }>;
   readonly alert: (message: string) => Promise<void>;
+  readonly metrics: SignerMetrics;
+  readonly logger?: Pick<Logger, "error">;
 }
 
-const REFILL_KEYS: readonly RefillKey[] = ["K3", "K7", "K8"];
-const GAS_REFILL_INTERVAL_MS = 5 * 60_000;
+/** The chain reads and writes a refill pass needs; the signer process supplies the rest. */
+export type GasRefillChainAdapters = Pick<
+  GasRefillOptions,
+  "getNativeBalance" | "submitTransaction"
+>;
 
-/** Where a key's refill stopped; the only detail an alert carries besides the key id. */
+const REFILL_KEYS: readonly RefillKey[] = ["K3", "K7", "K8"];
+const MS_PER_SECOND = 1000;
+
+/** Where a key's refill stopped. */
 type RefillFault = "key-unavailable" | "balance-read-failed" | "sign-failed" | "send-failed";
+/** The only detail a gas-low alert carries besides the key id (SCR-157 §2). */
+type GasLowReason = RefillFault | "below-min-after-refill" | "below-target-sum";
 
 /**
  * Refill low-balance signer keys to their configured targets through the relayer policy.
  *
- * Each key is evaluated on its own: a fault on one key is alerted with the key id and fault
- * only, and the pass continues with the remaining keys (SCR-155 §3).
+ * The pass first checks the relayer against the sum of every key's target. Each key is then
+ * evaluated on its own: a fault on one key is signalled and the pass continues with the remaining
+ * keys (SCR-155 §3). Every gas-low signal increments `czar_signer_gas_low{key}` and sends the text
+ * alert; a failing alert channel is logged and never stops the pass (SCR-157 §2).
  */
 export async function runGasRefill(options: GasRefillOptions): Promise<GasRefillResult[]> {
+  await checkRelayer(options);
   const results: GasRefillResult[] = [];
   for (const key of REFILL_KEYS) results.push(await refillKey(options, key));
   return results;
+}
+
+async function checkRelayer(options: GasRefillOptions): Promise<void> {
+  let targetSum = 0n;
+  for (const key of REFILL_KEYS)
+    targetSum += readGasBound(options.config, key, "targetAtomic") * NATIVE_PER_USDC_ATOMIC;
+  let fault: RefillFault = "key-unavailable";
+  let balance: bigint;
+  try {
+    const relayer = options.keyAddress("relayer");
+    fault = "balance-read-failed";
+    balance = await options.getNativeBalance(relayer);
+  } catch {
+    return signalGasLow(options, "relayer", fault);
+  }
+  if (balance < targetSum) await signalGasLow(options, "relayer", "below-target-sum");
 }
 
 async function refillKey(options: GasRefillOptions, key: RefillKey): Promise<GasRefillResult> {
@@ -65,11 +99,15 @@ async function refillKey(options: GasRefillOptions, key: RefillKey): Promise<Gas
   }
   if (balance >= min) return { key, balance, status: "unchanged" };
   const amount = (refillTarget - balance + NATIVE_PER_USDC_ATOMIC - 1n) / NATIVE_PER_USDC_ATOMIC;
-  const refilled = balance + amount * NATIVE_PER_USDC_ATOMIC;
-  if (amount <= 0n || refilled > max) {
-    await options.alert(`Gas refill bounds invalid for ${key}; check signer.gas.${key} config.`);
+  if (amount <= 0n || balance + amount * NATIVE_PER_USDC_ATOMIC > max) {
+    await sendAlert(
+      options,
+      key,
+      `Gas refill bounds invalid for ${key}; check signer.gas.${key} config.`,
+    );
     return { key, balance, status: "failed" };
   }
+  let receiptBlock: bigint;
   try {
     fault = "sign-failed";
     const signed = await options.signer.sign("relayer", {
@@ -79,12 +117,18 @@ async function refillKey(options: GasRefillOptions, key: RefillKey): Promise<Gas
     });
     if (!("signedTransaction" in signed)) throw new Error("gas-refill policy returned a signature");
     fault = "send-failed";
-    await options.submitTransaction(signed.signedTransaction);
+    receiptBlock = (await options.submitTransaction(signed.signedTransaction)).blockNumber;
   } catch {
     return refillFailed(options, key, balance, fault);
   }
-  // A mined refill is the outcome. A balance read after the receipt can race the key's own
-  // spending, so it is not used to judge the refill (SCR-155 §3).
+  // Read at the receipt's block: the key's own later spending cannot race this read (SCR-157 §2).
+  let refilled: bigint;
+  try {
+    refilled = await options.getNativeBalance(target, receiptBlock);
+  } catch {
+    return refillFailed(options, key, balance, "balance-read-failed");
+  }
+  if (refilled < min) await signalGasLow(options, key, "below-min-after-refill");
   return { key, balance: refilled, status: "refilled" };
 }
 
@@ -94,13 +138,31 @@ async function refillFailed(
   balance: bigint,
   fault: RefillFault,
 ): Promise<GasRefillResult> {
-  await options.alert(`relayer gas refill failed for ${key}: ${fault}`);
+  await signalGasLow(options, key, fault);
   return { key, balance, status: "failed" };
 }
 
+async function signalGasLow(
+  options: GasRefillOptions,
+  key: GasLowKey,
+  reason: GasLowReason,
+): Promise<void> {
+  options.metrics.incrementGasLow(key);
+  await sendAlert(options, key, `signer gas low for ${key}: ${reason}`);
+}
+
+async function sendAlert(options: GasRefillOptions, key: GasLowKey, message: string) {
+  try {
+    await options.alert(message);
+  } catch {
+    const logger = options.logger ?? createLogger({ service: "signer", component: "CZ-27" });
+    logger.error("signer_gas_alert", { keyId: key, outcome: "alert-failed" });
+  }
+}
+
 /**
- * Run one refill pass now, then one every five minutes. A pass never starts while another is
- * running; errors go to `onError` and do not stop later passes.
+ * Run one refill pass now, then one every `signer.gasRefillIntervalSeconds`. A pass never starts
+ * while another is running; errors go to `onError` and do not stop later passes.
  */
 export function startGasRefillJob(
   options: GasRefillOptions,
@@ -116,7 +178,8 @@ export function startGasRefillJob(
         running = false;
       });
   };
-  const timer = setInterval(runPass, GAS_REFILL_INTERVAL_MS);
+  const intervalMs = Number(options.config.get("signer.gasRefillIntervalSeconds")) * MS_PER_SECOND;
+  const timer = setInterval(runPass, intervalMs);
   runPass();
   return () => clearInterval(timer);
 }

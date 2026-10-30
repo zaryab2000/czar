@@ -4,6 +4,7 @@ export * from "./kinds.ts";
 export * from "./local-backend.ts";
 export * from "./passphrase.ts";
 export * from "./gas-refill.ts";
+export * from "./metrics.ts";
 export * from "./postgres-audit.ts";
 export {
   decide,

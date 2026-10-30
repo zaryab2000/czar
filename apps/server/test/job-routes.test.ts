@@ -17,6 +17,7 @@ import {
   testAppConfig,
   TEST_DEVICE_ID,
   TEST_USER_ID,
+  TEST_VAULT_FACTORY,
 } from "#test/fixtures";
 import { generatePrivateKey, privateKeyToAccount, sign } from "viem/accounts";
 import { keccak256 } from "viem";
@@ -68,6 +69,7 @@ beforeAll(async () => {
     logger: createLogger({ service: "server", component: "CZ-15", sink: () => undefined }),
     clock: { now: () => now },
     random: { bytes: (length) => Buffer.alloc(length, 4) },
+    vaultFactory: TEST_VAULT_FACTORY,
     jobDelivery: {
       pool,
       config,
@@ -126,6 +128,7 @@ describe("provider job routes", () => {
       logger: createLogger({ service: "server", component: "CZ-15", sink: () => undefined }),
       clock: { now: () => now },
       random: { bytes: (length) => Buffer.alloc(length, 4) },
+      vaultFactory: TEST_VAULT_FACTORY,
       jobDelivery: {
         pool,
         config,

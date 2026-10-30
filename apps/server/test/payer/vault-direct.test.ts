@@ -349,7 +349,8 @@ describe("vault-direct executor", () => {
     const chain = {
       stepUsed: vi.fn(async () => 0n),
       envelopeCapacity: vi.fn(async () => ({ cap: 10_000n, exposure: 0n })),
-      latestBlockTimestamp: vi.fn(async () => BigInt(Date.parse("2026-10-21T00:00:00Z") / 1000)),
+      // Chain time follows the test clock, which each sleep moves on.
+      latestBlockTimestamp: vi.fn(async () => BigInt(Math.floor(current.getTime() / 1000))),
       reserve,
       settle: vi.fn(async () => {
         settled = true;

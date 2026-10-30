@@ -34,6 +34,7 @@ export interface AppReadOptions {
 export interface AppReadDependencies {
   readonly pool: Pool;
   readonly config: Config;
+  readonly vaultFactory: Address;
   readonly options?: AppReadOptions;
 }
 
@@ -55,7 +56,7 @@ export async function getMeRoute(
   }>("SELECT msca,network,mode,shadow_ends_at FROM users WHERE user_id=$1", [userId]);
   const row = user.rows[0];
   if (!row?.msca) return problemResponse(context, 404, "validation");
-  const options = readOptions(dependencies.options);
+  const options = readOptions(dependencies);
   const categories = knownCategories(dependencies.config);
   const chainId = parseChainId(row.network);
   const chain = defineChain({
@@ -167,7 +168,7 @@ export async function listEnvelopesRoute(
   );
   const msca = user.rows[0]?.msca;
   if (!msca) return problemResponse(context, 404, "validation");
-  const options = readOptions(dependencies.options);
+  const options = readOptions(dependencies);
   const vault = await indexedVaultForOwner(options.indexerUrl, msca);
   if (!vault) return context.json({ items: [], nextCursor: null } satisfies AppPage<Envelope>);
   const params = parsePage(context, dependencies.config);
@@ -192,7 +193,7 @@ export async function getEnvelopeRoute(
   );
   const msca = user.rows[0]?.msca;
   if (!msca) return problemResponse(context, 404, "validation");
-  const options = readOptions(dependencies.options);
+  const options = readOptions(dependencies);
   const vault = await indexedVaultForOwner(options.indexerUrl, msca);
   if (!vault) return problemResponse(context, 404, "validation");
   const envelopeRef = context.req.param("envelopeRef");
@@ -220,7 +221,7 @@ export async function listReceiptsRoute(
   );
   const row = user.rows[0];
   if (!row?.msca) return problemResponse(context, 404, "validation");
-  const options = readOptions(dependencies.options);
+  const options = readOptions(dependencies);
   const vault = await indexedVaultForOwner(options.indexerUrl, row.msca);
   if (!vault) return context.json({ items: [], nextCursor: null } satisfies AppPage<LedgerReceipt>);
   const page = parsePage(context, dependencies.config);
@@ -582,10 +583,10 @@ function encodeManualReturnCursor(userId: string, cursor: ManualReturnPageCursor
   return Buffer.from(JSON.stringify({ userId, ...cursor })).toString("base64url");
 }
 
-function readOptions(input: AppReadOptions | undefined): AppReadOptions {
-  const options = input ?? {
+function readOptions(dependencies: AppReadDependencies): AppReadOptions {
+  const options = dependencies.options ?? {
     rpcUrl: process.env["CZAR_ARC_RPC_URL"] ?? "",
-    factoryAddress: (process.env["CZAR_VAULT_FACTORY_ADDRESS"] ?? "") as Address,
+    factoryAddress: dependencies.vaultFactory,
     indexerUrl: process.env["CZAR_INDEXER_URL"] ?? "",
   };
   if (!options.rpcUrl || !options.indexerUrl || !/^0x[\da-fA-F]{40}$/.test(options.factoryAddress))
