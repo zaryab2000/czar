@@ -3262,6 +3262,15 @@ export const PARAMETERS = [
     readOnly: true,
   },
   {
+    key: "app.origin",
+    type: "string",
+    default: "http://localhost",
+    unit: "origin",
+    reason:
+      "the origin the web app is served from; WebAuthn checks clientDataJSON.origin against it (D78)",
+    source: "docs/specs/06-review/change-requests/SCR-156-app-origin-config-key.md:18",
+  },
+  {
     key: "app.challengeTtlSeconds",
     type: "integer",
     default: 300,
