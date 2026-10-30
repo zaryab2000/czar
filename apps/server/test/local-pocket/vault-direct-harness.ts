@@ -131,11 +131,15 @@ export async function openX402Plan(
   };
 }
 
-/** One fresh vault-direct executor run (a fresh process after a kill) over the shared DB and chain. */
+/**
+ * One fresh vault-direct executor run (a fresh process after a kill) over the shared DB and chain. With
+ * `serverLagMs`, this run's server clock trails the harness clock (and chain time) by that much (SCR-155 §2).
+ */
 export function executeX402(
   harness: LocalPocketHarness,
   plan: X402Plan,
   workerId?: string,
+  serverLagMs = 0,
 ): Promise<VaultDirectResult> {
   return executeVaultDirectStep(
     { ...plan.input, ...(workerId === undefined ? {} : { workerId }) },
@@ -149,7 +153,7 @@ export function executeX402(
         usdc: ARC_USDC,
       }),
       safeFetch: plan.merchant.fetch,
-      now: harness.clock.now,
+      now: () => new Date(harness.clock.now().getTime() - serverLagMs),
       sleep: (milliseconds) => harness.clock.advance(milliseconds),
       boundary: async (context) => deliveredResult(context),
       recordReceipt: async () => true,
