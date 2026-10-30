@@ -118,7 +118,7 @@ describe("registry", () => {
     expect(config.get("selection.ratingRefreshDebounceSeconds")).toBe(30);
     expect(config.get("selection.testBuyer.minReceipts")).toBe(5);
     expect(config.get("selection.unverifiedWithApproval")).toBe(true);
-    const keys = new Set(PARAMETERS.map((spec) => spec.key));
+    const keys = new Set<string>(PARAMETERS.map((spec) => spec.key));
     for (const removed of [
       "selection.wCost",
       "selection.wLatency",
