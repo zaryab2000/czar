@@ -110,6 +110,27 @@ describe("loadConfig", () => {
 });
 
 describe("registry", () => {
+  it("keeps only the Flow 4A rating and health selection parameters", () => {
+    const config = loadConfig();
+    expect(config.get("rating.windowDays")).toBe(14);
+    expect(config.get("health.consecutiveFailures")).toBe(3);
+    expect(config.get("selection.confidenceZ")).toBe(1.959964);
+    expect(config.get("selection.ratingRefreshDebounceSeconds")).toBe(30);
+    expect(config.get("selection.testBuyer.minReceipts")).toBe(5);
+    expect(config.get("selection.unverifiedWithApproval")).toBe(true);
+    const keys = new Set(PARAMETERS.map((spec) => spec.key));
+    for (const removed of [
+      "selection.wCost",
+      "selection.wLatency",
+      "selection.riskQuantile",
+      "selection.halfLifeDays",
+      "selection.nMin",
+      "selection.policyVersion",
+    ]) {
+      expect(keys.has(removed), removed).toBe(false);
+    }
+  });
+
   it("has unique keys and unique environment names", () => {
     const keys = PARAMETERS.map((spec) => spec.key);
     expect(new Set(keys).size).toBe(keys.length);
