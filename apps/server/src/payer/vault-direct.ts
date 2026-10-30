@@ -54,6 +54,11 @@ export const MIN_RESERVATION_TTL_SECONDS = 30;
  * `StepError` `message`, which never holds user text (SCR-153 §2, SCR-154 G4).
  */
 const BAD_TTL = "BadTtl";
+/**
+ * SCR-155 §2: a step gets at most this many new attempts after its reserve reverts `BadTtl()`. If that attempt
+ * also reverts BadTtl the step ends `reserve-failed`. The bound is structural, not a config key.
+ */
+const NEW_ATTEMPTS_AFTER_BAD_TTL = 1;
 const RESERVE_FAILED = "reserve-failed";
 /** Marks an attempt whose saved reserve reverted `BadTtl()`: no reservation exists and its nonce is spent. */
 const STALE_RESERVE = Symbol("stale-reserve");
@@ -147,6 +152,11 @@ export interface VaultDirectChain {
     readonly txHash: string;
     readonly final: boolean;
   }>;
+  /**
+   * The latest block's timestamp from a fresh read. It is "now" for a new reserve's `validBefore` and its TTL
+   * check (CZ-15 §5.2 step 2, SCR-155 §2); the server clock is never used there.
+   */
+  latestBlockTimestamp(): Promise<bigint>;
   /** The mined outcome of a sent `reserve`; `undefined` while the transaction has no receipt. */
   reserveOutcome?(txHash: string): Promise<ReserveOutcome | undefined>;
   reservationFinal?(reservationId: bigint): Promise<boolean>;
@@ -256,6 +266,9 @@ async function executeStep(
     input.step.stepIndex,
     startAttempt,
   );
+  // SCR-155 §2: the saved attempts already used the one new attempt BadTtl allows. Fail on the last of them.
+  if (attempt - startAttempt > NEW_ATTEMPTS_AFTER_BAD_TTL)
+    return failStaleReserve({ ...input, attempt: attempt - 1 }, dependencies);
   const executionInput = {
     ...input,
     attempt,
@@ -424,9 +437,14 @@ async function executeReservedCalls(
     return { state: "failed", errorCode: "step-cap-exhausted" };
   }
   const validBefore =
-    stored?.validBefore ?? reservationExpiry(input, dependencies, first.offer.maxTimeoutSeconds);
-  if (!stored && progress.afterStaleReserve && !reservationTtlFits(dependencies, validBefore))
-    return failStaleReserve(input, dependencies);
+    stored?.validBefore ??
+    (await newReservationExpiry(
+      input,
+      dependencies,
+      first.offer.maxTimeoutSeconds,
+      progress.afterStaleReserve,
+    ));
+  if (validBefore === undefined) return failStaleReserve(input, dependencies);
   const proof = buildPayeeProof(input, payee);
   const attempt = input.attempt ?? 0;
   const existingReservation = await findOrCreateReservation(
@@ -456,13 +474,28 @@ async function executeReservedCalls(
   );
 }
 
-/** Whether a fresh reserve's `validBefore` clears the vault's `MIN_RESERVATION_TTL` from now. */
-function reservationTtlFits(dependencies: VaultDirectDependencies, validBefore: bigint): boolean {
-  const now = BigInt(Math.floor(dependencies.now().getTime() / 1000));
-  return validBefore >= now + BigInt(MIN_RESERVATION_TTL_SECONDS);
+/**
+ * A new reserve's `validBefore` by the CZ-15 §5.2 step-2 formula, with "now" the latest block timestamp
+ * (SCR-155 §2). `undefined` after a BadTtl revert when it does not clear the vault's `MIN_RESERVATION_TTL`
+ * from that timestamp (SCR-153 §2).
+ */
+async function newReservationExpiry(
+  input: VaultDirectInput,
+  dependencies: VaultDirectDependencies,
+  maxTimeoutSeconds: number,
+  afterStaleReserve: boolean,
+): Promise<bigint | undefined> {
+  const chainNow = await dependencies.chain.latestBlockTimestamp();
+  const validBefore = reservationExpiry(input, dependencies, maxTimeoutSeconds, chainNow);
+  if (afterStaleReserve && validBefore < chainNow + BigInt(MIN_RESERVATION_TTL_SECONDS))
+    return undefined;
+  return validBefore;
 }
 
-/** SCR-153 §2 bound: `envelope.expiresAt` leaves the step-2 formula no room above the minimum TTL. */
+/**
+ * SCR-153 §2 and SCR-155 §2: `envelope.expiresAt` leaves the step-2 formula no room above the minimum TTL, or
+ * the one new attempt after a BadTtl revert also reverted BadTtl.
+ */
 async function failStaleReserve(
   input: VaultDirectInput,
   dependencies: VaultDirectDependencies,
@@ -1184,13 +1217,15 @@ function reservationExpiry(
   input: VaultDirectInput,
   dependencies: VaultDirectDependencies,
   maxTimeoutSeconds: number,
+  chainNow: bigint,
 ): bigint {
-  const now = Math.floor(dependencies.now().getTime() / 1000);
   const ttl = Math.min(
     maxTimeoutSeconds,
     Number(dependencies.config.get("payer.reservationTtlSeconds")),
   );
-  return BigInt(Math.min(now + ttl, Math.floor(input.envelopeExpiresAt.getTime() / 1000)));
+  const expiresAt = BigInt(Math.floor(input.envelopeExpiresAt.getTime() / 1000));
+  const capped = chainNow + BigInt(ttl);
+  return capped < expiresAt ? capped : expiresAt;
 }
 
 function buildPayeeProof(input: VaultDirectInput, payee: `0x${string}`): readonly Hash32[] {
