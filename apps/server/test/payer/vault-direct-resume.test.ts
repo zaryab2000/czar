@@ -262,7 +262,10 @@ describe("a saved reserve (SCR-159 §2)", () => {
     const reserveArgs = run.vaultArgs("reserve");
     expect(reserveArgs).toHaveLength(2);
     const freshValidBefore = (resumedSeconds + BigInt(OFFER_TIMEOUT_SECONDS)).toString();
-    expect(reserveArgs[1]).toEqual({ ...reserveArgs[0], validBefore: freshValidBefore });
+    expect(reserveArgs[1]).toEqual({
+      ...(reserveArgs[0] as Record<string, unknown>),
+      validBefore: freshValidBefore,
+    });
     const authorization = run.sign.mock.calls.find(([, request]) => request.kind === "usdc-3009");
     expect(authorization?.[1].payload).toMatchObject({ validBefore: freshValidBefore });
   });
@@ -407,7 +410,12 @@ const FINALIZE_ARGS = { reservationId: RESERVATION_ID.toString(), fromIndex: "0"
 
 const REVERTED_FAILURE = {
   errorCode: "reserve-failed",
-  stepError: { schemaVersion: "1.0", code: "reserve-failed", message: "reverted", retryable: false },
+  stepError: {
+    schemaVersion: "1.0",
+    code: "reserve-failed",
+    message: "reverted",
+    retryable: false,
+  },
 };
 
 function paidRun(options: { readonly receiptStoredOnTry?: number } = {}) {
@@ -602,7 +610,8 @@ function paidRun(options: { readonly receiptStoredOnTry?: number } = {}) {
     },
     probes: () =>
       safeFetch.mock.calls.filter(([, init]) => !init?.headers?.["payment-signature"]).length,
-    authorizations: () => sign.mock.calls.filter(([, request]) => request.kind === "usdc-3009").length,
+    authorizations: () =>
+      sign.mock.calls.filter(([, request]) => request.kind === "usdc-3009").length,
     vaultCalls: () => vaultRequests().map((payload) => payload.selector),
     vaultArgs: (selector: string) =>
       vaultRequests()
