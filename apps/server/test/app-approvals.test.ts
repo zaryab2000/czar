@@ -24,7 +24,7 @@ const APP_TOKEN = Buffer.alloc(32, 41).toString("base64url");
 
 function planFixture(): Plan {
   const plan: Plan = {
-    schemaVersion: "1.2",
+    schemaVersion: "1.3",
     planId: PLAN_ID,
     objectiveId: OBJECTIVE_ID,
     objectiveHash: HASH,

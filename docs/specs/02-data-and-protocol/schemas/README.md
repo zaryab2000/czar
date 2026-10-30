@@ -21,7 +21,7 @@
 | `payment-ref.schema.json` | §4.12 |
 | `receipt.schema.json` | §4.13 |
 | `acceptance-report.schema.json` | §4.14 |
-| `step-result.schema.json` | §4.15 (1.1, SCR-160) |
+| `step-result.schema.json` | §4.15 (1.0; 1.1 lands with 4A-2, SCR-161) |
 | `step-error.schema.json` | §4.16 |
 | `demand-proof-leaf.schema.json` | §4.17 version 1, **superseded** by v2 (RV-026); kept for reference |
 | `demand-proof-leaf.v2.schema.json` | §4.17 version 2 (RV-026) |

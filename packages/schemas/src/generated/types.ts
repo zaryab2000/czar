@@ -16,6 +16,7 @@ export type { Plan } from "./plan.d.ts";
 export type { PocketRecord } from "./pocket-record.d.ts";
 export type { ProposedBelief } from "./proposed-belief.d.ts";
 export type { RankingDecision } from "./ranking-decision.d.ts";
+export type { Rating } from "./rating.d.ts";
 export type { Receipt } from "./receipt.d.ts";
 export type { Reservation } from "./reservation.d.ts";
 export type { SoulVersionLeaf } from "./soul-version-leaf.d.ts";
@@ -61,6 +62,7 @@ export type { SlObsId } from "./common.d.ts";
 export type { SlReportId } from "./common.d.ts";
 export type { SlVersionId } from "./common.d.ts";
 export type { SlPolicyVersion } from "./common.d.ts";
+export type { RatingId } from "./common.d.ts";
 export type { SchemaName } from "./metadata.ts";
 export interface SchemaTypes {
   "acceptance-report": import("./acceptance-report.d.ts").AcceptanceReport;
@@ -81,6 +83,7 @@ export interface SchemaTypes {
   "pocket-record": import("./pocket-record.d.ts").PocketRecord;
   "proposed-belief": import("./proposed-belief.d.ts").ProposedBelief;
   "ranking-decision": import("./ranking-decision.d.ts").RankingDecision;
+  "rating": import("./rating.d.ts").Rating;
   "receipt": import("./receipt.d.ts").Receipt;
   "reservation": import("./reservation.d.ts").Reservation;
   "soul-version-leaf": import("./soul-version-leaf.d.ts").SoulVersionLeaf;

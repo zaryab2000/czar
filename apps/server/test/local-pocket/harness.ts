@@ -700,7 +700,7 @@ function planJson(input: {
   sizes: { stepCap: bigint; cap: bigint };
 }): PlanJson {
   return {
-    schemaVersion: "1.2",
+    schemaVersion: "1.3",
     planHash: input.planHash,
     objectiveHash: input.objectiveHash,
     network: `eip155:${ARC_CHAIN_ID}`,

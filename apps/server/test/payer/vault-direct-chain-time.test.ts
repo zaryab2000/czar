@@ -335,7 +335,7 @@ function stepInput(): VaultDirectInput {
     envelopeExpiresAt,
     vault: VAULT,
     plan: {
-      schemaVersion: "1.2",
+      schemaVersion: "1.3",
       planId: PLAN_ID,
       objectiveId: OBJECTIVE,
       objectiveHash: HASH,

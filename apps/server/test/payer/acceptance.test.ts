@@ -278,7 +278,7 @@ function paidInput(payeeRoot: `0x${string}`): VaultDirectInput {
     envelopeExpiresAt: new Date("2026-10-22T00:00:00Z"),
     vault: VAULT,
     plan: {
-      schemaVersion: "1.2",
+      schemaVersion: "1.3",
       planId: PLAN_ID,
       objectiveId: OBJECTIVE_ID,
       objectiveHash: HASH,

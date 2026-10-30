@@ -18,6 +18,7 @@ export type SchemaName =
   | "pocket-record"
   | "proposed-belief"
   | "ranking-decision"
+  | "rating"
   | "receipt"
   | "reservation"
   | "soul-version-leaf"
@@ -47,6 +48,7 @@ export const schemaMetadata = [
   { name: "pocket-record", typeName: "PocketRecord", title: "PocketRecord", typeFile: "pocket-record.d.ts" },
   { name: "proposed-belief", typeName: "ProposedBelief", title: "ProposedBelief", typeFile: "proposed-belief.d.ts" },
   { name: "ranking-decision", typeName: "RankingDecision", title: "RankingDecision", typeFile: "ranking-decision.d.ts" },
+  { name: "rating", typeName: "Rating", title: "Rating", typeFile: "rating.d.ts" },
   { name: "receipt", typeName: "Receipt", title: "Receipt", typeFile: "receipt.d.ts" },
   { name: "reservation", typeName: "Reservation", title: "Reservation (mirror)", typeFile: "reservation.d.ts" },
   { name: "soul-version-leaf", typeName: "SoulVersionLeaf", title: "SoulVersionLeaf", typeFile: "soul-version-leaf.d.ts" },

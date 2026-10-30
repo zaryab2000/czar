@@ -273,7 +273,7 @@ describe("registered selection", () => {
     const body = JSON.parse(saved.rows[0]!.body_jcs) as Record<string, unknown>;
 
     expect(validateSchema("ranking-decision", decision)).toBe(true);
-    expect(decision.schemaVersion).toBe("1.1");
+    expect(decision.schemaVersion).toBe("1.2");
     expect(decision.policy_version).toBe(
       `pol_${H({
         policy: "czar-registered-interim",

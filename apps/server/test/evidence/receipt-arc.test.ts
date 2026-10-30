@@ -389,7 +389,7 @@ async function seedPayerRows(payeeRoot: Hash32): Promise<void> {
     "prof_11111111111111111111111111111111",
   );
   const plan = {
-    schemaVersion: "1.2",
+    schemaVersion: "1.3",
     planId: PLAN_ID,
     objectiveId: OBJECTIVE_ID,
     objectiveHash: OBJECTIVE_HASH,
@@ -450,7 +450,7 @@ function paidStep(
     })),
   };
   const plan: Plan = {
-    schemaVersion: "1.2",
+    schemaVersion: "1.3",
     planId: PLAN_ID,
     objectiveId: OBJECTIVE_ID,
     objectiveHash: OBJECTIVE_HASH,

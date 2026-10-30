@@ -381,7 +381,7 @@ async function createDecision(args: {
   );
   const snapshotId = await persistSnapshot(args.pool, snapshot, now(), args.retentionDays);
   return {
-    schemaVersion: "1.1",
+    schemaVersion: "1.2",
     query_id: randomUUID(),
     received_at: now().toISOString(),
     policy_version: policy,

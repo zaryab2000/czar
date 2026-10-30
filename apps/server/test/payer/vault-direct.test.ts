@@ -62,7 +62,7 @@ describe("vault-direct executor", () => {
         envelopeExpiresAt: new Date("2026-10-22T00:00:00Z"),
         vault: "0x0000000000000000000000000000000000000001",
         plan: {
-          schemaVersion: "1.2",
+          schemaVersion: "1.3",
           planId: "pln_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
           objectiveId: "obj_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
           objectiveHash: `0x${"01".repeat(32)}`,
@@ -371,7 +371,7 @@ describe("vault-direct executor", () => {
       envelopeExpiresAt: new Date("2026-10-22T00:00:00Z"),
       vault: VAULT,
       plan: {
-        schemaVersion: "1.2",
+        schemaVersion: "1.3",
         planId: PLAN_ID,
         objectiveId: OBJECTIVE,
         objectiveHash: HASH,
