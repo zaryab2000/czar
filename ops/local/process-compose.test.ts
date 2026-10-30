@@ -81,7 +81,7 @@ describe("local process composition", () => {
       serverMain.indexOf("const objects"),
     );
     expect(localServer.indexOf("await createLocalServerMain")).toBeLessThan(
-      localServer.indexOf("await listen(server, port)"),
+      localServer.indexOf("await listenOnLoopback(server, port)"),
     );
     expect(localMerchant.indexOf("await migrateMerchant(pool)")).toBeLessThan(
       localMerchant.indexOf("await createMerchantServer"),
@@ -152,5 +152,15 @@ describe("local process composition", () => {
 
   it("documents the single local stack start command", () => {
     expect(readme).toContain("process-compose -f ops/local/process-compose.yaml up");
+  });
+
+  it("gives the server the web app origin it checks WebAuthn against (SCR-156)", () => {
+    expect(processSection("server")).toContain("      - CZAR_APP_ORIGIN=http://localhost:3001");
+    expect(forkComposition).toContain("pnpm --filter @czar/web dev --port 3001");
+  });
+
+  it("starts the browser flow at the passkey page (SCR-156)", () => {
+    expect(readme).toContain("http://localhost:3001/onboarding/passkey");
+    expect(readme).not.toMatch(/localhost:3001\/onboarding`/);
   });
 });

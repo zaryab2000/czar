@@ -256,7 +256,7 @@ The existing compose graph waits for Postgres before the server, and the server'
 resolves `K10:czar-search` through the signer socket. An absent K10 is a startup
 failure, not a reason to bypass that check.
 
-After health passes in fork mode, open `http://localhost:3001/onboarding` in Safari or
+After health passes in fork mode, open `http://localhost:3001/onboarding/passkey` in Safari or
 Chrome. Use `localhost`, never `127.0.0.1`, because the passkey relying-party ID is `localhost`. On the Mac mini (no Touch ID) the browser uses the Mac login
 password with Safari/iCloud Keychain or the Chrome profile PIN. The app receives its
 wallet configuration from `GET /v1/app/wallet-config`; the local values point to the
