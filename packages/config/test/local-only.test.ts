@@ -87,4 +87,34 @@ describe("local-only endpoint guard", () => {
       }),
     ).rejects.toThrow("chain.gatewayApiBaseUrl");
   });
+
+  it.each(["http://localhost", "http://localhost:3001"])(
+    "accepts app.origin %s (SCR-156)",
+    async (origin) => {
+      await expect(
+        validateLocalOnlyConfig({
+          config: loadConfig({ envFile: { ...localValues, "app.origin": origin } }),
+          overlayPath: new URL("../../../env/local.toml", import.meta.url),
+          arcRpcUrl: "http://127.0.0.1:8545",
+          fetchFn: answered,
+        }),
+      ).resolves.toBeUndefined();
+    },
+  );
+
+  it.each([
+    "https://evil.example",
+    "http://127.0.0.1:3001",
+    "http://localhost:3001/onboarding",
+    "http://user@localhost:3001",
+  ])("rejects app.origin %s (SCR-156)", async (origin) => {
+    await expect(
+      validateLocalOnlyConfig({
+        config: loadConfig({ envFile: { ...localValues, "app.origin": origin } }),
+        overlayPath: new URL("../../../env/local.toml", import.meta.url),
+        arcRpcUrl: "http://127.0.0.1:8545",
+        fetchFn: answered,
+      }),
+    ).rejects.toThrow(/app\.origin/);
+  });
 });

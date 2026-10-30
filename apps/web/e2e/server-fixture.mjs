@@ -16,6 +16,7 @@ const appConfig = {
   CZAR_APP_CIRCLE_CLIENT_URL: process.env["CZAR_APP_CIRCLE_CLIENT_URL"],
   CZAR_APP_CIRCLE_CLIENT_KEY: process.env["CZAR_APP_CIRCLE_CLIENT_KEY"],
   CZAR_APP_ARC_RPC_URL: process.env["CZAR_APP_ARC_RPC_URL"],
+  CZAR_APP_ORIGIN: "http://localhost:3100",
 };
 const port = Number(process.env["CZAR_TEST_SERVER_PORT"] ?? 4310);
 for (const name of Object.keys(process.env)) {
@@ -32,7 +33,6 @@ await migrate(pool);
 const app = createApp({
   pool,
   config: loadConfig({ env: appConfig }),
-  appOrigin: "http://localhost:3100",
   logger: { info() {}, warn() {}, error() {}, debug() {} },
   clock: { now: () => new Date() },
   random: { bytes: randomBytes },
