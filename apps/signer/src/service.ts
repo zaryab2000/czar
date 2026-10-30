@@ -155,6 +155,8 @@ export function createSigner(options: SignerOptions): Signer {
   const windows = new Map<string, number[]>();
   const keyAddressWindows = new Map<string, number[]>();
   const retiring = new Map<string, number>();
+  const nonceLocks = new Map<string, Promise<unknown>>();
+  const lastNonces = new Map<string, number>();
 
   const keyAddress = (key: "K3" | "K7" | "K8"): Address => {
     const address = backend.address(key);
@@ -226,6 +228,31 @@ export function createSigner(options: SignerOptions): Signer {
     return owner !== undefined && owner.caller === caller && owns(caller, owner.keyId);
   }
 
+  /**
+   * SCR-159 §2: transactions for one key are prepared and signed one at a time, so two concurrent requests (the
+   * dispatcher and the freeze handler, both K3) never read the same pending count.
+   */
+  async function withNonceLock<T>(keyRef: string, run: () => Promise<T>): Promise<T> {
+    const previous = nonceLocks.get(keyRef) ?? Promise.resolve();
+    const current = previous.catch(() => undefined).then(run);
+    nonceLocks.set(keyRef, current);
+    try {
+      return await current;
+    } finally {
+      if (nonceLocks.get(keyRef) === current) nonceLocks.delete(keyRef);
+    }
+  }
+
+  /** `nonce = max(pending count from the RPC, last nonce assigned to this key + 1)` (SCR-159 §2). */
+  function assignNonce(
+    keyRef: string,
+    tx: TransactionSerializableEIP1559,
+  ): TransactionSerializableEIP1559 & { readonly nonce: number } {
+    if (tx.nonce === undefined) throw new Error("Prepared transaction has no nonce.");
+    const last = lastNonces.get(keyRef);
+    return { ...tx, nonce: last === undefined ? tx.nonce : Math.max(tx.nonce, last + 1) };
+  }
+
   async function sign(caller: string, request: SignRequest): Promise<SignResult> {
     let keyRef = String(request.keyId);
     let digest: Hash32 | undefined;
@@ -274,21 +301,31 @@ export function createSigner(options: SignerOptions): Signer {
         });
         return { signature: decision.wrap ? decision.wrap(raw) : raw, digest };
       }
-      const tx = await options.prepareTransaction(from, {
-        to: decision.to,
-        data: decision.data,
-        value: decision.value,
+      const signed = await withNonceLock(keyRef, async () => {
+        const tx = assignNonce(
+          keyRef,
+          await options.prepareTransaction(from, {
+            to: decision.to,
+            data: decision.data,
+            value: decision.value,
+          }),
+        );
+        if (
+          tx.chainId !== network.chainId ||
+          tx.to?.toLowerCase() !== decision.to.toLowerCase() ||
+          tx.data !== decision.data ||
+          (tx.value ?? 0n) !== decision.value
+        )
+          throw new Denied("prepared-transaction-mismatch");
+        const txDigest = keccak256(serializeTransaction(tx)) as Hash32;
+        digest = txDigest;
+        decision.checkPrepared?.(tx);
+        const signedTransaction = await backend.signTransaction(keyRef, tx);
+        lastNonces.set(keyRef, tx.nonce);
+        return { signedTransaction, txDigest };
       });
-      if (
-        tx.chainId !== network.chainId ||
-        tx.to?.toLowerCase() !== decision.to.toLowerCase() ||
-        tx.data !== decision.data ||
-        (tx.value ?? 0n) !== decision.value
-      )
-        throw new Denied("prepared-transaction-mismatch");
-      digest = keccak256(serializeTransaction(tx)) as Hash32;
-      decision.checkPrepared?.(tx);
-      const signedTransaction = await backend.signTransaction(keyRef, tx);
+      const { signedTransaction } = signed;
+      digest = signed.txDigest;
       await audit.write({
         at: nowMs(),
         caller,
