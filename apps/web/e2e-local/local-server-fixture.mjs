@@ -131,6 +131,7 @@ const app = createApp({
   logger: { info() {}, warn() {}, error() {}, debug() {} },
   clock: { now: () => new Date() },
   random: { bytes: randomBytes },
+  vaultFactory: deployment.factory,
   appReadOptions: {
     rpcUrl,
     factoryAddress: deployment.factory,
