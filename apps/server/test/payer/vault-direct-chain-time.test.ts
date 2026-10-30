@@ -224,6 +224,8 @@ function skewedRun(input: {
   const chain = {
     stepUsed: vi.fn(async () => 0n),
     envelopeCapacity: vi.fn(async () => ({ cap: UNIT_AMOUNT, exposure: 0n })),
+    transactionCount: vi.fn(async () => 0),
+    transactionStatus: vi.fn(async (): Promise<"success" | "reverted" | undefined> => undefined),
     latestBlockTimestamp: vi.fn(async () => {
       events.push({ kind: "block" });
       return chainNow();

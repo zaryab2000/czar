@@ -2,7 +2,9 @@ import type { Config } from "@czar/config";
 import { validateSchema, type StepResult } from "@czar/schemas";
 import type { Signer } from "@czar/signer";
 import type { Pool, PoolClient } from "pg";
+import { keccak256 } from "viem";
 import { appendExecutionPhase, getExecutionTrace } from "#src/payer/executions";
+import { savedTransactionState, type SavedTransactionChain } from "#src/payer/saved-transaction";
 import { ulid, type RandomSource } from "#src/http/ids";
 import { canTransition } from "#src/objectives/state";
 
@@ -16,7 +18,7 @@ export interface CompletionInput {
   readonly envelopeId: bigint;
 }
 
-export interface CompletionChain {
+export interface CompletionChain extends SavedTransactionChain {
   readEnvelope(
     vault: `0x${string}`,
     envelopeId: bigint,
@@ -89,25 +91,15 @@ async function closeEnvelopeWhenIdle(
   if (envelope.openReservations > 0n || envelope.openPockets > 0n || envelope.openJobs > 0n)
     return false;
   const trace = await getExecutionTrace(dependencies.pool, input.planId, journalStepIndex, 0);
-  const previous = trace.findLast((row) => row.phase === "envelope.close.sent");
-  const saved = previous?.payload["transaction"];
-  const transaction =
-    typeof saved === "string"
-      ? (saved as `0x${string}`)
-      : await signCloseEnvelope(input, dependencies);
-  if (typeof saved !== "string")
-    await appendExecutionPhase(dependencies.pool, {
-      planId: input.planId,
-      stepIndex: journalStepIndex,
-      attempt: 0,
-      phase: "envelope.close.sent",
-      payload: { transaction },
-    });
-  const txHash = await dependencies.chain.closeEnvelope({
-    vault: input.vault,
-    envelopeId: input.envelopeId,
-    transaction,
-  });
+  const transaction = await nextCloseTransaction(input, dependencies, trace, journalStepIndex);
+  const txHash =
+    typeof transaction === "string"
+      ? await dependencies.chain.closeEnvelope({
+          vault: input.vault,
+          envelopeId: input.envelopeId,
+          transaction,
+        })
+      : transaction.txHash;
   await appendExecutionPhase(dependencies.pool, {
     planId: input.planId,
     stepIndex: journalStepIndex,
@@ -116,6 +108,52 @@ async function closeEnvelopeWhenIdle(
     payload: { txHash },
   });
   return (await dependencies.chain.readEnvelope(input.vault, input.envelopeId)).state === "Closed";
+}
+
+/**
+ * SCR-159 §2 for the saved `closeEnvelope`: its bytes again while they can still land, its receipt when it has
+ * one, else the close signed again and saved with a new `envelope.close.sent`. A reverted close is recorded
+ * once and fails; it is never sent again.
+ */
+async function nextCloseTransaction(
+  input: CompletionInput,
+  dependencies: CompletionDependencies,
+  trace: Awaited<ReturnType<typeof getExecutionTrace>>,
+  journalStepIndex: number,
+): Promise<`0x${string}` | { readonly txHash: string }> {
+  const saved = trace.findLast((row) => row.phase === "envelope.close.sent")?.payload[
+    "transaction"
+  ];
+  if (typeof saved === "string") {
+    const savedTransaction = saved as `0x${string}`;
+    const txHash = keccak256(savedTransaction);
+    const state = await savedTransactionState(dependencies.chain, savedTransaction);
+    if (state === "pending") return savedTransaction;
+    if (state === "mined") return { txHash };
+    if (state === "reverted") {
+      const recorded = trace.some(
+        (row) => row.phase === "envelope.close.mined" && row.payload["txHash"] === txHash,
+      );
+      if (!recorded)
+        await appendExecutionPhase(dependencies.pool, {
+          planId: input.planId,
+          stepIndex: journalStepIndex,
+          attempt: 0,
+          phase: "envelope.close.mined",
+          payload: { txHash, outcome: "reverted" },
+        });
+      throw new Error(`closeEnvelope reverted: ${txHash}`);
+    }
+  }
+  const transaction = await signCloseEnvelope(input, dependencies);
+  await appendExecutionPhase(dependencies.pool, {
+    planId: input.planId,
+    stepIndex: journalStepIndex,
+    attempt: 0,
+    phase: "envelope.close.sent",
+    payload: { transaction },
+  });
+  return transaction;
 }
 
 async function signCloseEnvelope(

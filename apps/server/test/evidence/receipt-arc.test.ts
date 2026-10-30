@@ -42,6 +42,7 @@ import { testSignerWithDetails } from "#test/payer/test-signer";
 import { createPaymentReceipt } from "#src/evidence/receipts";
 import { createServerMain } from "#src/main";
 import type { VaultDirectChain } from "#src/payer/vault-direct";
+import { savedTransactionReads } from "#src/payer/saved-transaction";
 
 const RPC_PORT = 18546;
 const RPC_URL = `http://127.0.0.1:${RPC_PORT}`;
@@ -491,6 +492,7 @@ function paidStep(
 
 function arcPayerChain(): VaultDirectChain {
   return {
+    ...savedTransactionReads(publicClient),
     envelopeCapacity: async (envelopeId) => {
       const envelope = await publicClient.readContract({
         address: vault,

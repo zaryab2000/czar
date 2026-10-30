@@ -9,7 +9,12 @@ import {
 import { decodeEventLog } from "viem";
 import { derivedNonce } from "@czar/hashing";
 import { czarVaultAbi, getVault } from "@czar/vault-client";
-import { ReserveReverted, type VaultDirectChain } from "#src/payer/vault-direct";
+import { savedTransactionReads } from "#src/payer/saved-transaction";
+import {
+  ReserveReverted,
+  VaultTransactionReverted,
+  type VaultDirectChain,
+} from "#src/payer/vault-direct";
 
 const USDC_ABI = parseAbi([
   "function authorizationState(address authorizer, bytes32 nonce) view returns (bool)",
@@ -27,7 +32,7 @@ export function createViemVaultDirectChain(input: {
   async function send(raw: Hex): Promise<Hex> {
     const hash = await input.client.sendRawTransaction({ serializedTransaction: raw });
     const receipt = await input.client.waitForTransactionReceipt({ hash });
-    if (receipt.status !== "success") throw new Error("Vault transaction reverted: " + hash);
+    if (receipt.status !== "success") throw new VaultTransactionReverted(hash);
     return hash;
   }
 
@@ -61,6 +66,7 @@ export function createViemVaultDirectChain(input: {
   }
 
   return {
+    ...savedTransactionReads(input.client),
     async stepUsed(envelopeId, stepIndex) {
       return BigInt(await vault.read.stepUsed([envelopeId, stepIndex]));
     },

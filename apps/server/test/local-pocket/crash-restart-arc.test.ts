@@ -3,7 +3,8 @@
 // the resume past the saved reserve's TTL window, SCR-153 §2, and with the chain's clock ahead of the
 // server's, SCR-155 §2), call.sent, before settle, between /v1/transfer and gatewayMint, and after an expired
 // lease. With the chain's clock 400 s behind or ahead of the server's, finalize waits for chain time past
-// validBefore (SCR-157 §1).
+// validBefore (SCR-157 §1). A saved reserve that reverts Paused ends the step, and one whose nonce another K3
+// transaction took is signed again once (SCR-159 §2).
 // "Kill" is in-process: the executor is aborted at an injected point (a raw transaction is dropped before the
 // node or the payer dies right after it is mined; the seller or `/v1/transfer` answers and the payer dies
 // before reading it), the instance is dropped, and a fresh executor resumes over the same database and chain.
@@ -11,9 +12,16 @@
 // transfer per index, one Settled per index, one burn and one AttestationUsed per pullback.
 // Run: CZAR_LOCAL_CHAIN=1 pnpm --filter @czar/server exec vitest run test/local-pocket/crash-restart-arc.test.ts
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { getAbiItem, parseAbi, toFunctionSelector, type Address, type Hex } from "viem";
+import {
+  getAbiItem,
+  parseAbi,
+  parseTransaction,
+  toFunctionSelector,
+  type Address,
+  type Hex,
+} from "viem";
 import { derivedNonce } from "@czar/hashing";
-import { czarVaultAbi } from "@czar/vault-client";
+import { czarVaultAbi, czarVaultFactoryAbi, withFeeFloor } from "@czar/vault-client";
 import type { SafeFetch } from "@czar/x402";
 import { setupDatabase } from "#test/db";
 import { getExecutionTrace } from "#src/payer/executions";
@@ -23,6 +31,7 @@ import {
   GATEWAY_MINTER,
   GATEWAY_WALLET,
   type OutgoingTransaction,
+  walletFor,
 } from "#test/local-pocket/arc-chain";
 import {
   localChainEnabled,
@@ -105,6 +114,78 @@ describe.skipIf(!localChainEnabled)(
         expect(await reservedEvents(plan)).toHaveLength(0);
 
         expect((await executeX402(harness, plan)).state).toBe("done");
+        await expectPaidExactlyOnce(plan);
+      });
+
+      it("ends reserve-failed / reverted when the saved reserve re-sent after the kill reverts Paused (SCR-159 §2)", async () => {
+        const plan = await x402Plan();
+        harness.chain.crash.arm({
+          name: "reserve-unsent-paused",
+          when: "before-send",
+          match: sentTo(plan, reserveSelector),
+        });
+        await expect(executeX402(harness, plan)).rejects.toThrow(KILLED);
+        const saved = await savedReserve(plan);
+        await guardianPause(true);
+        try {
+          expect(await executeX402(harness, plan)).toEqual({
+            state: "failed",
+            errorCode: "reserve-failed",
+          });
+        } finally {
+          await guardianPause(false);
+        }
+        const stale = await harness.chain.reader.getTransactionReceipt({ hash: saved.txHash });
+        expect(stale.status).toBe("reverted");
+        const trace = await getExecutionTrace(getPool(), plan.planId, 0, 0);
+        expect(trace.map((row) => row.phase)).toEqual([
+          "reserve.sent",
+          "reserve.mined",
+          "step.failed",
+        ]);
+        expect(trace[1]?.payload).toEqual({ txHash: saved.txHash, outcome: "reverted" });
+        expect(trace[2]?.payload).toMatchObject({
+          stepError: { code: "reserve-failed", message: "reverted", retryable: false },
+        });
+
+        // No retry loop: a further run sends nothing and signs nothing.
+        const nonceBefore = await harness.chain.reader.getTransactionCount({
+          address: harness.signer.k3,
+        });
+        expect(await executeX402(harness, plan)).toEqual({
+          state: "failed",
+          errorCode: "reserve-failed",
+        });
+        expect(await harness.chain.reader.getTransactionCount({ address: harness.signer.k3 })).toBe(
+          nonceBefore,
+        );
+        expect(await getExecutionTrace(getPool(), plan.planId, 0, 1)).toEqual([]);
+        expect(await reservedEvents(plan)).toHaveLength(0);
+        expect(await authorizationsUsed(plan)).toHaveLength(0);
+        expect(plan.merchant.settlements()).toBe(0);
+      });
+
+      it("re-signs the saved reserve once when another K3 transaction took its nonce (SCR-159 §2)", async () => {
+        const plan = await x402Plan();
+        harness.chain.crash.arm({
+          name: "reserve-unsent-nonce-taken",
+          when: "before-send",
+          match: sentTo(plan, reserveSelector),
+        });
+        await expect(executeX402(harness, plan)).rejects.toThrow(KILLED);
+        const saved = await savedReserve(plan);
+        await takeK3Nonce(saved.signedTransaction);
+
+        expect((await executeX402(harness, plan)).state).toBe("done");
+        await expect(
+          harness.chain.reader.getTransactionReceipt({ hash: saved.txHash }),
+        ).rejects.toThrow();
+        const sent = (await getExecutionTrace(getPool(), plan.planId, 0, 0)).filter(
+          (row) => row.phase === "reserve.sent",
+        );
+        expect(sent).toHaveLength(2);
+        expect(sent[1]?.payload["validBefore"]).toBe(saved.validBefore.toString());
+        expect(await getExecutionTrace(getPool(), plan.planId, 0, 1)).toEqual([]);
         await expectPaidExactlyOnce(plan);
       });
 
@@ -397,16 +478,61 @@ async function expectFinalizedAfterValidBefore(plan: X402Plan): Promise<void> {
   expect(envelope.reserved).toBe(0n);
 }
 
-/** The `reserve.sent` the killed payer saved: its transaction hash and `validBefore`. */
-async function savedReserve(plan: X402Plan): Promise<{ txHash: Hex; validBefore: bigint }> {
+/** The `reserve.sent` the killed payer saved: its transaction, hash and `validBefore`. */
+async function savedReserve(
+  plan: X402Plan,
+): Promise<{ txHash: Hex; validBefore: bigint; signedTransaction: Hex }> {
   const sent = (await getExecutionTrace(getPool(), plan.planId, 0, 0)).find(
     (row) => row.phase === "reserve.sent",
   );
   const txHash = sent?.payload["txHash"];
   const validBefore = sent?.payload["validBefore"];
-  if (typeof txHash !== "string" || typeof validBefore !== "string")
+  const signedTransaction = sent?.payload["signedTransaction"];
+  if (
+    typeof txHash !== "string" ||
+    typeof validBefore !== "string" ||
+    typeof signedTransaction !== "string"
+  )
     throw new Error("The killed payer saved no reserve.sent phase.");
-  return { txHash: txHash as Hex, validBefore: BigInt(validBefore) };
+  return {
+    txHash: txHash as Hex,
+    validBefore: BigInt(validBefore),
+    signedTransaction: signedTransaction as Hex,
+  };
+}
+
+/**
+ * Another K3 transaction (as from a restarted signer process) mines on the saved transaction's nonce: a
+ * zero-value transfer to K3 itself, signed by the same key.
+ */
+async function takeK3Nonce(saved: Hex): Promise<void> {
+  const nonce = parseTransaction(saved).nonce;
+  const gasPrice = await harness.chain.reader.getGasPrice();
+  const signedTransaction = await harness.signer.backend.signTransaction("K3", {
+    type: "eip1559",
+    chainId: await harness.chain.reader.getChainId(),
+    nonce,
+    to: harness.signer.k3,
+    value: 0n,
+    gas: 21_000n,
+    maxFeePerGas: gasPrice * 2n,
+    maxPriorityFeePerGas: gasPrice,
+  });
+  const hash = await harness.chain.reader.sendRawTransaction({
+    serializedTransaction: signedTransaction,
+  });
+  expect((await harness.chain.reader.waitForTransactionReceipt({ hash })).status).toBe("success");
+}
+
+async function guardianPause(paused: boolean): Promise<void> {
+  const wallet = walletFor(harness.chain, harness.guardian);
+  const hash = await wallet.writeContract({
+    address: harness.chain.factory,
+    abi: czarVaultFactoryAbi,
+    functionName: paused ? "pause" : "unpause",
+    ...withFeeFloor({ maxFeePerGas: (await harness.chain.reader.getGasPrice()) * 2n }),
+  });
+  expect((await harness.chain.reader.waitForTransactionReceipt({ hash })).status).toBe("success");
 }
 
 /** Moves the payer clock and chain time together until the latest block is at least `timestamp`. */

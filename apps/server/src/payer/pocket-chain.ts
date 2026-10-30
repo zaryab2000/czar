@@ -1,6 +1,7 @@
 import { parseAbi, type Address, type Hex, type PublicClient } from "viem";
 import { czarVaultAbi } from "@czar/vault-client";
 import type { PocketPreparationChain } from "#src/payer/pocket";
+import { savedTransactionReads } from "#src/payer/saved-transaction";
 
 const gatewayWalletDelegateAbi = parseAbi([
   "function isAuthorizedForBalance(address token,address depositor,address delegate) view returns (bool)",
@@ -29,6 +30,7 @@ export function createPocketPreparationChain(input: {
   }
 
   return {
+    ...savedTransactionReads(input.client),
     async isRegistered(pocket) {
       return Number((await pocketRecord(pocket)).state) !== 0;
     },

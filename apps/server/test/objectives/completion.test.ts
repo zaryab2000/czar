@@ -90,6 +90,10 @@ describe("objective completion", () => {
           openJobs: 0n,
         })),
         closeEnvelope: close,
+        transactionCount: vi.fn(async () => 0),
+        transactionStatus: vi.fn(
+          async (): Promise<"success" | "reverted" | undefined> => undefined,
+        ),
       },
       now: () => new Date("2026-10-25T12:00:00Z"),
       random: { bytes: (size: number) => Buffer.alloc(size, 1) },
@@ -132,6 +136,10 @@ describe("objective completion", () => {
             openJobs: 0n,
           }),
           closeEnvelope: vi.fn(),
+          transactionCount: vi.fn(async () => 0),
+          transactionStatus: vi.fn(
+            async (): Promise<"success" | "reverted" | undefined> => undefined,
+          ),
         },
         now: () => new Date("2026-10-25T12:00:00Z"),
         random: { bytes: (size: number) => Buffer.alloc(size, 2) },
@@ -177,6 +185,10 @@ describe("objective completion", () => {
             openJobs: 0n,
           }),
           closeEnvelope: vi.fn(),
+          transactionCount: vi.fn(async () => 0),
+          transactionStatus: vi.fn(
+            async (): Promise<"success" | "reverted" | undefined> => undefined,
+          ),
         },
         now: () => new Date("2026-10-25T12:00:00Z"),
         random: { bytes: (size: number) => Buffer.alloc(size, 3) },
