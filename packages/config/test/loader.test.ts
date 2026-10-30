@@ -162,6 +162,23 @@ describe("registry", () => {
     }
   });
 
+  it("bounds the owner UserOperation receipt wait (SCR-159 §4)", () => {
+    const spec = PARAMETERS.find((entry) => entry.key === "app.userOpReceiptTimeoutSeconds");
+    expect(spec).toMatchObject({
+      type: "integer",
+      default: 120,
+      unit: "s",
+      reason: "Arc finality is sub-second; covers bundler queueing",
+    });
+    expect(spec?.source).toMatch(/^docs\/specs\/06-review\/change-requests\/SCR-159-[^:]+\.md:62$/);
+    expect(loadConfig().get("app.userOpReceiptTimeoutSeconds")).toBe(120);
+  });
+
+  it("serves the registry from a browser-safe entry point", async () => {
+    const browser = await import("@czar/config/registry");
+    expect(browser.PARAMETERS).toBe(PARAMETERS);
+  });
+
   it("matches the dump snapshot", () => {
     expect(loadConfig().dump()).toMatchSnapshot();
   });

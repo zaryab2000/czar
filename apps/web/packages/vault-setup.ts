@@ -22,7 +22,8 @@ export function canCreateVault(me: { readonly balances: Pick<Me["balances"], "ms
 
 /**
  * Creates the owner's vault and sets its passkey, skipping each step the chain already has
- * (SCR-157 §3, FAC-1). The factory and RP ID come from the server's wallet-config.
+ * (SCR-157 §3, FAC-1). Each operation is included before the next is sent (SCR-159 §4). The
+ * factory and RP ID come from the server's wallet-config.
  */
 export async function setUpVault(me: {
   readonly msca: `0x${string}`;
@@ -37,19 +38,24 @@ export async function setUpVault(me: {
   let created = false;
   if (existing === zeroAddress) {
     try {
-      await sendOwnerUserOperation(passkey, vaultFactory, encodeCreateVault(me.msca));
+      // setPasskey shares the EntryPoint nonce until createVault is included (SCR-159 §4).
+      await sendOwnerUserOperation(passkey, vaultFactory, encodeCreateVault(me.msca), {
+        waitForInclusion: true,
+      });
       created = true;
     } catch (cause) {
       if (!isVaultExistsError(cause)) throw cause;
     }
   }
   const vault = existing === zeroAddress ? me.vault : existing;
-  // A vault this call just created has no passkey yet and may not be mined, so it is not read.
+  // A vault this call just created has no passkey yet, so it is not read.
   if (!created) {
     const current = await readVaultPasskey({ client, vault });
     if (current.set && sameKey(current, { ...key, rpIdHash })) return;
   }
-  await sendOwnerUserOperation(passkey, vault, encodeSetPasskey(key.qx, key.qy, rpIdHash));
+  await sendOwnerUserOperation(passkey, vault, encodeSetPasskey(key.qx, key.qy, rpIdHash), {
+    waitForInclusion: true,
+  });
 }
 
 function sameKey(
