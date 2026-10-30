@@ -21,6 +21,7 @@ import {
   executeVaultDirectStep,
   MIN_RESERVATION_TTL_SECONDS,
   ReserveReverted,
+  VaultTransactionReverted,
   type ReserveOutcome,
   type VaultDirectChain,
   type VaultDirectDependencies,
@@ -41,8 +42,6 @@ const OFFER_TIMEOUT_SECONDS = 300;
 const STARTED_AT = new Date("2026-10-21T00:00:00Z");
 const STARTED_SECONDS = BigInt(STARTED_AT.getTime() / 1000);
 const FIRST_VALID_BEFORE = STARTED_SECONDS + BigInt(OFFER_TIMEOUT_SECONDS);
-const LEAF = payeeLeaf(PAYEE, PAYEE_KIND.X402_PAY_TO, 0, UNIT_AMOUNT);
-const TREE = buildTree([LEAF]);
 /** A test-only K3 key generated per run; nothing is committed. */
 const K3 = privateKeyToAccount(generatePrivateKey());
 /** A guard so an unbounded re-send loop fails the test instead of hanging it. */
@@ -245,6 +244,25 @@ describe("a saved reserve (SCR-159 §2)", () => {
     expect(run.chain.reserve).toHaveBeenCalledOnce();
   });
 
+  it("does not re-sign a mined reserve whose receipt a lagging RPC node has not served yet (review M3)", async () => {
+    const run = paidRun();
+    run.chain.reserve.mockRejectedValueOnce(new Error("RPC dropped before the receipt"));
+    await expect(executeVaultDirectStep(stepInput(), run.dependencies)).rejects.toThrow(
+      "RPC dropped",
+    );
+    // The saved reserve is mined: the count node is past its nonce, the receipt node lags one read.
+    run.mine(run.savedReserve(), "success");
+    run.chain.reserveOutcome.mockResolvedValueOnce(undefined);
+
+    await expect(executeVaultDirectStep(stepInput(), run.dependencies)).resolves.toMatchObject({
+      state: "done",
+    });
+
+    expect(run.chain.reserve).toHaveBeenCalledOnce();
+    const trace = await getExecutionTrace(getPool(), PLAN_ID, 0, 0);
+    expect(trace.filter((row) => row.phase === "reserve.sent")).toHaveLength(1);
+  });
+
   it("recomputes validBefore from chain time when the re-signed reserve's old one no longer clears the TTL", async () => {
     const run = paidRun();
     run.chain.reserve.mockRejectedValueOnce(new Error("RPC dropped before broadcast"));
@@ -261,7 +279,13 @@ describe("a saved reserve (SCR-159 §2)", () => {
 
     const reserveArgs = run.vaultArgs("reserve");
     expect(reserveArgs).toHaveLength(2);
-    const freshValidBefore = (resumedSeconds + BigInt(OFFER_TIMEOUT_SECONDS)).toString();
+    // Review M3: "replaced" is confirmed after one `payer.reconcileSeconds` wait, so chain time has moved on.
+    const confirmWait = BigInt(Number(run.dependencies.config.get("payer.reconcileSeconds")));
+    const freshValidBefore = (
+      resumedSeconds +
+      confirmWait +
+      BigInt(OFFER_TIMEOUT_SECONDS)
+    ).toString();
     expect(reserveArgs[1]).toEqual({
       ...(reserveArgs[0] as Record<string, unknown>),
       validBefore: freshValidBefore,
@@ -364,30 +388,94 @@ describe("saved settle and finalize transactions (SCR-159 §2)", () => {
     expect(run.vaultCalls().filter((selector) => selector === "settle")).toHaveLength(1);
   });
 
-  it("ends the step when a saved settle reverted, without another settle", async () => {
+  it("records a saved settle that reverted, sends no other settle, and still finalizes", async () => {
     const run = paidRun();
     run.chain.settle.mockImplementationOnce(async (args) => {
       run.mine(args.signedTransaction, "reverted");
-      throw new Error("Vault transaction reverted");
+      throw new Error("RPC dropped before the receipt");
     });
     await expect(executeVaultDirectStep(stepInput(), run.dependencies)).rejects.toThrow(
-      "Vault transaction reverted",
+      "RPC dropped",
     );
 
-    await expect(executeVaultDirectStep(stepInput(), run.dependencies)).resolves.toEqual({
-      state: "failed",
-      errorCode: "reserve-failed",
+    await expect(executeVaultDirectStep(stepInput(), run.dependencies)).resolves.toMatchObject({
+      state: "done",
     });
 
     expect(run.chain.settle).toHaveBeenCalledOnce();
+    expect(run.vaultCalls()).toEqual(["reserve", "settle", "finalize"]);
+    expect(run.reservationIsFinal()).toBe(true);
     const trace = await getExecutionTrace(getPool(), PLAN_ID, 0, 0);
-    expect(trace.at(-2)).toMatchObject({
-      phase: "settle.mined",
-      payload: { indices: [0], outcome: "reverted" },
+    expect(trace.find((row) => row.phase === "settle.mined")?.payload).toMatchObject({
+      indices: [0],
+      outcome: "reverted",
     });
-    expect(trace.at(-1)?.payload).toMatchObject({
-      stepError: { code: "reserve-failed", message: "settle reverted", retryable: false },
+    expect(run.receiptIndices()).toEqual([0]);
+    await expect(stepRow()).resolves.toEqual({ state: "done", calls_used: 1 });
+  });
+});
+
+describe("a reverted settle or finalize still reaches a Final reservation (review M2)", () => {
+  it("finalizes the rest after a third party finalized index 0 and our settle reverted AlreadyDone", async () => {
+    const run = paidRun({ calls: 2 });
+    run.thirdPartyFinalizeBefore("settle", 0, 1);
+
+    await expect(executeVaultDirectStep(stepInput(2), run.dependencies)).resolves.toMatchObject({
+      state: "done",
     });
+
+    expect(run.vaultCalls()).toEqual(["reserve", "settle", "finalize"]);
+    expect(run.vaultArgs("finalize")).toEqual([
+      { reservationId: RESERVATION_ID.toString(), fromIndex: "0", toIndex: "2" },
+    ]);
+    expect(run.reservationIsFinal()).toBe(true);
+    const trace = await getExecutionTrace(getPool(), PLAN_ID, 0, 0);
+    expect(trace.find((row) => row.phase === "settle.mined")?.payload).toMatchObject({
+      indices: [0, 1],
+      outcome: "reverted",
+    });
+    expect(trace.find((row) => row.phase === "finalize.mined")?.payload).not.toHaveProperty(
+      "outcome",
+    );
+    expect(run.receiptIndices().toSorted()).toEqual([0, 1]);
+    await expect(stepRow()).resolves.toEqual({ state: "done", calls_used: 2 });
+  });
+
+  it("completes from on-chain facts when the reservation is already Final and settle reverts ReservationNotActive", async () => {
+    const run = paidRun();
+    run.thirdPartyFinalizeBefore("settle", 0, 1);
+
+    await expect(executeVaultDirectStep(stepInput(), run.dependencies)).resolves.toMatchObject({
+      state: "done",
+    });
+
+    expect(run.vaultCalls()).toEqual(["reserve", "settle"]);
+    expect(run.chain.finalize).not.toHaveBeenCalled();
+    expect(run.reservationIsFinal()).toBe(true);
+    expect(run.receiptIndices()).toEqual([0]);
+    expect(await phases(0)).toContain("settle.mined");
+    await expect(stepRow()).resolves.toEqual({ state: "done", calls_used: 1 });
+  });
+
+  it("completes the step when our finalize reverts because a third party already made the reservation Final", async () => {
+    const run = paidRun({ calls: 2 });
+    run.leaveUnused(1);
+    run.thirdPartyFinalizeBefore("finalize", 0, 2);
+
+    const result = await executeVaultDirectStep(stepInput(2), run.dependencies);
+
+    expect(run.chain.finalize).toHaveBeenCalledOnce();
+    expect(run.reservationIsFinal()).toBe(true);
+    const trace = await getExecutionTrace(getPool(), PLAN_ID, 0, 0);
+    expect(trace.find((row) => row.phase === "finalize.mined")?.payload).toMatchObject({
+      start: 0,
+      count: 2,
+      outcome: "reverted",
+    });
+    // The step ends by the settled facts, never by the reverted finalize.
+    expect(trace.at(-1)?.payload["stepError"]).toBeUndefined();
+    // SCR-159 §3 (#171): one paid call of two, so the step is done and index 1 is recorded unpaid.
+    expect(result).toMatchObject({ state: "done" });
   });
 });
 
@@ -418,7 +506,8 @@ const REVERTED_FAILURE = {
   },
 };
 
-function paidRun(options: { readonly receiptStoredOnTry?: number } = {}) {
+function paidRun(options: { readonly receiptStoredOnTry?: number; readonly calls?: number } = {}) {
+  const calls = options.calls ?? 1;
   let chainSeconds = STARTED_SECONDS;
   let accountNonce = 0;
   let nextNonce = 0;
@@ -430,7 +519,61 @@ function paidRun(options: { readonly receiptStoredOnTry?: number } = {}) {
   let landAfterRead: Hex | undefined;
   const receipts = new Map<Hex, "success" | "reverted">();
   const settled = new Set<number>();
+  /** The vault's `doneMask`: indices settled or released. */
+  const done = new Set<number>();
+  /** Indices whose authorization was never used: `finalize` releases them. */
+  const unused = new Set<number>();
   let final = false;
+  let beforeNextVaultSend: { selector: "settle" | "finalize"; run: () => void } | undefined;
+  const receiptIndices: number[] = [];
+
+  function finalizeIfDone(): void {
+    if (done.size === calls) final = true;
+  }
+
+  /**
+   * `ReservationLogic.settle`: reverts `ReservationNotActive` once Final and `AlreadyDone` on a done index. Unlike
+   * the vault it never makes the reservation Final itself, so these runs always reach the finalize path.
+   */
+  function vaultSettle(indices: readonly number[]): boolean {
+    if (final || indices.some((index) => done.has(index))) return false;
+    for (const index of indices) {
+      settled.add(index);
+      done.add(index);
+    }
+    return true;
+  }
+
+  /** `ReservationLogic.finalize`: permissionless; books used authorizations, releases the rest. */
+  function vaultFinalize(start: number, count: number): boolean {
+    if (final) return false;
+    for (let index = start; index < start + count; index += 1) {
+      if (done.has(index)) continue;
+      if (!unused.has(index)) settled.add(index);
+      done.add(index);
+    }
+    finalizeIfDone();
+    return true;
+  }
+
+  /** Lands a vault call; a call the vault refuses mines with status 0. */
+  function sendVault(
+    selector: "settle" | "finalize",
+    signedTransaction: Hex,
+    apply: () => boolean,
+  ) {
+    if (beforeNextVaultSend?.selector === selector) {
+      beforeNextVaultSend.run();
+      beforeNextVaultSend = undefined;
+    }
+    const nonce = parseTransaction(signedTransaction).nonce ?? 0;
+    if (nonce >= accountNonce && !apply()) {
+      sends += 1;
+      mine(signedTransaction, "reverted");
+      throw new VaultTransactionReverted(keccak256(signedTransaction));
+    }
+    return land(signedTransaction);
+  }
 
   function mine(signedTransaction: Hex, status: "success" | "reverted"): void {
     receipts.set(keccak256(signedTransaction), status);
@@ -480,7 +623,7 @@ function paidRun(options: { readonly receiptStoredOnTry?: number } = {}) {
 
   const chain = {
     stepUsed: vi.fn(async () => 0n),
-    envelopeCapacity: vi.fn(async () => ({ cap: UNIT_AMOUNT, exposure: 0n })),
+    envelopeCapacity: vi.fn(async () => ({ cap: UNIT_AMOUNT * BigInt(calls), exposure: 0n })),
     latestBlockTimestamp: vi.fn(async () => chainSeconds),
     reserve: vi.fn<VaultDirectChain["reserve"]>(async (args) => ({
       reservationId: RESERVATION_ID,
@@ -496,16 +639,15 @@ function paidRun(options: { readonly receiptStoredOnTry?: number } = {}) {
     }),
     transactionCount: vi.fn(async (_address: `0x${string}`) => afterRead(accountNonce)),
     transactionStatus: vi.fn(async (txHash: `0x${string}`) => receipts.get(txHash)),
-    settle: vi.fn<VaultDirectChain["settle"]>(async (args) => {
-      const hash = land(args.signedTransaction);
-      for (const index of args.indices) settled.add(index);
-      return hash;
-    }),
-    authorizationState: vi.fn(async () => true),
+    settle: vi.fn<VaultDirectChain["settle"]>(async (args) =>
+      sendVault("settle", args.signedTransaction, () => vaultSettle(args.indices)),
+    ),
+    authorizationState: vi.fn(async ({ index }: { index: number }) => !unused.has(index)),
     isSettled: vi.fn(async ({ index }: { index: number }) => settled.has(index)),
     finalize: vi.fn<VaultDirectChain["finalize"]>(async (args) => {
-      const txHash = land(args.signedTransaction);
-      final = true;
+      const txHash = sendVault("finalize", args.signedTransaction, () =>
+        vaultFinalize(args.start, args.count),
+      );
       return { txHash, final };
     }),
     reservationFinal: vi.fn(async () => final),
@@ -573,7 +715,8 @@ function paidRun(options: { readonly receiptStoredOnTry?: number } = {}) {
       flags: [],
       bodyCommit: HASH,
     }),
-    recordReceipt: async () => {
+    recordReceipt: async (context) => {
+      receiptIndices.push(context.index);
       receiptTries += 1;
       return receiptTries >= (options.receiptStoredOnTry ?? 1);
     },
@@ -608,6 +751,15 @@ function paidRun(options: { readonly receiptStoredOnTry?: number } = {}) {
     setChainTime: (seconds: bigint) => {
       chainSeconds = seconds;
     },
+    /** Another account calls the permissionless `finalize` just before our next `selector` lands. */
+    thirdPartyFinalizeBefore: (selector: "settle" | "finalize", start: number, count: number) => {
+      beforeNextVaultSend = { selector, run: () => vaultFinalize(start, count) };
+    },
+    reservationIsFinal: () => final,
+    leaveUnused: (index: number) => {
+      unused.add(index);
+    },
+    receiptIndices: () => receiptIndices,
     probes: () =>
       safeFetch.mock.calls.filter(([, init]) => !init?.headers?.["payment-signature"]).length,
     authorizations: () =>
@@ -638,8 +790,10 @@ async function stepRow(): Promise<{ state: string; calls_used: number } | undefi
   return result.rows[0];
 }
 
-function stepInput(): VaultDirectInput {
+function stepInput(calls = 1): VaultDirectInput {
   const envelopeExpiresAt = new Date("2026-10-22T00:00:00Z");
+  const stepCap = (UNIT_AMOUNT * BigInt(calls)).toString();
+  const tree = buildTree([payeeLeaf(PAYEE, PAYEE_KIND.X402_PAY_TO, 0, BigInt(stepCap))]);
   return {
     planId: PLAN_ID,
     envelopeRef: "eip155:5042002:0x0000000000000000000000000000000000000001:1",
@@ -654,9 +808,9 @@ function stepInput(): VaultDirectInput {
       planHash: HASH,
       network: "eip155:5042002",
       category: "research",
-      cap: UNIT_AMOUNT.toString(),
+      cap: stepCap,
       slackBps: 0,
-      maxStepAmount: UNIT_AMOUNT.toString(),
+      maxStepAmount: stepCap,
       pocketCapBps: 0,
       expiresAt: envelopeExpiresAt.toISOString(),
       steps: [],
@@ -665,10 +819,10 @@ function stepInput(): VaultDirectInput {
           payee: PAYEE,
           kind: PAYEE_KIND.X402_PAY_TO,
           stepIndex: 0,
-          stepCap: UNIT_AMOUNT.toString(),
+          stepCap,
         },
       ],
-      payeeRoot: TREE.root,
+      payeeRoot: tree.root,
       shadow: false,
       createdAt: STARTED_AT.toISOString(),
       taskSpec: {} as never,
@@ -682,11 +836,14 @@ function stepInput(): VaultDirectInput {
       resource: { url: "http://127.0.0.1:4021/data", method: "GET" },
       payee: PAYEE,
       unitAmount: UNIT_AMOUNT.toString(),
-      expectedCalls: 1,
-      stepCap: UNIT_AMOUNT.toString(),
+      expectedCalls: calls,
+      stepCap,
       routingReason: "vault-direct",
       acceptanceProfileId: "prof_11111111111111111111111111111111",
-      callInputs: [{ callIndex: 0, input: { q: "one" } }],
+      callInputs: Array.from({ length: calls }, (_, callIndex) => ({
+        callIndex,
+        input: { q: `call-${callIndex}` },
+      })),
     },
     userId: TEST_USER_ID,
     deviceId: "dev_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",

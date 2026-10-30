@@ -52,6 +52,19 @@ export async function savedNonceSpent(
 export async function savedTransactionState(
   chain: SavedTransactionChain,
   signedTransaction: Hex,
+  confirmReplaced?: () => Promise<void>,
+): Promise<SavedTransactionState> {
+  const state = await readSavedTransactionState(chain, signedTransaction);
+  if (state !== "replaced" || confirmReplaced === undefined) return state;
+  // Review M3: behind a load-balanced RPC the count and the receipt can come from different nodes. A
+  // transaction counts as replaced only when a second read, after `confirmReplaced`, still says so.
+  await confirmReplaced();
+  return readSavedTransactionState(chain, signedTransaction);
+}
+
+async function readSavedTransactionState(
+  chain: SavedTransactionChain,
+  signedTransaction: Hex,
 ): Promise<SavedTransactionState> {
   const spent = await savedNonceSpent(chain, signedTransaction);
   const status = await chain.transactionStatus(keccak256(signedTransaction));

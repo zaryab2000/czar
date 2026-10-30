@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 import { createPublicClient, custom, type Address, type Hex } from "viem";
 import { createViemVaultDirectChain } from "#src/payer/viem-chain";
-import { ReserveReverted } from "#src/payer/vault-direct";
+import { ReserveReverted, VaultTransactionReverted } from "#src/payer/vault-direct";
 
 const VAULT = "0x0000000000000000000000000000000000000001" as Address;
 const USDC = "0x3600000000000000000000000000000000000000" as Address;
@@ -53,6 +53,32 @@ describe("viem vault-direct chain: reverted reserve", () => {
 
     await expect(chain.reserveOutcome?.(TX_HASH)).resolves.toBeUndefined();
     expect(node.methods).not.toContain("eth_getBlockByNumber");
+  });
+});
+
+describe("viem vault-direct chain: reverted settle and finalize (review M2)", () => {
+  it("throws VaultTransactionReverted with the hash when a sent settle reverts", async () => {
+    const node = fakeNode();
+    const chain = createViemVaultDirectChain({ client: node.client, vault: VAULT, usdc: USDC });
+
+    const error = await chain
+      .settle({ signedTransaction: SIGNED_RESERVE, reservationId: 1n, indices: [0] })
+      .catch((thrown: unknown) => thrown);
+
+    expect(error).toBeInstanceOf(VaultTransactionReverted);
+    expect(error).toMatchObject({ txHash: TX_HASH });
+  });
+
+  it("throws VaultTransactionReverted with the hash when a sent finalize reverts", async () => {
+    const node = fakeNode();
+    const chain = createViemVaultDirectChain({ client: node.client, vault: VAULT, usdc: USDC });
+
+    const error = await chain
+      .finalize({ signedTransaction: SIGNED_RESERVE, reservationId: 1n, start: 0, count: 1 })
+      .catch((thrown: unknown) => thrown);
+
+    expect(error).toBeInstanceOf(VaultTransactionReverted);
+    expect(error).toMatchObject({ txHash: TX_HASH });
   });
 });
 
