@@ -479,3 +479,51 @@ describe("gas refill job start (SCR-155 §3)", () => {
 function throwing(message: string): never {
   throw new Error(message);
 }
+
+describe("refill nonces after a failed send (SCR-159 §2)", () => {
+  it("signs the next refill on the failed refill's nonce, so it is not stuck behind a gap", async () => {
+    // The RPC pending count moves only when a refill reaches the node.
+    let pending = 5;
+    const t = await harness({
+      prepareTransaction: async (_from, call) => ({
+        type: "eip1559",
+        chainId: 5042002,
+        nonce: pending,
+        gas: 21_000n,
+        maxFeePerGas: 20_000_000_000n,
+        maxPriorityFeePerGas: 1n,
+        to: call.to,
+        data: call.data,
+        value: call.value,
+      }),
+    });
+    for (const key of REFILL_KEYS) t.state.native.set(t.address(key).toLowerCase(), 0n);
+    t.state.native.set(t.address("relayer").toLowerCase(), RELAYER_AT_TARGETS);
+    const nonces: number[] = [];
+    let failFirst = true;
+
+    const results = await runGasRefill({
+      config: loadConfig(),
+      signer: t.signer,
+      keyAddress: (key) => t.address(key),
+      getNativeBalance: async (address) => t.state.native.get(address.toLowerCase()) ?? 0n,
+      submitTransaction: async (transaction: Hex) => {
+        const tx = parseTransaction(transaction);
+        nonces.push(tx.nonce ?? -1);
+        if (failFirst) {
+          failFirst = false;
+          throw new Error("insufficient funds for gas");
+        }
+        pending += 1;
+        const to = (tx.to ?? "").toLowerCase();
+        t.state.native.set(to, (t.state.native.get(to) ?? 0n) + (tx.value ?? 0n));
+        return { blockNumber: 1n };
+      },
+      alert: async () => undefined,
+      metrics: createSignerMetrics(),
+    });
+
+    expect(results.map(({ status }) => status)).toEqual(["failed", "refilled", "refilled"]);
+    expect(nonces).toEqual([5, 5, 6]);
+  });
+});
