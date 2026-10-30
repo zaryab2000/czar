@@ -164,4 +164,3 @@ describe("local process composition", () => {
     expect(readme).not.toMatch(/localhost:3001\/onboarding`/);
   });
 });
-
