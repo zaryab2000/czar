@@ -81,7 +81,7 @@ describe("local process composition", () => {
       serverMain.indexOf("const objects"),
     );
     expect(localServer.indexOf("await createLocalServerMain")).toBeLessThan(
-      localServer.indexOf("await listen(server, port)"),
+      localServer.indexOf("await listenOnLoopback(server, port)"),
     );
     expect(localMerchant.indexOf("await migrateMerchant(pool)")).toBeLessThan(
       localMerchant.indexOf("await createMerchantServer"),
