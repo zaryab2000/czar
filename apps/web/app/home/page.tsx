@@ -124,7 +124,10 @@ function OwnerControls({ me, refresh }: { readonly me: Me; readonly refresh: () 
     setNotice(undefined);
     try {
       const intent = await appApi.createFreezeIntent(action);
-      await sendOwnerUserOperation(getStoredPasskey(), intent.to, intent.calldata);
+      // The toggle can be pressed again at once; the next press needs this one's nonce spent.
+      await sendOwnerUserOperation(getStoredPasskey(), intent.to, intent.calldata, {
+        waitForInclusion: true,
+      });
       setNotice(action === "freeze" ? "Freezing…" : "Unfreezing…");
       setConfirm(false);
       window.dispatchEvent(new Event(ACCOUNT_REFRESH_EVENT));

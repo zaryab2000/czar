@@ -9,7 +9,13 @@ import {
   type PublicClient,
   type Transport,
 } from "viem";
-import { createBundlerClient, toWebAuthnAccount } from "viem/account-abstraction";
+import {
+  createBundlerClient,
+  toWebAuthnAccount,
+  WaitForUserOperationReceiptTimeoutError,
+  type BundlerClient,
+} from "viem/account-abstraction";
+import { PARAMETERS } from "@czar/config/registry";
 import { readEnvelopeCount as readCount } from "@czar/vault-client";
 import { getAppWalletConfig } from "#src/app-api";
 import type { BrowserPasskey } from "#src/passkey";
@@ -18,10 +24,22 @@ const CHAIN_ID = 5042002;
 const BUNDLERS = ["circle", "pimlico", "alchemy", "zerodev"] as const;
 const P256_ORDER = BigInt("0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551");
 
+/** `waitForInclusion`: return only once the accepting bundler reports the receipt (SCR-159 §4). */
+export interface OwnerUserOperationOptions {
+  readonly waitForInclusion?: boolean;
+}
+
+/**
+ * Sends one owner UserOperation through the first bundler that accepts it. With
+ * `waitForInclusion`, it then waits on that bundler for the receipt, bounded by
+ * `app.userOpReceiptTimeoutSeconds`, and fails when the receipt shows a revert. Send before the
+ * next owner operation only after inclusion: both use the same EntryPoint nonce until then.
+ */
 export async function sendOwnerUserOperation(
   passkey: Pick<BrowserPasskey, "credentialId" | "publicKey">,
   to: `0x${string}`,
   data: Hex,
+  options: OwnerUserOperationOptions = {},
 ): Promise<{ readonly userOpHash: Hex; readonly bundler: (typeof BUNDLERS)[number] }> {
   const walletConfig = await getAppWalletConfig();
   const chain = arcChain(walletConfig.arcRpcUrl);
@@ -45,6 +63,13 @@ export async function sendOwnerUserOperation(
     owner: owner as unknown as Parameters<typeof toCircleSmartAccount>[0]["owner"],
   });
   let lastError: unknown;
+  let accepted:
+    | {
+        readonly userOpHash: Hex;
+        readonly bundler: (typeof BUNDLERS)[number];
+        readonly client: BundlerClient;
+      }
+    | undefined;
   for (const name of walletConfig.bundlerOrder) {
     const endpoint =
       walletConfig.bundlerEndpoints[name] ??
@@ -60,18 +85,60 @@ export async function sendOwnerUserOperation(
           walletConfig.circleClientKey,
         ) as unknown as Transport,
       });
-      const userOpHash = await bundler.sendUserOperation({
-        account,
-        calls: [{ to, data, value: 0n }],
-      });
-      return { userOpHash, bundler: name };
+      accepted = {
+        userOpHash: await bundler.sendUserOperation({
+          account,
+          calls: [{ to, data, value: 0n }],
+        }),
+        bundler: name,
+        client: bundler,
+      };
+      break;
     } catch (error) {
       lastError = error;
     }
   }
-  throw new Error("The network is busy. Your approval was not sent. Try again in a minute.", {
-    cause: lastError,
-  });
+  if (!accepted) {
+    throw new Error("The network is busy. Your approval was not sent. Try again in a minute.", {
+      cause: lastError,
+    });
+  }
+  if (options.waitForInclusion) await waitForInclusion(accepted.client, accepted.userOpHash);
+  return { userOpHash: accepted.userOpHash, bundler: accepted.bundler };
+}
+
+/** Waits on the bundler that accepted the operation; it is never re-sent to another one. */
+async function waitForInclusion(
+  bundler: Pick<BundlerClient, "waitForUserOperationReceipt">,
+  hash: Hex,
+): Promise<void> {
+  const seconds = userOpReceiptTimeoutSeconds();
+  let receipt: Awaited<ReturnType<BundlerClient["waitForUserOperationReceipt"]>>;
+  try {
+    receipt = await bundler.waitForUserOperationReceipt({ hash, timeout: seconds * 1_000 });
+  } catch (cause) {
+    const message =
+      cause instanceof WaitForUserOperationReceiptTimeoutError
+        ? `The network has not confirmed this change after ${seconds} seconds.`
+        : "Czar could not confirm this change with the network.";
+    throw new Error(`${message} Wait a minute and check before trying again.`, { cause });
+  }
+  if (!receipt.success) {
+    // The revert data stays on the cause so callers can decode it (`@czar/vault-client`).
+    throw new Error("This change failed on-chain and was not applied.", {
+      cause: Object.assign(new Error("UserOperation reverted"), { data: receipt.reason }),
+    });
+  }
+}
+
+function userOpReceiptTimeoutSeconds(): number {
+  const seconds = PARAMETERS.find(
+    (spec) => spec.key === "app.userOpReceiptTimeoutSeconds",
+  )?.default;
+  if (typeof seconds !== "number" || !Number.isInteger(seconds) || seconds <= 0) {
+    throw new Error("Invalid wallet configuration: app.userOpReceiptTimeoutSeconds");
+  }
+  return seconds;
 }
 
 export function normalizeP256LowS(signature: `0x${string}`): `0x${string}` {
