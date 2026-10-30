@@ -1,6 +1,6 @@
 # Track A exit report (SCR-146 §3, amended by SCR-155 §5)
 
-**Status:** READY FOR ARCHITECT CHECK. Runs 1–6 PASS on merged bases. SCR-155 §1–§3 are merged (#155, #163, #164). The SCR-157 PRs (#166, #167, approved with SCR-158 changes) are open with their tests passing; they must merge before sign-off. Track B stays held until Zaryab merges the final version of this report.
+**Status:** ARCHITECT CHECK PASSED (2026-10-30); waiting for Zaryab's merge. Runs 1–6 PASS on merged bases. SCR-155 §1–§3 are merged (#155, #163, #164). The SCR-157 PRs (#166, #167, approved with SCR-158 changes) are open with their tests passing; they must merge before sign-off. Track B stays held until Zaryab merges the final version of this report.
 
 ## Gate (SCR-155 §5)
 | # | Item | Status |
@@ -10,12 +10,13 @@
 | 3 | #155 (SCR-155 §1, `initializeDouble`) merged | Merged: #155 |
 | 3a | SCR-157 §1 (chain time for every on-chain deadline) merged with tests passing | Merged: #166 |
 | 3b | SCR-157 §2–§3 (gas-low signal; vault onboarding from wallet-config) merged with tests passing | Merged: #167 |
+| 3b2 | #174: `build-v1` fix after #170 (schemas regenerated; Plan 1.3, RankingDecision 1.2) and SCR-161 | Open: #174, merge first |
 | 3c | SCR-159 §1–§2 (resume without re-probe; safe re-send; per-key nonces) with tests passing | Open: #173 (`14aa6cf`) |
 | 3d | SCR-159 §3 (steps with paid calls end done; unpaid per call) with tests passing | Open: #171 (`f7160e9`, contains #173) |
 | 3e | SCR-159 §4 (owner UserOperations wait for inclusion) with tests passing | Open: #172 (`4597704`) |
 | 4 | This report updated to the SCR-155 §5 gate | This PR |
 | 5 | Senior reviewer | Done: independent review of #173 + #171 + #172 (see "Independent review") |
-| 6 | Architect check | — |
+| 6 | Architect check | Done 2026-10-30 (see §3.5) |
 | 7 | Zaryab's merge | — |
 
 The FORK browser flow is not part of the gate (SCR-155 §5). `local-v1` is frozen.
@@ -120,8 +121,9 @@ A fresh reviewer with only the combined diff, CLAUDE.md and SCR-159 found **no c
 - SCR-159 §2 closeEnvelope, add: "After a reverted `closeEnvelope`, re-read the envelope; when it is still `Open` with no open reservations, pockets or jobs, sign the close once more."
 - `openapi.yaml` `AppWalletConfig` (from #172): add required `userOpReceiptTimeoutSeconds` (integer, minimum 1), "Seconds the app waits for an owner UserOperation receipt on the accepting bundler, from `app.userOpReceiptTimeoutSeconds` (SCR-159 §4)". Until then the web reads the key's registry default.
 
-## Blocker outside Track A
-- `build-v1` at `71f119c` (#170, SCR-160) adds the `rating` and `ranking-decision` schemas and moves `Plan` to `1.3` without code changes. Every test that loads `@czar/schemas` fails ("Schema metadata is stale"); regenerating then fails the web typecheck against `Plan` 1.3. SCR-160 implementation is Track B, so it was not touched; the SCR-159 PRs are verified on `5c126eb`.
+## Blocker outside Track A (resolved)
+- `build-v1` at `71f119c` (#170, SCR-160) failed every test that loads `@czar/schemas`. **Resolved by #174**: schemas regenerated, `Plan` 1.3 and `RankingDecision` 1.2 in code, `StepResult` held at 1.0 until package 4A-2 (SCR-161 §1). Verified with #173, #171 and #172 merged on top: `pnpm -r typecheck` clean; server 72 files, 492 tests passed (arc-anvil suites excluded, verified earlier on 5c126eb); web 55, config 63, schemas 33, api-contract 11, signer 162, daemon 94.
+- The builder's three hard stops are ruled in SCR-161 §2–§4 and listed under M8 below.
 
 ## Known intermittent test
 - `apps/server/test/evidence/receipt-arc.test.ts` fails intermittently with `BadTtl()` on the new-reserve path. Cause: on-demand mining on the local test chain. No effect on testnet. No fix now (SCR-158 §1). On 2026-10-30 one full run hung in this test instead of failing (no block arrives for the chain-time waits, and the test has no timeout); it was stopped after 20 min, and the test alone and the full rerun passed. Seen in 3 of 8 full server-suite runs between #166 and #167; it passes when run alone.
@@ -139,6 +141,12 @@ A fresh reviewer with only the combined diff, CLAUDE.md and SCR-159 found **no c
 ## 3.4 Outside Track A: M8 (D92) — first Arc testnet run
 These do not block this report:
 - **M8 preflight:** the latest Arc block must be under 5 s old before the first testnet payment (SCR-158 §1).
+- **Before the first testnet payment (SCR-161):**
+  - the signer nonce reuse window and `abandonTransaction` for socket callers (§2)
+  - one re-sign of a reverted `closeEnvelope` when the envelope is still `Open` and empty (§3)
+  - the server fills `AppWalletConfig.userOpReceiptTimeoutSeconds`, and the web drops its registry import (§4)
+  - two pending approvals reusing one EntryPoint nonce (§6)
+  - the two approval timing headers added to `openapi.yaml` (§6, architect)
 - **`apps/web/e2e/passkey.spec.ts`:** it needs a real chain, so it runs against testnet.
 - **The real-passkey owner flow** (SCR-155 §5): passkey, vault, funding, limits, pairing, objective, approval, payment, receipt, freeze. It moves from the FORK browser flow to the first Arc testnet run.
 - **The five-minute first-refill finding:** confirm on testnet that a freshly started signer funds K3/K7/K8 in its first pass (SCR-155 §3) before the first objective.
@@ -150,6 +158,11 @@ These do not block this report:
 - any live Circle or model call
 - any real device
 
+## Track B backlog (SCR-161 §6)
+- Re-planning: the dispatcher never calls re-plan, so `unpaid` and `delivery-failed` steps don't re-plan.
+- `dependency-missing` fails the step before reserve instead of per call (CZ-15 §5.2 step 4).
+- Flow 4A package 4A-2 writes the observation row at `auth.signed` (SCR-161 §5) and moves `StepResult` to 1.1.
+
 ## Stage 2
 - **Dispatcher throughput** (SCR-159 §5): `waitForAuthorization` and `waitUntilValidBefore` block the single dispatcher for up to `validBefore + payer.reconcileGraceSeconds`; acceptable for one owner in Phase 1.
 - **Signer metrics collection** (SCR-158 §5): `czar_signer_gas_low{key}` is in-process only; the signer listens only on its Unix socket.
@@ -160,5 +173,5 @@ These do not block this report:
 | Step | Status |
 |---|---|
 | Designated senior reviewer verified the evidence | Independent reviewer (fresh agent, combined diff of #173 + #171 + #172, CLAUDE.md, SCR-159), 2026-10-30: no critical defect; majors M2 and M3 fixed, M1 fixed in its in-spec part with proposed SCR text for the rest; minors recorded (see "Independent review") |
-| Architect check against SCR-146 and SCR-155 §5 | |
+| Architect check against SCR-146 and SCR-155 §5 | Chief architect, 2026-10-30. **Passed.** Every gate item is merged or open with passing tests, in this merge order: #174, #173, #171, #172, then this report. Rulings SCR-139 to SCR-161 are recorded. Runs 1–6 stand on their recorded bases. The SCR-159 fixes carry their own automated tests, including runs 2, 4 and 5 on arc-anvil. The independent review found no critical defect. Its majors are fixed, or ruled into M8 where no money is at risk (SCR-161). The real-passkey owner flow is an M8 item by Zaryab's decision (SCR-155 §5). Known limits are listed under M8, Gateway, job path, Track B backlog and stage 2. Track B may start when Zaryab merges this report. |
 | Zaryab merged this report (Track A closed) | |
