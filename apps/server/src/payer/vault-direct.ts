@@ -83,6 +83,17 @@ export class ReserveReverted extends Error {
   }
 }
 
+/** A sent `settle` or `finalize` mined with status 0. */
+export class VaultTransactionReverted extends Error {
+  readonly txHash: Hex;
+
+  constructor(txHash: Hex) {
+    super(`Vault transaction reverted: ${txHash}`);
+    this.name = "VaultTransactionReverted";
+    this.txHash = txHash;
+  }
+}
+
 /**
  * The mined outcome of a sent `reserve`. A revert carries only its block's timestamp: a receipt has no revert
  * data, and BadTtl is decided by the vault's condition on that block (SCR-153 §2).
@@ -976,22 +987,31 @@ async function settleAndFinalize(
       key: { indices: batch },
       args: { reservationId: reservationId.toString(), indices: batch.map(String) },
     });
-    if (settle.kind === "reverted") {
+    let revertedHash = settle.kind === "reverted" ? settle.txHash : undefined;
+    if (settle.kind === "send") {
+      try {
+        await dependencies.chain.settle({
+          reservationId,
+          indices: batch,
+          signedTransaction: settle.signedTransaction,
+        });
+      } catch (error) {
+        if (!(error instanceof VaultTransactionReverted)) throw error;
+        revertedHash = error.txHash;
+      }
+    }
+    if (revertedHash !== undefined) {
       await appendExecutionPhase(dependencies.pool, {
         planId: input.planId,
         stepIndex: input.step.stepIndex,
         attempt,
         phase: "settle.mined",
-        payload: { indices: batch, txHash: settle.txHash, outcome: REVERTED },
+        payload: { indices: batch, txHash: revertedHash, outcome: REVERTED },
       });
-      return failVaultTransaction(input, dependencies, attempt, "settle reverted");
+      // Review M2: finalize books used authorizations as settled, so a reverted settle (for example
+      // `AlreadyDone` after a third party's permissionless finalize) still goes on to finalize.
+      continue;
     }
-    if (settle.kind === "send")
-      await dependencies.chain.settle({
-        reservationId,
-        indices: batch,
-        signedTransaction: settle.signedTransaction,
-      });
     await appendExecutionPhase(dependencies.pool, {
       planId: input.planId,
       stepIndex: input.step.stepIndex,
@@ -1000,6 +1020,8 @@ async function settleAndFinalize(
       payload: { indices: batch },
     });
   }
+  const receiptsRecorded = new Set<number>();
+  const contexts = new Map<number, Parameters<VaultDirectDependencies["recordReceipt"]>[0]>();
   for (const entry of completed) {
     if (!authorized.includes(entry.index)) continue;
     const context = {
@@ -1057,7 +1079,9 @@ async function settleAndFinalize(
         },
       });
     }
+    contexts.set(entry.index, { ...context, stepResult });
     if (await dependencies.chain.isSettled({ reservationId, index: entry.index })) {
+      receiptsRecorded.add(entry.index);
       const receiptStored = await dependencies.recordReceipt({ ...context, stepResult });
       if (!receiptStored) receiptPending = true;
     }
@@ -1079,28 +1103,44 @@ async function settleAndFinalize(
         toIndex: String(start + finalizeCount),
       },
     });
-    if (finalize.kind === "reverted") {
+    let finalizeReverted = finalize.kind === "reverted" ? finalize.txHash : undefined;
+    let finalized: { readonly txHash: string; readonly final: boolean } | undefined;
+    if (finalize.kind === "send") {
+      try {
+        finalized = await dependencies.chain.finalize({
+          reservationId,
+          start,
+          count: finalizeCount,
+          signedTransaction: finalize.signedTransaction,
+        });
+      } catch (error) {
+        if (!(error instanceof VaultTransactionReverted)) throw error;
+        finalizeReverted = error.txHash;
+      }
+    }
+    if (finalizeReverted !== undefined) {
       await appendExecutionPhase(dependencies.pool, {
         planId: input.planId,
         stepIndex: input.step.stepIndex,
         attempt,
         phase: "finalize.mined",
-        payload: { start, count: finalizeCount, txHash: finalize.txHash, outcome: REVERTED },
+        payload: { start, count: finalizeCount, txHash: finalizeReverted, outcome: REVERTED },
       });
+      // Review M2: a third party may have made the reservation Final first (`ReservationNotActive`).
+      // The step then completes from the on-chain facts; any other revert still ends it.
+      if ((await dependencies.chain.reservationFinal?.(reservationId)) === true) {
+        final = true;
+        break;
+      }
       return failVaultTransaction(input, dependencies, attempt, "finalize reverted");
     }
-    const finalized =
-      finalize.kind === "send"
-        ? await dependencies.chain.finalize({
-            reservationId,
-            start,
-            count: finalizeCount,
-            signedTransaction: finalize.signedTransaction,
-          })
-        : {
-            txHash: finalize.txHash,
-            final: (await dependencies.chain.reservationFinal?.(reservationId)) ?? false,
-          };
+    if (finalized === undefined) {
+      if (finalize.kind !== "mined") throw new Error("Finalize has no mined transaction.");
+      finalized = {
+        txHash: finalize.txHash,
+        final: (await dependencies.chain.reservationFinal?.(reservationId)) ?? false,
+      };
+    }
     await appendExecutionPhase(dependencies.pool, {
       planId: input.planId,
       stepIndex: input.step.stepIndex,
@@ -1112,6 +1152,12 @@ async function settleAndFinalize(
     start += finalizeCount;
   }
   if (!final) throw new Error("Reservation is not final after finalizing every reserved index.");
+  // Review M2: an index left unsettled by a reverted settle is booked by finalize; record its receipt now.
+  for (const [index, context] of contexts) {
+    if (receiptsRecorded.has(index)) continue;
+    if (!(await dependencies.chain.isSettled({ reservationId, index }))) continue;
+    if (!(await dependencies.recordReceipt(context))) receiptPending = true;
+  }
   if (authorized.length !== calls.length) {
     await markStepFailed(dependencies.pool, {
       planId: input.planId,
