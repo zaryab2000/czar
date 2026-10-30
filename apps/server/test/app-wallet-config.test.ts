@@ -62,9 +62,6 @@ describe("public wallet configuration", () => {
       vaultFactory: TEST_VAULT_FACTORY,
       webauthnRpId: "localhost",
     };
-    const valid = (responseBody: unknown) =>
-      validateRecordedExchange("getAppWalletConfig", { responseStatus: 200, responseBody }).valid;
-
     expect(valid(complete)).toBe(true);
     const { vaultFactory: _factory, ...withoutFactory } = complete;
     const { webauthnRpId: _rpId, ...withoutRpId } = complete;
@@ -125,6 +122,11 @@ describe("public wallet configuration", () => {
     );
   });
 });
+
+function valid(responseBody: unknown): boolean {
+  return validateRecordedExchange("getAppWalletConfig", { responseStatus: 200, responseBody })
+    .valid;
+}
 
 function walletValuesToPublicBody() {
   return {

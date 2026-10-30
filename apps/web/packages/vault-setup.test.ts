@@ -40,7 +40,12 @@ const QX = `0x${"11".repeat(32)}` as const;
 const QY = `0x${"22".repeat(32)}` as const;
 const PASSKEY = { credentialId: "credential-id", publicKey: `0x04${QX.slice(2)}${QY.slice(2)}` };
 const RP_ID_HASH = sha256(stringToBytes(RP_ID));
-const NO_PASSKEY = { qx: `0x${"00".repeat(32)}`, qy: `0x${"00".repeat(32)}`, rpIdHash: `0x${"00".repeat(32)}`, set: false } as const;
+const NO_PASSKEY = {
+  qx: `0x${"00".repeat(32)}`,
+  qy: `0x${"00".repeat(32)}`,
+  rpIdHash: `0x${"00".repeat(32)}`,
+  set: false,
+} as const;
 
 /** A chain whose factory answers `vaultOf` and whose vault answers `getPasskey`. */
 function chainWith(state: {
@@ -91,7 +96,10 @@ beforeEach(() => {
     vaultFactory: FACTORY,
     webauthnRpId: RP_ID,
   });
-  mocks.sendOwnerUserOperation.mockResolvedValue({ userOpHash: `0x${"ab".repeat(32)}`, bundler: "circle" });
+  mocks.sendOwnerUserOperation.mockResolvedValue({
+    userOpHash: `0x${"ab".repeat(32)}`,
+    bundler: "circle",
+  });
 });
 
 afterEach(() => {

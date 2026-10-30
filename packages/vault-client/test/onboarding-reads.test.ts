@@ -49,7 +49,8 @@ describe("readVaultOf", () => {
     for (const vault of [VAULT, zeroAddress]) {
       const { client, calls } = chain((_to, data) => {
         const call = decodeFunctionData({ abi: czarVaultFactoryAbi, data });
-        expect(call).toMatchObject({ functionName: "vaultOf", args: [MSCA] });
+        expect(call.functionName).toBe("vaultOf");
+        expect(String(call.args?.[0]).toLowerCase()).toBe(MSCA);
         return encodeFunctionResult({
           abi: czarVaultFactoryAbi,
           functionName: "vaultOf",
@@ -57,9 +58,8 @@ describe("readVaultOf", () => {
         });
       });
 
-      await expect(readVaultOf({ client, factory: FACTORY, ownerAccount: MSCA })).resolves.toBe(
-        vault,
-      );
+      const read = await readVaultOf({ client, factory: FACTORY, ownerAccount: MSCA });
+      expect(read.toLowerCase()).toBe(vault);
       expect(calls[0]?.to.toLowerCase()).toBe(FACTORY);
     }
   });

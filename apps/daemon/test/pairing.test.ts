@@ -46,6 +46,7 @@ beforeAll(async () => {
     }),
     clock: { now: () => new Date(currentTime) },
     random: { bytes: randomBytes },
+    vaultFactory: "0x00000000000000000000000000000000000000f1",
   });
 });
 

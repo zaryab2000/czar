@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { Context } from "hono";
+import type { Address } from "viem";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { apiContracts, validateRecordedExchange } from "@czar/api-contract";
 import type { Config } from "@czar/config";
@@ -58,6 +59,8 @@ export interface AppDependencies extends PairDependencies {
   logger: Logger;
   modelClient?: ModelClient;
   jobDelivery?: JobDeliveryDependencies;
+  /** CzarVaultFactory from the deployment manifest for the configured network (SCR-157 §3). */
+  vaultFactory: Address;
   appReadOptions?: AppReadOptions;
   revisePlanSubjects?: (
     userId: string,
@@ -75,7 +78,10 @@ interface RequestState {
 type ServerContext = Context<any, any, any>;
 
 export function createApp(dependencies: AppDependencies): Hono {
-  const walletConfig = resolveAppWalletConfig(dependencies.config);
+  const walletConfig = resolveAppWalletConfig(dependencies.config, {
+    vaultFactory: dependencies.vaultFactory,
+    readFactory: dependencies.appReadOptions?.factoryAddress,
+  });
   const app = new Hono();
   app.onError((error, context) => {
     const code = error instanceof RequestValidationError ? "validation" : "upstream-unavailable";

@@ -25,6 +25,7 @@ import type {
 const SESSION_KEY = "czar.appSession";
 const SESSION_EXPIRY_KEY = "czar.appSessionExpiresAt";
 const BUNDLERS = ["circle", "pimlico", "alchemy", "zerodev"] as const;
+const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 let appWalletConfigRequest: Promise<AppWalletConfig> | undefined;
 
 export async function getAppWalletConfig(): Promise<AppWalletConfig> {
@@ -286,6 +287,8 @@ function parseAppWalletConfig(value: unknown): AppWalletConfig | undefined {
     "bundlerOrder",
     "circleClientKey",
     "circleClientUrl",
+    "vaultFactory",
+    "webauthnRpId",
   ];
   if (Object.keys(value).toSorted().join(",") !== expected.join(",")) return undefined;
   if (
@@ -297,7 +300,10 @@ function parseAppWalletConfig(value: unknown): AppWalletConfig | undefined {
     value["bundlerOrder"].length === 0 ||
     value["bundlerOrder"].some((name) => typeof name !== "string" || !isBundler(name)) ||
     new Set(value["bundlerOrder"]).size !== value["bundlerOrder"].length ||
-    !isRecord(value["bundlerEndpoints"])
+    !isRecord(value["bundlerEndpoints"]) ||
+    typeof value["vaultFactory"] !== "string" ||
+    !ADDRESS.test(value["vaultFactory"]) ||
+    !isHostName(value["webauthnRpId"])
   ) {
     return undefined;
   }
@@ -305,6 +311,16 @@ function parseAppWalletConfig(value: unknown): AppWalletConfig | undefined {
     if (!isBundler(name) || !isHttpUrl(endpoint)) return undefined;
   }
   return value as unknown as AppWalletConfig;
+}
+
+/** A bare host name, as `new URL(origin).hostname` gives it: no scheme, port or path. */
+function isHostName(value: unknown): value is string {
+  if (typeof value !== "string" || value.length === 0) return false;
+  try {
+    return new URL(`http://${value}`).hostname === value;
+  } catch {
+    return false;
+  }
 }
 
 function isBundler(value: string): value is AppBundler {

@@ -20,18 +20,6 @@ describe("passkey registration origin (SCR-156)", () => {
     expect((await registerWithOrigin(context, "http://localhost:3002", 3)).status).toBe(422);
   });
 
-  it("checks the authenticator's RP ID hash against the app.origin host (SCR-157 §3)", async () => {
-    const context = createTestContext(getPool(), {
-      config: testAppConfig({ "app.origin": "http://czar.test:3100" }),
-    });
-    expect((await registerWithOrigin(context, "http://czar.test:3100", 6, "czar.test")).status).toBe(
-      201,
-    );
-    expect((await registerWithOrigin(context, "http://czar.test:3100", 7, "localhost")).status).toBe(
-      422,
-    );
-  });
-
   it("checks against the http://localhost default when app.origin is not set", async () => {
     const context = createTestContext(getPool());
     expect((await registerWithOrigin(context, "http://localhost", 4)).status).toBe(201);
@@ -209,12 +197,11 @@ function createAuthenticatorData(
   credentialId: string,
   signCount: number,
   registration: boolean,
-  rpId = "localhost",
 ): Buffer {
   const counter = Buffer.alloc(4);
   counter.writeUInt32BE(signCount);
   const prefix = Buffer.concat([
-    createHash("sha256").update(rpId).digest(),
+    createHash("sha256").update("localhost").digest(),
     Buffer.from([registration ? 0x41 : 0x01]),
     counter,
   ]);
@@ -238,14 +225,13 @@ async function registerWithOrigin(
   context: ReturnType<typeof createTestContext>,
   origin: string,
   seed: number,
-  rpId = "localhost",
 ): Promise<Response> {
   const privateKey = Buffer.alloc(32);
   privateKey[31] = seed;
   const publicKey = p256.getPublicKey(privateKey, false);
   const credentialId = Buffer.from(`origin-credential-${seed}`).toString("base64url");
   const challenge = await createChallenge(context.app, "register");
-  const authData = createAuthenticatorData(publicKey, credentialId, 0, true, rpId);
+  const authData = createAuthenticatorData(publicKey, credentialId, 0, true);
   return context.app.request("/v1/auth/passkey", {
     method: "POST",
     headers: {

@@ -176,8 +176,9 @@ test("creates a passkey and later completes createSession", async ({ page, brows
   await expect
     .poll(
       async () =>
-        (await accountMe(registeredMsca!, vaultFactory!)).limits.filter((limit) => limit.userMax === "1000000")
-          .length,
+        (await accountMe(registeredMsca!, vaultFactory!)).limits.filter(
+          (limit) => limit.userMax === "1000000",
+        ).length,
     )
     .toBe(4);
   await expect(page.getByText("Limits submitted. Waiting for LimitsSet to sync…")).toBeVisible();

@@ -379,6 +379,7 @@ function createServerApp(
     logger: options.logger,
     clock: options.clock,
     random: options.random,
+    vaultFactory: options.appReadOptions.factoryAddress,
     ...(options.modelClient ? { modelClient: options.modelClient } : {}),
     jobDelivery: {
       pool: options.pool,
