@@ -1,9 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { custom, encodeErrorResult, type Hex } from "viem";
-import {
-  createBundlerClient as createViemBundlerClient,
-  waitForUserOperationReceipt,
-} from "viem/account-abstraction";
+import { waitForUserOperationReceipt } from "viem/account-abstraction";
 import { PARAMETERS } from "@czar/config/registry";
 import { czarVaultFactoryAbi } from "@czar/vault-client";
 
@@ -25,6 +22,10 @@ vi.mock("viem/account-abstraction", async (importOriginal) => ({
 }));
 
 import { sendOwnerUserOperation, normalizeP256LowS } from "#src/wallet";
+
+const { createBundlerClient: createViemBundlerClient } = await vi.importActual<
+  typeof import("viem/account-abstraction")
+>("viem/account-abstraction");
 
 const P256_ORDER = BigInt("0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551");
 
