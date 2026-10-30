@@ -8,6 +8,7 @@ import { loadConfig } from "@czar/config";
 import { buildTree, PAYEE_KIND, payeeLeaf } from "@czar/hashing";
 import { buildPaymentRequired, encodeBase64Json, encodePaymentRequired } from "@czar/x402";
 import type { SignRequest, SignResult } from "@czar/signer";
+import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { setupDatabase } from "#test/db";
 import { markStepDoneWithResults } from "#src/payer/executions";
 import { makeObjectiveSubmission, seedDevice, TEST_USER_ID } from "#test/fixtures";
@@ -247,79 +248,36 @@ describe("vault-direct executor", () => {
       },
     };
     const signedPayment = `0x${"ab".repeat(416)}` as `0x${string}`;
-    const safeFetch = vi
-      .fn()
-      .mockResolvedValueOnce({
-        status: 402,
-        url: "http://127.0.0.1:4021/data?q=one",
-        headers: { "payment-required": encodePaymentRequired(offer) },
-        body: new Uint8Array(),
-      })
-      .mockResolvedValueOnce({
-        status: 402,
-        url: "http://127.0.0.1:4021/data?q=one",
-        headers: { "payment-required": encodePaymentRequired(offer) },
-        body: new Uint8Array(),
-      })
-      .mockResolvedValueOnce({
-        status: 402,
-        url: "http://127.0.0.1:4021/data?q=one",
-        headers: { "payment-required": encodePaymentRequired(offer) },
-        body: new Uint8Array(),
-      })
-      .mockRejectedValueOnce(new Error("simulated worker death after call.sent"))
-      .mockResolvedValueOnce({
-        status: 402,
-        url: "http://127.0.0.1:4021/data?q=one",
-        headers: { "payment-required": encodePaymentRequired(offer) },
-        body: new Uint8Array(),
-      })
-      .mockResolvedValueOnce({
-        status: 402,
-        url: "http://127.0.0.1:4021/data?q=one",
-        headers: { "payment-required": encodePaymentRequired(offer) },
-        body: new Uint8Array(),
-      })
-      .mockResolvedValueOnce({
-        status: 200,
-        url: "http://127.0.0.1:4021/data?q=one",
-        headers: {
-          "payment-response": encodeBase64Json({
-            errorReason: "settlement_pending",
-            transaction: HASH,
-          }),
-        },
-        body: new TextEncoder().encode('{"price":"ok"}'),
-      })
-      .mockResolvedValueOnce({
-        status: 402,
-        url: "http://127.0.0.1:4021/data?q=one",
-        headers: { "payment-required": encodePaymentRequired(offer) },
-        body: new Uint8Array(),
-      })
-      .mockResolvedValueOnce({
-        status: 402,
-        url: "http://127.0.0.1:4021/data?q=one",
-        headers: { "payment-required": encodePaymentRequired(offer) },
-        body: new Uint8Array(),
-      })
-      .mockResolvedValueOnce({
-        status: 402,
-        url: "http://127.0.0.1:4021/data?q=one",
-        headers: { "payment-required": encodePaymentRequired(offer) },
-        body: new Uint8Array(),
-      })
-      .mockResolvedValue({
-        status: 200,
-        url: "http://127.0.0.1:4021/data?q=one",
-        headers: {
-          "payment-response": encodeBase64Json({
-            errorReason: "settlement_pending",
-            transaction: HASH,
-          }),
-        },
-        body: new TextEncoder().encode('{"price":"ok"}'),
-      });
+    // SCR-159 §1: only the first attempt's pre-check probes; every resume continues from the saved phase.
+    let failFirstPaidCall = true;
+    const safeFetch = vi.fn(
+      async (_url: string, options?: { headers?: Record<string, string> }) => {
+        if (!options?.headers?.["payment-signature"])
+          return {
+            status: 402,
+            url: "http://127.0.0.1:4021/data?q=one",
+            headers: { "payment-required": encodePaymentRequired(offer) },
+            body: new Uint8Array(),
+          };
+        if (failFirstPaidCall) {
+          failFirstPaidCall = false;
+          throw new Error("simulated worker death after call.sent");
+        }
+        return {
+          status: 200,
+          url: "http://127.0.0.1:4021/data?q=one",
+          headers: {
+            "payment-response": encodeBase64Json({
+              errorReason: "settlement_pending",
+              transaction: HASH,
+            }),
+          },
+          body: new TextEncoder().encode('{"price":"ok"}'),
+        };
+      },
+    );
+    const k3 = privateKeyToAccount(generatePrivateKey());
+    let nextNonce = 0;
     let failFirstAuthorizationSign = true;
     let successfulAuthorizationSignatures = 0;
     const sign = vi.fn(async (_caller: string, request: SignRequest): Promise<SignResult> => {
@@ -331,7 +289,18 @@ describe("vault-direct executor", () => {
         successfulAuthorizationSignatures += 1;
         return { signature: signedPayment, digest: HASH as `0x${string}` };
       }
-      return { signedTransaction: "0x1234" as `0x${string}` };
+      const signedTransaction = await k3.signTransaction({
+        type: "eip1559",
+        chainId: 5042002,
+        nonce: nextNonce,
+        gas: 100_000n,
+        maxFeePerGas: 1n,
+        maxPriorityFeePerGas: 1n,
+        to: VAULT,
+        data: "0x",
+      });
+      nextNonce += 1;
+      return { signedTransaction };
     });
     let settled = false;
     const isSettled = vi
@@ -343,13 +312,19 @@ describe("vault-direct executor", () => {
       .mockRejectedValueOnce(new Error("simulated worker death after reserve.sent"))
       .mockResolvedValue({ reservationId: 4n, txHash: HASH });
     const finalize = vi
-      .fn<() => Promise<{ txHash: string; final: boolean }>>()
+      .fn<
+        (args: {
+          readonly signedTransaction: string;
+        }) => Promise<{ txHash: string; final: boolean }>
+      >()
       .mockRejectedValueOnce(new Error("simulated worker death before finalize result"))
       .mockResolvedValue({ txHash: HASH, final: true });
     const chain = {
       stepUsed: vi.fn(async () => 0n),
       envelopeCapacity: vi.fn(async () => ({ cap: 10_000n, exposure: 0n })),
       // Chain time follows the test clock, which each sleep moves on.
+      transactionCount: vi.fn(async () => 0),
+      transactionStatus: vi.fn(async (): Promise<"success" | "reverted" | undefined> => undefined),
       latestBlockTimestamp: vi.fn(async () => BigInt(Math.floor(current.getTime() / 1000))),
       reserve,
       settle: vi.fn(async () => {
@@ -489,16 +464,19 @@ describe("vault-direct executor", () => {
     expect(chain.settle).toHaveBeenCalledWith({
       reservationId: 4n,
       indices: [0],
-      signedTransaction: "0x1234",
+      signedTransaction: expect.stringMatching(/^0x02/),
     });
+    // SCR-159 §2: the saved finalize can still land (account nonce ≤ its nonce), so its bytes are sent again.
     expect(chain.finalize).toHaveBeenCalledTimes(2);
+    expect(chain.finalize.mock.calls[1]?.[0]).toEqual(chain.finalize.mock.calls[0]?.[0]);
     const finalizeRanges = sign.mock.calls
       .map(([, request]) => request.payload as Record<string, unknown>)
       .filter((payload) => payload["selector"] === "finalize")
       .map((payload) => payload["args"]);
-    expect(finalizeRanges).toHaveLength(2);
-    for (const range of finalizeRanges)
-      expect(range).toEqual({ reservationId: "4", fromIndex: "0", toIndex: "1" });
+    expect(finalizeRanges).toEqual([{ reservationId: "4", fromIndex: "0", toIndex: "1" }]);
+    expect(
+      safeFetch.mock.calls.filter(([, options]) => !options?.headers?.["payment-signature"]),
+    ).toHaveLength(1);
     expect(boundary).toHaveBeenCalledOnce();
     expect(recordReceipt).toHaveBeenCalledTimes(2);
     expect(recordReceipt.mock.calls[0]?.[0].paymentRef).toMatchObject({

@@ -9,6 +9,7 @@ import {
 import { decodeEventLog } from "viem";
 import { derivedNonce } from "@czar/hashing";
 import { czarVaultAbi, getVault } from "@czar/vault-client";
+import { savedTransactionReads } from "#src/payer/saved-transaction";
 import { ReserveReverted, type VaultDirectChain } from "#src/payer/vault-direct";
 
 const USDC_ABI = parseAbi([
@@ -61,6 +62,7 @@ export function createViemVaultDirectChain(input: {
   }
 
   return {
+    ...savedTransactionReads(input.client),
     async stepUsed(envelopeId, stepIndex) {
       return BigInt(await vault.read.stepUsed([envelopeId, stepIndex]));
     },

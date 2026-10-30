@@ -74,6 +74,7 @@ import {
   type PocketPreparationInput,
 } from "#src/payer/pocket";
 import { createPocketPreparationChain } from "#src/payer/pocket-chain";
+import { savedTransactionReads } from "#src/payer/saved-transaction";
 import { createViemVaultDirectChain } from "#src/payer/viem-chain";
 import {
   cancelExpiredPullback,
@@ -1222,6 +1223,7 @@ async function readGuardianPauseState(
 
 function completionChain(options: ServerMainOptions) {
   return {
+    ...savedTransactionReads(options.publicClient),
     async readEnvelope(vault: Address, envelopeId: bigint) {
       const value = await options.publicClient.readContract({
         address: vault,

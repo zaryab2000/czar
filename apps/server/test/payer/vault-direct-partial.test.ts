@@ -205,6 +205,10 @@ function partialRun(modes: readonly MerchantMode[], options: { receiptStored?: b
     stepUsed: vi.fn(async () => 0n),
     envelopeCapacity: vi.fn(async () => ({ cap: STEP_CAP, exposure: 0n })),
     latestBlockTimestamp: vi.fn(async () => chainNow()),
+    transactionCount: vi.fn(async (_address: `0x${string}`) => 0),
+    transactionStatus: vi.fn(
+      async (_txHash: `0x${string}`): Promise<"success" | "reverted" | undefined> => undefined,
+    ),
     reserve: vi.fn<VaultDirectChain["reserve"]>(async () => ({
       reservationId: RESERVATION_ID,
       txHash: HASH,
@@ -400,6 +404,10 @@ function completionDependencies() {
         openJobs: 0n,
       })),
       closeEnvelope: vi.fn(),
+      transactionCount: vi.fn(async (_address: `0x${string}`) => 0),
+      transactionStatus: vi.fn(
+        async (_txHash: `0x${string}`): Promise<"success" | "reverted" | undefined> => undefined,
+      ),
     },
     now: () => new Date("2026-10-21T01:00:00Z"),
     random: { bytes: (size: number) => Buffer.alloc(size, 1) },

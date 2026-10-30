@@ -1,7 +1,8 @@
 // SCR-153 §2: a saved `reserve.sent` whose transaction reverted `BadTtl()` gets a new attempt from CZ-15 §5.2
 // step 1; when the step-2 formula cannot reach the vault's MIN_RESERVATION_TTL it ends `reserve-failed`.
 // BadTtl is decided by the vault's condition on the mined block (saved validBefore < block.timestamp +
-// MIN_RESERVATION_TTL), from the receipt and that block's header only. Any other revert keeps the existing path.
+// MIN_RESERVATION_TTL), from the receipt and that block's header only. Any other revert ends the step
+// `reserve-failed` / `reverted` (SCR-159 §2).
 // SCR-155 §2: "now" in the step-2 formula and the TTL check is the latest block timestamp, never the server
 // clock, and a step gets at most one new attempt for BadTtl, counted from the saved attempts.
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -9,6 +10,7 @@ import { loadConfig } from "@czar/config";
 import { buildTree, derivedNonce, PAYEE_KIND, payeeLeaf } from "@czar/hashing";
 import type { SignRequest, SignResult } from "@czar/signer";
 import { buildPaymentRequired, encodeBase64Json, encodePaymentRequired } from "@czar/x402";
+import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { appendExecutionPhase, getExecutionTrace } from "#src/payer/executions";
 import {
   executeVaultDirectStep,
@@ -30,7 +32,19 @@ const HASH = `0x${"01".repeat(32)}`;
 const STALE_TX_HASH = `0x${"0a".repeat(32)}`;
 const SECOND_TX_HASH = `0x${"0b".repeat(32)}`;
 const FRESH_TX_HASH = `0x${"0c".repeat(32)}`;
-const STALE_SIGNED_RESERVE = "0xdead01" as const;
+/** A test-only K3 key generated per run; nothing is committed. */
+const K3 = privateKeyToAccount(generatePrivateKey());
+/** The saved reserve: nonce 0, which the fake chain's account nonce (0) has not passed. */
+const STALE_SIGNED_RESERVE = await K3.signTransaction({
+  type: "eip1559",
+  chainId: 5042002,
+  nonce: 0,
+  gas: 100_000n,
+  maxFeePerGas: 1n,
+  maxPriorityFeePerGas: 1n,
+  to: "0x0000000000000000000000000000000000000001",
+  data: "0x",
+});
 const FRESH_SIGNED_RESERVE = "0xbeef02" as const;
 const SIGNED_VAULT_CALL = "0x1234" as const;
 const FRESH_RESERVATION_ID = 9n;
@@ -50,6 +64,16 @@ const CHAIN_AHEAD_SECONDS = 400;
 /** A guard so an unbounded attempt loop fails the test instead of hanging it. */
 const MAX_RESERVES_SENT = 3;
 const LEAF = payeeLeaf(PAYEE, PAYEE_KIND.X402_PAY_TO, 0, UNIT_AMOUNT);
+const OFFER = buildPaymentRequired({
+  url: "http://127.0.0.1:4021/data",
+  description: "local test merchant",
+  serviceName: "fixture",
+  tags: [],
+  network: "eip155:5042002",
+  amount: UNIT_AMOUNT.toString(),
+  payTo: PAYEE,
+  maxTimeoutSeconds: OFFER_TIMEOUT_SECONDS,
+});
 const TREE = buildTree([LEAF]);
 
 beforeAll(async () => seedDevice(getPool()));
@@ -161,23 +185,31 @@ describe("vault-direct stale saved reserve (SCR-153 §2)", () => {
     await expect(stepRow()).resolves.toEqual({ state: "failed", calls_used: 0 });
   });
 
-  it("keeps the existing path for a saved reserve whose mined block meets the TTL", async () => {
+  it("ends reserve-failed / reverted for a saved reserve whose mined block meets the TTL (SCR-159 §2)", async () => {
     await seedStaleReserveSent();
-    const reverted = new ReserveReverted(STALE_TX_HASH, LAST_TIMESTAMP_IN_TTL);
-    const run = paidRun({
-      outcome: { status: "reverted", blockTimestamp: LAST_TIMESTAMP_IN_TTL },
-      firstReserve: reverted,
+    const run = paidRun({ outcome: { status: "reverted", blockTimestamp: LAST_TIMESTAMP_IN_TTL } });
+
+    await expect(executeVaultDirectStep(stepInput(), run.dependencies)).resolves.toEqual({
+      state: "failed",
+      errorCode: "reserve-failed",
     });
 
-    await expect(executeVaultDirectStep(stepInput(), run.dependencies)).rejects.toBe(reverted);
-
-    expect(run.chain.reserve).toHaveBeenCalledOnce();
-    expect(run.chain.reserve.mock.calls[0]?.[0].signedTransaction).toBe(STALE_SIGNED_RESERVE);
+    expect(run.chain.reserve).not.toHaveBeenCalled();
     const stale = await getExecutionTrace(getPool(), PLAN_ID, 0, 0);
-    expect(stale.map((row) => row.phase)).toEqual(["reserve.sent"]);
+    expect(stale.map((row) => row.phase)).toEqual(["reserve.sent", "reserve.mined", "step.failed"]);
+    expect(stale[1]?.payload).toEqual({ txHash: STALE_TX_HASH, outcome: "reverted" });
+    expect(stale[2]?.payload).toEqual({
+      errorCode: "reserve-failed",
+      stepError: {
+        schemaVersion: "1.0",
+        code: "reserve-failed",
+        message: "reverted",
+        retryable: false,
+      },
+    });
     expect(await getExecutionTrace(getPool(), PLAN_ID, 0, 1)).toEqual([]);
     expect(signedSelectors(run.sign)).toEqual([]);
-    await expect(stepRow()).resolves.toEqual({ state: "queued", calls_used: 0 });
+    await expect(stepRow()).resolves.toEqual({ state: "failed", calls_used: 0 });
   });
 });
 
@@ -355,6 +387,8 @@ function paidRun(input: {
     stepUsed: vi.fn(async () => 0n),
     envelopeCapacity: vi.fn(async () => ({ cap: UNIT_AMOUNT, exposure: 0n })),
     reserve,
+    transactionCount: vi.fn(async () => 0),
+    transactionStatus: vi.fn(async (): Promise<"success" | "reverted" | undefined> => undefined),
     latestBlockTimestamp: vi.fn(async () => chainNow()),
     reserveOutcome: vi.fn(async (txHash: string) => input.outcomes?.[txHash] ?? input.outcome),
     settle: vi.fn(async () => {
@@ -365,16 +399,6 @@ function paidRun(input: {
     isSettled: vi.fn(async () => settled),
     finalize: vi.fn(async () => ({ txHash: HASH, final: true })),
   };
-  const offer = buildPaymentRequired({
-    url: "http://127.0.0.1:4021/data",
-    description: "local test merchant",
-    serviceName: "fixture",
-    tags: [],
-    network: "eip155:5042002",
-    amount: UNIT_AMOUNT.toString(),
-    payTo: PAYEE,
-    maxTimeoutSeconds: OFFER_TIMEOUT_SECONDS,
-  });
   const safeFetch = vi.fn(async (_url: string, options?: { headers?: Record<string, string> }) =>
     options?.headers?.["payment-signature"]
       ? {
@@ -388,7 +412,7 @@ function paidRun(input: {
       : {
           status: 402,
           url: "http://127.0.0.1:4021/data?q=one",
-          headers: { "payment-required": encodePaymentRequired(offer) },
+          headers: { "payment-required": encodePaymentRequired(OFFER) },
           body: new Uint8Array(),
         },
   );
@@ -434,6 +458,14 @@ async function seedStaleReserveSent(attempt = 0, txHash = STALE_TX_HASH): Promis
       validBefore: STALE_VALID_BEFORE.toString(),
       txHash,
       signedTransaction: STALE_SIGNED_RESERVE,
+      calls: [
+        {
+          index: 0,
+          offer: OFFER.accepts[0],
+          paymentRequired: OFFER,
+          resource: { url: OFFER.resource.url, description: OFFER.resource.description },
+        },
+      ],
     },
   });
 }

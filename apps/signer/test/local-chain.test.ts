@@ -358,7 +358,6 @@ describe.skipIf(!enabled)("SCR-146 §3.3 run 2: signer against real chain reads"
       const signedTransaction = await writeOff(run);
       const prepared = run.prepared.at(-1);
       if (prepared === undefined) throw new Error("no prepared transaction");
-      const digest = keccak256(serializeTransaction(prepared));
       const {
         r: _r,
         s: _s,
@@ -366,6 +365,9 @@ describe.skipIf(!enabled)("SCR-146 §3.3 run 2: signer against real chain reads"
         yParity: _yParity,
         ...parsed
       } = parseTransaction(signedTransaction);
+      // SCR-159 §2: the signer assigns the nonce, never below the RPC pending count the preparer filled in.
+      expect(parsed.nonce ?? -1).toBeGreaterThanOrEqual(prepared.nonce ?? 0);
+      const digest = keccak256(serializeTransaction({ ...prepared, nonce: parsed.nonce }));
       const data = encodeFunctionData({
         abi: czarVaultAbi,
         functionName: "writeOffPocket",

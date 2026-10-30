@@ -91,6 +91,10 @@ describe("server composition root", () => {
       chain: {
         stepUsed: vi.fn(async () => 0n),
         envelopeCapacity: vi.fn(async () => ({ cap: 10_000n, exposure: 0n })),
+        transactionCount: vi.fn(async () => 0),
+        transactionStatus: vi.fn(
+          async (): Promise<"success" | "reverted" | undefined> => undefined,
+        ),
         latestBlockTimestamp: vi.fn(),
         reserve: vi.fn(),
         settle: vi.fn(),
