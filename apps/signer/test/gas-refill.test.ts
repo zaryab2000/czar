@@ -171,8 +171,16 @@ describe("gas refill job", () => {
       },
     });
 
-    expect(results[0]).toMatchObject({ key: "K3", status: "failed" });
-    expect(alerts).toEqual([expect.stringContaining("relayer")]);
+    expect(results.map(({ key, status }) => [key, status])).toEqual([
+      ["K3", "failed"],
+      ["K7", "failed"],
+      ["K8", "failed"],
+    ]);
+    expect(alerts).toEqual(
+      (["K3", "K7", "K8"] as const).map(
+        (key) => `relayer gas refill failed for ${key}: send-failed`,
+      ),
+    );
   });
 });
 
@@ -291,7 +299,7 @@ describe("gas refill job start (SCR-155 §3)", () => {
     vi.useFakeTimers();
     const chain = fakeRefillChain({ K3: atTarget("K3"), K7: atTarget("K7"), K8: atTarget("K8") });
     let passes = 0;
-    let release: () => void = () => undefined;
+    let release: (() => void) | undefined;
     const read = chain.options.getNativeBalance;
     const stop = startGasRefillJob(
       {
@@ -311,7 +319,7 @@ describe("gas refill job start (SCR-155 §3)", () => {
       expect(passes).toBe(1);
       await vi.advanceTimersByTimeAsync(10 * 60_000);
       expect(passes).toBe(1);
-      release();
+      release?.();
       await vi.advanceTimersByTimeAsync(5 * 60_000);
       expect(passes).toBe(2);
     } finally {
