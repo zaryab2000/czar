@@ -2,16 +2,16 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://czar.dev/schemas/ranking-decision.schema.json",
   "title": "RankingDecision",
-  "description": "Selection Layer RankingDecision, adopted verbatim from SL \u00a75.6 (spec 02 \u00a74.19).",
+  "description": "Selection Layer RankingDecision, adopted verbatim from SL §5.6 (spec 02 §4.19).",
   "type": "object",
   "x-privacyClass": "server-only",
   "additionalProperties": false,
   "properties": {
     "schemaVersion": {
       "type": "string",
-      "description": "Schema version, major.minor; this file is 1.1 (2026-10-25: snapshot_anchor_tx may be null for the unanchored interim producer, SCR-137).",
+      "description": "Schema version, major.minor; this file is 1.2 (SCR-160: unverified[].reason gains unrated; score is the Wilson lower bound of the rated share; features and badges per SCR-160 §9.3). 1.1: snapshot_anchor_tx may be null (SCR-137).",
       "x-privacyClass": "server-only",
-      "const": "1.1"
+      "const": "1.2"
     },
     "query_id": {
       "type": "string",
@@ -109,7 +109,7 @@
           },
           "gate": {
             "type": "string",
-            "description": "Gate.",
+            "description": "Gate (C4 gates, or health-blocked for an uncleared injection-blocked fact, SCR-160 §6).",
             "x-privacyClass": "server-only",
             "maxLength": 64
           },
@@ -155,12 +155,12 @@
           },
           "score": {
             "type": "number",
-            "description": "Score.",
+            "description": "Score: the Wilson lower bound of good/(good+bad) at selection.confidenceZ (SCR-160 §9.4).",
             "x-privacyClass": "server-only"
           },
           "features": {
             "type": "object",
-            "description": "Features.",
+            "description": "Features (SCR-160 §9.3): good, bad, owners_rated, owners_bad, lower_bound, health_facts[], price_atomic.",
             "x-privacyClass": "server-only"
           },
           "evidence_refs": {
@@ -199,7 +199,7 @@
               "x-privacyClass": "server-only",
               "maxLength": 64
             },
-            "description": "Badges.",
+            "description": "Badges: single-owner, health-flagged, incident-open (SCR-160 §9.3).",
             "x-privacyClass": "server-only"
           },
           "explanation": {
@@ -240,13 +240,16 @@
           },
           "reason": {
             "type": "string",
-            "description": "Reason.",
+            "description": "Reason: unrated (no rating record for the task class, SCR-160) or, for pre-SCR-160 rows, n_eff_below_min.",
             "x-privacyClass": "server-only",
-            "const": "n_eff_below_min"
+            "enum": [
+              "n_eff_below_min",
+              "unrated"
+            ]
           },
           "n_eff": {
             "type": "number",
-            "description": "Effective evidence count.",
+            "description": "Effective evidence count; 0 for unrated (SCR-160).",
             "x-privacyClass": "server-only",
             "minimum": 0
           }
