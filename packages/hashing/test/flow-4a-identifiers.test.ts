@@ -45,7 +45,7 @@ describe("Flow 4A identifiers", () => {
         rail: "erc8183-job",
         network: NETWORK,
         contract: ESCROW,
-        jobId: "0007",
+        jobId: "7",
         client: PAYER,
         provider: PAY_TO,
         evaluator: PAYER,
@@ -63,5 +63,30 @@ describe("Flow 4A identifiers", () => {
     expect(serviceId(NETWORK, PAY_TO, ESCROW)).toBe(
       `svc_${keccak256(stringToHex(preimage)).slice(2, 34)}`,
     );
+  });
+
+  it("rejects a noncanonical job id or nonce", () => {
+    const job = {
+      schemaVersion: "1.0",
+      rail: "erc8183-job",
+      network: NETWORK,
+      contract: ESCROW,
+      jobId: "07",
+      client: PAYER,
+      provider: PAY_TO,
+      evaluator: PAYER,
+      budget: "1000",
+    } as const;
+    expect(() => dedupKey(job)).toThrow(/jobId/);
+    const payment = {
+      schemaVersion: "1.0",
+      rail: "gateway-batched",
+      network: NETWORK,
+      payer: PAYER,
+      payTo: PAY_TO,
+      amount: "1000",
+      nonce: "0x1",
+    } as const;
+    expect(() => dedupKey(payment)).toThrow(/nonce/);
   });
 });
