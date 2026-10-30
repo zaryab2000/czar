@@ -495,10 +495,10 @@ components:
 
     AppWalletConfig:
       type: object
-      description: Public, same-origin wallet bootstrap values from validated server config (SCR-140). K2 is a public-facing client key, not a private key.
+      description: Public, same-origin wallet bootstrap values from validated server config (SCR-140). K2 is a public-facing client key, not a private key. vaultFactory is CzarVaultFactory from the server's deployment manifest for the configured network (SCR-157 §3).
       x-privacyClass: public
       additionalProperties: false
-      required: [circleClientUrl, circleClientKey, arcRpcUrl, bundlerOrder, bundlerEndpoints]
+      required: [circleClientUrl, circleClientKey, arcRpcUrl, bundlerOrder, bundlerEndpoints, vaultFactory, webauthnRpId]
       properties:
         circleClientUrl:
           type: string
@@ -529,6 +529,11 @@ components:
             pimlico: { type: string, format: uri }
             alchemy: { type: string, format: uri }
             zerodev: { type: string, format: uri }
+        vaultFactory: { $ref: "#/components/schemas/Address" }
+        webauthnRpId:
+          type: string
+          minLength: 1
+          description: WebAuthn RP ID, the host name of app.origin (SCR-156, SCR-157 §3).
 
     Me:
       type: object
