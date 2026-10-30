@@ -96,7 +96,8 @@ function chainProjection(
       }),
     reservation: (vault, id) => readReservation(input.chain, vault, id),
     pullback: (vault, id) => readPullback(input.chain, vault, id),
-    blockNumber: () => input.chain.getBlockNumber(),
+    // SCR-153 §3: the withdraw and pullback-expiry predicates need the live head, never viem's cached one.
+    blockNumber: () => input.chain.getBlockNumber({ cacheTime: 0 }),
     autonomy: (vault, categoryId) => readAutonomy(input, vault, categoryId),
     nativeBalance: (address) => input.chain.getBalance({ address }),
   };
@@ -250,7 +251,6 @@ async function overdueManualReturnFacts(
       envelopeOpen: envelope.state === 1,
       pendingPullbackZero,
       gatewayWithdrawingZero: balances.gatewayWithdrawing === 0n,
-      pocketUsdcZero: balances.usdc === 0n,
       slowWithdrawAudited,
       pocketReturnAudited,
       manualReturnRowValid: false,
@@ -265,7 +265,6 @@ async function overdueManualReturnFacts(
     envelopeOpen: envelope.state === 1,
     pendingPullbackZero,
     gatewayWithdrawingZero: balances.gatewayWithdrawing === 0n,
-    pocketUsdcZero: balances.usdc === 0n,
     slowWithdrawAudited,
     pocketReturnAudited,
     manualReturnRowValid: true,
@@ -429,7 +428,7 @@ async function pocketBalances(
     sql("SELECT 1 FROM pullbacks WHERE lower(pocket)=lower($1) AND state='Pending' LIMIT 1", [
       pocket,
     ]),
-    input.chain.getBlockNumber(),
+    input.chain.getBlockNumber({ cacheTime: 0 }),
   ]);
   const row = projection.rows[0];
   const observedAt =

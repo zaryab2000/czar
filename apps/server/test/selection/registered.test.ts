@@ -157,6 +157,51 @@ function response(
   };
 }
 
+function declaredInputResponse(
+  location: "queryParams" | "body",
+  properties: Record<string, unknown>,
+  example: Record<string, unknown>,
+) {
+  const method = location === "queryParams" ? "GET" : "POST";
+  const input =
+    location === "queryParams"
+      ? { type: "http", method, queryParams: example }
+      : { type: "http", method, bodyType: "json", body: example };
+  const body = {
+    x402Version: 2,
+    resource: { url: RESOURCE },
+    accepts: [offer("25", "0xaaa")],
+    extensions: {
+      bazaar: {
+        info: { input },
+        schema: {
+          $schema: "https://json-schema.org/draft/2020-12/schema",
+          type: "object",
+          properties: {
+            input: {
+              type: "object",
+              properties: {
+                type: { type: "string", const: "http" },
+                method: { type: "string" },
+                ...(location === "body" ? { bodyType: { type: "string" } } : {}),
+                [location]: { type: "object", properties },
+              },
+              required: ["type", "method"],
+            },
+          },
+          required: ["input"],
+        },
+      },
+    },
+  };
+  return {
+    status: 402,
+    url: RESOURCE,
+    headers: { "payment-required": encodeBase64Json(body) },
+    body: Buffer.from(""),
+  };
+}
+
 function bareUrl(input: string): string {
   const url = new URL(input);
   url.search = "";
@@ -493,6 +538,101 @@ describe("registered selection", () => {
     }));
     const selection = setup(fetchImpl, { [SERVICE_A]: registration() }, () => new Date());
     expect(await selection.outputSchema.forService(SERVICE_A)).toBeNull();
+  });
+
+  it("carries a declared GET query string input into the card inputFields", async () => {
+    const fetchImpl = vi.fn<SafeFetch>(async () =>
+      declaredInputResponse(
+        "queryParams",
+        { q: { type: "string", description: "seller-written text", maxLength: 200 } },
+        { q: "czar probe" },
+      ),
+    );
+    const selection = setup(fetchImpl, { [SERVICE_A]: registration() }, () => new Date());
+    const service = await selection.directory.get(SERVICE_A);
+
+    expect(service?.extensions.czar.card["inputFields"]).toEqual([{ name: "q", type: "string" }]);
+    expect(JSON.stringify(service?.extensions.czar.card)).not.toContain("seller-written text");
+  });
+
+  it("carries declared POST JSON body fields into the card inputFields", async () => {
+    const fetchImpl = vi.fn<SafeFetch>(async () =>
+      declaredInputResponse(
+        "body",
+        { query: { type: "string" }, limit: { type: "integer" } },
+        { query: "czar probe", limit: 5 },
+      ),
+    );
+    const selection = setup(
+      fetchImpl,
+      { [SERVICE_A]: registration(RESOURCE, "POST") },
+      () => new Date(),
+    );
+    const service = await selection.directory.get(SERVICE_A);
+
+    expect(service?.extensions.czar.card["inputFields"]).toEqual([
+      { name: "query", type: "string" },
+      { name: "limit", type: "integer" },
+    ]);
+  });
+
+  it("keeps empty inputFields when no Bazaar input is declared", async () => {
+    const fetchImpl = vi.fn<SafeFetch>(async () => ({
+      status: 402,
+      url: RESOURCE,
+      headers: {
+        "payment-required": encodeBase64Json({
+          x402Version: 2,
+          resource: { url: RESOURCE },
+          accepts: [offer("25", "0xaaa")],
+        }),
+      },
+      body: Buffer.from(""),
+    }));
+    const selection = setup(fetchImpl, { [SERVICE_A]: registration() }, () => new Date());
+    const service = await selection.directory.get(SERVICE_A);
+
+    expect(service?.extensions.czar.card).toMatchObject({ inputFields: [], outputFields: [] });
+  });
+
+  it("bounds card fields to 50 entries, 64-character names and JSON types", async () => {
+    const properties: Record<string, unknown> = {
+      [`n${"x".repeat(64)}`]: { type: "string" },
+      untyped: { description: "no type" },
+      union: { type: ["string", "null"] },
+    };
+    for (let index = 0; index < 60; index += 1) properties[`f${index}`] = { type: "number" };
+    const fetchImpl = vi.fn<SafeFetch>(async () =>
+      declaredInputResponse("queryParams", properties, {}),
+    );
+    const selection = setup(fetchImpl, { [SERVICE_A]: registration() }, () => new Date());
+    const fields = (await selection.directory.get(SERVICE_A))?.extensions.czar.card[
+      "inputFields"
+    ] as Array<{ name: string; type: string }>;
+
+    expect(fields).toHaveLength(50);
+    expect(fields[0]).toEqual({ name: "f0", type: "number" });
+    expect(fields.at(-1)).toEqual({ name: "f49", type: "number" });
+  });
+
+  it("carries declared output example properties into the card outputFields", async () => {
+    const fetchImpl = vi.fn<SafeFetch>(async () =>
+      response("25", "0xaaa", NETWORK, {
+        type: "object",
+        properties: {
+          answer: { type: "string", description: "seller-written text" },
+          count: { type: "integer" },
+        },
+      }),
+    );
+    const selection = setup(fetchImpl, { [SERVICE_A]: registration() }, () => new Date());
+    const card = (await selection.directory.get(SERVICE_A))?.extensions.czar.card;
+
+    expect(card?.["outputFields"]).toEqual([
+      { name: "answer", type: "string" },
+      { name: "count", type: "integer" },
+    ]);
+    expect(JSON.stringify(card)).not.toContain("seller-written text");
   });
 
   it("keeps a meaningful type-only response schema", async () => {

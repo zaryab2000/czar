@@ -35,6 +35,9 @@ import {
 
 type H = Awaited<ReturnType<typeof harness>>;
 
+/** Arc native balances are 18-decimal wei; config and payload amounts are USDC 6-decimal atomic. */
+const WEI_PER_ATOMIC = 10n ** 12n;
+
 async function expectDenied(t: H, promise: Promise<unknown>, rule: string) {
   const before = t.calls.length;
   await expect(promise).rejects.toMatchObject({ name: "Denied", rule });
@@ -84,12 +87,14 @@ const vaultCall = (selector: string, args: unknown) => ({
   payload: { vault: VAULT, selector, args },
 });
 
+/** The harness preparer's gas (200,000) × maxFeePerGas (20 gwei) in USDC atomic units (SCR-152). */
+const GAS_RESERVE = (200_000n * 20_000_000_000n) / 10n ** 12n;
+
 const validOverdueManualReturnFacts = {
   pocketStateValid: true,
   envelopeOpen: true,
   pendingPullbackZero: true,
   gatewayWithdrawingZero: true,
-  pocketUsdcZero: true,
   slowWithdrawAudited: true,
   pocketReturnAudited: true,
   manualReturnRowValid: true,
@@ -486,7 +491,6 @@ describe("vault-call (K3)", () => {
       "envelopeOpen",
       "pendingPullbackZero",
       "gatewayWithdrawingZero",
-      "pocketUsdcZero",
       "slowWithdrawAudited",
       "pocketReturnAudited",
       "manualReturnRowValid",
@@ -517,6 +521,30 @@ describe("vault-call (K3)", () => {
     await expectDenied(
       recorded,
       recorded.signer.sign("cz-15", vaultCall("writeOffPocket", { pocket: recorded.pocket })),
+      "gateway-balance-stale",
+    );
+  });
+
+  it("SCR-152 predicate 5: the exception holds while the pocket EOA is empty, not when USDC is returnable", async () => {
+    const empty = await harness();
+    empty.state.balances = { ...empty.state.balances, gatewayApiFresh: false, usdc: GAS_RESERVE };
+    empty.state.overdueManualReturnFacts = { ...validOverdueManualReturnFacts };
+    await empty.signer.sign("cz-15", vaultCall("writeOffPocket", { pocket: empty.pocket }));
+    expect(empty.audit.rows.at(-1)).toMatchObject({
+      outcome: "signed",
+      rule: "writeoff-manual-return-overdue",
+    });
+
+    const returnable = await harness();
+    returnable.state.balances = {
+      ...returnable.state.balances,
+      gatewayApiFresh: false,
+      usdc: GAS_RESERVE + 1n,
+    };
+    returnable.state.overdueManualReturnFacts = { ...validOverdueManualReturnFacts };
+    await expectDenied(
+      returnable,
+      returnable.signer.sign("cz-15", vaultCall("writeOffPocket", { pocket: returnable.pocket })),
       "gateway-balance-stale",
     );
   });
@@ -1216,20 +1244,72 @@ describe("K4 pocket kinds", () => {
 
   it("signer_k4_returnToOwningVault_allowed", async () => {
     const t = await harness();
-    t.state.balances = { ...t.state.balances, usdc: 700n, native: 900n };
+    t.state.balances = { ...t.state.balances, usdc: 10_000n, native: 900n };
     await t.signer.sign("cz-15", {
       keyId: "K4",
       kind: "pocket-return",
-      payload: { pocket: t.pocket, kind: "usdc", amount: "700" },
+      payload: { pocket: t.pocket, kind: "usdc", amount: String(10_000n - GAS_RESERVE) },
     });
-    const call = decodeFunctionData({ abi: USDC_ABI, data: t.prepared[0]?.data as Hex });
+    const call = decodeFunctionData({ abi: USDC_ABI, data: t.prepared.at(-1)?.data as Hex });
     expect(call.args?.[0]?.toLowerCase()).toBe(VAULT);
+    expect(call.args?.[1]).toBe(10_000n - GAS_RESERVE);
     await t.signer.sign("cz-15", {
       keyId: "K4",
       kind: "pocket-return",
       payload: { pocket: t.pocket, kind: "native", amount: "900" },
     });
-    expect(t.prepared[1]).toMatchObject({ to: VAULT, value: 900n, data: "0x" });
+    expect(t.prepared.at(-1)).toMatchObject({ to: VAULT, value: 900n, data: "0x" });
+  });
+
+  it("SCR-152: pocket-return signs only for value = balance - gasReserve of the prepared transaction", async () => {
+    const t = await harness();
+    t.state.balances = { ...t.state.balances, usdc: 10_000n };
+    const returnable = 10_000n - GAS_RESERVE;
+    for (const amount of [returnable + 1n, returnable - 1n, 10_000n, 10_001n, 0n]) {
+      await expectDenied(
+        t,
+        t.signer.sign("cz-15", {
+          keyId: "K4",
+          kind: "pocket-return",
+          payload: { pocket: t.pocket, kind: "usdc", amount: amount.toString() },
+        }),
+        "pocket-return-value-mismatch",
+      );
+    }
+    expect(t.calls).toEqual([]);
+    await t.signer.sign("cz-15", {
+      keyId: "K4",
+      kind: "pocket-return",
+      payload: { pocket: t.pocket, kind: "usdc", amount: returnable.toString() },
+    });
+    expect(t.calls).toEqual([`tx:K4:${t.pocket}`]);
+  });
+
+  it("SCR-152: pocket-return is denied pocket-empty when nothing is returnable", async () => {
+    const t = await harness();
+    for (const usdc of [0n, 1n, GAS_RESERVE]) {
+      t.state.balances = { ...t.state.balances, usdc };
+      await expectDenied(
+        t,
+        t.signer.sign("cz-15", {
+          keyId: "K4",
+          kind: "pocket-return",
+          payload: { pocket: t.pocket, kind: "usdc", amount: "1" },
+        }),
+        "pocket-empty",
+      );
+    }
+    expect(t.calls).toEqual([]);
+  });
+
+  it("keeps amount <= balance for a USDC return on a network where gas is not USDC", async () => {
+    const t = await harness({ network: { ...NETWORK, usdc: OTHER } });
+    t.state.balances = { ...t.state.balances, usdc: 700n };
+    await t.signer.sign("cz-15", {
+      keyId: "K4",
+      kind: "pocket-return",
+      payload: { pocket: t.pocket, kind: "usdc", amount: "700" },
+    });
     await expectDenied(
       t,
       t.signer.sign("cz-15", {
@@ -1245,15 +1325,15 @@ describe("K4 pocket kinds", () => {
     const t = await harness();
     t.state.balances = {
       ...t.state.balances,
-      usdc: 700n,
+      usdc: 10_000n,
       gatewayApiFresh: false,
     };
     await t.signer.sign("cz-15", {
       keyId: "K4",
       kind: "pocket-return",
-      payload: { pocket: t.pocket, kind: "usdc", amount: "700" },
+      payload: { pocket: t.pocket, kind: "usdc", amount: String(10_000n - GAS_RESERVE) },
     });
-    const call = decodeFunctionData({ abi: USDC_ABI, data: t.prepared[0]?.data as Hex });
+    const call = decodeFunctionData({ abi: USDC_ABI, data: t.prepared.at(-1)?.data as Hex });
     expect(call.args?.[0]?.toLowerCase()).toBe(VAULT);
   });
 
@@ -1562,18 +1642,31 @@ describe("relayer-tx and gas-refill (relayer)", () => {
   it("signer_gasRefill_aboveMax_denied", async () => {
     const t = await harness();
     const k3 = t.address("K3");
-    t.state.native.set(k3, 4_000_000n);
-    await t.signer.sign("relayer", {
+    t.state.native.set(k3.toLowerCase(), 4_000_000n * WEI_PER_ATOMIC);
+    const { signedTransaction } = (await t.signer.sign("relayer", {
       keyId: "relayer",
       kind: "gas-refill",
       payload: { target: k3, amount: "1000000" },
-    });
+    })) as { signedTransaction: Hex };
+    const tx = parseTransaction(signedTransaction);
+    expect(tx.to?.toLowerCase()).toBe(k3.toLowerCase());
+    expect(tx.value).toBe(1_000_000n * WEI_PER_ATOMIC);
     await expectDenied(
       t,
       t.signer.sign("relayer", {
         keyId: "relayer",
         kind: "gas-refill",
         payload: { target: k3, amount: "1000001" },
+      }),
+      "above-max",
+    );
+    t.state.native.set(k3.toLowerCase(), 4_000_000n * WEI_PER_ATOMIC + 1n);
+    await expectDenied(
+      t,
+      t.signer.sign("relayer", {
+        keyId: "relayer",
+        kind: "gas-refill",
+        payload: { target: k3, amount: "1000000" },
       }),
       "above-max",
     );

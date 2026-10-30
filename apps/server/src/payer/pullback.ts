@@ -22,6 +22,7 @@ import {
   startExecutorLeaseRenewal,
   type ExecutionPhaseRow,
 } from "#src/payer/executions";
+import type { PocketBalanceSnapshot } from "#src/payer/indexer-pocket";
 
 export { PULLBACK_CANCEL_DELAY_BLOCKS };
 const MILLISECONDS_PER_HOUR = 3_600_000;
@@ -30,6 +31,8 @@ const SLOW_WITHDRAW_RETRY_RULES = new Set([
   "pocket-spend-after-observation",
   "slow-withdraw-value-mismatch",
 ]);
+/** SCR-152 §1: the signer's prepared transaction governs the returnable value; re-read and retry. */
+const POCKET_RETURN_RETRY_RULES = new Set(["pocket-return-value-mismatch", "pocket-empty"]);
 
 export interface PullbackValueInput {
   readonly outstanding: bigint;
@@ -159,11 +162,50 @@ export interface SlowPullbackDependencies {
     getBlockNumber(): Promise<bigint>;
     withdrawalBlock(pocket: Address): Promise<bigint>;
     withdrawingBalance(pocket: Address): Promise<bigint>;
-    pocketUsdcBalance(pocket: Address): Promise<bigint>;
+    /**
+     * SCR-152 `returnable = balanceOf(USDC, pocket) − gasReserve` of a `pocket-return` to `vault`, from fresh
+     * reads; `≤ 0` means the pocket EOA is empty.
+     */
+    pocketReturnable(pocket: Address, vault: Address): Promise<bigint>;
     sendPocketTransaction(transaction: `0x${string}`, kind: string): Promise<string>;
     transactionReceipt(hash: string): Promise<SlowPullbackReceipt | null>;
   };
+  /** The pocket's `pocket_balances` row: the SCR-141 Gateway figure SCR-153 "Gateway clear" reads. */
+  readonly readGatewayBalance: (pocket: Address) => Promise<PocketBalanceSnapshot>;
   readonly now: () => Date;
+}
+
+export type SlowPullbackResult =
+  | { readonly state: "waiting-withdrawal" }
+  | { readonly state: "waiting-return" }
+  | { readonly state: "manual-return-required"; readonly amount: string }
+  | { readonly state: "returned-to-vault"; readonly amount: string };
+
+/** The slow-path row's transaction columns that SCR-153 "Gateway clear" reads. */
+export interface GatewayClearRow {
+  readonly initiateTx: string | null;
+  readonly withdrawTx: string | null;
+}
+
+/** Fresh chain reads, and the SCR-141 Gateway figure, for one SCR-153 resume pass. */
+export interface GatewayClearReads {
+  readonly withdrawingBalance: bigint;
+  readonly initiateReceipt: SlowPullbackReceipt | null;
+  readonly withdrawReceipt: SlowPullbackReceipt | null;
+  /** Gateway available, fresh or the last good observation (SCR-141); `null` when none exists. */
+  readonly gatewayAvailable: bigint | null;
+}
+
+interface SlowPathRow extends GatewayClearRow {
+  readonly returnTx: string | null;
+}
+
+/** One slow-path pass for one row, under the envelope lease. */
+interface SlowPass {
+  readonly input: SlowPullbackInput;
+  readonly dependencies: SlowPullbackDependencies;
+  readonly attempt: number;
+  readonly assertLeaseHeld: () => void;
 }
 
 export interface SlowPullbackReceipt {
@@ -197,12 +239,7 @@ export function calculateClosedPocketPullbackValue(
 export async function executeSlowPullbackFallback(
   input: SlowPullbackInput,
   dependencies: SlowPullbackDependencies,
-): Promise<
-  | { readonly state: "waiting-withdrawal" }
-  | { readonly state: "waiting-return" }
-  | { readonly state: "manual-return-required"; readonly amount: string }
-  | { readonly state: "returned-to-vault"; readonly amount: string }
-> {
+): Promise<SlowPullbackResult> {
   const delayMs =
     Number(dependencies.config.get("payer.pullbackApiDownHours")) * MILLISECONDS_PER_HOUR;
   if (
@@ -249,151 +286,114 @@ async function runSlowPullback(
   dependencies: SlowPullbackDependencies,
   attempt: number,
   assertLeaseHeld: () => void,
-): Promise<
-  | { readonly state: "waiting-withdrawal" }
-  | { readonly state: "waiting-return" }
-  | { readonly state: "manual-return-required"; readonly amount: string }
-  | { readonly state: "returned-to-vault"; readonly amount: string }
-> {
+): Promise<SlowPullbackResult> {
   await ensureSlowPathRow(input, dependencies, attempt);
-  const trace = await getExecutionTrace(dependencies.pool, input.planId, input.stepIndex, attempt);
+  const pass: SlowPass = { input, dependencies, attempt, assertLeaseHeld };
   const withdrawingBalance = await dependencies.chain.withdrawingBalance(input.pocket);
   if (withdrawingBalance > 0n) {
     const observedWithdrawalBlock = await dependencies.chain.withdrawalBlock(input.pocket);
     const head = await dependencies.chain.getBlockNumber();
     if (head < observedWithdrawalBlock) return { state: "waiting-withdrawal" };
-    await sendSlowWithdrawal(input, dependencies, attempt, "withdraw", assertLeaseHeld);
+    await sendSlowWithdrawal(pass, { step: "withdraw" });
     return { state: "waiting-return" };
   }
-  const pocketBalance = await dependencies.chain.pocketUsdcBalance(input.pocket);
-  if (pocketBalance === 0n)
-    return await recoverEmptySlowPath(input, dependencies, attempt, trace, assertLeaseHeld);
-  return await returnSlowWithdrawalBalance(input, dependencies, attempt, assertLeaseHeld);
+  const row = await readSlowPathRow(dependencies, input);
+  const initiateReceipt = await receiptOf(dependencies, row.initiateTx);
+  const withdrawReceipt = await receiptOf(dependencies, row.withdrawTx);
+  const withdrawMined = withdrawReceipt?.status === "success";
+  if (initiateReceipt?.status === "success" && !withdrawMined)
+    throw new Error(
+      "SCR-153: withdrawingBalance is 0 after a mined initiate_tx without a mined withdraw_tx; " +
+        "the slow-path resume table has no row for this state.",
+    );
+  // A mined withdraw is Gateway clear on its own, so the indexer figure is read only when it decides.
+  const reads: GatewayClearReads = {
+    withdrawingBalance,
+    initiateReceipt,
+    withdrawReceipt,
+    gatewayAvailable: withdrawMined ? null : await readGatewayFigure(dependencies, input.pocket),
+  };
+  if (!isGatewayClear(row, reads)) return await advanceSlowWithdrawal(pass, row, reads);
+  return await returnAfterGatewayClear(pass, row);
 }
 
-async function recoverEmptySlowPath(
-  input: SlowPullbackInput,
+/**
+ * SCR-153 §1 "Gateway clear": the row's `withdraw_tx` is mined with status 1, or nothing is withdrawing, no
+ * `initiate_tx` is in flight and the SCR-141 Gateway available figure (fresh or last good) is 0.
+ */
+export function isGatewayClear(row: GatewayClearRow, reads: GatewayClearReads): boolean {
+  if (row.withdrawTx !== null && reads.withdrawReceipt?.status === "success") return true;
+  if (reads.withdrawingBalance !== 0n) return false;
+  const initiateInFlight = row.initiateTx !== null && reads.initiateReceipt === null;
+  return !initiateInFlight && reads.gatewayAvailable === 0n;
+}
+
+/** The SCR-141 figure V is read from; `null` when the Gateway API has never been observed for the pocket. */
+async function readGatewayFigure(
   dependencies: SlowPullbackDependencies,
-  attempt: number,
-  trace: readonly ExecutionPhaseRow[],
-  assertLeaseHeld: () => void,
-): Promise<
-  | { readonly state: "waiting-withdrawal" | "waiting-return" }
-  | { readonly state: "manual-return-required" | "returned-to-vault"; readonly amount: string }
-> {
-  let returnHash = await slowPathTransactionHash(dependencies, input, "return_tx");
-  const returnTrace = trace.findLast((row) => row.phase === "pullback.slow.return.sent");
-  const returnTransaction = returnTrace?.payload["transaction"];
-  if (!returnHash && typeof returnTransaction === "string") {
-    returnHash = await broadcastSlowTransaction(
-      dependencies,
-      returnTransaction as `0x${string}`,
-      "pocket-return:usdc",
+  pocket: Address,
+): Promise<bigint | null> {
+  let snapshot;
+  try {
+    snapshot = await dependencies.readGatewayBalance(pocket);
+  } catch {
+    // An unreadable figure is a missing figure: the row waits and records `gateway-figure-missing`.
+    return null;
+  }
+  return snapshot.apiObservedAt === null ? null : snapshot.gatewayAvailableAtomic;
+}
+
+/** SCR-153 §1 row 3: not Gateway clear and nothing withdrawing, so K4 `initiate` (or its re-broadcast). */
+async function advanceSlowWithdrawal(
+  pass: SlowPass,
+  row: SlowPathRow,
+  reads: GatewayClearReads,
+): Promise<{ readonly state: "waiting-withdrawal" }> {
+  const { input, dependencies, attempt } = pass;
+  const inFlight = row.initiateTx !== null && reads.initiateReceipt === null;
+  if (!inFlight && reads.gatewayAvailable === null) {
+    await writeSlowPhase(dependencies, input, attempt, "pullback.slow.gateway-figure-missing", {
+      pocket: input.pocket,
+    });
+    return { state: "waiting-withdrawal" };
+  }
+  const reverted = reads.initiateReceipt?.status === "reverted";
+  if (reverted)
+    await dependencies.pool.query(
+      `UPDATE payer_pullback_gateway_failures SET initiate_tx=NULL
+       WHERE plan_id=$1 AND step_index=$2 AND attempt=$3`,
+      [input.planId, input.stepIndex, attempt],
     );
-    await persistSlowTransactionHash(dependencies, input, attempt, "return", returnHash);
-  }
-  if (returnHash) {
-    const receipt = await dependencies.chain.transactionReceipt(returnHash);
-    if (receipt) {
-      const transfer = verifiedVaultTransfer(receipt, input);
-      if (transfer)
-        return await recordVerifiedReturn(
-          input,
-          dependencies,
-          attempt,
-          returnHash,
-          receipt,
-          transfer,
-        );
-      return { state: "waiting-return" };
-    }
-    if (typeof returnTransaction === "string")
-      await broadcastSlowTransaction(
-        dependencies,
-        returnTransaction as `0x${string}`,
-        "pocket-return:usdc",
-      );
-    return { state: "waiting-return" };
-  }
-  const initiateHash = await slowPathTransactionHash(dependencies, input, "initiate_tx");
-  if (initiateHash) {
-    const receipt = await dependencies.chain.transactionReceipt(initiateHash);
-    if (receipt?.status === "success") return { state: "waiting-withdrawal" };
-    if (receipt?.status === "reverted") {
-      if (input.value <= 0n) return { state: "waiting-withdrawal" };
-      await dependencies.pool.query(
-        `UPDATE payer_pullback_gateway_failures SET initiate_tx=NULL
-         WHERE plan_id=$1 AND step_index=$2 AND attempt=$3`,
-        [input.planId, input.stepIndex, attempt],
-      );
-      await sendSlowWithdrawal(input, dependencies, attempt, "initiate", assertLeaseHeld, true);
-      return { state: "waiting-withdrawal" };
-    }
-    const initiateTrace = trace.findLast((row) => row.phase === "pullback.slow.initiate.sent");
-    const transaction = initiateTrace?.payload["transaction"];
-    if (typeof transaction === "string") {
-      await broadcastSlowTransaction(
-        dependencies,
-        transaction as `0x${string}`,
-        "pullback.slow.initiate",
-      );
-      return { state: "waiting-withdrawal" };
-    }
-  }
-  if (input.value <= 0n) return { state: "waiting-withdrawal" };
-  await sendSlowWithdrawal(input, dependencies, attempt, "initiate", assertLeaseHeld);
+  await sendSlowWithdrawal(pass, { step: "initiate", value: reads.gatewayAvailable }, reverted);
   return { state: "waiting-withdrawal" };
 }
 
 async function sendSlowWithdrawal(
-  input: SlowPullbackInput,
-  dependencies: SlowPullbackDependencies,
-  attempt: number,
-  step: "initiate" | "withdraw",
-  assertLeaseHeld: () => void,
+  pass: SlowPass,
+  request:
+    | { readonly step: "initiate"; readonly value: bigint | null }
+    | { readonly step: "withdraw" },
   forceResign = false,
 ): Promise<void> {
-  const phase = step === "initiate" ? "pullback.slow.initiate" : "pullback.slow.withdraw";
+  const { input, dependencies, attempt } = pass;
+  const phase = request.step === "initiate" ? "pullback.slow.initiate" : "pullback.slow.withdraw";
   const trace = await getExecutionTrace(dependencies.pool, input.planId, input.stepIndex, attempt);
   const prior = forceResign ? undefined : trace.findLast((row) => row.phase === `${phase}.sent`);
   let transaction = prior?.payload["transaction"];
   if (typeof transaction !== "string") {
-    let signed;
-    try {
-      signed = await dependencies.signer.sign("cz-15", {
-        keyId: `K4:${input.pocket}`,
-        kind: "pocket-slow-withdraw",
-        payload: {
-          pocket: input.pocket,
-          step,
-          ...(step === "initiate" ? { value: input.value.toString() } : {}),
-        },
-      });
-    } catch (error) {
-      if (
-        step !== "initiate" ||
-        !(error instanceof Denied) ||
-        !SLOW_WITHDRAW_RETRY_RULES.has(error.rule)
-      )
-        throw error;
-      await writeSlowPhase(dependencies, input, attempt, `pullback.slow.${error.rule}`, {
-        pocket: input.pocket,
-      });
-      return;
-    }
-    if (!("signedTransaction" in signed))
-      throw new Error(`K4 did not sign slow withdrawal ${step}.`);
-    transaction = signed.signedTransaction;
+    const signed = await signSlowWithdrawal(pass, request);
+    if (signed === null) return;
+    transaction = signed;
     await writeSlowPhase(dependencies, input, attempt, `${phase}.sent`, { transaction });
   }
   await persistSlowTransactionHash(
     dependencies,
     input,
     attempt,
-    step,
+    request.step,
     keccak256(transaction as `0x${string}`),
   );
-  assertLeaseHeld();
+  pass.assertLeaseHeld();
   const txHash = await broadcastSlowTransaction(dependencies, transaction as `0x${string}`, phase);
   await writeSlowPhase(
     dependencies,
@@ -402,6 +402,44 @@ async function sendSlowWithdrawal(
     `${phase === "pullback.slow.initiate" ? "pullback.slow.initiated" : "pullback.slow.withdrawn"}`,
     { txHash },
   );
+}
+
+/** Signs `initiate` (V by SCR-141) or `withdraw`; on an SCR-141 denial records it and returns `null`. */
+async function signSlowWithdrawal(
+  pass: SlowPass,
+  request:
+    | { readonly step: "initiate"; readonly value: bigint | null }
+    | { readonly step: "withdraw" },
+): Promise<`0x${string}` | null> {
+  const { input, dependencies, attempt } = pass;
+  if (request.step === "initiate" && request.value === null)
+    throw new Error("Slow pullback initiate_tx is recorded without its signed transaction.");
+  let signed;
+  try {
+    signed = await dependencies.signer.sign("cz-15", {
+      keyId: "K4",
+      kind: "pocket-slow-withdraw",
+      payload: {
+        pocket: input.pocket,
+        step: request.step,
+        ...(request.step === "initiate" ? { value: String(request.value) } : {}),
+      },
+    });
+  } catch (error) {
+    if (
+      request.step !== "initiate" ||
+      !(error instanceof Denied) ||
+      !SLOW_WITHDRAW_RETRY_RULES.has(error.rule)
+    )
+      throw error;
+    await writeSlowPhase(dependencies, input, attempt, `pullback.slow.${error.rule}`, {
+      pocket: input.pocket,
+    });
+    return null;
+  }
+  if (!("signedTransaction" in signed))
+    throw new Error(`K4 did not sign slow withdrawal ${request.step}.`);
+  return signed.signedTransaction;
 }
 
 async function broadcastSlowTransaction(
@@ -418,58 +456,57 @@ async function broadcastSlowTransaction(
   return expectedHash;
 }
 
-async function returnSlowWithdrawalBalance(
-  input: SlowPullbackInput,
-  dependencies: SlowPullbackDependencies,
-  attempt: number,
-  assertLeaseHeld: () => void,
-): Promise<
-  | { readonly state: "waiting-return" }
-  | { readonly state: "manual-return-required"; readonly amount: string }
-  | { readonly state: "returned-to-vault"; readonly amount: string }
-> {
-  let amount = await dependencies.chain.pocketUsdcBalance(input.pocket);
-  if (amount === 0n) return { state: "waiting-return" };
-  const trace = await getExecutionTrace(dependencies.pool, input.planId, input.stepIndex, attempt);
-  const prior = trace.findLast((row) => row.phase === "pullback.slow.return.sent");
-  let transaction = prior?.payload["transaction"];
-  const priorHash = await slowPathTransactionHash(dependencies, input, "return_tx");
-  if (priorHash) {
-    const receipt = await dependencies.chain.transactionReceipt(priorHash);
-    if (!receipt) {
-      if (typeof transaction === "string")
-        await broadcastSlowTransaction(
-          dependencies,
-          transaction as `0x${string}`,
-          "pocket-return:usdc",
-        );
-      return { state: "waiting-return" };
-    }
-    const transfer = verifiedVaultTransfer(receipt, input);
-    if (receipt.status === "success") {
-      if (!transfer) return { state: "waiting-return" };
-      amount = await dependencies.chain.pocketUsdcBalance(input.pocket);
-      if (amount === 0n)
-        return await recordVerifiedReturn(
-          input,
-          dependencies,
-          attempt,
-          priorHash,
-          receipt,
-          transfer,
-        );
-    }
-    transaction = undefined;
+/** SCR-153 §1 rows 4–6, once the row is Gateway clear and nothing is withdrawing. */
+async function returnAfterGatewayClear(
+  pass: SlowPass,
+  row: SlowPathRow,
+): Promise<SlowPullbackResult> {
+  const { input, dependencies } = pass;
+  if (row.returnTx !== null) {
+    const receipt = await dependencies.chain.transactionReceipt(row.returnTx);
+    if (receipt === null) return await rebroadcastPocketReturn(pass, row.returnTx);
+    if (receipt.status === "success") return await completeReturn(pass, row.returnTx, receipt);
   }
+  const returnable = await dependencies.chain.pocketReturnable(input.pocket, input.vault);
+  if (returnable <= 0n) return await recordNothingReturned(pass);
+  return await sendPocketReturn(pass, returnable, row.returnTx === null);
+}
+
+async function rebroadcastPocketReturn(
+  pass: SlowPass,
+  returnTx: string,
+): Promise<SlowPullbackResult> {
+  const { input, dependencies, attempt } = pass;
+  const trace = await getExecutionTrace(dependencies.pool, input.planId, input.stepIndex, attempt);
+  const transaction = trace.findLast((entry) => entry.phase === "pullback.slow.return.sent")
+    ?.payload["transaction"];
+  if (
+    typeof transaction !== "string" ||
+    keccak256(transaction as `0x${string}`).toLowerCase() !== returnTx.toLowerCase()
+  )
+    throw new Error("Slow pullback return_tx is recorded without its signed transaction.");
+  pass.assertLeaseHeld();
+  await broadcastSlowTransaction(dependencies, transaction as `0x${string}`, "pocket-return:usdc");
+  const receipt = await dependencies.chain.transactionReceipt(returnTx);
+  if (receipt?.status !== "success") return { state: "waiting-return" };
+  return await completeReturn(pass, returnTx, receipt);
+}
+
+async function sendPocketReturn(
+  pass: SlowPass,
+  amount: bigint,
+  reuseSigned: boolean,
+): Promise<SlowPullbackResult> {
+  const { input, dependencies, attempt } = pass;
+  const trace = await getExecutionTrace(dependencies.pool, input.planId, input.stepIndex, attempt);
+  const prior = reuseSigned
+    ? trace.findLast((entry) => entry.phase === "pullback.slow.return.sent")
+    : undefined;
+  let transaction = prior?.payload["transaction"];
   if (typeof transaction !== "string") {
-    const signed = await dependencies.signer.sign("cz-15", {
-      keyId: `K4:${input.pocket}`,
-      kind: "pocket-return",
-      payload: { pocket: input.pocket, kind: "usdc", amount: amount.toString() },
-    });
-    if (!("signedTransaction" in signed))
-      throw new Error("K4 did not sign the USDC pocket return.");
-    transaction = signed.signedTransaction;
+    const signed = await signPocketReturn(input, dependencies, attempt, amount);
+    if (signed === null) return { state: "waiting-return" };
+    transaction = signed;
     await writeSlowPhase(dependencies, input, attempt, "pullback.slow.return.sent", {
       amount: amount.toString(),
       transaction,
@@ -482,7 +519,7 @@ async function returnSlowWithdrawalBalance(
     "return",
     keccak256(transaction as `0x${string}`),
   );
-  assertLeaseHeld();
+  pass.assertLeaseHeld();
   const txHash = await broadcastSlowTransaction(
     dependencies,
     transaction as `0x${string}`,
@@ -493,10 +530,89 @@ async function returnSlowWithdrawalBalance(
     txHash,
   });
   const receipt = await dependencies.chain.transactionReceipt(txHash);
-  if (!receipt) return { state: "waiting-return" };
-  const transfer = verifiedVaultTransfer(receipt, input);
-  if (!transfer) return { state: "waiting-return" };
-  return await recordVerifiedReturn(input, dependencies, attempt, txHash, receipt, transfer);
+  if (receipt?.status !== "success") return { state: "waiting-return" };
+  return await completeReturn(pass, txHash, receipt);
+}
+
+/** SCR-153 completion (c) with a return: its receipt holds one USDC `Transfer(pocket → vault)`. */
+async function completeReturn(
+  pass: SlowPass,
+  returnTx: string,
+  receipt: SlowPullbackReceipt,
+): Promise<SlowPullbackResult> {
+  const transfer = verifiedVaultTransfer(receipt, pass.input);
+  if (!transfer)
+    throw new Error("Slow pullback return_tx was mined without one USDC Transfer(pocket → vault).");
+  return await recordVerifiedReturn(
+    pass.input,
+    pass.dependencies,
+    pass.attempt,
+    returnTx,
+    receipt,
+    transfer,
+  );
+}
+
+/** SCR-153 §1 row 6: Gateway clear, `returnable ≤ 0` and no return sent: terminal with nothing returned. */
+async function recordNothingReturned(pass: SlowPass): Promise<SlowPullbackResult> {
+  const { input, dependencies, attempt } = pass;
+  const result = await dependencies.pool.query(
+    `UPDATE payer_pullback_gateway_failures SET state='returned-to-vault',returned_amount=0
+     WHERE plan_id=$1 AND step_index=$2 AND attempt=$3`,
+    [input.planId, input.stepIndex, attempt],
+  );
+  if (result.rowCount !== 1) throw new Error("Empty slow pullback completion was not persisted.");
+  return { state: "returned-to-vault", amount: "0" };
+}
+
+async function readSlowPathRow(
+  dependencies: SlowPullbackDependencies,
+  input: SlowPullbackInput,
+): Promise<SlowPathRow> {
+  const result = await dependencies.pool.query<{
+    readonly initiate_tx: string | null;
+    readonly withdraw_tx: string | null;
+    readonly return_tx: string | null;
+  }>(
+    `SELECT initiate_tx,withdraw_tx,return_tx FROM payer_pullback_gateway_failures
+     WHERE plan_id=$1 AND step_index=$2`,
+    [input.planId, input.stepIndex],
+  );
+  const row = result.rows[0];
+  if (!row) throw new Error("Slow pullback row is missing after it was written.");
+  return { initiateTx: row.initiate_tx, withdrawTx: row.withdraw_tx, returnTx: row.return_tx };
+}
+
+async function receiptOf(
+  dependencies: SlowPullbackDependencies,
+  hash: string | null,
+): Promise<SlowPullbackReceipt | null> {
+  return hash === null ? null : await dependencies.chain.transactionReceipt(hash);
+}
+
+/** Signs the USDC return; on a SCR-152 value denial records it and leaves the retry to the next pass. */
+async function signPocketReturn(
+  input: SlowPullbackInput,
+  dependencies: SlowPullbackDependencies,
+  attempt: number,
+  amount: bigint,
+): Promise<`0x${string}` | null> {
+  let signed;
+  try {
+    signed = await dependencies.signer.sign("cz-15", {
+      keyId: "K4",
+      kind: "pocket-return",
+      payload: { pocket: input.pocket, kind: "usdc", amount: amount.toString() },
+    });
+  } catch (error) {
+    if (!(error instanceof Denied) || !POCKET_RETURN_RETRY_RULES.has(error.rule)) throw error;
+    await writeSlowPhase(dependencies, input, attempt, `pullback.slow.${error.rule}`, {
+      pocket: input.pocket,
+    });
+    return null;
+  }
+  if (!("signedTransaction" in signed)) throw new Error("K4 did not sign the USDC pocket return.");
+  return signed.signedTransaction;
 }
 
 async function ensureSlowPathRow(
@@ -567,19 +683,6 @@ async function persistSlowTransactionHash(
   if (result.rowCount !== 1) throw new Error("Slow pullback transaction hash was not persisted.");
 }
 
-async function slowPathTransactionHash(
-  dependencies: SlowPullbackDependencies,
-  input: SlowPullbackInput,
-  column: "initiate_tx" | "return_tx",
-): Promise<string | null> {
-  const result = await dependencies.pool.query<{ readonly hash: string | null }>(
-    `SELECT ${column} AS hash FROM payer_pullback_gateway_failures
-     WHERE plan_id=$1 AND step_index=$2`,
-    [input.planId, input.stepIndex],
-  );
-  return result.rows[0]?.hash ?? null;
-}
-
 function verifiedVaultTransfer(
   receipt: SlowPullbackReceipt,
   input: SlowPullbackInput,
@@ -602,15 +705,18 @@ async function recordVerifiedReturn(
   txHash: string,
   receipt: SlowPullbackReceipt,
   transfer: SlowPullbackReceipt["logs"][number],
-): Promise<
-  | { readonly state: "waiting-return" }
-  | { readonly state: "manual-return-required" | "returned-to-vault"; readonly amount: string }
-> {
-  const [pocketBalance, withdrawingBalance] = await Promise.all([
-    dependencies.chain.pocketUsdcBalance(input.pocket),
+): Promise<SlowPullbackResult> {
+  const [returnable, withdrawingBalance] = await Promise.all([
+    dependencies.chain.pocketReturnable(input.pocket, input.vault),
     dependencies.chain.withdrawingBalance(input.pocket),
   ]);
-  if (pocketBalance !== 0n || withdrawingBalance !== 0n) return { state: "waiting-return" };
+  // SCR-153 completion (b) and (d): nothing withdrawing on a fresh read, and the EOA empty (SCR-152 §2).
+  if (withdrawingBalance !== 0n) return { state: "waiting-return" };
+  if (returnable > 0n)
+    throw new Error(
+      "SCR-153: the pocket EOA is not empty after a mined return_tx; " +
+        "the slow-path resume table has no row for this state.",
+    );
   const state =
     input.closedPocketRecovery || input.trigger === "closed-dust"
       ? "returned-to-vault"

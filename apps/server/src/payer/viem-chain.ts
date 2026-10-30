@@ -1,8 +1,15 @@
-import { parseAbi, type Address, type Hex, type PublicClient } from "viem";
+import {
+  parseAbi,
+  TransactionReceiptNotFoundError,
+  type Address,
+  type Hex,
+  type PublicClient,
+  type TransactionReceipt,
+} from "viem";
 import { decodeEventLog } from "viem";
 import { derivedNonce } from "@czar/hashing";
 import { czarVaultAbi, getVault } from "@czar/vault-client";
-import type { VaultDirectChain } from "#src/payer/vault-direct";
+import { ReserveReverted, type VaultDirectChain } from "#src/payer/vault-direct";
 
 const USDC_ABI = parseAbi([
   "function authorizationState(address authorizer, bytes32 nonce) view returns (bool)",
@@ -28,6 +35,31 @@ export function createViemVaultDirectChain(input: {
     return vault.read.getReservation([reservationId]);
   }
 
+  /** The timestamp of the block that mined `receipt`, from that block's header (SCR-153 §2). */
+  async function minedAt(receipt: TransactionReceipt): Promise<bigint> {
+    const block = await input.client.getBlock({ blockNumber: receipt.blockNumber });
+    return block.timestamp;
+  }
+
+  function reservedId(receipt: TransactionReceipt): bigint | undefined {
+    const event = receipt.logs
+      .filter((log) => log.address.toLowerCase() === input.vault.toLowerCase())
+      .map((log) => {
+        try {
+          return decodeEventLog({
+            abi: czarVaultAbi,
+            eventName: RESERVED_EVENT,
+            data: log.data,
+            topics: log.topics,
+          });
+        } catch {
+          return undefined;
+        }
+      })
+      .find((decoded) => decoded !== undefined);
+    return event ? BigInt(event.args.reservationId) : undefined;
+  }
+
   return {
     async stepUsed(envelopeId, stepIndex) {
       return BigInt(await vault.read.stepUsed([envelopeId, stepIndex]));
@@ -43,25 +75,15 @@ export function createViemVaultDirectChain(input: {
       return { cap: envelope.cap, exposure };
     },
     async reserve(args) {
-      const txHash = await send(args.signedTransaction);
-      const receipt = await input.client.getTransactionReceipt({ hash: txHash });
-      const event = receipt.logs
-        .filter((log) => log.address.toLowerCase() === input.vault.toLowerCase())
-        .map((log) => {
-          try {
-            return decodeEventLog({
-              abi: czarVaultAbi,
-              eventName: RESERVED_EVENT,
-              data: log.data,
-              topics: log.topics,
-            });
-          } catch {
-            return undefined;
-          }
-        })
-        .find((decoded) => decoded !== undefined);
-      if (!event) throw new Error("Mined reserve transaction did not emit Reserved.");
-      return { reservationId: BigInt(event.args.reservationId), txHash };
+      const txHash = await input.client.sendRawTransaction({
+        serializedTransaction: args.signedTransaction,
+      });
+      const receipt = await input.client.waitForTransactionReceipt({ hash: txHash });
+      if (receipt.status !== "success") throw new ReserveReverted(txHash, await minedAt(receipt));
+      const reservationId = reservedId(receipt);
+      if (reservationId === undefined)
+        throw new Error("Mined reserve transaction did not emit Reserved.");
+      return { reservationId, txHash };
     },
     async settle(args) {
       return send(args.signedTransaction);
@@ -90,29 +112,18 @@ export function createViemVaultDirectChain(input: {
       const reservation = await readReservation(reservationId);
       return Number(reservation.state) === RESERVATION_FINAL_STATE;
     },
-    async reservationFromTransaction(txHash) {
+    async reserveOutcome(txHash) {
+      let receipt: TransactionReceipt;
       try {
-        const receipt = await input.client.getTransactionReceipt({ hash: txHash as Hex });
-        if (receipt.status !== "success") return undefined;
-        const event = receipt.logs
-          .filter((log) => log.address.toLowerCase() === input.vault.toLowerCase())
-          .map((log) => {
-            try {
-              return decodeEventLog({
-                abi: czarVaultAbi,
-                eventName: RESERVED_EVENT,
-                data: log.data,
-                topics: log.topics,
-              });
-            } catch {
-              return undefined;
-            }
-          })
-          .find((decoded) => decoded !== undefined);
-        return event ? BigInt(event.args.reservationId) : undefined;
-      } catch {
-        return undefined;
+        receipt = await input.client.getTransactionReceipt({ hash: txHash as Hex });
+      } catch (error) {
+        if (error instanceof TransactionReceiptNotFoundError) return undefined;
+        throw error;
       }
+      if (receipt.status !== "success")
+        return { status: "reverted", blockTimestamp: await minedAt(receipt) };
+      const reservationId = reservedId(receipt);
+      return reservationId === undefined ? undefined : { status: "reserved", reservationId };
     },
   };
 }

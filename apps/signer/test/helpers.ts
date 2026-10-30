@@ -250,7 +250,6 @@ export function defaultState(pocket: Address): State {
       envelopeOpen: false,
       pendingPullbackZero: false,
       gatewayWithdrawingZero: false,
-      pocketUsdcZero: false,
       slowWithdrawAudited: false,
       pocketReturnAudited: false,
       manualReturnRowValid: false,
@@ -340,6 +339,8 @@ export async function harness(
     alert?: (message: string) => Promise<void>;
     logger?: Pick<Logger, "error">;
     withoutAlert?: boolean;
+    /** Milliseconds; replaces the fixed test clock (and `advance`), e.g. with chain time. */
+    nowMs?: () => number;
   } = {},
 ) {
   const fs = memoryFs();
@@ -380,7 +381,7 @@ export async function harness(
         }),
     ...(options.logger === undefined ? {} : { logger: options.logger }),
     callers: CALLERS,
-    nowMs: () => nowMs,
+    nowMs: options.nowMs ?? (() => nowMs),
     prepareTransaction:
       options.prepareTransaction ??
       (async (_from, call) => {

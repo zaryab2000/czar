@@ -7,7 +7,7 @@ import type { Pool } from "pg";
 import type { Address, PublicClient, WalletClient } from "viem";
 import { executePullback, executeSlowPullbackFallback } from "#src/payer/pullback";
 import type { PocketHaltDependencies, PocketCloseDependencies } from "#src/payer/pocket";
-import { createIndexerPocketReader } from "#src/payer/indexer-pocket";
+import { createIndexerPocketReader, type IndexerPocketReader } from "#src/payer/indexer-pocket";
 import { createPullbackChainAdapter } from "#src/payer/pullback-chain-adapter";
 import { createPullbackExecutionChain } from "#src/payer/pullback-execution-chain";
 
@@ -95,15 +95,12 @@ export function createPocketRecoveryOperations(
             context.envelopeRef !== row.envelope_ref
           )
             throw new Error("Open slow-pullback row does not match its persisted pocket context.");
-          const result = await runClosedSlowReturn(
-            input,
-            context,
-            row.pocket,
-            BigInt(row.value ?? "0"),
-            row.unavailable_since,
-            row.attempt ?? 0,
-            row.step_index,
-          );
+          const result = await runClosedSlowReturn(input, reader, context, row.pocket, {
+            observedBalance: BigInt(row.value ?? "0"),
+            apiUnavailableSince: row.unavailable_since,
+            attempt: row.attempt ?? 0,
+            stepIndex: row.step_index,
+          });
           if (result === "waiting") continue;
         } catch {
           input.logger.error("closed_pocket_recovery_failed", {
@@ -147,7 +144,9 @@ async function recoverClosedPocket(
     throw new Error("Closed pocket projection does not match its linked vault.");
   const balance = await reader.pocketBalance(pocket);
   if (balance.gatewayWithdrawingAtomic > 0n) {
-    const slow = await runClosedSlowReturn(input, context, pocket, balance.gatewayAvailableAtomic);
+    const slow = await runClosedSlowReturn(input, reader, context, pocket, {
+      observedBalance: balance.gatewayAvailableAtomic,
+    });
     return slow === "waiting" && closeMustComplete ? "waiting" : slow;
   }
   const result = await executeFromBalance(
@@ -163,20 +162,26 @@ async function recoverClosedPocket(
     balance,
   );
   if (result.state === "waiting" && result.reason === "closed-pocket-dust")
-    return runClosedSlowReturn(input, context, pocket, balance.gatewayAvailableAtomic);
+    return runClosedSlowReturn(input, reader, context, pocket, {
+      observedBalance: balance.gatewayAvailableAtomic,
+    });
   if (result.state === "waiting" && closeMustComplete) return "waiting";
   return "done";
 }
 
 async function runClosedSlowReturn(
   input: PocketRecoveryInput,
+  reader: IndexerPocketReader,
   context: PocketPlanContext,
   pocket: Address,
-  observedBalance: bigint,
-  apiUnavailableSince: Date = input.now(),
-  attempt?: number,
-  stepIndex?: number,
+  resume: {
+    readonly observedBalance: bigint;
+    readonly apiUnavailableSince?: Date;
+    readonly attempt?: number;
+    readonly stepIndex?: number;
+  },
 ): Promise<"done" | "waiting"> {
+  const { observedBalance, attempt, stepIndex } = resume;
   const chain = createPullbackChainAdapter(
     input.publicClient,
     input.walletClient,
@@ -191,13 +196,20 @@ async function runClosedSlowReturn(
       pocket,
       vault: context.vault,
       usdc: input.config.get("chain.usdcAddress") as Address,
-      apiUnavailableSince,
+      apiUnavailableSince: resume.apiUnavailableSince ?? input.now(),
       value: observedBalance,
       trigger: "closed-dust",
       closedPocketRecovery: true,
       ...(attempt === undefined ? {} : { attempt }),
     },
-    { pool: input.pool, config: input.config, signer: input.signer, chain, now: input.now },
+    {
+      pool: input.pool,
+      config: input.config,
+      signer: input.signer,
+      chain,
+      readGatewayBalance: (balanceOf) => reader.pocketBalance(balanceOf),
+      now: input.now,
+    },
   );
   return result.state === "returned-to-vault" ? "done" : "waiting";
 }
