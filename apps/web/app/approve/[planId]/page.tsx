@@ -511,6 +511,10 @@ function alternativeReason(
       return "payee changed since listing";
     case "not-in-top-k":
       return "ranked lower";
+    case "unrated":
+      return "no ratings yet";
+    case "health-blocked":
+      return "blocked after returning unsafe text";
   }
 }
 

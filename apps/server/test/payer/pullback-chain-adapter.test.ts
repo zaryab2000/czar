@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createLogger } from "@czar/logging";
 import { loadConfig } from "@czar/config";
 import {
+  decodeFunctionData,
   encodeAbiParameters,
   encodeEventTopics,
   parseAbi,
@@ -18,6 +19,7 @@ const GATEWAY_WALLET = "0x0077777d7EBA4688BDeF3E311b846F25870A19B9" as Address;
 const VAULT = "0x0000000000000000000000000000000000000002" as Address;
 const TRANSACTION = `0x${"ab".repeat(64)}` as Hex;
 const TX_HASH = `0x${"cd".repeat(32)}` as Hex;
+const TRANSFER_ABI = parseAbi(["function transfer(address to, uint256 value) returns (bool)"]);
 
 describe("createPullbackChainAdapter", () => {
   it("reads the current block, USDC balance, and withdrawal block through viem", async () => {
@@ -31,16 +33,10 @@ describe("createPullbackChainAdapter", () => {
     );
 
     await expect(adapter.getBlockNumber()).resolves.toBe(42n);
-    await expect(adapter.pocketUsdcBalance(POCKET)).resolves.toBe(123_456n);
     await expect(adapter.withdrawalBlock(POCKET)).resolves.toBe(123_456n);
     await expect(adapter.withdrawingBalance(POCKET)).resolves.toBe(123_456n);
-    expect(getBlockNumber).toHaveBeenCalledOnce();
-    expect(readContract).toHaveBeenCalledWith({
-      address: USDC,
-      abi: expect.any(Array),
-      functionName: "balanceOf",
-      args: [POCKET],
-    });
+    // The head decides wait vs. K4 withdraw on every pass (SCR-153 §1): never a cached value.
+    expect(getBlockNumber).toHaveBeenCalledExactlyOnceWith({ cacheTime: 0 });
     expect(readContract).toHaveBeenCalledWith({
       address: GATEWAY_WALLET,
       abi: [
@@ -75,6 +71,59 @@ describe("createPullbackChainAdapter", () => {
       functionName: "withdrawingBalance",
       args: [USDC, POCKET],
     });
+  });
+
+  it("returns balance - gasReserve from the signer's preparer, probing with a one-unit transfer (SCR-152)", async () => {
+    const readContract = vi.fn(async () => 10_000n);
+    const prepared: { from: Address; data: Hex }[] = [];
+    const adapter = createPullbackChainAdapter(
+      { readContract } as unknown as PublicClient,
+      { sendRawTransaction: vi.fn() } as unknown as WalletClient,
+      GATEWAY_WALLET,
+      {
+        config: loadConfig(),
+        transactionPreparer: async (from, call) => {
+          prepared.push({ from, data: call.data });
+          return {
+            type: "eip1559",
+            chainId: 5042002,
+            to: call.to,
+            data: call.data,
+            gas: 200_000n,
+            maxFeePerGas: 20_000_000_000n,
+          };
+        },
+      },
+    );
+
+    // 200,000 gas × 20 gwei = 4,000 USDC atomic units of gas reserve.
+    await expect(adapter.pocketReturnable(POCKET, VAULT)).resolves.toBe(6_000n);
+    expect(readContract).toHaveBeenCalledWith({
+      address: USDC,
+      abi: expect.any(Array),
+      functionName: "balanceOf",
+      args: [POCKET],
+    });
+    expect(prepared.map((call) => call.from)).toEqual([POCKET, POCKET]);
+    expect(
+      prepared.map((call) => decodeFunctionData({ abi: TRANSFER_ABI, data: call.data }).args),
+    ).toEqual([
+      [VAULT, 1n],
+      [VAULT, 6_000n],
+    ]);
+  });
+
+  it("reports nothing returnable for an empty pocket without preparing a transfer", async () => {
+    const transactionPreparer = vi.fn();
+    const adapter = createPullbackChainAdapter(
+      { readContract: vi.fn(async () => 0n) } as unknown as PublicClient,
+      { sendRawTransaction: vi.fn() } as unknown as WalletClient,
+      GATEWAY_WALLET,
+      { config: loadConfig(), transactionPreparer },
+    );
+
+    await expect(adapter.pocketReturnable(POCKET, VAULT)).resolves.toBe(0n);
+    expect(transactionPreparer).not.toHaveBeenCalled();
   });
 
   it("submits the signed transaction and logs its kind and hash only", async () => {

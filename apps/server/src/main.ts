@@ -74,6 +74,7 @@ import {
   type PocketPreparationInput,
 } from "#src/payer/pocket";
 import { createPocketPreparationChain } from "#src/payer/pocket-chain";
+import { savedTransactionReads } from "#src/payer/saved-transaction";
 import { createViemVaultDirectChain } from "#src/payer/viem-chain";
 import {
   cancelExpiredPullback,
@@ -379,6 +380,7 @@ function createServerApp(
     logger: options.logger,
     clock: options.clock,
     random: options.random,
+    vaultFactory: options.appReadOptions.factoryAddress,
     ...(options.modelClient ? { modelClient: options.modelClient } : {}),
     jobDelivery: {
       pool: options.pool,
@@ -1221,6 +1223,7 @@ async function readGuardianPauseState(
 
 function completionChain(options: ServerMainOptions) {
   return {
+    ...savedTransactionReads(options.publicClient),
     async readEnvelope(vault: Address, envelopeId: bigint) {
       const value = await options.publicClient.readContract({
         address: vault,

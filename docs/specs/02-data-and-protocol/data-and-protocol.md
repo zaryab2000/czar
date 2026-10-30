@@ -423,11 +423,14 @@ type PaymentRef =
 ### 4.15 `StepResult`
 
 - **Purpose:** the only form in which untrusted merchant output leaves the reader: it goes to the paying agent (code), acceptance and write-back, **never to the planner** (D74, RV-018; the planner's re-plan input is only `{stepIndex, errorCode, flags}`). Produced by the reader model under a fixed schema. **Superseded by D74:** "the only form in which untrusted merchant output reaches the planner".
-- **Schema:** `schemas/step-result.schema.json`
+- **Schema:** `schemas/step-result.schema.json` (1.0 today; the SCR-160 rows `callIndex`, `subjectIndex`, `obsId` below land as 1.1 together with Flow 4A package 4A-2, SCR-161)
 
 | Field | Type | R | PC | Description |
 |---|---|---|---|---|
 | `stepIndex` | integer | yes | SO | |
+| `callIndex` | integer 0–4095 | yes | SO | the paid call within the step: authorization index (vault-direct), nanopayment index (pocket), `0` (job); one `StepResult` per paid call (SCR-160) |
+| `subjectIndex` | integer ≥ 0 | no | SO | the `TaskSpec` subject this call served (D84) |
+| `obsId` | `SlObsId` | yes | SO | `obs_` + keccak256(`dedupKey`)[0:32] of this call's payment (§7.1, SCR-160) |
 | `status` | enum `delivered` \| `http-error` \| `timeout` \| `no-response` \| `unknown` | yes | SO | SL outcome vocabulary |
 | `source` | object `{origin: string, payTo: Address, paymentRefHash: Hash32}` | yes | SO | label of where the text came from |
 | `fields` | array of `{name: string ≤ 64, value: string ≤ 2,000, confidence: number}` ≤ 50 | yes | SO | extracted values; values are data, JSON-encoded, never instructions |
@@ -594,6 +597,13 @@ type PaymentRef =
 - **`rootId`:** the lowercase hex of the root's `projectRef` (32 bytes, no `0x`; `projectRef` is defined in §4.1). The same value is `InterviewSubmission.mission.projectRootId`. It is local only.
 - **Fields:** `scanId` (`scan_<Ulid>`), `rootId`, `includeAgentFiles`, `includeGlobalAgentFile`, `includeGit`, `consentId`, `status` (`running` \| `done` \| `failed` \| `cancelled`), `fileCount`, `byteCount`, `skipped` counts (`sensitivePath`, `outsideRoot`, `oversized`, `untracked`, `nonText`), `proposalCount`, `suspiciousSkipped`, `startedAt`, `endedAt`.
 - **Held (SCR-030):** `OpenLoopPreview` and `DemandConfirmationReceipt` for user-confirmed open loops are defined in SCR-030 and added with the Flow 7 review.
+
+### 4.28 `Rating` (SCR-160)
+
+- **Purpose:** the paying owner's **good** or **bad** on one producing step of one delivered objective. The only supplier quality signal in Czar. Bound to every settled receipt (`obs_id`) that step's supplier received for the objective; counted once by the ranker; written only by the owner of the vault that paid; changeable once within `rating.windowDays` of delivery, then frozen.
+- **Schema:** `schemas/rating.schema.json`. Example: `examples/rating.example.json`. All fields `SO`.
+- **Fields:** `ratingId` (`rtg_<Ulid>`), `userId`, `vault`, `objectiveId`, `stepIndex`, `network`, `serviceId`, `versionId` (`ver_…` or `ver_unknown`), `taskClass`, `value` (`good` | `bad`), `obsIds[]` (resolved by the server), `surface` (`cli` | `web`), `supersedes` (`rtg_…` or null), `createdAt`.
+- **Invariants:** no free text, no cell value, no subject, no file name. One rating per `(objectiveId, stepIndex)` plus at most one correction (`supersedes`). A receipt belongs to at most one rating. Full rules, checks and routes: SCR-160 §7.
 
 ### 4.27 `CapabilityCard` (D91)
 
@@ -790,6 +800,8 @@ Spec 03's Foundry tests MUST reproduce the seven on-chain entries (all but `brie
 | `repoId` (P2) | `keccak256(utf8("github:" + <numeric GitHub repository id>))` | claim server | global | GitHub numeric ids survive renames |
 | `batchId` | `bat_<Ulid>` | evidence publisher | global | |
 | `resultId` | `res_<Ulid>` | server | global | write-back download handle |
+| `ratingId` | `rtg_<Ulid>` | server | global | `Rating` (§4.28, SCR-160) |
+| `obs_id` | `obs_` + lowercase hex(keccak256(utf8(`dedupKey`)))[0:32] | server (CZ-15 at `auth.signed`; jobs at `JobOpened`) | global | `dedupKey` per rail: `x402-exact:<network>:<payer>:<payTo>:<nonce>`, `gateway-batched:<network>:<pocket>:<payTo>:<nonce>`, `erc8183:<network>:<escrowContract>:<jobId>` (addresses lowercase, `nonce` as `0x` + 64 hex, `jobId` decimal). Stable across crash-resume; unique per payment (SCR-160 §3). **Supersedes** the random `obs_` value. |
 | `userId` | `usr_<Ulid>` | server | global | |
 | `pushSubscriptionId` | `psh_<Ulid>` | server | per user | stage 2 (D69) |
 | `quoteId` | `qte_<Ulid>` | server | global | `createQuote` results (each names a `planId` and `stepIndex`) and shadow-mode quotes (RV-020) |
@@ -989,7 +1001,9 @@ Full definition: `api/openapi.yaml` (OpenAPI 3.1; operation ids are checked by t
 | POST | `/v1/services/search` (`findService`) | key required | `FindServiceRequest` → `FindServiceResponse` | backs MCP `find_service` (AM-01); `network` other than `selection.paymentNetwork` → 422 `network-not-payable` (D83) |
 | POST | `/v1/services/market-view` (`getMarketView`) | key required | `MarketViewRequest {capability, maxPrice?}` → `MarketView` (§4.22) | Lane A of D83; read-only; backs MCP `find_service` with `includeMarketView` and the app's market screen |
 | POST | `/v1/quotes` (`createQuote`) | key required | `QuoteRequest` → `QuoteResponse` | backs MCP `quote`; moves no money (AM-01) |
-| POST | `/v1/outcomes` (`reportOutcome`) | key required | `OutcomeReport` → `OutcomeRecorded` | backs MCP `report_outcome` (AM-01) |
+| POST | `/v1/outcomes` (`reportOutcome`) | key required | `OutcomeReport` → `OutcomeRecorded` | backs MCP `report_outcome` (AM-01); never creates a `Rating` |
+| POST | `/v1/ratings` (`submitRating`) | key required | `RatingRequest` → `202 RatingAccepted` | the owner's good or bad on a producing step (§4.28, SCR-160 §7) |
+| GET | `/v1/objectives/{objectiveId}/rating-prompt` (`getRatingPrompt`) | yes | → `RatingPrompt` | producing suppliers and whether each can be rated now (SCR-160 §7.6) |
 | POST | `/v1/models/complete` (`completeModelCall`) | key required, **never replayed** | `ModelCallRequest` → `ModelCallResponse` | model proxy for P-01, P-04, P-05, P-06; stores only token counts (D31, AM-02); a repeated key gets `409 replay-not-stored` (RV-043) |
 
 **App surface (`AppSession`, except public wallet bootstrap)**
@@ -1006,6 +1020,8 @@ Full definition: `api/openapi.yaml` (OpenAPI 3.1; operation ids are checked by t
 | GET | `/v1/envelopes?state=` | yes | → page of `Envelope` (§4.8) | |
 | GET | `/v1/envelopes/{envelopeRef}` | yes | → `EnvelopeDetail` (envelope, reservations, pockets, jobs) | |
 | POST | `/v1/freeze/intent` | key required | `{action}` → `FreezeIntent` calldata | one-tap freeze; app submits the UserOp |
+| POST | `/v1/app/ratings` (`submitAppRating`) | key required | `RatingRequest` → `202 RatingAccepted` | same rules as `submitRating`, app session (SCR-160 §7) |
+| GET | `/v1/app/results?cursor=` (`listAppResults`) | yes | → page of `AppResultCard` | result cards with per-supplier ratings for Receipts and Home (SCR-160 §8.2) |
 | GET | `/v1/pockets/manual-returns?cursor=` | yes | → page of `ManualReturn` | pocket returns the owner records with a `recordManualReturn` UserOp (SCR-133); scoped to the session user |
 | POST | `/v1/devices/pairing-codes` | key required | → `PairingCode` `{code, expiresAt}` | 8-digit code for `pairDevice`, valid `app.pairingCodeTtlMinutes`; never logged (SCR-134) |
 | GET | `/v1/devices?cursor=` | yes | → page of `Device` | the session user's devices (SCR-134) |
@@ -1420,3 +1436,4 @@ Agent-directed text met this session (not followed): the Circle and Arc doc head
 | 2026-10-25 | SCR-133, SCR-134 | §9.2 app routes `listManualReturns`, `createPairingCode`, `listDevices`, `revokeDevice`; shapes in `api/openapi.yaml`. |
 | 2026-10-25 | SCR-137 | §11.3 sanitized result keeps the validated Bazaar `schema`; §4.19 interim producer metadata; `ranking-decision.schema.json` 1.1 (`snapshot_anchor_tx` may be `null`, meaning not anchored). |
 | 2026-10-25 | SCR-138 | §4.19: the interim snapshot holds every registered service, its probe state and every reduced offer, so decisions reproduce from `(policy_version, snapshot_id, query)`. |
+| 2026-10-30 | SCR-160 | §4.15 `StepResult` 1.1 (`callIndex`, `subjectIndex`, `obsId`); new §4.28 `Rating` and `rating.schema.json`; §4.19 `ranking-decision.schema.json` 1.2 (`unrated`); §4.5 `plan.schema.json` 1.3 (`approvalReasons`; `why.alternativesLost` reasons `unrated`, `health-blocked`); §7.1 `ratingId` and the derived `obs_id`; §9.2 routes `submitRating`, `getRatingPrompt`, `submitAppRating`, `listAppResults`; `common.schema.json` `RatingId`. |

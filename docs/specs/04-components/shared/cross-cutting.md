@@ -93,10 +93,11 @@ Every outbound fetch of a URL that came from outside Czar's own code goes throug
 ## 4. Logging, metrics and audit (no personal data)
 
 - Format: one JSON object per line (pino-style), UTC timestamps, `service`, `component` (`CZ-nn`), `event` (snake_case), `traceId`, `spanId`.
-- **Field allowlist** (anything else is dropped by `@czar/logging`): ids with Czar prefixes (`obj_`, `pln_`, `stp_`, `pay_`, `res_`, `dev_`, `bat_`, and in daemon logs `src_`, `prop_`, `scan_`, `cns_` (D90)), `envelopeRef`, `reservationId`, `pullbackId`, `jobKey`, hashes (`Hash32`), addresses, amounts (`Amount6`), counts, durations, enum states, `czarCode`, HTTP status, chain block numbers and tx hashes, origin hosts (never full URLs with query strings), model name and prompt hash, token counts.
+- **Field allowlist** (anything else is dropped by `@czar/logging`): ids with Czar prefixes (`obj_`, `pln_`, `stp_`, `pay_`, `res_`, `dev_`, `bat_`, `rtg_`, `obs_` (SCR-160), and in daemon logs `src_`, `prop_`, `scan_`, `cns_` (D90)), `envelopeRef`, `reservationId`, `pullbackId`, `jobKey`, hashes (`Hash32`), addresses, amounts (`Amount6`), counts, durations, enum states, `czarCode`, HTTP status, chain block numbers and tx hashes, origin hosts (never full URLs with query strings), model name and prompt hash, token counts.
 - **Never logged:** objective `goal` text, soul text, interview answers, proposal text, source excerpts, pastes, agent summaries, source locators (D90), merchant bodies, `StepResult.fields[].value`, hook payloads, file paths, emails, IPs beyond a /24 or /48 truncation (SL §11), push bodies (stage 2, D69).
 - Daemon logs stay on the machine (`~/Library/Logs/Czar/` on macOS, rotated, 14 days) and are shown in the viewer's "What left this machine" panel as counts and hashes (spec 01 §16.3).
 - Metrics (server): Prometheus-style counters and histograms named `czar_<component>_<metric>`; labels limited to enums.
+- Rating counters (SCR-160 §8.3): `czar_ratings_prompts_shown{surface}`, `czar_ratings_posted{surface,value}`, `czar_ratings_corrections{surface}`. Rating and health fields allowed in logs: `fact`, `value` (enums), `good`, `bad`, `lower_bound` (numbers). `merchantLabel` is never logged.
 - Daemon soul-input counters (D90, local): `soul_input_proposals{source_kind,status}`, `soul_input_skipped{reason}`, `soul_input_screen_flags{flag}`, `soul_input_model_calls{outcome}`, `soul_input_mcp_rate_limited`. Enum labels only.
 - Audit log (server, append-only table `audit`): actor key id (`K3`…), action, object ids, amounts, tx hashes, timestamp, outcome (spec 01 §16.3). Retained 1 year.
 
@@ -104,7 +105,7 @@ Every outbound fetch of a URL that came from outside Czar's own code goes throug
 
 ### 5.1 API `czarCode` (02 §9.4)
 
-`validation`, `idempotency-conflict`, `replay-not-stored` (RV-043), `device-revoked`, `session-expired`, `hash-mismatch`, `plan-expired`, `envelope-not-open`, `approval-required`, `payment-id-conflict`, `plan-not-approved`, `step-not-in-plan`, `step-calls-exhausted`, `step-cap-exhausted`, `input-not-in-template`, `input-redaction-hit`, `resource-not-indexed` (RV-019, RV-021), `fetch-blocked` (RV-022), `network-not-payable` (D83), `rate-limited`, `upstream-unavailable` (retryable), `frozen`, `paused`.
+`validation`, `idempotency-conflict`, `replay-not-stored` (RV-043), `device-revoked`, `session-expired`, `hash-mismatch`, `plan-expired`, `envelope-not-open`, `approval-required`, `payment-id-conflict`, `plan-not-approved`, `step-not-in-plan`, `step-calls-exhausted`, `step-cap-exhausted`, `input-not-in-template`, `input-redaction-hit`, `resource-not-indexed` (RV-019, RV-021), `fetch-blocked` (RV-022), `network-not-payable` (D83), `rate-limited`, `upstream-unavailable` (retryable), `frozen`, `paused`; SCR-160 ratings: `unknown-objective`, `controlled-user`, `not-producing`, `nothing-settled`, `window-closed`, `supersedes-required`, `bad-supersedes`, `not-your-payment`.
 
 Local viewer API (`local-openapi.yaml`, D90): `bundle-mismatch` (the confirmed proposal list differs from the bundle), `source-changed` (the source digest no longer matches at acceptance; the proposal must be reviewed again), `consent-required` (the scan scope has no current consent).
 
@@ -233,3 +234,4 @@ Supply-chain rules (CLAUDE.md): `pnpm audit --audit-level=moderate`, `minimumRel
 | 2026-10-20 | D83 | `@czar/x402` buyer refuses networks outside `x402.allowedPaymentNetworks`. |
 | 2026-10-20 | D90 | §4 daemon id prefixes, never-logged soul-input text, local counters; §6.1 P-07; §6.2 P-07 budget row (total ≈ 4.6 M under the unchanged 6 M cap) and timeout. |
 | 2026-10-25 | SCR-130 | Local environment row names the D92 stand-ins; `fetch.localStandinOrigins` and the local-only guard (overlay + loopback RPC + `anvil_nodeInfo`, not chain id). |
+| 2026-10-30 | SCR-160 | §4 allowlist `rtg_`, `obs_`, rating counters; §5.1 rating codes. |

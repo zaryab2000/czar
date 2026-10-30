@@ -5,7 +5,7 @@ const config: NextConfig = {
   poweredByHeader: false,
   reactStrictMode: true,
   async rewrites() {
-    const serverUrl = process.env["CZAR_SERVER_URL"] ?? "http://127.0.0.1:4310";
+    const serverUrl = process.env["CZAR_SERVER_URL"] ?? "http://127.0.0.1:3000";
     return [{ source: "/v1/:path*", destination: `${serverUrl}/v1/:path*` }];
   },
 };

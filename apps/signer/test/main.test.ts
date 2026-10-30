@@ -40,7 +40,7 @@ describe("signer process bootstrap", () => {
       argv: ["node", "main.ts"],
       refill: {
         getNativeBalance: async () => 10_000_000n,
-        submitTransaction: async () => undefined,
+        submitTransaction: async () => ({ blockNumber: 1n }),
       },
     });
 
@@ -50,6 +50,7 @@ describe("signer process bootstrap", () => {
       expect(opened).toContain("dev.czar.signer.keystore.token.merchants:merchants");
       expect(opened).toContain("dev.czar.signer.keystore.token.relayer-jobs:relayer-jobs");
       expect(vi.getTimerCount()).toBe(1);
+      expect(running.metrics.render()).toContain("# TYPE czar_signer_gas_low counter");
     } finally {
       await running.stop();
       await rm(dir, { recursive: true, force: true });
@@ -95,7 +96,6 @@ function emptyProjection(): Projection {
       envelopeOpen: false,
       pendingPullbackZero: false,
       gatewayWithdrawingZero: false,
-      pocketUsdcZero: false,
       slowWithdrawAudited: false,
       pocketReturnAudited: false,
       manualReturnRowValid: false,

@@ -7,5 +7,6 @@ export async function submitManualReturn(item: ManualReturn): Promise<void> {
     getStoredPasskey(),
     item.vault,
     encodeRecordManualReturn(item.pocket, BigInt(item.returnedAmount)),
+    { waitForInclusion: true },
   );
 }

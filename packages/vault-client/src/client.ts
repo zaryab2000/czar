@@ -68,6 +68,31 @@ export const getVaultFactory = (
   client: Client | { public: Client; wallet?: Client },
 ) => getContract({ address, abi: czarVaultFactoryAbi, client });
 
+/** Reads the vault the factory created for an owner account; the zero address when there is none. */
+export async function readVaultOf(input: {
+  readonly client: PublicClient;
+  readonly factory: Address;
+  readonly ownerAccount: Address;
+}): Promise<Address> {
+  return getVaultFactory(input.factory, input.client).read.vaultOf([input.ownerAccount]);
+}
+
+export interface VaultPasskey {
+  readonly qx: Hex;
+  readonly qy: Hex;
+  readonly rpIdHash: Hex;
+  readonly set: boolean;
+}
+
+/** Reads the owner passkey a Czar vault holds (`set` is false before `setPasskey`). */
+export async function readVaultPasskey(input: {
+  readonly client: PublicClient;
+  readonly vault: Address;
+}): Promise<VaultPasskey> {
+  const passkey = await getVault(input.vault, input.client).read.getPasskey();
+  return { qx: passkey.qx, qy: passkey.qy, rpIdHash: passkey.rpIdHash, set: passkey.set };
+}
+
 /** Reads the owner-facing vault state at one already selected block. */
 export async function readPinnedVaultState(input: {
   readonly client: PublicClient;

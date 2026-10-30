@@ -234,7 +234,7 @@ components:
           description: "Counts only for the in-place fill (D85). No values, no paths."
           required: [status]
           properties:
-            status: { type: string, enum: [filled, partial, none-filled, off, file-missing] }
+            status: { type: string, enum: [filled, partial, none-filled, "off", file-missing] }
             cellsFilled: { type: integer, minimum: 0 }
             cellsSkippedClash: { type: integer, minimum: 0 }
             cellsNotFound: { type: integer, minimum: 0 }
@@ -495,10 +495,10 @@ components:
 
     AppWalletConfig:
       type: object
-      description: Public, same-origin wallet bootstrap values from validated server config (SCR-140). K2 is a public-facing client key, not a private key.
+      description: Public, same-origin wallet bootstrap values from validated server config (SCR-140). K2 is a public-facing client key, not a private key. vaultFactory is CzarVaultFactory from the server's deployment manifest for the configured network (SCR-157 §3).
       x-privacyClass: public
       additionalProperties: false
-      required: [circleClientUrl, circleClientKey, arcRpcUrl, bundlerOrder, bundlerEndpoints]
+      required: [circleClientUrl, circleClientKey, arcRpcUrl, bundlerOrder, bundlerEndpoints, vaultFactory, webauthnRpId]
       properties:
         circleClientUrl:
           type: string
@@ -529,6 +529,15 @@ components:
             pimlico: { type: string, format: uri }
             alchemy: { type: string, format: uri }
             zerodev: { type: string, format: uri }
+        vaultFactory: { $ref: "#/components/schemas/Address" }
+        webauthnRpId:
+          type: string
+          minLength: 1
+          description: WebAuthn RP ID, the host name of app.origin (SCR-156, SCR-157 §3).
+        userOpReceiptTimeoutSeconds:
+          type: integer
+          minimum: 1
+          description: "Seconds the app waits for an owner UserOperation receipt on the accepting bundler, from app.userOpReceiptTimeoutSeconds (SCR-159 §4, SCR-161 §4). Optional; the app falls back to the registry default when absent."
 
     Me:
       type: object
@@ -658,6 +667,69 @@ components:
         state: { type: string, enum: [manual-return-required, recorded, expired], description: "expired = the pocket closed before the return was recorded; the USDC is already in the vault." }
         recordedCredit: { $ref: "#/components/schemas/Amount6", description: "credit from ManualReturnRecorded; may be lower than returnedAmount (contract bound)." }
         recordedTx: { $ref: "#/components/schemas/Hash32" }
+
+    RatingRequest:
+      type: object
+      description: "The owner's good or bad on one producing step of a delivered objective (SCR-160 §7). The server resolves the bound receipts; the client never names them."
+      x-privacyClass: server-only
+      additionalProperties: false
+      required: [objectiveId, stepIndex, value]
+      properties:
+        objectiveId: { type: string, pattern: "^obj_[0-9A-HJKMNP-TV-Z]{26}$" }
+        stepIndex: { type: integer, minimum: 0, maximum: 63, description: "A producing step: a Result.provenance entry with accepted = true." }
+        value: { type: string, enum: [good, bad] }
+        supersedes: { type: string, pattern: "^rtg_[0-9A-HJKMNP-TV-Z]{26}$", description: "The caller's effective rating for the same objective and step; required when one exists; at most one correction (SCR-160 §7.5)." }
+    RatingAccepted:
+      type: object
+      x-privacyClass: server-only
+      additionalProperties: false
+      required: [ratingId, objectiveId, stepIndex, value, receipts, windowClosesAt]
+      properties:
+        ratingId: { type: string, pattern: "^rtg_[0-9A-HJKMNP-TV-Z]{26}$" }
+        objectiveId: { type: string, pattern: "^obj_[0-9A-HJKMNP-TV-Z]{26}$" }
+        stepIndex: { type: integer, minimum: 0, maximum: 63 }
+        value: { type: string, enum: [good, bad] }
+        receipts: { type: integer, minimum: 1, description: "Settled receipts bound to this rating." }
+        windowClosesAt: { type: string, format: date-time }
+    RatingPromptStep:
+      type: object
+      description: "One producing supplier of a delivered objective, as shown by the rating prompt (SCR-160 §7.6, §8)."
+      x-privacyClass: server-only
+      additionalProperties: false
+      required: [stepIndex, merchantLabel, merchantIsCzar, receipts, effectiveRating, canRate, canCorrect]
+      properties:
+        stepIndex: { type: integer, minimum: 0, maximum: 63 }
+        merchantLabel: { type: string, maxLength: 253, description: "Host name of Result.provenance[].origin; never a full URL." }
+        merchantIsCzar: { type: boolean }
+        receipts: { type: integer, minimum: 0, description: "Settled, unreleased receipts of the step (jobs: Completed only)." }
+        effectiveRating: { type: string, enum: [good, bad, none] }
+        ratingId: { type: string, pattern: "^rtg_[0-9A-HJKMNP-TV-Z]{26}$", description: "The effective rating, when one exists." }
+        canRate: { type: boolean, description: "producing, receipts > 0, inside the window, no effective rating." }
+        canCorrect: { type: boolean, description: "inside the window, an effective rating exists and has not itself corrected one." }
+    RatingPrompt:
+      type: object
+      x-privacyClass: server-only
+      additionalProperties: false
+      required: [objectiveId, deliveredAt, windowClosesAt, steps]
+      properties:
+        objectiveId: { type: string, pattern: "^obj_[0-9A-HJKMNP-TV-Z]{26}$" }
+        deliveredAt: { type: string, format: date-time, description: "results.created_at; the window starts here." }
+        windowClosesAt: { type: string, format: date-time }
+        steps: { type: array, maxItems: 64, items: { $ref: "#/components/schemas/RatingPromptStep" } }
+    AppResultCard:
+      type: object
+      description: "A delivered objective's result card for Receipts and Home (SCR-160 §8.2). No cell values, subjects or file names."
+      x-privacyClass: server-only
+      additionalProperties: false
+      required: [objectiveId, deliveredAt, kind, stepCount, suppliers, windowClosesAt]
+      properties:
+        objectiveId: { type: string, pattern: "^obj_[0-9A-HJKMNP-TV-Z]{26}$" }
+        deliveredAt: { type: string, format: date-time }
+        kind: { type: string, maxLength: 64, description: "TaskSpec.kind." }
+        stepCount: { type: integer, minimum: 0 }
+        suppliers: { type: array, maxItems: 64, items: { $ref: "#/components/schemas/RatingPromptStep" } }
+        amountDisplay: { type: string, maxLength: 64, description: "From ledger_receipts when present." }
+        windowClosesAt: { type: string, format: date-time }
 
     PairingCode:
       type: object
@@ -1252,6 +1324,37 @@ paths:
         "422": { $ref: "#/components/responses/Problem" }
         "429": { $ref: "#/components/responses/RateLimited" }
 
+  /v1/ratings:
+    post:
+      tags: [daemon]
+      summary: The owner's good or bad on a delivered result's producing step (SCR-160 §7).
+      operationId: submitRating
+      security: [ { DeviceToken: [] } ]
+      parameters: [ { $ref: "#/components/parameters/IdempotencyKey" } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/RatingRequest" } } }
+      responses:
+        "202": { description: Accepted, content: { application/json: { schema: { $ref: "#/components/schemas/RatingAccepted" } } } }
+        "4XX": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /v1/objectives/{objectiveId}/rating-prompt:
+    get:
+      tags: [daemon]
+      summary: The producing suppliers of a delivered objective and whether each can be rated now (SCR-160 §7.6).
+      operationId: getRatingPrompt
+      security: [ { DeviceToken: [] } ]
+      parameters:
+        - name: objectiveId
+          in: path
+          required: true
+          schema: { type: string, pattern: "^obj_[0-9A-HJKMNP-TV-Z]{26}$" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/RatingPrompt" } } } }
+        "4XX": { $ref: "#/components/responses/Problem" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
   /v1/outcomes:
     post:
       tags: [daemon]
@@ -1609,6 +1712,42 @@ paths:
       responses:
         "4XX": { $ref: "#/components/responses/Problem" }
         "200": { description: Intent, content: { application/json: { schema: { $ref: "#/components/schemas/FreezeIntent" } } } }
+
+  /v1/app/ratings:
+    post:
+      tags: [app]
+      summary: The owner's good or bad on a delivered result's producing step, from the web app (SCR-160 §7).
+      operationId: submitAppRating
+      security: [ { AppSession: [] } ]
+      parameters: [ { $ref: "#/components/parameters/IdempotencyKey" } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/RatingRequest" } } }
+      responses:
+        "202": { description: Accepted, content: { application/json: { schema: { $ref: "#/components/schemas/RatingAccepted" } } } }
+        "4XX": { $ref: "#/components/responses/Problem" }
+
+  /v1/app/results:
+    get:
+      tags: [app]
+      summary: Result cards with per-supplier ratings for Receipts and Home (SCR-160 §8.2).
+      operationId: listAppResults
+      security: [ { AppSession: [] } ]
+      parameters:
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "4XX": { $ref: "#/components/responses/Problem" }
+        "200":
+          description: Page of AppResultCard
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Page" }
+                  - type: object
+                    properties:
+                      items: { type: array, items: { $ref: "#/components/schemas/AppResultCard" } }
 
   /v1/pockets/manual-returns:
     get:

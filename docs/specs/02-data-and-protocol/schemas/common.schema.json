@@ -207,6 +207,12 @@
       "type": "string",
       "pattern": "^pol_[0-9a-f]{16}$",
       "description": "Selection Layer PolicyVersion (SL §5.1)."
+    },
+    "RatingId": {
+      "type": "string",
+      "pattern": "^rtg_[0-9A-HJKMNP-TV-Z]{26}$",
+      "description": "Rating id (SCR-160), minted by the server.",
+      "x-privacyClass": "server-only"
     }
   }
 }

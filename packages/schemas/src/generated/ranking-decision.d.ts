@@ -5,9 +5,9 @@
  */
 export interface RankingDecision {
   /**
-   * Schema version, major.minor; this file is 1.1 (2026-10-25: snapshot_anchor_tx may be null for the unanchored interim producer, SCR-137).
+   * Schema version, major.minor; this file is 1.2 (SCR-160: unverified[].reason gains unrated; score is the Wilson lower bound of the rated share; features and badges per SCR-160 §9.3). 1.1: snapshot_anchor_tx may be null (SCR-137).
    */
-  schemaVersion: "1.1";
+  schemaVersion: "1.2";
   /**
    * Query id.
    */
@@ -72,7 +72,7 @@ export interface RankingDecision {
      */
     service_id: string;
     /**
-     * Gate.
+     * Gate (C4 gates, or health-blocked for an uncleared injection-blocked fact, SCR-160 §6).
      */
     gate: string;
     /**
@@ -99,11 +99,11 @@ export interface RankingDecision {
      */
     version_id: string;
     /**
-     * Score.
+     * Score: the Wilson lower bound of good/(good+bad) at selection.confidenceZ (SCR-160 §9.4).
      */
     score: number;
     /**
-     * Features.
+     * Features (SCR-160 §9.3): good, bad, owners_rated, owners_bad, lower_bound, health_facts[], price_atomic.
      */
     features: {
       [k: string]: unknown;
@@ -125,7 +125,7 @@ export interface RankingDecision {
      */
     missing: string[];
     /**
-     * Badges.
+     * Badges: single-owner, health-flagged, incident-open (SCR-160 §9.3).
      *
      * Items: Badge.
      */
@@ -146,11 +146,11 @@ export interface RankingDecision {
      */
     service_id: string;
     /**
-     * Reason.
+     * Reason: unrated (no rating record for the task class, SCR-160) or, for pre-SCR-160 rows, n_eff_below_min.
      */
-    reason: "n_eff_below_min";
+    reason: "n_eff_below_min" | "unrated";
     /**
-     * Effective evidence count.
+     * Effective evidence count; 0 for unrated (SCR-160).
      */
     n_eff: number;
   }[];

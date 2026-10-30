@@ -131,7 +131,7 @@ async function buildPlan(
   );
   const expiresAt = expiry(input.now, collected.jobExpiresMs, config);
   const partial = {
-    schemaVersion: "1.2" as const,
+    schemaVersion: "1.3" as const,
     planId,
     objectiveId: input.objectiveId,
     objectiveHash: input.objectiveHash,

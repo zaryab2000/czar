@@ -289,7 +289,7 @@ stateDiagram-v2
 
 #### 5.4 Report and hash
 
-- `AcceptanceReport` = SL `ValidationReportCore` fields + Czar additions (02 §4.14): `obs_id` (the receipt's id), `profile_id` (`prof_` + hash of the profile JSON, SL §5.1), `method_version` = the executor code hash (SL-C7 `code_hash`), `validator = {id: "czar-evaluator", address: K7 address}`, `assignment = {kind: "buyer-local"}`, `checks[]`, `conflict_flags = ["self-reported-checks"]`, `cost_usd = 0`, `created_at`, `limits = ["no-correctness-check"]`, `envelopeRef`, `stepIndex`, `jobKey?`, `decision`, `reportHash = keccak256(jcs(report minus reportHash))` (02 §5.2).
+- `AcceptanceReport` = SL `ValidationReportCore` fields + Czar additions (02 §4.14): `obs_id` (the receipt's id; its value is `obs_` + keccak256(`dedupKey`)[0:32] of the paid call, 02 §7.1, SCR-160 §3), `profile_id` (`prof_` + hash of the profile JSON, SL §5.1), `method_version` = the executor code hash (SL-C7 `code_hash`), `validator = {id: "czar-evaluator", address: K7 address}`, `assignment = {kind: "buyer-local"}`, `checks[]`, `conflict_flags = ["self-reported-checks"]`, `cost_usd = 0`, `created_at`, `limits = ["no-correctness-check"]`, `envelopeRef`, `stepIndex`, `jobKey?`, `decision`, `reportHash = keccak256(jcs(report minus reportHash))` (02 §5.2).
 - **Ids (SCR-122):** the executor is the single plain-JS file `apps/server/src/acceptance/executor/checks.js`, run unchanged; `code_hash` = `keccak256(UTF-8 bytes of that file)`. `profile_id` = `"prof_" + hex(keccak256(jcs(profile without profile_id)))[0:32]` (`@czar/hashing` `profileId`). The Phase 1 `data-json` profile JSON is fixed in SCR-122 (check specs name parameter keys, not values). `shapeHash(body)` = `keccak256(jcs(keyTree(JSON.parse(body))))`, where `keyTree` keeps object keys, maps an array to `[keyTree(first)]` or `[]`, and a scalar to its type name (`string`, `number`, `boolean`, `null`); CZ-18 writes `shape_hash_advisory` with the same `@czar/hashing` `shapeHash`.
 - `reportHash` is the ERC-8183 `reason` (03 `job-escrow-adapter.md` §3) and the `outcomeHashes[]` entry in the `demand-proof` leaf (02 §4.17).
 
@@ -661,6 +661,8 @@ None.
 
 #### 5.2 Ranking inputs and the "unknown is not bad" rule
 
+> **Superseded by SCR-160 (2026-10-30).** The dimensions, Beta posteriors, `n_eff`, `nMin`, `BetaQuantile`, `pol_default_v1`, the cost and latency terms, the peer-median rule and the `"<n_eff> checked calls …"` explanation below are replaced by SCR-160 §9: the only quality input is the owner's `Rating` (02 §4.28); rated suppliers are ordered by the Wilson lower bound of their good share; unrated suppliers are listed `unverified[]` with `reason = "unrated"` and need the owner's approval (`Plan.approvalReasons`); health facts (SCR-160 §6) add `approvalReasons` or exclude, never score. The N1 exploration-slot and `selection.unverifiedWithApproval` mechanics, the D83 guards and the interim-producer metadata (SCR-137, SCR-138) stay. The paragraphs below are kept for history only.
+
 - Dimensions in Phase 1: `delivery`, `structural`, `requirement` (from CZ-16 results on Czar's own receipts), `latency_p50/p95`, `price_match` (SL-C9). `correctness` is structurally missing (no reference or consensus profiles yet) and is named in `missing_dimensions_for_class` on every decision (SL-C10 step 2).
 - **Required dimensions by payment path (N1, D87).** For `erc8183-job` task classes in Phase 1 the only required dimension is `delivery`, because Czar-evaluated job outcomes are eligible for `delivery` only (`evaluator-affiliated`, SL-C8); `structural` and `requirement` still appear as badges and in `missing_dimensions_for_class` but do not make a provider unverified. Other paths keep their required set. This applies to every job provider, Czar's own or not.
 - **Unverified with approval (N1).** `selection.unverifiedWithApproval` (testnet: `true`): when a capability has no ranked candidate, `RankingDecision` may name the top unverified candidate in `exploration_slot` with `reason = "no-ranked-candidate"`; CZ-13 may then plan it, and the plan always needs the person's explicit approval (never earned-allowance auto-approval). This is a general rule, not a special case for any seller.
@@ -743,7 +745,10 @@ None.
 |---|---|
 | `services` (SL `ServiceRecord`) | `service_id`, `origin`, `method`, `path_pattern`, `pay_to[]`, `claim`, `admission`, `sources[]`, `probe_eligible` |
 | `service_versions` | `version_id`, `requirements_hash`, `openapi_hash`, `shape_hash_advisory` |
-| `observations` | `obs_id`, `ObservationCore` JSON, `sig`, `received_at` |
+| `observations` | **Replaced by SCR-160 §5.1:** one row per paid call keyed by the derived `obs_id`, with the settlement fact (`settled_at`, `released_at`), `delivered`, `job_state`, `vault`, `payment_ref_hash`, `payment_id`, `dedup_key` |
+| `ratings`, `rating_receipts`, `ratings_effective` | SCR-160 §7.2: the owner's ratings, their bound receipts, the effective rating per `(objective_id, step_index)` |
+| `supplier_health` | SCR-160 §6.1: health facts H1–H4 per `(fact, obs_id)`, cleared per owner |
+| `supplier_counts` | SCR-160 §9.2: `good`, `bad`, `owners_rated`, `owners_bad`, `lower_bound`, `lineage_root`, `policy_version` per `(network, service_id, version_id, task_class)`; **replaces** `reputation` |
 | `assessments` | `assessment_id`, `obs_id`, provenance, `dedup_key`, `independence`, `eligible_uses[]`, `flags[]`, `assessed_with` |
 | `reputation` | `(service_id, version_id, task_class, dimension)`, `α`, `β`, `n_eff`, `badges[]`, `lineage_root`, `policy_version` |
 | `ranking_decisions` | `query_id`, `RankingDecision` JSON, retained `selection.decisionRetentionDays` 90 (SL-C10) |
@@ -901,3 +906,4 @@ Postgres 16 (pgvector only in Phase 2, C1-13), `@czar/x402` for probes, `@x402/e
 | 2026-10-25 | SCR-142 | Canonical `local-template-v1` profile and producer; internal `pollEndedAt` ends closed-pocket polling durably. |
 | 2026-10-26 | SCR-143 | `acceptance_decisions.deliverableHash`; evaluator never writes `StepResult`; matched upload retained until CZ-15 persists it. |
 | 2026-10-26 | SCR-144 | `manualReturnsForVault` returns `logIndex`. |
+| 2026-10-30 | SCR-160 | CZ-16 §5.4 `obs_id` value rule; CZ-18 §5.2 superseded by ratings and health facts; §5.5 `observations` replaced, `ratings`, `supplier_health`, `supplier_counts` added, `reputation` replaced. |

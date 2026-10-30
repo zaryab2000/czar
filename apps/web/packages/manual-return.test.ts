@@ -20,7 +20,7 @@ describe("submitManualReturn", () => {
     });
   });
 
-  it("encodes the row amount and submits the UserOp to its vault", async () => {
+  it("encodes the row amount and submits the UserOp to its vault, waiting for inclusion", async () => {
     const item = manualReturnsFixture[0]!;
 
     await submitManualReturn(item);
@@ -29,6 +29,7 @@ describe("submitManualReturn", () => {
       wallet.getStoredPasskey.mock.results[0]?.value,
       item.vault,
       encodeRecordManualReturn(item.pocket, BigInt(item.returnedAmount)),
+      { waitForInclusion: true },
     );
   });
 });

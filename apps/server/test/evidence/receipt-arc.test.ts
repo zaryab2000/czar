@@ -42,6 +42,7 @@ import { testSignerWithDetails } from "#test/payer/test-signer";
 import { createPaymentReceipt } from "#src/evidence/receipts";
 import { createServerMain } from "#src/main";
 import type { VaultDirectChain } from "#src/payer/vault-direct";
+import { savedTransactionReads } from "#src/payer/saved-transaction";
 
 const RPC_PORT = 18546;
 const RPC_URL = `http://127.0.0.1:${RPC_PORT}`;
@@ -389,7 +390,7 @@ async function seedPayerRows(payeeRoot: Hash32): Promise<void> {
     "prof_11111111111111111111111111111111",
   );
   const plan = {
-    schemaVersion: "1.2",
+    schemaVersion: "1.3",
     planId: PLAN_ID,
     objectiveId: OBJECTIVE_ID,
     objectiveHash: OBJECTIVE_HASH,
@@ -450,7 +451,7 @@ function paidStep(
     })),
   };
   const plan: Plan = {
-    schemaVersion: "1.2",
+    schemaVersion: "1.3",
     planId: PLAN_ID,
     objectiveId: OBJECTIVE_ID,
     objectiveHash: OBJECTIVE_HASH,
@@ -491,6 +492,7 @@ function paidStep(
 
 function arcPayerChain(): VaultDirectChain {
   return {
+    ...savedTransactionReads(publicClient),
     envelopeCapacity: async (envelopeId) => {
       const envelope = await publicClient.readContract({
         address: vault,
@@ -515,6 +517,8 @@ function arcPayerChain(): VaultDirectChain {
         functionName: "stepUsed",
         args: [envelopeId, stepIndex],
       }),
+    latestBlockTimestamp: async () =>
+      (await publicClient.getBlock({ blockTag: "latest" })).timestamp,
     reserve: async ({ signedTransaction }) => {
       const txHash = await sendSigned(signedTransaction);
       const reservationId = await publicClient.readContract({

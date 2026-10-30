@@ -81,6 +81,9 @@ describe("payer acceptance boundaries", () => {
     const chain = {
       stepUsed: vi.fn(async () => AMOUNT * 2n),
       envelopeCapacity: vi.fn(async () => ({ cap: 10_000n, exposure: 6_000n })),
+      transactionCount: vi.fn(async () => 0),
+      transactionStatus: vi.fn(async (): Promise<"success" | "reverted" | undefined> => undefined),
+      latestBlockTimestamp: vi.fn(async () => BigInt(Date.parse("2026-10-21T00:00:00Z") / 1000)),
       reserve,
       settle: vi.fn(async () => HASH),
       authorizationState: vi.fn(async () => true),
@@ -140,6 +143,11 @@ describe("payer acceptance boundaries", () => {
       chain: {
         stepUsed: vi.fn(async () => 0n),
         envelopeCapacity: vi.fn(async () => ({ cap: 10_000n, exposure: 8_000n })),
+        transactionCount: vi.fn(async () => 0),
+        transactionStatus: vi.fn(
+          async (): Promise<"success" | "reverted" | undefined> => undefined,
+        ),
+        latestBlockTimestamp: vi.fn(async () => BigInt(Date.parse("2026-10-21T00:00:00Z") / 1000)),
         reserve,
         settle: vi.fn(async () => HASH),
         authorizationState: vi.fn(async () => true),
@@ -219,6 +227,11 @@ describe("payer acceptance boundaries", () => {
       chain: {
         stepUsed: vi.fn(async () => 0n),
         envelopeCapacity: vi.fn(async () => ({ cap: 10_000n, exposure: 0n })),
+        transactionCount: vi.fn(async () => 0),
+        transactionStatus: vi.fn(
+          async (): Promise<"success" | "reverted" | undefined> => undefined,
+        ),
+        latestBlockTimestamp: vi.fn(async () => BigInt(Date.parse("2026-10-21T00:00:00Z") / 1000)),
         reserve: vi.fn(async () => ({ reservationId: 4n, txHash: HASH })),
         settle: vi.fn(async () => HASH),
         authorizationState: vi.fn(async () => true),
@@ -275,7 +288,7 @@ function paidInput(payeeRoot: `0x${string}`): VaultDirectInput {
     envelopeExpiresAt: new Date("2026-10-22T00:00:00Z"),
     vault: VAULT,
     plan: {
-      schemaVersion: "1.2",
+      schemaVersion: "1.3",
       planId: PLAN_ID,
       objectiveId: OBJECTIVE_ID,
       objectiveHash: HASH,

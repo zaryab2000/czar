@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { H } from "@czar/hashing";
 import type { Config } from "@czar/config";
-import type { RankingDecision } from "@czar/schemas";
+import type { CapabilityCard, RankingDecision } from "@czar/schemas";
 import {
   readPaymentRequired,
   type PaymentRequirements,
@@ -24,11 +24,28 @@ interface Registration {
   readonly capabilities: readonly string[];
 }
 
+type CardField = CapabilityCard["inputFields"][number];
+
+/** `CapabilityCard.inputFields`/`outputFields` bounds (02 §4.27). */
+const MAX_CARD_FIELDS = 50;
+const MAX_CARD_FIELD_NAME = 64;
+const CARD_FIELD_TYPES: ReadonlySet<string> = new Set<CardField["type"]>([
+  "string",
+  "number",
+  "integer",
+  "boolean",
+  "object",
+  "array",
+  "null",
+]);
+
 interface RegisteredRecord {
   readonly serviceId: string;
   readonly registration: Registration;
   readonly accepts: readonly PaymentRequirements[];
   readonly outputSchema: Readonly<Record<string, unknown>> | null;
+  readonly inputFields: readonly CardField[];
+  readonly outputFields: readonly CardField[];
 }
 
 interface ProbeOutcome {
@@ -229,13 +246,19 @@ async function probe(
     });
     if (!result.ok || !sameResourcePath(result.resource.url, registration.resource.url))
       return { record: null, probedAt };
+    const declared = result.extensions.bazaar?.schema;
+    const outputSchema = responseSchema(declared);
     return {
       probedAt,
       record: {
         serviceId,
         registration,
         accepts: result.paymentRequired.accepts,
-        outputSchema: responseSchema(result.extensions.bazaar?.schema),
+        outputSchema,
+        inputFields: cardFields(
+          objectAt(declared, ...declaredInputPath(registration.resource.method), "properties"),
+        ),
+        outputFields: cardFields(objectAt(outputSchema, "properties")),
       },
     };
   } catch {
@@ -278,6 +301,25 @@ function responseSchema(schema: Readonly<Record<string, unknown>> | undefined) {
   return example;
 }
 
+/** Where the sanitized Bazaar schema declares the buyer input (02 §12.2, A3-35). */
+function declaredInputPath(method: Registration["resource"]["method"]): string[] {
+  const location = method === "GET" ? "queryParams" : "body";
+  return ["properties", "input", "properties", location];
+}
+
+/** `{name, type}` per declared property, descriptions dropped, bounded per 02 §4.27. */
+function cardFields(properties: Record<string, unknown> | null): CardField[] {
+  const fields: CardField[] = [];
+  for (const [name, property] of Object.entries(properties ?? {})) {
+    if (fields.length === MAX_CARD_FIELDS) break;
+    const type = isObject(property) ? property["type"] : undefined;
+    if (name.length > MAX_CARD_FIELD_NAME || !isString(type) || !CARD_FIELD_TYPES.has(type))
+      continue;
+    fields.push({ name, type: type as CardField["type"] });
+  }
+  return fields;
+}
+
 function objectAt(value: unknown, ...path: string[]): Record<string, unknown> | null {
   let current = value;
   for (const key of path) {
@@ -297,7 +339,11 @@ function toPlannerService(record: RegisteredRecord): PlannerService & { probeInp
       czar: {
         claim: { status: "unclaimed" },
         evidence: null,
-        card: { serviceName: record.registration.serviceName, inputFields: [], outputFields: [] },
+        card: {
+          serviceName: record.registration.serviceName,
+          inputFields: record.inputFields,
+          outputFields: record.outputFields,
+        },
         source: "czar-registered",
       },
     },
@@ -335,7 +381,7 @@ async function createDecision(args: {
   );
   const snapshotId = await persistSnapshot(args.pool, snapshot, now(), args.retentionDays);
   return {
-    schemaVersion: "1.1",
+    schemaVersion: "1.2",
     query_id: randomUUID(),
     received_at: now().toISOString(),
     policy_version: policy,

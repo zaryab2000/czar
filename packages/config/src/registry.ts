@@ -2511,6 +2511,15 @@ export const PARAMETERS = [
       "K7/K8 rows written as signer.gas.<key>.* with min/target/max order assumed from the K3 row",
   },
   {
+    key: "signer.gasRefillIntervalSeconds",
+    type: "integer",
+    default: 300,
+    unit: "s",
+    reason: "CZ-27 §5.5 refill cadence",
+    source:
+      "docs/specs/06-review/change-requests/SCR-157-track-a-closeout-chain-time-gas-alert-onboarding.md:36",
+  },
+  {
     key: "signer.keychainService",
     type: "string",
     default: "dev.czar.signer.keystore",
@@ -3262,6 +3271,15 @@ export const PARAMETERS = [
     readOnly: true,
   },
   {
+    key: "app.origin",
+    type: "string",
+    default: "http://localhost",
+    unit: "origin",
+    reason:
+      "the origin the web app is served from; WebAuthn checks clientDataJSON.origin against it (D78)",
+    source: "docs/specs/06-review/change-requests/SCR-156-app-origin-config-key.md:18",
+  },
+  {
     key: "app.challengeTtlSeconds",
     type: "integer",
     default: 300,
@@ -3435,6 +3453,15 @@ export const PARAMETERS = [
     noDefault: true,
   },
   {
+    key: "app.userOpReceiptTimeoutSeconds",
+    type: "integer",
+    default: 120,
+    unit: "s",
+    reason: "Arc finality is sub-second; covers bundler queueing",
+    source:
+      "docs/specs/06-review/change-requests/SCR-159-track-a-review-defects-resume-rebroadcast-partial-userop.md:62",
+  },
+  {
     key: "indexer.closedPocketQuietHours",
     type: "integer",
     default: 48,
@@ -3460,5 +3487,25 @@ export const PARAMETERS = [
     reason:
       "ERC-8183 job route stays off until the T-055 evaluator handoff and the CZ-15 job-result builder merge; enabled only by a later SCR (SCR-143)",
     source: "docs/specs/04-components/server/server-planning-and-payment.md:242",
+  },
+  {
+    key: "daemon.objectivePollSeconds",
+    type: "integer",
+    default: 5,
+    unit: "s",
+    reason:
+      "czar objective polls the objective state for a human at the terminal; one GET per 5 s is negligible (SCR-147)",
+    source: "docs/specs/05-build-plan/phase-1-tasks.md:1036",
+  },
+  {
+    key: "daemon.serverOrigin",
+    type: "string",
+    default: null,
+    unit: "url",
+    reason:
+      "origin of the Czar server for daemon commands that contact it; https, or loopback only with the local overlay (SCR-149)",
+    source:
+      "docs/specs/06-review/change-requests/SCR-149-daemon-server-origin-and-result-polling.md:16",
+    noDefault: true,
   },
 ] as const satisfies readonly ParameterSpec[];

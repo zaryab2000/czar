@@ -17,7 +17,7 @@ const HASH = `0x${"1".repeat(64)}`;
 
 function testPlan(shadow = false): Plan {
   const plan: Plan = {
-    schemaVersion: "1.2",
+    schemaVersion: "1.3",
     planId: PLAN_ID,
     objectiveId: OBJECTIVE,
     objectiveHash: HASH,

@@ -1,11 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { categoryHash } from "@czar/hashing";
-import { encodeSetCategoryLimits } from "@czar/vault-client";
 import type { Me } from "@czar/schemas";
 import { appApi } from "#src/app-api";
-import { getStoredPasskey, sendOwnerUserOperation } from "#src/wallet";
+import { submitCategoryLimits } from "#src/category-limits";
 import { useAppData } from "#src/use-app-data";
 import { formatUsd } from "@czar/web/money-format";
 
@@ -36,19 +34,19 @@ export default function LimitsOnboardingPage() {
     setBusy(true);
     setNotice(undefined);
     try {
-      for (const category of CATEGORIES) {
+      const entries = CATEGORIES.map((category) => {
         const existing = data.limits.find((limit) => limit.category === category);
         const values = limits[category] ?? {
           userMax: existing ? unitsToInput(existing.userMax) : "0",
           autoLimit: existing ? unitsToInput(existing.autoLimit) : "0",
         };
-        const calldata = encodeSetCategoryLimits(
-          categoryHash(category),
-          parseUsd(values.userMax),
-          parseUsd(values.autoLimit),
-        );
-        await sendOwnerUserOperation(getStoredPasskey(), data.vault as `0x${string}`, calldata);
-      }
+        return {
+          category,
+          userMax: parseUsd(values.userMax),
+          autoLimit: parseUsd(values.autoLimit),
+        };
+      });
+      await submitCategoryLimits(data.vault as `0x${string}`, entries);
       setNotice("Limits submitted. Waiting for LimitsSet to sync…");
       refresh();
     } catch (cause) {

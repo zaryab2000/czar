@@ -30,7 +30,7 @@ function fixture(): { plan: AppPlan; intent: ApprovalIntent; extraRoot: `0x${str
     sourceTrust: "user-prompt" as const,
   };
   const planBase = {
-    schemaVersion: "1.2" as const,
+    schemaVersion: "1.3" as const,
     planId: "pln_01J00000000000000000000000",
     objectiveId: "obj_01J00000000000000000000000",
     objectiveHash: `0x${"1".repeat(64)}`,

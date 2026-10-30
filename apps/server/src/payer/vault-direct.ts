@@ -41,12 +41,70 @@ import {
   markStepHandedOff,
   releaseExecutorLease,
   startExecutorLeaseRenewal,
+  type CallError,
   type ExecutorLeaseGuard,
   type ExecutionPhaseRow,
 } from "#src/payer/executions";
+import {
+  savedNonceSpent,
+  savedTransactionState,
+  type SavedTransactionChain,
+} from "#src/payer/saved-transaction";
 import { MAX_AUTHORIZATIONS_PER_RESERVATION } from "#src/router/index";
 
 export const FINALIZE_CHUNK = 32;
+/** The vault's `MIN_RESERVATION_TTL` (`CzarConstants.sol`): `validBefore ≥ block.timestamp + this`. */
+export const MIN_RESERVATION_TTL_SECONDS = 30;
+/**
+ * The vault error name a stale saved reserve is closed with. It goes in `reserve.mined` and in the
+ * `StepError` `message`, which never holds user text (SCR-153 §2, SCR-154 G4).
+ */
+const BAD_TTL = "BadTtl";
+/**
+ * SCR-155 §2: a step gets at most this many new attempts after its reserve reverts `BadTtl()`. If that attempt
+ * also reverts BadTtl the step ends `reserve-failed`. The bound is structural, not a config key.
+ */
+const NEW_ATTEMPTS_AFTER_BAD_TTL = 1;
+const RESERVE_FAILED = "reserve-failed";
+/** SCR-159 §2: the outcome a saved transaction's status-0 receipt is recorded with, and the reserve's message. */
+const REVERTED = "reverted";
+/** Cross-cutting §5.2 `StepError` codes for a call, or a step, without an accepted paid result (SCR-159 §3). */
+const UNPAID = "unpaid";
+const DELIVERY_FAILED = "delivery-failed";
+/** Marks an attempt whose saved reserve reverted `BadTtl()`: no reservation exists and its nonce is spent. */
+const STALE_RESERVE = Symbol("stale-reserve");
+
+/** A `reserve` transaction mined with status 0 in a block with timestamp `blockTimestamp`. */
+export class ReserveReverted extends Error {
+  readonly txHash: string;
+  readonly blockTimestamp: bigint;
+
+  constructor(txHash: string, blockTimestamp: bigint) {
+    super(`Vault reserve reverted in the block at ${blockTimestamp}: ${txHash}`);
+    this.name = "ReserveReverted";
+    this.txHash = txHash;
+    this.blockTimestamp = blockTimestamp;
+  }
+}
+
+/** A sent `settle` or `finalize` mined with status 0. */
+export class VaultTransactionReverted extends Error {
+  readonly txHash: Hex;
+
+  constructor(txHash: Hex) {
+    super(`Vault transaction reverted: ${txHash}`);
+    this.name = "VaultTransactionReverted";
+    this.txHash = txHash;
+  }
+}
+
+/**
+ * The mined outcome of a sent `reserve`. A revert carries only its block's timestamp: a receipt has no revert
+ * data, and BadTtl is decided by the vault's condition on that block (SCR-153 §2).
+ */
+export type ReserveOutcome =
+  | { readonly status: "reserved"; readonly reservationId: bigint }
+  | { readonly status: "reverted"; readonly blockTimestamp: bigint };
 
 export interface VaultDirectInput {
   readonly planId: string;
@@ -88,7 +146,7 @@ export interface VaultDirectDependencies {
   readonly assertLeaseHeld?: () => void;
 }
 
-export interface VaultDirectChain {
+export interface VaultDirectChain extends SavedTransactionChain {
   stepUsed(envelopeId: bigint, stepIndex: number): Promise<bigint>;
   envelopeCapacity(envelopeId: bigint): Promise<{
     readonly cap: bigint;
@@ -116,7 +174,15 @@ export interface VaultDirectChain {
     readonly txHash: string;
     readonly final: boolean;
   }>;
-  reservationFromTransaction?(txHash: string): Promise<bigint | undefined>;
+  /**
+   * The latest block's timestamp from a fresh read. It is "now" for every CZ-15 comparison against a deadline
+   * the chain enforces: a new reserve's `validBefore` and its TTL check (CZ-15 §5.2 step 2, SCR-155 §2), call
+   * retries within `validBefore`, the reconcile loop and the wait before `finalize` (SCR-157 §1). The server
+   * clock is never used there.
+   */
+  latestBlockTimestamp(): Promise<bigint>;
+  /** The mined outcome of a sent `reserve`; `undefined` while the transaction has no receipt. */
+  reserveOutcome?(txHash: string): Promise<ReserveOutcome | undefined>;
   reservationFinal?(reservationId: bigint): Promise<boolean>;
 }
 
@@ -217,8 +283,19 @@ async function executeStep(
     input.step.expectedCalls,
   );
   if (usage.remaining === 0) return { state: "done", stepResults: [] };
+  const startAttempt = input.attempt ?? 0;
+  const { attempt, trace } = await currentAttempt(
+    dependencies.pool,
+    input.planId,
+    input.step.stepIndex,
+    startAttempt,
+  );
+  // SCR-155 §2: the saved attempts already used the one new attempt BadTtl allows. Fail on the last of them.
+  if (attempt - startAttempt > NEW_ATTEMPTS_AFTER_BAD_TTL)
+    return failStaleReserve({ ...input, attempt: attempt - 1 }, dependencies);
   const executionInput = {
     ...input,
+    attempt,
     step: {
       ...input.step,
       expectedCalls: usage.remaining,
@@ -227,14 +304,9 @@ async function executeStep(
         : { callInputs: input.step.callInputs.slice(usage.used) }),
     },
   };
-  const attempt = input.attempt ?? 0;
-  const trace = await getExecutionTrace(
-    dependencies.pool,
-    input.planId,
-    input.step.stepIndex,
-    attempt,
-  );
-  const prechecked = await precheckCalls(executionInput, dependencies);
+  const prechecked =
+    savedPreparedCalls(executionInput, trace) ??
+    (await precheckCalls(executionInput, dependencies));
   if (prechecked.errorCode) {
     await markStepFailed(dependencies.pool, {
       planId: input.planId,
@@ -244,7 +316,36 @@ async function executeStep(
     });
     return { state: "failed", errorCode: prechecked.errorCode };
   }
-  return executeReservedCalls(executionInput, dependencies, prechecked.calls, trace, usage.used);
+  const result = await executeReservedCalls(executionInput, dependencies, prechecked.calls, trace, {
+    callsUsedBefore: usage.used,
+    afterStaleReserve: attempt > startAttempt,
+  });
+  // SCR-153 §2: the saved reserve reverted BadTtl, so start again from step 1 as `attempt + 1`.
+  if (result === STALE_RESERVE) return executeStep(input, dependencies);
+  return result;
+}
+
+/**
+ * The attempt to run: the first one from `startAttempt` whose reserve did not revert `BadTtl()`. A stale
+ * attempt never reserved on chain and signed no authorization, so its successor starts from step 1.
+ */
+async function currentAttempt(
+  pool: Pool,
+  planId: string,
+  stepIndex: number,
+  startAttempt: number,
+): Promise<{ readonly attempt: number; readonly trace: readonly ExecutionPhaseRow[] }> {
+  let attempt = startAttempt;
+  let trace = await getExecutionTrace(pool, planId, stepIndex, attempt);
+  while (staleReserve(trace)) {
+    attempt += 1;
+    trace = await getExecutionTrace(pool, planId, stepIndex, attempt);
+  }
+  return { attempt, trace };
+}
+
+function staleReserve(trace: readonly ExecutionPhaseRow[]): boolean {
+  return trace.findLast((row) => row.phase === "reserve.mined")?.payload["message"] === BAD_TTL;
 }
 
 async function remainingExpectedCalls(
@@ -280,6 +381,66 @@ interface RenderedRequest {
   readonly method: string;
   readonly headers: Readonly<Record<string, string>>;
   readonly body?: Uint8Array;
+}
+
+/** The pre-check's offer for one call, saved in `reserve.sent` so a resumed attempt needs no new probe. */
+interface SavedCall {
+  readonly index: number;
+  readonly offer: PaymentRequirements;
+  readonly paymentRequired: PaymentRequired;
+  readonly paymentIdentifier?: { readonly required: boolean };
+  readonly resource: PreparedCall["resource"];
+}
+
+function savedCall(call: PreparedCall): SavedCall {
+  return {
+    index: call.index,
+    offer: call.offer,
+    paymentRequired: call.paymentRequired,
+    ...(call.paymentIdentifier === undefined ? {} : { paymentIdentifier: call.paymentIdentifier }),
+    resource: call.resource,
+  };
+}
+
+/**
+ * SCR-159 §1: an attempt with a `reserve.sent` row resumes from its last saved phase with the calls its own
+ * pre-check prepared. The pre-check (CZ-15 §5.2 step 1) runs only for an attempt without one.
+ */
+function savedPreparedCalls(
+  input: VaultDirectInput,
+  trace: readonly ExecutionPhaseRow[],
+): { readonly calls: PreparedCall[]; readonly errorCode: undefined } | undefined {
+  const sent = trace.findLast((row) => row.phase === "reserve.sent");
+  if (!sent) return undefined;
+  const saved = sent.payload["calls"];
+  if (!Array.isArray(saved))
+    throw new Error("Stored reserve.sent phase is missing its prepared calls.");
+  return { calls: saved.map((entry) => restorePreparedCall(input, entry)), errorCode: undefined };
+}
+
+function restorePreparedCall(input: VaultDirectInput, entry: unknown): PreparedCall {
+  const saved = entry as Partial<SavedCall> | null;
+  const call = typeof saved?.index === "number" ? input.step.callInputs?.[saved.index] : undefined;
+  const request = call ? renderRequest(input, call.input, call.subjectIndex) : null;
+  if (
+    !saved ||
+    typeof saved.index !== "number" ||
+    !saved.offer ||
+    !saved.paymentRequired ||
+    !saved.resource ||
+    !request
+  )
+    throw new Error("Stored prepared call cannot be recovered safely.");
+  return {
+    index: saved.index,
+    request,
+    offer: saved.offer,
+    paymentRequired: saved.paymentRequired,
+    ...(saved.paymentIdentifier === undefined
+      ? {}
+      : { paymentIdentifier: saved.paymentIdentifier }),
+    resource: saved.resource,
+  };
 }
 
 async function precheckCalls(input: VaultDirectInput, dependencies: VaultDirectDependencies) {
@@ -342,8 +503,8 @@ async function executeReservedCalls(
   dependencies: VaultDirectDependencies,
   calls: readonly PreparedCall[],
   trace: readonly ExecutionPhaseRow[],
-  callsUsedBefore: number,
-): Promise<VaultDirectResult> {
+  progress: { readonly callsUsedBefore: number; readonly afterStaleReserve: boolean },
+): Promise<VaultDirectResult | typeof STALE_RESERVE> {
   const first = calls[0];
   if (!first) return { state: "failed", errorCode: "unsupported-offer" };
   // On resume, the reservation's own arguments win over a fresh probe and the current clock:
@@ -362,32 +523,87 @@ async function executeReservedCalls(
     return { state: "failed", errorCode: "step-cap-exhausted" };
   }
   const validBefore =
-    stored?.validBefore ?? reservationExpiry(input, dependencies, first.offer.maxTimeoutSeconds);
-  const proof = buildPayeeProof(input, payee);
+    stored?.validBefore ??
+    (await newReservationExpiry(
+      input,
+      dependencies,
+      first.offer.maxTimeoutSeconds,
+      progress.afterStaleReserve,
+    ));
+  if (validBefore === undefined) return failStaleReserve(input, dependencies);
   const attempt = input.attempt ?? 0;
-  const existingReservation = await findOrCreateReservation(
+  const reservation = await findOrCreateReservation(
     input,
     dependencies,
     trace,
-    payee,
-    amount,
-    count,
-    validBefore,
-    proof,
+    {
+      envelopeId: input.envelopeId,
+      stepIndex: input.step.stepIndex,
+      payee,
+      stepCap: BigInt(input.step.stepCap),
+      proof: buildPayeeProof(input, payee),
+      unitAmount: amount,
+      count,
+      validBefore,
+      calls,
+    },
     attempt,
   );
-  if (existingReservation === undefined) return { state: "failed", errorCode: "reserve-pending" };
+  if (reservation === STALE_RESERVE) return STALE_RESERVE;
+  if ("state" in reservation) return reservation;
   return settleAndFinalize(
     input,
     dependencies,
     calls.slice(0, count),
-    existingReservation,
-    validBefore,
+    reservation.reservationId,
+    reservation.validBefore,
     amount,
     attempt,
     trace,
-    callsUsedBefore,
+    progress.callsUsedBefore,
+    count,
   );
+}
+
+/**
+ * A new reserve's `validBefore` by the CZ-15 §5.2 step-2 formula, with "now" the latest block timestamp
+ * (SCR-155 §2). `undefined` after a BadTtl revert when it does not clear the vault's `MIN_RESERVATION_TTL`
+ * from that timestamp (SCR-153 §2).
+ */
+async function newReservationExpiry(
+  input: VaultDirectInput,
+  dependencies: VaultDirectDependencies,
+  maxTimeoutSeconds: number,
+  afterStaleReserve: boolean,
+): Promise<bigint | undefined> {
+  const chainNow = await dependencies.chain.latestBlockTimestamp();
+  const validBefore = reservationExpiry(input, dependencies, maxTimeoutSeconds, chainNow);
+  if (afterStaleReserve && validBefore < chainNow + BigInt(MIN_RESERVATION_TTL_SECONDS))
+    return undefined;
+  return validBefore;
+}
+
+/**
+ * SCR-153 §2 and SCR-155 §2: `envelope.expiresAt` leaves the step-2 formula no room above the minimum TTL, or
+ * the one new attempt after a BadTtl revert also reverted BadTtl.
+ */
+async function failStaleReserve(
+  input: VaultDirectInput,
+  dependencies: VaultDirectDependencies,
+): Promise<VaultDirectResult> {
+  await markStepFailed(dependencies.pool, {
+    planId: input.planId,
+    stepIndex: input.step.stepIndex,
+    attempt: input.attempt ?? 0,
+    errorCode: RESERVE_FAILED,
+    stepError: {
+      schemaVersion: "1.0",
+      code: RESERVE_FAILED,
+      message: BAD_TTL,
+      retryable: false,
+    },
+  });
+  return { state: "failed", errorCode: RESERVE_FAILED };
 }
 
 async function newReservationCount(
@@ -414,85 +630,270 @@ async function newReservationCount(
   return Math.min(maxCount, affordableCount);
 }
 
+/** A reserve's arguments and the pre-checked calls saved with its `reserve.sent`. */
+interface ReserveRequest extends ReserveInput {
+  readonly calls: readonly PreparedCall[];
+}
+
+interface Reservation {
+  readonly reservationId: bigint;
+  readonly validBefore: bigint;
+}
+
+type ReserveResult = Reservation | VaultDirectResult | typeof STALE_RESERVE;
+
 async function findOrCreateReservation(
   input: VaultDirectInput,
   dependencies: VaultDirectDependencies,
   trace: readonly ExecutionPhaseRow[],
-  payee: `0x${string}`,
-  amount: bigint,
-  count: number,
-  validBefore: bigint,
-  proof: readonly Hash32[],
+  reserve: ReserveRequest,
   attempt: number,
-): Promise<bigint | undefined> {
+): Promise<ReserveResult> {
   const mined = trace.findLast((row) => row.phase === "reserve.mined");
-  if (mined) return BigInt(String(mined.payload["reservationId"]));
+  if (mined) {
+    if (mined.payload["outcome"] === REVERTED)
+      return failRevertedReserve(input, dependencies, trace, attempt);
+    return {
+      reservationId: BigInt(String(mined.payload["reservationId"])),
+      validBefore: reserve.validBefore,
+    };
+  }
   const sent = trace.findLast((row) => row.phase === "reserve.sent");
-  if (sent) {
-    const txHash = sent.payload["txHash"];
-    if (typeof txHash !== "string") return undefined;
-    const existing = await dependencies.chain.reservationFromTransaction?.(txHash);
-    if (existing !== undefined) return existing;
-    const savedTransaction = sent.payload["signedTransaction"];
-    if (typeof savedTransaction !== "string") return undefined;
-    const reservation = await submitReserve(
+  if (sent) return resumeSavedReserve(input, dependencies, sent, reserve, attempt);
+  const signedTransaction = await signReserve(dependencies, input.vault, reserve);
+  return submitReserveOrStale(
+    input,
+    dependencies,
+    { ...reserve, signedTransaction },
+    attempt,
+    true,
+  );
+}
+
+/**
+ * SCR-159 §2 for a saved `reserve.sent`. The account nonce is read before the receipt, so a reserve that
+ * lands between the two reads is seen mined and never signed again.
+ * - status 0 with the BadTtl condition: SCR-153 §2; any other status 0: `reserve-failed` / `reverted`
+ * - no receipt, account nonce ≤ saved nonce: the same bytes again
+ * - no receipt, account nonce > saved nonce: the same arguments signed again, with a new `reserve.sent`
+ */
+async function resumeSavedReserve(
+  input: VaultDirectInput,
+  dependencies: VaultDirectDependencies,
+  sent: ExecutionPhaseRow,
+  reserve: ReserveRequest,
+  attempt: number,
+): Promise<ReserveResult> {
+  const txHash = sent.payload["txHash"];
+  const saved = sent.payload["signedTransaction"];
+  if (typeof txHash !== "string" || typeof saved !== "string")
+    return { state: "failed", errorCode: "reserve-pending" };
+  let spent = await savedNonceSpent(dependencies.chain, saved as Hex);
+  let outcome = await dependencies.chain.reserveOutcome?.(txHash);
+  if (spent && outcome === undefined) {
+    // Review M3: confirm "replaced" on a second read before signing another reserve, so a receipt that a
+    // lagging RPC node has not served yet never leads to a second reservation.
+    await sleepReconcileInterval(dependencies);
+    spent = await savedNonceSpent(dependencies.chain, saved as Hex);
+    outcome = await dependencies.chain.reserveOutcome?.(txHash);
+  }
+  if (outcome?.status === "reserved")
+    return recordReserved(input, dependencies, attempt, {
+      reservationId: outcome.reservationId,
+      validBefore: reserve.validBefore,
+      txHash,
+    });
+  if (outcome?.status === "reverted")
+    return revertedBadTtl(reserve.validBefore, outcome.blockTimestamp)
+      ? recordStaleReserve(input, dependencies, attempt, txHash)
+      : recordRevertedReserve(input, dependencies, attempt, txHash);
+  if (!spent)
+    return submitReserveOrStale(
       input,
       dependencies,
-      {
-        envelopeId: input.envelopeId,
-        stepIndex: input.step.stepIndex,
-        payee,
-        stepCap: BigInt(input.step.stepCap),
-        proof,
-        unitAmount: amount,
-        count,
-        validBefore,
-        signedTransaction: savedTransaction as Hex,
-      },
+      { ...reserve, signedTransaction: saved as Hex },
       attempt,
       false,
     );
-    return reservation.reservationId;
+  const validBefore = await resignedReservationExpiry(input, dependencies, reserve);
+  if (validBefore === undefined) return failStaleReserve(input, dependencies);
+  const resigned = { ...reserve, validBefore };
+  const signedTransaction = await signReserve(dependencies, input.vault, resigned);
+  return submitReserveOrStale(
+    input,
+    dependencies,
+    { ...resigned, signedTransaction },
+    attempt,
+    true,
+  );
+}
+
+/**
+ * SCR-159 §2 rule 4: a re-signed reserve keeps its `validBefore` while it still clears `MIN_RESERVATION_TTL`
+ * from the latest block; otherwise it takes a new one by the step-2 formula on chain time (SCR-155 §2,
+ * SCR-157 §1). `undefined` when that one does not clear it either.
+ */
+async function resignedReservationExpiry(
+  input: VaultDirectInput,
+  dependencies: VaultDirectDependencies,
+  reserve: ReserveRequest,
+): Promise<bigint | undefined> {
+  const chainNow = await dependencies.chain.latestBlockTimestamp();
+  const minimum = chainNow + BigInt(MIN_RESERVATION_TTL_SECONDS);
+  if (reserve.validBefore >= minimum) return reserve.validBefore;
+  const first = reserve.calls[0];
+  if (!first) throw new Error("A saved reserve has no prepared call.");
+  const validBefore = reservationExpiry(
+    input,
+    dependencies,
+    first.offer.maxTimeoutSeconds,
+    chainNow,
+  );
+  return validBefore >= minimum ? validBefore : undefined;
+}
+
+function signReserve(
+  dependencies: VaultDirectDependencies,
+  vault: `0x${string}`,
+  reserve: ReserveInput,
+): Promise<Hex> {
+  return signVaultCall(dependencies, vault, "reserve", {
+    envelopeId: reserve.envelopeId.toString(),
+    stepIndex: String(reserve.stepIndex),
+    payee: reserve.payee,
+    stepCap: reserve.stepCap.toString(),
+    proof: reserve.proof,
+    unitAmount: reserve.unitAmount.toString(),
+    count: String(reserve.count),
+    validBefore: reserve.validBefore.toString(),
+  });
+}
+
+async function submitReserveOrStale(
+  input: VaultDirectInput,
+  dependencies: VaultDirectDependencies,
+  reserve: ReserveRequest & { readonly signedTransaction: Hex },
+  attempt: number,
+  recordSent: boolean,
+): Promise<ReserveResult> {
+  try {
+    return await submitReserve(input, dependencies, reserve, attempt, recordSent);
+  } catch (error) {
+    if (!(error instanceof ReserveReverted)) throw error;
+    if (revertedBadTtl(reserve.validBefore, error.blockTimestamp))
+      return recordStaleReserve(input, dependencies, attempt, error.txHash);
+    return recordRevertedReserve(input, dependencies, attempt, error.txHash);
   }
-  const reserveArgs = {
-    envelopeId: input.envelopeId.toString(),
-    stepIndex: String(input.step.stepIndex),
-    payee,
-    stepCap: input.step.stepCap,
-    proof,
-    unitAmount: amount.toString(),
-    count: String(count),
-    validBefore: validBefore.toString(),
-  };
-  const signedTransaction = await signVaultCall(dependencies, input.vault, "reserve", reserveArgs);
-  return (
-    await submitReserve(
-      input,
-      dependencies,
-      {
-        envelopeId: input.envelopeId,
-        stepIndex: input.step.stepIndex,
-        payee,
-        stepCap: BigInt(input.step.stepCap),
-        proof,
-        unitAmount: amount,
-        count,
-        validBefore,
-        signedTransaction,
-      },
-      attempt,
-      true,
-    )
-  ).reservationId;
+}
+
+/**
+ * SCR-153 §2: a status-0 `reserve` reverted `BadTtl()` exactly when its `validBefore` is below the mined
+ * block's `timestamp + MIN_RESERVATION_TTL` (`ReservationLogic.sol`). Any other status-0 reserve is another
+ * revert.
+ */
+function revertedBadTtl(validBefore: bigint, blockTimestamp: bigint): boolean {
+  return validBefore < blockTimestamp + BigInt(MIN_RESERVATION_TTL_SECONDS);
+}
+
+/** SCR-153 §2: close the stale attempt with `reserve.mined` carrying `BadTtl` as its outcome. */
+async function recordStaleReserve(
+  input: VaultDirectInput,
+  dependencies: VaultDirectDependencies,
+  attempt: number,
+  txHash: string,
+): Promise<typeof STALE_RESERVE> {
+  dependencies.assertLeaseHeld?.();
+  await appendExecutionPhase(dependencies.pool, {
+    planId: input.planId,
+    stepIndex: input.step.stepIndex,
+    attempt,
+    phase: "reserve.mined",
+    payload: { txHash, message: BAD_TTL },
+  });
+  return STALE_RESERVE;
+}
+
+/**
+ * SCR-159 §2 rule 2: a reserve that reverted for any reason but BadTtl ends the step. No reservation exists and
+ * nothing was signed against it; the envelope continues by re-plan or close.
+ */
+async function recordRevertedReserve(
+  input: VaultDirectInput,
+  dependencies: VaultDirectDependencies,
+  attempt: number,
+  txHash: string,
+): Promise<VaultDirectResult> {
+  dependencies.assertLeaseHeld?.();
+  await appendExecutionPhase(dependencies.pool, {
+    planId: input.planId,
+    stepIndex: input.step.stepIndex,
+    attempt,
+    phase: "reserve.mined",
+    payload: { txHash, outcome: REVERTED },
+  });
+  return failVaultTransaction(input, dependencies, attempt, REVERTED);
+}
+
+/** A resume after the reverted reserve was recorded: end the step once, as `recordRevertedReserve` does. */
+async function failRevertedReserve(
+  input: VaultDirectInput,
+  dependencies: VaultDirectDependencies,
+  trace: readonly ExecutionPhaseRow[],
+  attempt: number,
+): Promise<VaultDirectResult> {
+  if (trace.some((row) => row.phase === "step.failed"))
+    return { state: "failed", errorCode: RESERVE_FAILED };
+  return failVaultTransaction(input, dependencies, attempt, REVERTED);
+}
+
+/**
+ * A vault transaction of the step reverted: the step ends `reserve-failed`, the cross-cutting §5.2 code for a
+ * vault revert. `message` names the transaction and never holds user text.
+ */
+async function failVaultTransaction(
+  input: VaultDirectInput,
+  dependencies: VaultDirectDependencies,
+  attempt: number,
+  message: string,
+): Promise<VaultDirectResult> {
+  await markStepFailed(dependencies.pool, {
+    planId: input.planId,
+    stepIndex: input.step.stepIndex,
+    attempt,
+    errorCode: RESERVE_FAILED,
+    stepError: { schemaVersion: "1.0", code: RESERVE_FAILED, message, retryable: false },
+  });
+  return { state: "failed", errorCode: RESERVE_FAILED };
+}
+
+async function recordReserved(
+  input: VaultDirectInput,
+  dependencies: VaultDirectDependencies,
+  attempt: number,
+  reservation: Reservation & { readonly txHash: string },
+): Promise<Reservation> {
+  dependencies.assertLeaseHeld?.();
+  await appendExecutionPhase(dependencies.pool, {
+    planId: input.planId,
+    stepIndex: input.step.stepIndex,
+    attempt,
+    phase: "reserve.mined",
+    payload: {
+      reservationId: reservation.reservationId.toString(),
+      validBefore: Number(reservation.validBefore),
+      txHash: reservation.txHash,
+    },
+  });
+  return { reservationId: reservation.reservationId, validBefore: reservation.validBefore };
 }
 
 async function submitReserve(
   input: VaultDirectInput,
   dependencies: VaultDirectDependencies,
-  reserve: ReserveInput & { readonly signedTransaction: Hex },
+  reserve: ReserveRequest & { readonly signedTransaction: Hex },
   attempt: number,
   recordSent: boolean,
-): Promise<{ readonly reservationId: bigint; readonly txHash: string }> {
+): Promise<Reservation> {
   dependencies.assertLeaseHeld?.();
   if (recordSent)
     await appendExecutionPhase(dependencies.pool, {
@@ -507,21 +908,15 @@ async function submitReserve(
         validBefore: reserve.validBefore.toString(),
         txHash: keccak256(reserve.signedTransaction),
         signedTransaction: reserve.signedTransaction,
+        calls: reserve.calls.map(savedCall),
       },
     });
   const reservation = await dependencies.chain.reserve(reserve);
-  await appendExecutionPhase(dependencies.pool, {
-    planId: input.planId,
-    stepIndex: input.step.stepIndex,
-    attempt,
-    phase: "reserve.mined",
-    payload: {
-      reservationId: reservation.reservationId.toString(),
-      validBefore: Number(reserve.validBefore),
-      txHash: reservation.txHash,
-    },
+  return recordReserved(input, dependencies, attempt, {
+    reservationId: reservation.reservationId,
+    validBefore: reserve.validBefore,
+    txHash: reservation.txHash,
   });
-  return reservation;
 }
 
 async function settleAndFinalize(
@@ -534,6 +929,7 @@ async function settleAndFinalize(
   attempt: number,
   trace: readonly ExecutionPhaseRow[],
   callsUsedBefore: number,
+  reservedCount: number,
 ): Promise<VaultDirectResult> {
   const completed: {
     index: number;
@@ -574,7 +970,6 @@ async function settleAndFinalize(
       });
     }
   }
-  const results: unknown[] = [];
   const completedResults: {
     index: number;
     subjectIndex?: number;
@@ -597,19 +992,36 @@ async function settleAndFinalize(
     if (!(await dependencies.chain.isSettled({ reservationId, index }))) unsettled.push(index);
   }
   for (const batch of chunks(unsettled, Number(dependencies.config.get("payer.settleBatchMax")))) {
-    const signedTransaction = await signVaultCall(dependencies, input.vault, "settle", {
-      reservationId: reservationId.toString(),
-      indices: batch.map(String),
+    const settle = await nextVaultTransaction(input, dependencies, trace, attempt, {
+      selector: "settle",
+      key: { indices: batch },
+      args: { reservationId: reservationId.toString(), indices: batch.map(String) },
     });
-    dependencies.assertLeaseHeld?.();
-    await appendExecutionPhase(dependencies.pool, {
-      planId: input.planId,
-      stepIndex: input.step.stepIndex,
-      attempt,
-      phase: "settle.sent",
-      payload: { indices: batch, txHash: keccak256(signedTransaction) },
-    });
-    await dependencies.chain.settle({ reservationId, indices: batch, signedTransaction });
+    let revertedHash = settle.kind === "reverted" ? settle.txHash : undefined;
+    if (settle.kind === "send") {
+      try {
+        await dependencies.chain.settle({
+          reservationId,
+          indices: batch,
+          signedTransaction: settle.signedTransaction,
+        });
+      } catch (error) {
+        if (!(error instanceof VaultTransactionReverted)) throw error;
+        revertedHash = error.txHash;
+      }
+    }
+    if (revertedHash !== undefined) {
+      await appendExecutionPhase(dependencies.pool, {
+        planId: input.planId,
+        stepIndex: input.step.stepIndex,
+        attempt,
+        phase: "settle.mined",
+        payload: { indices: batch, txHash: revertedHash, outcome: REVERTED },
+      });
+      // Review M2: finalize books used authorizations as settled, so a reverted settle (for example
+      // `AlreadyDone` after a third party's permissionless finalize) still goes on to finalize.
+      continue;
+    }
     await appendExecutionPhase(dependencies.pool, {
       planId: input.planId,
       stepIndex: input.step.stepIndex,
@@ -618,6 +1030,8 @@ async function settleAndFinalize(
       payload: { indices: batch },
     });
   }
+  const receiptsRecorded = new Set<number>();
+  const contexts = new Map<number, Parameters<VaultDirectDependencies["recordReceipt"]>[0]>();
   for (const entry of completed) {
     if (!authorized.includes(entry.index)) continue;
     const context = {
@@ -653,7 +1067,6 @@ async function settleAndFinalize(
     if (!validateSchema("step-result", candidate))
       throw new TypeError("Boundary returned an invalid StepResult for the paid call.");
     const stepResult = candidate as StepResult;
-    results.push(stepResult);
     const call = input.step.callInputs?.find(
       (callCandidate) => callCandidate.callIndex === entry.index,
     );
@@ -675,37 +1088,68 @@ async function settleAndFinalize(
         },
       });
     }
+    contexts.set(entry.index, { ...context, stepResult });
     if (await dependencies.chain.isSettled({ reservationId, index: entry.index })) {
+      receiptsRecorded.add(entry.index);
       const receiptStored = await dependencies.recordReceipt({ ...context, stepResult });
       if (!receiptStored) receiptPending = true;
     }
   }
   let start = 0;
   let final = false;
-  const finalizeCount = FINALIZE_CHUNK;
   if (dependencies.chain.reservationFinal)
     final = await dependencies.chain.reservationFinal(reservationId);
   if (!final) await waitUntilValidBefore(dependencies, validBefore);
-  while (!final) {
-    const signedTransaction = await signVaultCall(dependencies, input.vault, "finalize", {
-      reservationId: reservationId.toString(),
-      fromIndex: String(start),
-      toIndex: String(start + finalizeCount),
+  while (!final && start < reservedCount) {
+    // The vault refuses a range past the reservation's count (`BadParams`).
+    const finalizeCount = Math.min(FINALIZE_CHUNK, reservedCount - start);
+    const finalize = await nextVaultTransaction(input, dependencies, trace, attempt, {
+      selector: "finalize",
+      key: { start, count: finalizeCount },
+      args: {
+        reservationId: reservationId.toString(),
+        fromIndex: String(start),
+        toIndex: String(start + finalizeCount),
+      },
     });
-    dependencies.assertLeaseHeld?.();
-    await appendExecutionPhase(dependencies.pool, {
-      planId: input.planId,
-      stepIndex: input.step.stepIndex,
-      attempt,
-      phase: "finalize.sent",
-      payload: { start, count: finalizeCount, txHash: keccak256(signedTransaction) },
-    });
-    const finalized = await dependencies.chain.finalize({
-      reservationId,
-      start,
-      count: finalizeCount,
-      signedTransaction,
-    });
+    let finalizeReverted = finalize.kind === "reverted" ? finalize.txHash : undefined;
+    let finalized: { readonly txHash: string; readonly final: boolean } | undefined;
+    if (finalize.kind === "send") {
+      try {
+        finalized = await dependencies.chain.finalize({
+          reservationId,
+          start,
+          count: finalizeCount,
+          signedTransaction: finalize.signedTransaction,
+        });
+      } catch (error) {
+        if (!(error instanceof VaultTransactionReverted)) throw error;
+        finalizeReverted = error.txHash;
+      }
+    }
+    if (finalizeReverted !== undefined) {
+      await appendExecutionPhase(dependencies.pool, {
+        planId: input.planId,
+        stepIndex: input.step.stepIndex,
+        attempt,
+        phase: "finalize.mined",
+        payload: { start, count: finalizeCount, txHash: finalizeReverted, outcome: REVERTED },
+      });
+      // Review M2: a third party may have made the reservation Final first (`ReservationNotActive`).
+      // The step then completes from the on-chain facts; any other revert still ends it.
+      if ((await dependencies.chain.reservationFinal?.(reservationId)) === true) {
+        final = true;
+        break;
+      }
+      return failVaultTransaction(input, dependencies, attempt, "finalize reverted");
+    }
+    if (finalized === undefined) {
+      if (finalize.kind !== "mined") throw new Error("Finalize has no mined transaction.");
+      finalized = {
+        txHash: finalize.txHash,
+        final: (await dependencies.chain.reservationFinal?.(reservationId)) ?? false,
+      };
+    }
     await appendExecutionPhase(dependencies.pool, {
       planId: input.planId,
       stepIndex: input.step.stepIndex,
@@ -716,35 +1160,166 @@ async function settleAndFinalize(
     final = finalized.final;
     start += finalizeCount;
   }
-  if (authorized.length !== calls.length) {
-    await markStepFailed(dependencies.pool, {
+  if (!final) throw new Error("Reservation is not final after finalizing every reserved index.");
+  // Review M2: an index left unsettled by a reverted settle is booked by finalize; record its receipt now.
+  for (const [index, context] of contexts) {
+    if (receiptsRecorded.has(index)) continue;
+    if (!(await dependencies.chain.isSettled({ reservationId, index }))) continue;
+    if (!(await dependencies.recordReceipt(context))) receiptPending = true;
+  }
+  return completeFinalizedStep(input, dependencies, {
+    calls,
+    reservationId,
+    attempt,
+    authorized,
+    completedResults,
+    receiptPending,
+    callsUsedBefore,
+  });
+}
+
+/**
+ * SCR-159 §3, after `finalize`: a call is paid when its index is settled on chain, and accepted when it is
+ * paid and its body passed the CZ-16 delivery check. The step ends `done` with the accepted calls' results;
+ * every other index is recorded per call as `delivery-failed` (paid) or `unpaid`. With no accepted call the
+ * step ends `failed`: `delivery-failed` when any call was paid, else `unpaid`.
+ */
+async function completeFinalizedStep(
+  input: VaultDirectInput,
+  dependencies: VaultDirectDependencies,
+  outcome: {
+    readonly calls: readonly PreparedCall[];
+    readonly reservationId: bigint;
+    readonly attempt: number;
+    readonly authorized: readonly number[];
+    readonly completedResults: readonly {
+      readonly index: number;
+      readonly subjectIndex?: number;
+      readonly stepResult: StepResult;
+    }[];
+    readonly receiptPending: boolean;
+    readonly callsUsedBefore: number;
+  },
+): Promise<VaultDirectResult> {
+  const { calls, reservationId, attempt, authorized } = outcome;
+  const accepted = outcome.completedResults.filter(({ stepResult }) => deliveredBody(stepResult));
+  const stepResults = accepted.map(({ stepResult }) => stepResult);
+  // A paid call's receipt is settlement evidence; the step stays open until every one is stored.
+  if (outcome.receiptPending) return { state: "pending", stepResults };
+  const callErrors: CallError[] = [];
+  let paid = 0;
+  for (const call of calls) {
+    const settled =
+      authorized.includes(call.index) ||
+      (await dependencies.chain.isSettled({ reservationId, index: call.index }));
+    if (settled) paid += 1;
+    if (accepted.some(({ index }) => index === call.index)) continue;
+    callErrors.push({ index: call.index, code: settled ? DELIVERY_FAILED : UNPAID });
+  }
+  const callsUsed = outcome.callsUsedBefore + paid;
+  if (accepted.length > 0) {
+    await markStepDoneWithResults(dependencies.pool, {
       planId: input.planId,
       stepIndex: input.step.stepIndex,
       attempt,
-      errorCode: "unpaid-index",
+      callsUsed,
+      results: accepted,
+      callErrors,
     });
-    return { state: "failed", errorCode: "unpaid-index" };
+    return { state: "done", stepResults };
   }
-  if (receiptPending) return { state: "pending", stepResults: results };
-  await markStepDoneWithResults(dependencies.pool, {
+  const errorCode = paid > 0 ? DELIVERY_FAILED : UNPAID;
+  await markStepFailed(dependencies.pool, {
     planId: input.planId,
     stepIndex: input.step.stepIndex,
     attempt,
-    callsUsed: callsUsedBefore + authorized.length,
-    results: completedResults,
+    errorCode,
+    stepError: {
+      schemaVersion: "1.0",
+      code: errorCode,
+      message: errorCode === UNPAID ? "No call was paid." : "Paid calls returned no usable body.",
+      retryable: false,
+    },
+    callsUsed,
+    callErrors,
   });
-  return { state: "done", stepResults: results };
+  return { state: "failed", errorCode };
 }
 
+/** False when the CZ-16 delivery check failed for a paid body (`http-error`, `timeout`, `no-response`). */
+function deliveredBody(stepResult: StepResult): boolean {
+  return (
+    stepResult.status !== "http-error" &&
+    stepResult.status !== "timeout" &&
+    stepResult.status !== "no-response"
+  );
+}
+
+/**
+ * SCR-157 §1: the vault finalizes only when `block.timestamp > validBefore` (`NotExpired`), so the wait ends
+ * once the latest block is past `validBefore`; every following block is too. Chain time is re-read after each
+ * `payer.reconcileSeconds` sleep; the server clock is never used.
+ */
 async function waitUntilValidBefore(
   dependencies: VaultDirectDependencies,
   validBefore: bigint,
 ): Promise<void> {
-  const pollMs = Number(dependencies.config.get("payer.reconcileSeconds")) * 1000;
-  while (Math.floor(dependencies.now().getTime() / 1000) < Number(validBefore)) {
-    const remainingMs = Number(validBefore) * 1000 - dependencies.now().getTime();
-    await (dependencies.sleep ?? delay)(Math.min(pollMs, remainingMs));
+  while ((await dependencies.chain.latestBlockTimestamp()) <= validBefore) {
+    await sleepReconcileInterval(dependencies);
   }
+}
+
+type NextVaultTransaction =
+  | { readonly kind: "send"; readonly signedTransaction: Hex }
+  | { readonly kind: "mined" | "reverted"; readonly txHash: Hex };
+
+/**
+ * SCR-159 §2 for a `settle` or `finalize` this attempt saved for the same indices: its bytes again while they
+ * can still land, its receipt when it has one, else the same arguments signed again and saved with a new
+ * `*.sent` row.
+ */
+async function nextVaultTransaction(
+  input: VaultDirectInput,
+  dependencies: VaultDirectDependencies,
+  trace: readonly ExecutionPhaseRow[],
+  attempt: number,
+  transaction: {
+    readonly selector: "settle" | "finalize";
+    readonly key: Readonly<Record<string, unknown>>;
+    readonly args: Readonly<Record<string, unknown>>;
+  },
+): Promise<NextVaultTransaction> {
+  const sentPhase = `${transaction.selector}.sent`;
+  const saved = trace.findLast(
+    (row) =>
+      row.phase === sentPhase &&
+      Object.entries(transaction.key).every(
+        ([name, value]) => JSON.stringify(row.payload[name]) === JSON.stringify(value),
+      ),
+  )?.payload["signedTransaction"];
+  if (typeof saved === "string") {
+    const state = await savedTransactionState(dependencies.chain, saved as Hex, () =>
+      sleepReconcileInterval(dependencies),
+    );
+    if (state === "pending") return { kind: "send", signedTransaction: saved as Hex };
+    if (state === "mined" || state === "reverted")
+      return { kind: state, txHash: keccak256(saved as Hex) };
+  }
+  const signedTransaction = await signVaultCall(
+    dependencies,
+    input.vault,
+    transaction.selector,
+    transaction.args,
+  );
+  dependencies.assertLeaseHeld?.();
+  await appendExecutionPhase(dependencies.pool, {
+    planId: input.planId,
+    stepIndex: input.step.stepIndex,
+    attempt,
+    phase: sentPhase,
+    payload: { ...transaction.key, txHash: keccak256(signedTransaction), signedTransaction },
+  });
+  return { kind: "send", signedTransaction };
 }
 
 async function signVaultCall(
@@ -844,11 +1419,16 @@ async function authorizeAndCall(
     phase: "call.sent",
     payload: { index: call.index, headerHash: keccak256(headers["payment-signature"] as Hex) },
   });
-  let response: SafeFetchResponse | undefined;
+  // SCR-159 §3: a merchant that settled and then answered without a 2xx body still took the payment. Its
+  // response is kept so the call reaches settle, the boundary (CZ-16 delivery fails) and the receipt.
+  let settledResponse: SafeFetchResponse | undefined;
   let errorCode = "unpaid";
   for (let retry = 0; retry < Number(dependencies.config.get("payer.callRetries")); retry += 1) {
+    // 02 §7.5: retries only within validBefore, by chain time (SCR-157 §1); USDC refuses the authorization
+    // once `block.timestamp ≥ validBefore`.
+    if (retry > 0 && (await dependencies.chain.latestBlockTimestamp()) >= validBefore) break;
     dependencies.assertLeaseHeld?.();
-    response = await dependencies.safeFetch(call.request.url, {
+    const response = await dependencies.safeFetch(call.request.url, {
       ...requestOptions(call.request),
       headers,
       timeoutMs: Math.min(
@@ -856,21 +1436,18 @@ async function authorizeAndCall(
         call.offer.maxTimeoutSeconds * 1000,
       ),
     });
+    const attemptSettlement = readSettlement(response.headers);
+    const moved = attemptSettlement.state === "settled" || attemptSettlement.state === "pending";
+    if (moved) settledResponse = response;
     if (response.status === 409) {
       errorCode = "idempotency-conflict";
       break;
     }
-    const settlement = readSettlement(response.headers);
-    if (settlement.state === "unpaid") break;
-    if (
-      response.status >= 200 &&
-      response.status < 300 &&
-      (settlement.state === "settled" || settlement.state === "pending")
-    )
-      break;
-    response = undefined;
+    if (attemptSettlement.state === "unpaid") break;
+    if (response.status >= 200 && response.status < 300 && moved) break;
   }
-  if (!response || response.status < 200 || response.status >= 300) return { errorCode };
+  const response = settledResponse;
+  if (!response) return { errorCode };
   const settlement = readSettlement(response.headers);
   if (settlement.state !== "settled" && settlement.state !== "pending")
     return { errorCode: "unpaid" };
@@ -1045,13 +1622,15 @@ function reservationExpiry(
   input: VaultDirectInput,
   dependencies: VaultDirectDependencies,
   maxTimeoutSeconds: number,
+  chainNow: bigint,
 ): bigint {
-  const now = Math.floor(dependencies.now().getTime() / 1000);
   const ttl = Math.min(
     maxTimeoutSeconds,
     Number(dependencies.config.get("payer.reservationTtlSeconds")),
   );
-  return BigInt(Math.min(now + ttl, Math.floor(input.envelopeExpiresAt.getTime() / 1000)));
+  const expiresAt = BigInt(Math.floor(input.envelopeExpiresAt.getTime() / 1000));
+  const capped = chainNow + BigInt(ttl);
+  return capped < expiresAt ? capped : expiresAt;
 }
 
 function buildPayeeProof(input: VaultDirectInput, payee: `0x${string}`): readonly Hash32[] {
@@ -1133,14 +1712,18 @@ async function waitForAuthorization(
   validBefore: bigint,
 ): Promise<boolean> {
   const until =
-    Number(validBefore) + Number(dependencies.config.get("payer.reconcileGraceSeconds"));
-  while (Math.floor(dependencies.now().getTime() / 1000) <= until) {
+    validBefore + BigInt(Number(dependencies.config.get("payer.reconcileGraceSeconds")));
+  // CZ-15 §5.5 by chain time (SCR-157 §1): the deadline is the one USDC enforces on the authorization.
+  while ((await dependencies.chain.latestBlockTimestamp()) <= until) {
     if (await dependencies.chain.authorizationState({ reservationId, index })) return true;
-    await (dependencies.sleep ?? delay)(
-      Number(dependencies.config.get("payer.reconcileSeconds")) * 1000,
-    );
+    await sleepReconcileInterval(dependencies);
   }
   return false;
+}
+
+function sleepReconcileInterval(dependencies: VaultDirectDependencies): Promise<void> {
+  const milliseconds = Number(dependencies.config.get("payer.reconcileSeconds")) * 1000;
+  return (dependencies.sleep ?? delay)(milliseconds);
 }
 
 function delay(milliseconds: number): Promise<void> {

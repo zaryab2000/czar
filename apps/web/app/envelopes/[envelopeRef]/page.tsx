@@ -74,7 +74,7 @@ function ManualReturnList({
     try {
       await submitManualReturn(item);
       setSubmittedReturns((current) => new Set([...current, item.returnTx]));
-      setNotice("Return submitted. Waiting for the network to confirm it.");
+      setNotice("Return recorded on-chain. Waiting for Czar to sync it.");
       refresh();
     } catch (cause) {
       setNotice(cause instanceof Error ? cause.message : "Czar could not submit this return.");
@@ -97,7 +97,7 @@ function ManualReturnList({
                   route. Record it so your vault&apos;s books match.
                 </span>
                 <button
-                  disabled={busyReturn === item.returnTx || submittedReturns.has(item.returnTx)}
+                  disabled={busyReturn !== undefined || submittedReturns.has(item.returnTx)}
                   onClick={() => void recordReturn(item)}
                   type="button"
                 >

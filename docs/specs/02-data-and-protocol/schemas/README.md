@@ -21,12 +21,13 @@
 | `payment-ref.schema.json` | §4.12 |
 | `receipt.schema.json` | §4.13 |
 | `acceptance-report.schema.json` | §4.14 |
-| `step-result.schema.json` | §4.15 |
+| `step-result.schema.json` | §4.15 (1.0; 1.1 lands with 4A-2, SCR-161) |
 | `step-error.schema.json` | §4.16 |
 | `demand-proof-leaf.schema.json` | §4.17 version 1, **superseded** by v2 (RV-026); kept for reference |
 | `demand-proof-leaf.v2.schema.json` | §4.17 version 2 (RV-026) |
 | `soul-version-leaf.schema.json` | §4.18 |
-| `ranking-decision.schema.json` | §4.19 |
+| `ranking-decision.schema.json` | §4.19 (1.2, SCR-160) |
+| `rating.schema.json` | §4.28 (SCR-160) |
 | `evidence-batch.schema.json` | §4.20 |
 | `job-brief.schema.json` | §4.21 (RV-025) |
 | `source-receipt.schema.json` | §4.23 (D90) |
@@ -36,6 +37,8 @@
 | `validate-schemas.mjs` | full Draft 2020-12 check of every schema and of `../examples/` |
 
 ## Checks run
+
+2026-10-30 (SCR-160), from this directory: `python3 -I check-schemas.py` → `checked 29 files; problems: 0`; `node <scratch>/validate-schemas.mjs . ../examples` → `ALL PASS` (ajv 8.17.1, ajv-formats 3.0.1).
 
 2026-10-20 (D90), from this directory: `python3 -I check-schemas.py` → `checked 27 files; problems: 0`; `node <scratch>/validate-schemas.mjs . ../examples` → `ALL PASS` (ajv 8.17.1, ajv-formats 3.0.1). Negative checks on `soul.schema.json` 1.2: a declared belief with `observation-score`, a user-confirmed belief with confidence 0.9 or without `confirmedAt`, and a receipt id that is neither `evt_` nor `src_` are all rejected.
 

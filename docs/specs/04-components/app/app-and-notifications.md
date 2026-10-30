@@ -414,3 +414,4 @@ K17 VAPID private key in the secret store; a leak lets an attacker spam notifica
 | 2026-10-25 | SCR-135 | §4 passkey transport aligned with SCR-125; `app.circleClientUrl`, `app.circleClientKey`, `app.arcRpcUrl`. |
 | 2026-10-25 | SCR-140 | §4 public wallet configuration before sign-in, replacing `/v1/me` bundler headers. |
 | 2026-10-25 | SCR-132, SCR-133, SCR-134 | "Approval sent" state; `recordManualReturn` UserOp and the Envelope "Money to record" section; device routes on Settings; wording. |
+| 2026-10-30 | SCR-160 | Result cards with per-supplier Good/Bad on Receipts and Home ("This week"), from `listAppResults` and `submitAppRating`; replaces the "This was wrong" action (SCR-160 §8.2). |

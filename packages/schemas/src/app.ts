@@ -1,4 +1,11 @@
-import type { Envelope, JobRecord, Plan, PocketRecord, Reservation } from "#src/generated/types";
+import type {
+  Envelope,
+  JobRecord,
+  Plan,
+  PocketRecord,
+  Reservation,
+  TaskSpec,
+} from "#src/generated/types";
 
 export interface AppPage<T> {
   readonly items: readonly T[];
@@ -13,6 +20,10 @@ export interface AppWalletConfig {
   readonly arcRpcUrl: string;
   readonly bundlerOrder: readonly AppBundler[];
   readonly bundlerEndpoints: Partial<Record<AppBundler, string>>;
+  /** CzarVaultFactory from the server's deployment manifest (SCR-157 §3). */
+  readonly vaultFactory: `0x${string}`;
+  /** The host name of `app.origin` (SCR-156, SCR-157 §3). */
+  readonly webauthnRpId: string;
 }
 
 export interface SessionRequest {
@@ -119,6 +130,72 @@ export interface ApprovalIntent {
 export interface SubmittedNotice {
   readonly userOpHash: `0x${string}`;
   readonly bundler?: "circle" | "pimlico" | "alchemy" | "zerodev";
+}
+
+export type ResultAckSurface = "claude-code-file" | "pr-comment" | "doc-insert";
+
+export interface ResultAck {
+  readonly resultId: string;
+  readonly writtenAt: string;
+  readonly surface: ResultAckSurface;
+  readonly artifacts?: {
+    readonly delivered: number;
+    readonly heldForReview: number;
+    readonly released?: number;
+  };
+  readonly fill?: {
+    readonly status: "filled" | "partial" | "none-filled" | "off" | "file-missing";
+    readonly cellsFilled?: number;
+    readonly cellsSkippedClash?: number;
+    readonly cellsNotFound?: number;
+  };
+  readonly assembly?: readonly {
+    readonly stepIndex: number;
+    readonly kind: "local" | "agent-assist";
+    readonly status: "assembled" | "assembly-failed" | "handed-to-agent" | "dropped-no-agent";
+    readonly rows?: number;
+    readonly columns?: number;
+    readonly structuralPass?: boolean;
+  }[];
+}
+
+export interface Result {
+  readonly resultId: string;
+  readonly objectiveId: string;
+  readonly mimeType: "text/markdown" | "application/json";
+  readonly body: string;
+  readonly provenance: readonly {
+    readonly stepIndex: number;
+    readonly origin: string;
+    readonly paymentRefHash: string;
+    readonly accepted: boolean;
+  }[];
+  readonly assembly?: readonly {
+    readonly stepIndex: number;
+    readonly kind: "local" | "agent-assist";
+    readonly capability: string;
+    readonly template?: "table-build" | "list-build" | "merge-dedupe";
+    readonly columns?: readonly string[];
+    readonly inputs: readonly {
+      readonly stepIndex: number;
+      readonly subjectIndex?: number;
+      readonly accepted: boolean;
+      readonly fields: readonly { readonly name: string; readonly value: string }[];
+    }[];
+  }[];
+  readonly taskSpec?: TaskSpec;
+  readonly fillInPlace?: boolean;
+  readonly artifacts?: readonly {
+    readonly stepIndex: number;
+    readonly name: string;
+    readonly mimeType: string;
+    readonly contentHash: string;
+    readonly bytes: number;
+    readonly flags: readonly ("injection-suspect" | "pii-suspect" | "screen-unavailable")[];
+  }[];
+  readonly costTotal?: string;
+  readonly minutesSaved?: number;
+  readonly createdAt: string;
 }
 
 export interface FreezeIntent {

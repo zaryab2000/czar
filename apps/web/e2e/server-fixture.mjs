@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import { createApp } from "../../server/src/app.ts";
 import { migrate } from "../../server/src/db/migrate.ts";
 import { loadConfig } from "../../server/node_modules/@czar/config/src/index.ts";
+import { E2E_VAULT_FACTORY } from "./e2e-deployment.mjs";
 
 const serverRequire = createRequire(new URL("../../server/package.json", import.meta.url));
 const { Pool } = serverRequire("pg");
@@ -16,6 +17,7 @@ const appConfig = {
   CZAR_APP_CIRCLE_CLIENT_URL: process.env["CZAR_APP_CIRCLE_CLIENT_URL"],
   CZAR_APP_CIRCLE_CLIENT_KEY: process.env["CZAR_APP_CIRCLE_CLIENT_KEY"],
   CZAR_APP_ARC_RPC_URL: process.env["CZAR_APP_ARC_RPC_URL"],
+  CZAR_APP_ORIGIN: "http://localhost:3100",
 };
 const port = Number(process.env["CZAR_TEST_SERVER_PORT"] ?? 4310);
 for (const name of Object.keys(process.env)) {
@@ -32,13 +34,13 @@ await migrate(pool);
 const app = createApp({
   pool,
   config: loadConfig({ env: appConfig }),
-  appOrigin: "http://localhost:3100",
   logger: { info() {}, warn() {}, error() {}, debug() {} },
   clock: { now: () => new Date() },
   random: { bytes: randomBytes },
+  vaultFactory: E2E_VAULT_FACTORY,
   appReadOptions: {
     rpcUrl,
-    factoryAddress: "0xA624047E961D13bF49711e1383e7A3EBD3E25ef4",
+    factoryAddress: E2E_VAULT_FACTORY,
     indexerUrl,
   },
 });

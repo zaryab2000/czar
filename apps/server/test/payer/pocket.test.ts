@@ -8,13 +8,31 @@ import {
   readPlanPocketKey,
   sweepAndRetirePocketKey,
 } from "#src/payer/pocket";
+import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { setupDatabase } from "#test/db";
 import { makeObjectiveSubmission, seedDevice, TEST_USER_ID } from "#test/fixtures";
 import { loadConfig } from "@czar/config";
 import { buildTree, pocketLeaf } from "@czar/hashing";
+import { KEY_IDS } from "@czar/signer";
 import { buildPaymentRequired, decodeBase64Json, encodePaymentRequired } from "@czar/x402";
 
 const getPool = setupDatabase();
+/** A test-only K3 key generated per run; nothing is committed. */
+const K3 = privateKeyToAccount(generatePrivateKey());
+
+/** A signed K3 transaction with `nonce`, so a saved one decodes to its sender and nonce (SCR-159 §2). */
+function signTestTransaction(nonce: number): Promise<`0x${string}`> {
+  return K3.signTransaction({
+    type: "eip1559",
+    chainId: 5042002,
+    nonce,
+    gas: 100_000n,
+    maxFeePerGas: 1n,
+    maxPriorityFeePerGas: 1n,
+    to: "0x0000000000000000000000000000000000000002",
+    data: "0x",
+  });
+}
 const PLAN_ID = "pln_01K7ZT9P4N5Q6R7S8T9V0W1X2Y";
 const POCKET = "0x0000000000000000000000000000000000000001";
 
@@ -54,6 +72,53 @@ beforeEach(async () => {
 });
 
 describe("pocket funding", () => {
+  it("asks the signer for the K4 key id, not a pocket key reference", async () => {
+    await getPool().query("INSERT INTO plan_pocket_keys(plan_id,pocket_address) VALUES($1,$2)", [
+      PLAN_ID,
+      POCKET,
+    ]);
+    const sign = vi.fn(async (_caller: string, _request: { keyId: string; kind: string }) => ({
+      signedTransaction: "0x01" as const,
+    }));
+    await executePocketPreparation(
+      {
+        planId: PLAN_ID,
+        envelopeRef: "eip155:5042002:0x0000000000000000000000000000000000000002:1",
+        envelopeId: 1n,
+        vault: "0x0000000000000000000000000000000000000002",
+        plan: {
+          payeeRoot: buildTree([pocketLeaf(POCKET as `0x${string}`)]).root,
+          payeeLeaves: [{ payee: POCKET, kind: 4, stepIndex: 4294967295, stepCap: "0" }],
+          pocketCapBps: 2500,
+          cap: "1000000",
+          steps: [{ stepIndex: 0, kind: "gateway-nano", stepCap: "250000" }],
+        },
+      },
+      {
+        pool: getPool(),
+        config: loadConfig(),
+        signer: { sign },
+        chain: {
+          isRegistered: async () => true,
+          registerPocket: async () => "register",
+          pocketGasGranted: async () => 20_000n,
+          grantPocketGas: async () => "gas",
+          isDelegateReady: async () => false,
+          addDelegate: async () => "delegate",
+          isFunded: async () => true,
+          fundPocket: async () => "fund",
+          transactionCount: async () => 0,
+          transactionStatus: async () => undefined,
+        },
+        now: () => new Date("2026-10-22T00:00:00Z"),
+      },
+    );
+
+    const delegate = sign.mock.calls.find(([, request]) => request.kind === "pocket-delegate");
+    expect(delegate?.[1].keyId).toBe("K4");
+    expect(KEY_IDS).toContain(delegate?.[1].keyId);
+  });
+
   it("reuses a registration transaction when the first Gateway step is not step zero", async () => {
     await getPool().query("INSERT INTO plan_pocket_keys(plan_id,pocket_address) VALUES($1,$2)", [
       PLAN_ID,
@@ -82,6 +147,8 @@ describe("pocket funding", () => {
       addDelegate: async () => "delegate",
       isFunded: async () => true,
       fundPocket: async () => "fund",
+      transactionCount: async () => 0,
+      transactionStatus: async () => undefined,
     };
     const input = {
       planId: PLAN_ID,
@@ -101,7 +168,7 @@ describe("pocket funding", () => {
       config: loadConfig(),
       signer: {
         sign: vi.fn(async () => {
-          const transaction = `0x${String(signed.length + 1).padStart(4, "0")}` as const;
+          const transaction = await signTestTransaction(signed.length);
           signed.push(transaction);
           return { signedTransaction: transaction };
         }),
@@ -305,6 +372,7 @@ describe("pocket funding", () => {
     let delegated = false;
     let funded = false;
     let failAfter: "register" | "gas" | "delegate" | "fund" | undefined = "register";
+    let nextNonce = 0;
     const stopAfter = (phase: typeof failAfter) => {
       if (failAfter !== phase) return;
       failAfter = undefined;
@@ -335,6 +403,8 @@ describe("pocket funding", () => {
         funded = true;
         return "fund-tx";
       }),
+      transactionCount: async () => 0,
+      transactionStatus: async () => undefined,
     };
     const input = {
       planId: PLAN_ID,
@@ -353,7 +423,14 @@ describe("pocket funding", () => {
     const dependencies = {
       pool: getPool(),
       config: loadConfig(),
-      signer: { sign: vi.fn(async () => ({ signedTransaction: "0x1234" as const })) },
+      signer: {
+        sign: vi.fn(async (_caller: string, request: { kind: string }) => ({
+          signedTransaction:
+            request.kind === "vault-call"
+              ? await signTestTransaction(nextNonce++)
+              : ("0x1234" as const),
+        })),
+      },
       chain,
       now: () => new Date("2026-10-22T00:00:00Z"),
     };

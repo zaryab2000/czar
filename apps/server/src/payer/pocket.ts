@@ -19,8 +19,9 @@ import {
 } from "@czar/x402";
 import type { Pool } from "pg";
 import { randomBytes, randomUUID } from "node:crypto";
-import { toHex, type Address } from "viem";
+import { keccak256, toHex, type Address } from "viem";
 import { isManualReturnWriteOffHeld } from "#src/payer/pullback";
+import { savedTransactionState, type SavedTransactionChain } from "#src/payer/saved-transaction";
 import {
   acquireExecutorLease,
   appendExecutionPhase,
@@ -188,7 +189,7 @@ async function sweepPocketBalance(
   let transaction = phaseTransaction(trace, `pocket.return.${kind}.sent`);
   if (!transaction) {
     const signed = await dependencies.signer.sign("cz-15", {
-      keyId: `K4:${input.pocket}`,
+      keyId: "K4",
       kind: "pocket-return",
       payload: { pocket: input.pocket, kind, amount: amount.toString() },
     });
@@ -245,7 +246,7 @@ export interface PocketPreparationInput {
   readonly dispatchLease?: ExecutorLeaseGuard;
 }
 
-export interface PocketPreparationChain {
+export interface PocketPreparationChain extends SavedTransactionChain {
   isRegistered(pocket: Address): Promise<boolean>;
   registerPocket(args: {
     envelopeId: bigint;
@@ -361,13 +362,17 @@ async function preparePocket(
     attempt,
   );
   if (!(await chain.isRegistered(pocket))) {
-    const transaction =
-      phaseTransaction(trace, "pocket.register.sent") ??
-      (await signVaultCall(dependencies, input.vault, "registerPocket", {
-        envelopeId: input.envelopeId.toString(),
-        pocket,
-        proof,
-      }));
+    const transaction = await nextPocketVaultTransaction(
+      dependencies,
+      trace,
+      "pocket.register.sent",
+      () =>
+        signVaultCall(dependencies, input.vault, "registerPocket", {
+          envelopeId: input.envelopeId.toString(),
+          pocket,
+          proof,
+        }),
+    );
     assertLeaseHeld();
     await recordPhase(dependencies, input, attempt, "pocket.register.sent", {
       pocket,
@@ -383,12 +388,16 @@ async function preparePocket(
   }
   const gasUnits = BigInt(Number(dependencies.config.get("payer.pocketGasUnits")));
   if ((await chain.pocketGasGranted(pocket)) < gasUnits) {
-    const transaction =
-      phaseTransaction(trace, "pocket.gas.sent") ??
-      (await signVaultCall(dependencies, input.vault, "grantPocketGas", {
-        pocket,
-        units: gasUnits.toString(),
-      }));
+    const transaction = await nextPocketVaultTransaction(
+      dependencies,
+      trace,
+      "pocket.gas.sent",
+      () =>
+        signVaultCall(dependencies, input.vault, "grantPocketGas", {
+          pocket,
+          units: gasUnits.toString(),
+        }),
+    );
     assertLeaseHeld();
     await recordPhase(dependencies, input, attempt, "pocket.gas.sent", {
       pocket,
@@ -411,12 +420,16 @@ async function preparePocket(
     planCap: BigInt(input.plan.cap),
   });
   if (funded > 0n && !(await chain.isFunded(pocket))) {
-    const transaction =
-      phaseTransaction(trace, "pocket.fund.sent") ??
-      (await signVaultCall(dependencies, input.vault, "fundPocket", {
-        pocket,
-        amount: funded.toString(),
-      }));
+    const transaction = await nextPocketVaultTransaction(
+      dependencies,
+      trace,
+      "pocket.fund.sent",
+      () =>
+        signVaultCall(dependencies, input.vault, "fundPocket", {
+          pocket,
+          amount: funded.toString(),
+        }),
+    );
     assertLeaseHeld();
     await recordPhase(dependencies, input, attempt, "pocket.fund.sent", {
       pocket,
@@ -445,7 +458,7 @@ async function prepareDelegate(
   let transaction = phaseTransaction(trace, "pocket.delegate.sent");
   if (!transaction) {
     const signed = await dependencies.signer.sign("cz-15", {
-      keyId: `K4:${pocket}`,
+      keyId: "K4",
       kind: "pocket-delegate",
       payload: { pocket, vault: input.vault },
     });
@@ -464,6 +477,24 @@ async function prepareDelegate(
     transaction,
   });
   await recordPhase(dependencies, input, attempt, "pocket.delegate", { pocket, txHash });
+}
+
+/**
+ * SCR-159 §2 for a saved K3 pocket transaction, reached only while the chain shows its work undone: its bytes
+ * again while they can still land, else the same arguments signed again. A saved transaction that mined
+ * reverted fails here and is never sent again.
+ */
+async function nextPocketVaultTransaction(
+  dependencies: PocketPreparationDependencies,
+  trace: readonly { readonly phase: string; readonly payload: Readonly<Record<string, unknown>> }[],
+  sentPhase: string,
+  sign: () => Promise<`0x${string}`>,
+): Promise<`0x${string}`> {
+  const saved = phaseTransaction(trace, sentPhase);
+  if (!saved) return sign();
+  const state = await savedTransactionState(dependencies.chain, saved);
+  if (state === "reverted") throw new Error(`Pocket transaction reverted: ${keccak256(saved)}`);
+  return state === "replaced" ? sign() : saved;
 }
 
 async function signVaultCall(
@@ -646,7 +677,7 @@ async function sendGatewayCall(
       Math.floor(dependencies.now().getTime() / 1000) + offer.maxTimeoutSeconds,
     );
     const signed = await dependencies.signer.sign("cz-15", {
-      keyId: `K4:${input.pocket}`,
+      keyId: "K4",
       kind: "gateway-nano",
       payload: {
         pocket: input.pocket,

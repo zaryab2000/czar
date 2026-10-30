@@ -160,6 +160,7 @@ describe("Gateway balance projection rules", () => {
   });
 
   it("polls an exact pocket balance and reads withdrawal state at one chain block", async () => {
+    const getBlockNumber = vi.fn(async (_options?: { cacheTime?: number }) => 123n);
     const store = memoryStore();
     const fetcher = vi.fn().mockResolvedValue(
       new Response(
@@ -191,13 +192,15 @@ describe("Gateway balance projection rules", () => {
       },
       {
         fetch: fetcher,
-        chain: { getBlockNumber: async () => 123n, readContract } as never,
+        chain: { getBlockNumber, readContract } as never,
         store,
         now: () => now,
       },
     );
 
     expect(result).toMatchObject({ apiError: false, chainError: false });
+    // The head must be read uncached, so chain reads are not pinned to a block older than the API figure.
+    expect(getBlockNumber).toHaveBeenCalledWith({ cacheTime: 0 });
     expect(store.current()).toMatchObject({
       gatewayAvailableAtomic: "1000",
       gatewayPendingBatchAtomic: "0",

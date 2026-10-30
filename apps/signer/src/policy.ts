@@ -7,6 +7,7 @@ import {
   keccak256,
   toBytes,
   type Hex,
+  type TransactionSerializableEIP1559,
 } from "viem";
 import {
   addressToBytes32,
@@ -21,6 +22,7 @@ import {
   domainSeparator,
   paymentRefHash,
   transferWithAuthorizationStructHash,
+  USDC_ADDRESS,
   usdcTransferWithAuthorizationDigest,
   type Address,
   type Domain,
@@ -87,6 +89,69 @@ export interface PolicyContext {
   readonly merchantKeyAddress: (service: string) => Address;
   /** `signer.gas.<key>.maxAtomic` for the gas-refill targets. */
   readonly gasMaxAtomic: Readonly<Record<"K3" | "K7" | "K8", bigint>>;
+  /**
+   * SCR-152 `gasReserve` of a `pocket-return` of `amount` USDC from `pocket` to `vault`, from the transaction the
+   * signer would prepare for it.
+   */
+  readonly pocketReturnGasReserve: (
+    pocket: Address,
+    vault: Address,
+    amount: bigint,
+  ) => Promise<bigint>;
+}
+
+/** 18-decimal native units per 6-decimal USDC unit on Arc (A1-05). */
+export const NATIVE_PER_USDC_ATOMIC = 10n ** 12n;
+
+/** On Arc gas is paid in USDC: the native balance and USDC `balanceOf` are one ledger (A1-05, SCR-152). */
+export const usdcPaysGas = (network: SignerNetwork): boolean => eq(network.usdc, USDC_ADDRESS);
+
+/** SCR-152: `ceil(gas × maxFeePerGas / 10^12)` of a prepared transaction, in USDC atomic units. */
+export function gasReserveAtomic(
+  tx: Pick<TransactionSerializableEIP1559, "gas" | "maxFeePerGas">,
+): bigint {
+  if (tx.gas === undefined || tx.maxFeePerGas === undefined)
+    throw new Error("prepared transaction has no gas or maxFeePerGas");
+  return (tx.gas * tx.maxFeePerGas + NATIVE_PER_USDC_ATOMIC - 1n) / NATIVE_PER_USDC_ATOMIC;
+}
+
+/**
+ * A one-unit transfer: its gas estimate never exceeds a nonzero balance, and its calldata has the fewest nonzero
+ * bytes, so its `gasReserve` is the smallest any `pocket-return` from the pocket can have.
+ */
+const PROBE_RETURN_ATOMIC = 1n;
+
+/**
+ * SCR-152 §1 `returnable = balance − gasReserve`, where `gasReserve` is that of the transfer of the returnable value
+ * itself: `reserveFor(amount)` prepares a `pocket-return` of `amount` and returns its `gasReserve`. The one-unit
+ * probe bounds the value (`ceiling`); the transfer of the ceiling gives the reserve. A result `≤ 0` means empty (§2).
+ */
+export async function returnableAtomic(
+  usdc: bigint,
+  reserveFor: (amount: bigint) => Promise<bigint>,
+): Promise<{ readonly ceiling: bigint; readonly returnable: bigint }> {
+  if (usdc === 0n) return { ceiling: 0n, returnable: 0n };
+  const ceiling = usdc - (await reserveFor(PROBE_RETURN_ATOMIC));
+  if (ceiling <= 0n) return { ceiling, returnable: ceiling };
+  return { ceiling, returnable: usdc - (await reserveFor(ceiling)) };
+}
+
+/**
+ * SCR-152 §2: the pocket EOA is empty when nothing is returnable at the current fee. Where gas is not USDC, only a
+ * zero USDC balance is empty.
+ */
+export async function pocketEmpty(
+  ctx: PolicyContext,
+  pocket: Address,
+  vault: Address,
+  usdc: bigint,
+): Promise<boolean> {
+  if (usdc === 0n) return true;
+  if (!usdcPaysGas(ctx.network)) return false;
+  const { returnable } = await returnableAtomic(usdc, (amount) =>
+    ctx.pocketReturnGasReserve(pocket, vault, amount),
+  );
+  return returnable <= 0n;
 }
 
 /** Ids the audit row records; never payloads or text (CZ-27 §5.2, §8). */
@@ -114,6 +179,8 @@ export type Decision =
       readonly purpose: PurposeIds;
       readonly rule?: "writeoff-manual-return-overdue";
       readonly alert?: WriteOffAlert;
+      /** Checks the prepared transaction before it is signed; throws `Denied` to refuse it. */
+      readonly checkPrepared?: (tx: TransactionSerializableEIP1559) => void;
     };
 
 /** Public, non-sensitive context for the stale-Gateway write-off alert. */
@@ -326,6 +393,7 @@ async function vaultCall(ctx: PolicyContext, req: Req): Promise<Decision> {
         if (readFacts === undefined) throw new Denied("gateway-balance-stale");
         const facts = await readFacts(pocket, vault, ctx.now());
         if (!allOverdueManualReturnFacts(facts)) deny("gateway-balance-stale");
+        if (!(await pocketEmpty(ctx, pocket, vault, balances.usdc))) deny("gateway-balance-stale");
         rule = "writeoff-manual-return-overdue";
         alert = {
           name: "writeoff-overdue-stale-gateway",
@@ -356,7 +424,6 @@ function allOverdueManualReturnFacts(facts: OverdueManualReturnFacts): boolean {
     facts.envelopeOpen &&
     facts.pendingPullbackZero &&
     facts.gatewayWithdrawingZero &&
-    facts.pocketUsdcZero &&
     facts.slowWithdrawAudited &&
     facts.pocketReturnAudited &&
     facts.manualReturnRowValid &&
@@ -696,13 +763,38 @@ async function pocketReturn(ctx: PolicyContext, req: Req): Promise<Decision> {
   const balances = await ctx.projection.pocketBalances(pocket);
   // The destination is always the pocket's own vault, never caller-supplied (RV-004, RV-055).
   if (req.kind === "usdc") {
-    if (amount > balances.usdc) deny("above-balance");
     const data = encodeFunctionData({
       abi: USDC_ABI,
       functionName: "transfer",
       args: [view.vault, amount],
     });
-    return { type: "transaction", to: ctx.network.usdc, data, value: 0n, purpose: {} };
+    const decision = {
+      type: "transaction",
+      to: ctx.network.usdc,
+      data,
+      value: 0n,
+      purpose: {},
+    } as const;
+    if (!usdcPaysGas(ctx.network)) {
+      if (amount > balances.usdc) deny("above-balance");
+      return decision;
+    }
+    // SCR-152 §1: the value must be exactly balance − gasReserve of the transaction about to be signed.
+    if (balances.usdc === 0n) deny("pocket-empty");
+    const reserveFor = (value: bigint) => ctx.pocketReturnGasReserve(pocket, view.vault, value);
+    const ceiling = balances.usdc - (await reserveFor(PROBE_RETURN_ATOMIC));
+    if (ceiling <= 0n) deny("pocket-empty");
+    if (amount > ceiling) {
+      // Above the ceiling no prepared transfer can match, and its estimate may revert: decide without it.
+      const { returnable } = await returnableAtomic(balances.usdc, reserveFor);
+      deny(returnable <= 0n ? "pocket-empty" : "pocket-return-value-mismatch");
+    }
+    const checkPrepared = (tx: TransactionSerializableEIP1559) => {
+      const returnable = balances.usdc - gasReserveAtomic(tx);
+      if (returnable <= 0n) deny("pocket-empty");
+      if (amount !== returnable) deny("pocket-return-value-mismatch");
+    };
+    return { ...decision, checkPrepared };
   }
   if (amount > balances.native) deny("above-balance");
   return { type: "transaction", to: view.vault, data: "0x", value: amount, purpose: {} };
@@ -790,10 +882,12 @@ async function gasRefill(ctx: PolicyContext, req: Req): Promise<Decision> {
   const amount = req.amount as bigint;
   const key = (["K3", "K7", "K8"] as const).find((id) => eq(ctx.keyAddress(id), target));
   if (key === undefined) deny("target-not-allowed");
+  // `amount` and `maxAtomic` are USDC atomic; the balance and the transaction value are native wei.
   const balance = await ctx.projection.nativeBalance(target);
-  const max = ctx.gasMaxAtomic[key as "K3" | "K7" | "K8"];
-  if (balance + amount > max) deny("above-max");
-  return { type: "transaction", to: target, data: "0x", value: amount, purpose: {} };
+  const value = amount * NATIVE_PER_USDC_ATOMIC;
+  const max = ctx.gasMaxAtomic[key as "K3" | "K7" | "K8"] * NATIVE_PER_USDC_ATOMIC;
+  if (balance + value > max) deny("above-max");
+  return { type: "transaction", to: target, data: "0x", value, purpose: {} };
 }
 
 const HANDLERS: Readonly<Record<Kind, (ctx: PolicyContext, req: Req) => Promise<Decision>>> = {

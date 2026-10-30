@@ -32,12 +32,18 @@ importers:
       '@czar/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@czar/hashing':
+        specifier: workspace:*
+        version: link:../../packages/hashing
       '@czar/logging':
         specifier: workspace:*
         version: link:../../packages/logging
       '@czar/redaction':
         specifier: workspace:*
         version: link:../../packages/redaction
+      '@czar/schemas':
+        specifier: workspace:*
+        version: link:../../packages/schemas
       '@napi-rs/keyring':
         specifier: 2.1.1
         version: 2.1.1
@@ -214,6 +220,9 @@ importers:
       '@czar/api-contract':
         specifier: workspace:*
         version: link:../../packages/api-contract
+      '@czar/config':
+        specifier: workspace:*
+        version: link:../../packages/config
       '@czar/hashing':
         specifier: workspace:*
         version: link:../../packages/hashing

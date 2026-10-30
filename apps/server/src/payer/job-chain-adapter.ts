@@ -111,6 +111,12 @@ export function createJobChainAdapter(input: {
     throw new Error(`Unsupported job escrow kind: ${kind}`);
   }
 
+  async function latestBlockTimestamp(): Promise<number> {
+    // A block read is never served from viem's cache (SCR-157 §1: a fresh read).
+    const block = await input.client.getBlock({ blockTag: "latest" });
+    return Number(block.timestamp);
+  }
+
   async function waitForStatus(
     jobKeyValue: Hash32,
     isComplete: (view: JobChainView) => boolean,
@@ -209,8 +215,11 @@ export function createJobChainAdapter(input: {
     },
     cancelJob: async (args) => send(args.transaction),
     claimJobRefund: async (args) => send(args.transaction),
+    latestBlockTimestamp,
     async waitForResult(jobKeyValue, expiredAt) {
-      const timeoutMs = Math.max(0, expiredAt * 1000 - input.now().getTime());
+      // A local wait for the provider or evaluator; it sends nothing. The refund that follows checks
+      // expiredAt against chain time (SCR-157 §1), so a timer that fires early only ends this pass.
+      const timeoutMs = Math.max(0, expiredAt * MILLISECONDS_PER_SECOND - input.now().getTime());
       return waitForStatus(
         jobKeyValue,
         (view) =>
@@ -251,7 +260,8 @@ export function createJobChainAdapter(input: {
       );
       const cutoff = rows.rows[0]?.brief.decisionCutoff;
       if (typeof cutoff !== "number" || !Number.isSafeInteger(cutoff)) return true;
-      return input.now().getTime() < cutoff * MILLISECONDS_PER_SECOND;
+      // The cutoff gates claimJobRefund and sits a margin before the on-chain expiredAt: chain time.
+      return (await latestBlockTimestamp()) < cutoff;
     },
   };
 }

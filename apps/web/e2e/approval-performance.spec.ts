@@ -61,7 +61,7 @@ test("approval deep link meets the JavaScript and interactive budgets", async ({
 function createPlan(): AppPlan {
   const createdAt = new Date();
   return {
-    schemaVersion: "1.2",
+    schemaVersion: "1.3",
     planId: PLAN_ID,
     objectiveId: "obj_ta14_performance",
     objectiveHash: `0x${"1".repeat(64)}`,

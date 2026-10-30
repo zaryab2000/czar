@@ -1,22 +1,39 @@
 import type { Config } from "@czar/config";
 import type { AppBundler, AppWalletConfig } from "@czar/schemas";
 import type { Context } from "hono";
+import { isAddress, isAddressEqual, zeroAddress, type Address } from "viem";
 import { validateRecordedExchange } from "@czar/api-contract";
 
 const BUNDLERS = ["circle", "pimlico", "alchemy", "zerodev"] as const;
 const BUNDLER_SET = new Set<string>(BUNDLERS);
 type ServerContext = Context<any, any, any>;
 
-export function resolveAppWalletConfig(config: Config): AppWalletConfig {
+/**
+ * Builds the public wallet configuration once at startup and refuses to start on any invalid
+ * value. `vaultFactory` is the CzarVaultFactory of the server's deployment manifest; a missing,
+ * zero or mismatched factory stops the server (SCR-157 §3).
+ */
+export function resolveAppWalletConfig(
+  config: Config,
+  deployment: { readonly vaultFactory: Address; readonly readFactory: Address | undefined },
+): AppWalletConfig {
   const resolved: AppWalletConfig = {
     circleClientUrl: requiredUrl(config.get("app.circleClientUrl"), "app.circleClientUrl"),
     circleClientKey: requiredText(config.get("app.circleClientKey"), "app.circleClientKey"),
     arcRpcUrl: requiredUrl(config.get("app.arcRpcUrl"), "app.arcRpcUrl"),
     bundlerOrder: parseBundlerOrder(config.get("app.bundlerOrder")),
     bundlerEndpoints: parseBundlerEndpoints(config.get("app.bundlerEndpoints")),
+    vaultFactory: requiredFactory(deployment.vaultFactory, deployment.readFactory),
+    webauthnRpId: webauthnRpId(config),
   };
   assertContract(resolved);
   return resolved;
+}
+
+/** The WebAuthn RP ID: the host name of `app.origin` (SCR-156, SCR-157 §3). */
+function webauthnRpId(config: Config): string {
+  const origin = requiredUrl(config.get("app.origin"), "app.origin");
+  return new URL(origin).hostname;
 }
 
 export function getAppWalletConfigRoute(
@@ -50,6 +67,18 @@ function requiredUrl(value: unknown, key: string): string {
     throw invalidConfig(key);
   }
   return text;
+}
+
+function requiredFactory(vaultFactory: unknown, readFactory: Address | undefined): Address {
+  if (
+    typeof vaultFactory !== "string" ||
+    !isAddress(vaultFactory, { strict: false }) ||
+    vaultFactory === zeroAddress ||
+    (readFactory !== undefined && !isAddressEqual(vaultFactory, readFactory))
+  ) {
+    throw invalidConfig("vaultFactory");
+  }
+  return vaultFactory;
 }
 
 function parseBundlerOrder(value: unknown): readonly AppBundler[] {

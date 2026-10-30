@@ -213,7 +213,7 @@ describe("job chain adapter", () => {
     );
     const query = vi.fn(async () => ({ rows: [{ brief: { decisionCutoff: 2_000 } }] }));
     const adapter = createJobChainAdapter({
-      client: { readContract } as never,
+      client: { readContract, getBlock: vi.fn(async () => ({ timestamp: 1_999n })) } as never,
       pool: { query } as never,
       config: loadConfig(),
       vault: "0x0000000000000000000000000000000000000001",
@@ -239,7 +239,7 @@ describe("job chain adapter", () => {
           : { status: 2, budget: 900n, expiredAt: 3_000n },
     );
     const adapter = createJobChainAdapter({
-      client: { readContract } as never,
+      client: { readContract, getBlock: vi.fn(async () => ({ timestamp: 2_001n })) } as never,
       pool: {
         query: vi.fn(async () => ({ rows: [{ brief: { decisionCutoff: 2_000 } }] })),
       } as never,
@@ -253,5 +253,33 @@ describe("job chain adapter", () => {
     await expect(adapter.hasDecisionPending(`0x${"22".repeat(32)}` as `0x${string}`)).resolves.toBe(
       false,
     );
+  });
+
+  it("treats a submission as pending while chain time, not the server clock, is before its cutoff", async () => {
+    const readContract = vi.fn(async ({ address, functionName }) =>
+      functionName === "jobEscrowKind"
+        ? 1
+        : address === "0x0000000000000000000000000000000000000001"
+          ? { state: 3, jobId: 7n, expiredAt: 3_000 }
+          : { status: 2, budget: 900n, expiredAt: 3_000n },
+    );
+    const getBlock = vi.fn(async () => ({ timestamp: 1_999n }));
+    const adapter = createJobChainAdapter({
+      client: { readContract, getBlock } as never,
+      pool: {
+        query: vi.fn(async () => ({ rows: [{ brief: { decisionCutoff: 2_000 } }] })),
+      } as never,
+      config: loadConfig(),
+      vault: "0x0000000000000000000000000000000000000001",
+      jobEscrow: "0x0000000000000000000000000000000000000002",
+      usdc: "0x0000000000000000000000000000000000000003",
+      // The server clock is 400 s past the cutoff; the chain is not.
+      now: () => new Date(2_400_000),
+    });
+
+    await expect(adapter.hasDecisionPending(`0x${"22".repeat(32)}` as `0x${string}`)).resolves.toBe(
+      true,
+    );
+    expect(getBlock).toHaveBeenCalledWith({ blockTag: "latest" });
   });
 });

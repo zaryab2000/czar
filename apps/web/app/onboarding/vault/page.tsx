@@ -1,15 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { encodeCreateVault, encodeSetPasskey } from "@czar/vault-client";
 import type { Me } from "@czar/schemas";
 import { appApi } from "#src/app-api";
 import { useAppData } from "#src/use-app-data";
-import { getStoredPasskey, sendOwnerUserOperation } from "#src/wallet";
-
-const FACTORY =
-  process.env["NEXT_PUBLIC_CZAR_VAULT_FACTORY_ADDRESS"] ??
-  "0xA624047E961D13bF49711e1383e7A3EBD3E25ef4";
+import { ADD_NETWORK_FEES, canCreateVault, setUpVault } from "#src/vault-setup";
 
 export default function VaultOnboardingPage() {
   const load = useCallback(() => appApi.getMe(), []);
@@ -36,34 +31,13 @@ export default function VaultOnboardingPage() {
     setBusy(true);
     setNotice(undefined);
     try {
-      if (!FACTORY) throw new Error("The Czar vault factory is not configured for this network.");
-      const passkey = getStoredPasskey();
-      try {
-        await sendOwnerUserOperation(
-          passkey,
-          FACTORY as `0x${string}`,
-          encodeCreateVault(data.msca as `0x${string}`),
-        );
-      } catch (cause) {
-        if (!errorHasMessage(cause, "VaultExists")) throw cause;
-      }
-      const key = passkeyCoordinates(passkey.publicKey);
-      const rpIdHash = new Uint8Array(
-        await crypto.subtle.digest("SHA-256", new TextEncoder().encode("localhost")),
-      );
-      const rpIdHashHex =
-        `0x${Array.from(rpIdHash, (byte) => byte.toString(16).padStart(2, "0")).join("")}` as `0x${string}`;
-      await sendOwnerUserOperation(
-        passkey,
-        data.vault as `0x${string}`,
-        encodeSetPasskey(key.qx, key.qy, rpIdHashHex),
-      );
+      await setUpVault({ msca: data.msca as `0x${string}`, vault: data.vault as `0x${string}` });
       setNotice("Vault setup submitted. Waiting for VaultCreated to sync…");
       refresh();
     } catch (cause) {
       if (isInsufficientGas(cause)) {
         setFundNetworkFees(true);
-        setNotice("Add a small amount to your MSCA for network fees, then try again.");
+        setNotice(ADD_NETWORK_FEES);
       } else {
         setNotice(cause instanceof Error ? cause.message : "Czar could not create your vault.");
       }
@@ -76,6 +50,7 @@ export default function VaultOnboardingPage() {
   if (loading && !data) return <p role="status">Loading your account…</p>;
   if (error && !data) return <p role="alert">{error}</p>;
   if (!data) return <p role="alert">Czar could not load your account.</p>;
+  const hasNetworkFees = canCreateVault(data);
   return (
     <section className="welcome-card page-stack">
       <p className="eyebrow">Step 2 of 4</p>
@@ -89,16 +64,24 @@ export default function VaultOnboardingPage() {
           </a>
         </>
       ) : (
-        <button className="primary-button" disabled={busy} onClick={createVault} type="button">
-          {busy ? "Sending…" : "Create vault"}
-        </button>
+        <>
+          <button
+            className="primary-button"
+            disabled={busy || !hasNetworkFees}
+            onClick={createVault}
+            type="button"
+          >
+            {busy ? "Sending…" : "Create vault"}
+          </button>
+          {!hasNetworkFees && <p role="status">{ADD_NETWORK_FEES}</p>}
+        </>
       )}
       <p>Network fee reserve: {formatAmount(data.balances.mscaBalance)} USDC</p>
       <button disabled={busy} onClick={refresh} type="button">
         Check setup status
       </button>
       {notice && <p role="status">{notice}</p>}
-      {fundNetworkFees && (
+      {(fundNetworkFees || (!data.vaultCreated && !hasNetworkFees)) && (
         <a className="primary-link" href="/onboarding/fund?fund-msca=1">
           Add money for network fees
         </a>
@@ -120,19 +103,6 @@ function isInsufficientGas(cause: unknown): boolean {
   return ["AA21", "insufficient funds", "prefund"].some((fragment) =>
     errorHasMessage(cause, fragment),
   );
-}
-
-function passkeyCoordinates(publicKey: `0x${string}`): {
-  readonly qx: `0x${string}`;
-  readonly qy: `0x${string}`;
-} {
-  if (!/^0x04[\da-fA-F]{128}$/.test(publicKey)) {
-    throw new Error("The saved passkey key is invalid. Create your passkey again.");
-  }
-  return {
-    qx: `0x${publicKey.slice(4, 68)}`,
-    qy: `0x${publicKey.slice(68)}`,
-  };
 }
 
 function formatAmount(value: Me["balances"]["mscaBalance"]): string {

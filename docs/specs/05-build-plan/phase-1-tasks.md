@@ -1033,6 +1033,12 @@
 - **Acceptance tests:** exact decimal conversion and malformed handling; stale figure denies write-off, retirement and slow withdraw but not `pocket-return`; dust at or below the fee allows write-off; `Closed` pockets polled until every balance reads zero for `indexer.closedPocketQuietHours`; `nanoSpent` counts non-failed transfers. Live `/v1/balances` behaviour is G0-05.
 - **SCR-141 (2026-10-25):** internal `closedZeroSince` and the quiet-period rule (`pendingBatch` included; failed reads neither set nor reset); signer `pocket-slow-withdraw` `initiate` under trigger (a) with the last good figure and denials `gateway-figure-missing`, `slow-withdraw-value-mismatch`, `pocket-spend-after-observation`; `withdraw` without an API figure. Tests for each denial, fresh vs. last-good amount, and a `gateway-nano` signature inside the window.
 
+### T-126 Daemon `czar objective` submit command (SCR-147)
+- **Milestone / group / who:** M3 / M3-d / agent. **Size:** S. **Deps:** T-060, T-061 (pairing). **Owner:** Lane 4.
+- **Spec refs:** SCR-147; `S02/data-and-protocol.md` §4.4, §5.2, §9.2; `S04/shared/cross-cutting.md` §4.
+- **Outputs:** the `czar objective` command in `apps/daemon`; `daemon.objectivePollSeconds` (`@czar/config`).
+- **Acceptance tests:** as SCR-147 "Acceptance (T-126)".
+
 ### T-125 Owner manual return (SCR-133)
 - **Milestone / group / who:** M4 / M4-b / agent. **Size:** M. **Deps:** T-124, T-053. **Owners:** Lane 1 (`encodeRecordManualReturn`, indexer `manual_returns` and query), Lane 2 (migration, reconciliation, write-off hold), Lane 5 (`listManualReturns`, Envelope section, Home notice).
 - **Spec refs:** CZ-15 §5.3 as amended by SCR-133; CZ-19 §5.4 `manualReturnsForVault`; CZ-22 §4, §5.1, §12; `S02/api/openapi.yaml` `listManualReturns`; `S03/czar-vault.md` `recordManualReturn`.
@@ -1509,6 +1515,7 @@
   - A service with `n_eff < 5` appears only in `unverified`, never ranked ("unknown is not bad").
   - Index items validate for both readers (Circle `metadata` shape and spec fields).
 - **D83 (2026-10-20):** reputation rows keyed by network; `findService` refuses a non-payment network with 422 `network-not-payable`; `includeMarketView` returns the T-107 view.
+- **SCR-160 (2026-10-30):** the posterior steps and acceptance tests above are superseded. T-091 is delivered as the Flow 4A packages 4A-1 to 4A-7 of SCR-160 §15 (ratings, health facts, Wilson lower-bound ordering, `RankingDecision` 1.2), each as its own PR with the SCR-160 §14 acceptance tests.
 - **N1 (2026-10-20):** required dimensions by payment path (`delivery` only for `erc8183-job` task classes); `exploration_slot` with `selection.unverifiedWithApproval`. Tests: CZ-18 §14 provider-eligibility case.
 
 ### T-092 Planner P-03 decomposition over CZ-18 candidates, eval suite
@@ -1776,3 +1783,4 @@
 | 2026-10-21 | SCR-122, SCR-123 | T-047 sandbox, ids and profile seed; T-046 eval modes, `expectedFields`, code-only extractor, re-plan input, budget path. |
 | 2026-10-25 | SCR-132, SCR-136 | T-050 split into T-050a (local, D92 stand-ins) and T-050b (testnet, M8, with G0-04); new T-122 (execution runtime) and T-123 (interim selection, SCR-131); T-043 reopened without G0-04; T-071 to the evidence/social replan; owners for T-043, T-045, T-090, T-091, T-115. |
 | 2026-10-25 | SCR-127, SCR-133, SCR-136 | New T-124 (Gateway balance projection) and T-125 (owner manual return); T-053 notes; T-085 split; T-105 local key file and later lab entries. |
+| 2026-10-30 | SCR-160 | T-091 delivered as Flow 4A packages 4A-1 to 4A-7 (ratings as the only quality signal, health facts, Wilson lower-bound ranking); no fill rate, latency or edit inference. |
