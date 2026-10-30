@@ -118,7 +118,6 @@ export interface JobChain {
     transaction: Hex,
   ): Promise<{ readonly jobKey: Hash32; readonly jobId: bigint; readonly txHash: string }>;
   getJob(jobKey: Hash32): Promise<JobChainView>;
-  /** Resolves on a result, or once chain time reaches `expiredAt` (SCR-157 §1). */
   waitForResult(jobKey: Hash32, expiredAt: number): Promise<JobChainView>;
   /**
    * The latest block's timestamp in seconds from a fresh read. It is "now" for every job deadline the chain

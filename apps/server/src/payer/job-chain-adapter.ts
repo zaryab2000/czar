@@ -46,6 +46,7 @@ export function createJobChainAdapter(input: {
   readonly vault: Address;
   readonly jobEscrow: Address;
   readonly usdc: Address;
+  readonly now: () => Date;
 }): JobChain {
   async function send(transaction: Hex): Promise<string> {
     const hash = await input.client.sendRawTransaction({ serializedTransaction: transaction });
@@ -116,39 +117,21 @@ export function createJobChainAdapter(input: {
     return Number(block.timestamp);
   }
 
-  /**
-   * Waits for `isComplete` on each escrow event. The wait ends with a fresh view after `deadline`: a server
-   * timeout (`timeoutMs`), or chain time reaching `chainSeconds`, re-read every `payer.reconcileSeconds`.
-   */
   async function waitForStatus(
     jobKeyValue: Hash32,
     isComplete: (view: JobChainView) => boolean,
-    deadline: { readonly timeoutMs: number } | { readonly chainSeconds: number },
+    timeoutMs: number,
   ): Promise<JobChainView> {
     const first = await readView(jobKeyValue);
     if (isComplete(first)) return first;
-    if ("chainSeconds" in deadline && (await latestBlockTimestamp()) >= deadline.chainSeconds)
-      return first;
     const pollingInterval = Number(input.config.get("payer.vaultEventPollMs"));
     const abi = escrowEventAbi(await readEscrowKind());
     return new Promise((resolve, reject) => {
       let closed = false;
       let stop: (() => void) | undefined;
-      const timer =
-        "timeoutMs" in deadline
-          ? setTimeout(() => {
-              void readView(jobKeyValue).then(finish, fail);
-            }, deadline.timeoutMs)
-          : setInterval(
-              () => {
-                void latestBlockTimestamp()
-                  .then(async (chainNow) => {
-                    if (chainNow >= deadline.chainSeconds) finish(await readView(jobKeyValue));
-                  })
-                  .catch(fail);
-              },
-              Number(input.config.get("payer.reconcileSeconds")) * MILLISECONDS_PER_SECOND,
-            );
+      const timer = setTimeout(() => {
+        void readView(jobKeyValue).then(finish, fail);
+      }, timeoutMs);
       timer.unref();
       const finish = (view: JobChainView) => {
         if (closed) return;
@@ -220,7 +203,7 @@ export function createJobChainAdapter(input: {
       const result = await waitForStatus(
         jobKeyValue,
         (view) => Boolean(view.budget && view.budget > 0n),
-        { timeoutMs },
+        timeoutMs,
       );
       return result.budget && result.budget > 0n ? result.budget : undefined;
     },
@@ -234,6 +217,9 @@ export function createJobChainAdapter(input: {
     claimJobRefund: async (args) => send(args.transaction),
     latestBlockTimestamp,
     async waitForResult(jobKeyValue, expiredAt) {
+      // A local wait for the provider or evaluator; it sends nothing. The refund that follows checks
+      // expiredAt against chain time (SCR-157 §1), so a timer that fires early only ends this pass.
+      const timeoutMs = Math.max(0, expiredAt * MILLISECONDS_PER_SECOND - input.now().getTime());
       return waitForStatus(
         jobKeyValue,
         (view) =>
@@ -241,7 +227,7 @@ export function createJobChainAdapter(input: {
           view.escrowState === "Completed" ||
           view.escrowState === "Rejected" ||
           view.escrowState === "Expired",
-        { chainSeconds: expiredAt },
+        timeoutMs,
       );
     },
     async isFrozenOrPaused(vault) {
@@ -274,7 +260,7 @@ export function createJobChainAdapter(input: {
       );
       const cutoff = rows.rows[0]?.brief.decisionCutoff;
       if (typeof cutoff !== "number" || !Number.isSafeInteger(cutoff)) return true;
-      // decisionCutoff sits a margin before the on-chain expiredAt, so it is compared by chain time.
+      // The cutoff gates claimJobRefund and sits a margin before the on-chain expiredAt: chain time.
       return (await latestBlockTimestamp()) < cutoff;
     },
   };
