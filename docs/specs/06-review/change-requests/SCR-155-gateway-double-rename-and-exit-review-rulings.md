@@ -1,4 +1,4 @@
-# SCR-155: Gateway doubles' initializer rename; rulings on the Track A exit-report items
+# SCR-155: Gateway doubles' initializer rename; rulings on the Track A exit-report items; local testing ends
 
 | Field | Value |
 |---|---|
@@ -41,7 +41,24 @@
 - The builder owns §2 and §3, as build-v1 PRs, tests first.
 - §1 is PR #155.
 - The six SCR-146 runs need no re-run for §1 and §4.
-- After §2 and §3 merge, runs 1 and 5 (the paths they touch) are re-run on the merged build-v1 and recorded in the exit report.
+- §2 and §3 are proven by their automated tests (unit tests plus the arc-anvil test suites). No manual local re-runs (§5).
+
+## 5. Exit gate change: local chain testing ends (Zaryab, 2026-10-30)
+- **Decision:** Zaryab ends manual testing on local chains (FORK and CLEAN).
+  - From now on, every manual test runs on Arc testnet (`eip155:5042002`).
+  - Each testnet step that needs funds, a sign-up or a real device still needs his explicit approval (CLAUDE.md).
+- **Amends SCR-146 §3 (Track A exit gate):**
+  - The FORK browser flow is removed from the gate. The real-passkey owner flow moves to the first Arc testnet run (M8, D92), and the exit report lists it as an M8 item.
+  - The six CLEAN runs already recorded in the exit report (runs 1–6 on merged `build-v1` and `local-v1`) stand as the run evidence. No new local runs are required.
+  - The gate is now:
+    1. the code items in §2 and §3 of this SCR merged, each with its tests passing
+    2. #155 merged
+    3. the exit report (`reports/track-a-exit.md`) updated to this gate
+    4. senior reviewer
+    5. architect check
+    6. Zaryab's merge
+- **`local-v1`:** frozen. No new local-only PRs. `build-v1` no longer syncs into it. The branch is kept as history.
+- **Arc-anvil in automated tests:** unchanged. Contract and chain tests still run on pinned `arc-anvil --network arc` (CLAUDE.md). This decision ends manual local-stack testing, not automated tests.
 
 ## Decision
 - Architect rulings under Zaryab's delegation. Recorded by his merge.
