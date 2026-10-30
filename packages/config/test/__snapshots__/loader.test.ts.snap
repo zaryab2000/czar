@@ -2204,6 +2204,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 500000,
   },
   {
+    "key": "signer.gasRefillIntervalSeconds",
+    "source": "default",
+    "unit": "s",
+    "value": 300,
+  },
+  {
     "key": "signer.keyAddressPerMin",
     "source": "default",
     "unit": "calls/min",

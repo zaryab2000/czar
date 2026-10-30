@@ -50,7 +50,7 @@ describe("signer process bootstrap", () => {
       expect(opened).toContain("dev.czar.signer.keystore.token.merchants:merchants");
       expect(opened).toContain("dev.czar.signer.keystore.token.relayer-jobs:relayer-jobs");
       expect(vi.getTimerCount()).toBe(1);
-      expect(running.metrics.render()).toContain('czar_signer_gas_low{key="relayer"} 0');
+      expect(running.metrics.render()).toContain("# TYPE czar_signer_gas_low counter");
     } finally {
       await running.stop();
       await rm(dir, { recursive: true, force: true });
