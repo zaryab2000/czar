@@ -46,7 +46,6 @@ export function createJobChainAdapter(input: {
   readonly vault: Address;
   readonly jobEscrow: Address;
   readonly usdc: Address;
-  readonly now: () => Date;
 }): JobChain {
   async function send(transaction: Hex): Promise<string> {
     const hash = await input.client.sendRawTransaction({ serializedTransaction: transaction });
@@ -111,21 +110,45 @@ export function createJobChainAdapter(input: {
     throw new Error(`Unsupported job escrow kind: ${kind}`);
   }
 
+  async function latestBlockTimestamp(): Promise<number> {
+    // A block read is never served from viem's cache (SCR-157 §1: a fresh read).
+    const block = await input.client.getBlock({ blockTag: "latest" });
+    return Number(block.timestamp);
+  }
+
+  /**
+   * Waits for `isComplete` on each escrow event. The wait ends with a fresh view after `deadline`: a server
+   * timeout (`timeoutMs`), or chain time reaching `chainSeconds`, re-read every `payer.reconcileSeconds`.
+   */
   async function waitForStatus(
     jobKeyValue: Hash32,
     isComplete: (view: JobChainView) => boolean,
-    timeoutMs: number,
+    deadline: { readonly timeoutMs: number } | { readonly chainSeconds: number },
   ): Promise<JobChainView> {
     const first = await readView(jobKeyValue);
     if (isComplete(first)) return first;
+    if ("chainSeconds" in deadline && (await latestBlockTimestamp()) >= deadline.chainSeconds)
+      return first;
     const pollingInterval = Number(input.config.get("payer.vaultEventPollMs"));
     const abi = escrowEventAbi(await readEscrowKind());
     return new Promise((resolve, reject) => {
       let closed = false;
       let stop: (() => void) | undefined;
-      const timer = setTimeout(() => {
-        void readView(jobKeyValue).then(finish, fail);
-      }, timeoutMs);
+      const timer =
+        "timeoutMs" in deadline
+          ? setTimeout(() => {
+              void readView(jobKeyValue).then(finish, fail);
+            }, deadline.timeoutMs)
+          : setInterval(
+              () => {
+                void latestBlockTimestamp()
+                  .then(async (chainNow) => {
+                    if (chainNow >= deadline.chainSeconds) finish(await readView(jobKeyValue));
+                  })
+                  .catch(fail);
+              },
+              Number(input.config.get("payer.reconcileSeconds")) * MILLISECONDS_PER_SECOND,
+            );
       timer.unref();
       const finish = (view: JobChainView) => {
         if (closed) return;
@@ -197,7 +220,7 @@ export function createJobChainAdapter(input: {
       const result = await waitForStatus(
         jobKeyValue,
         (view) => Boolean(view.budget && view.budget > 0n),
-        timeoutMs,
+        { timeoutMs },
       );
       return result.budget && result.budget > 0n ? result.budget : undefined;
     },
@@ -209,8 +232,8 @@ export function createJobChainAdapter(input: {
     },
     cancelJob: async (args) => send(args.transaction),
     claimJobRefund: async (args) => send(args.transaction),
+    latestBlockTimestamp,
     async waitForResult(jobKeyValue, expiredAt) {
-      const timeoutMs = Math.max(0, expiredAt * 1000 - input.now().getTime());
       return waitForStatus(
         jobKeyValue,
         (view) =>
@@ -218,7 +241,7 @@ export function createJobChainAdapter(input: {
           view.escrowState === "Completed" ||
           view.escrowState === "Rejected" ||
           view.escrowState === "Expired",
-        timeoutMs,
+        { chainSeconds: expiredAt },
       );
     },
     async isFrozenOrPaused(vault) {
@@ -251,7 +274,8 @@ export function createJobChainAdapter(input: {
       );
       const cutoff = rows.rows[0]?.brief.decisionCutoff;
       if (typeof cutoff !== "number" || !Number.isSafeInteger(cutoff)) return true;
-      return input.now().getTime() < cutoff * MILLISECONDS_PER_SECOND;
+      // decisionCutoff sits a margin before the on-chain expiredAt, so it is compared by chain time.
+      return (await latestBlockTimestamp()) < cutoff;
     },
   };
 }

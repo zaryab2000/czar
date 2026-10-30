@@ -72,7 +72,11 @@ describe("job brief commitments", () => {
   it("still refuses to open a new job when its minimum lead time is unavailable", async () => {
     const current = new Date("2026-10-23T00:00:00Z");
     const input = recoveryInput(new Date(current.getTime() + 60_000));
-    const chain = { findJob: vi.fn(async () => undefined), openJob: vi.fn() };
+    const chain = {
+      findJob: vi.fn(async () => undefined),
+      openJob: vi.fn(),
+      latestBlockTimestamp: chainTimeAt(current),
+    };
     await expect(
       executeJobStep(input, {
         pool: getPool(),
@@ -96,6 +100,7 @@ describe("job brief commitments", () => {
     let refundAttempts = 0;
     let vaultSynced = false;
     const chain = {
+      latestBlockTimestamp: chainTimeAt(current),
       findJob: vi.fn(async () => ({ jobKey: key, jobId: 7n })),
       getJob: vi.fn(async () => ({
         vaultState: vaultSynced ? "Expired" : "Funded",
@@ -345,6 +350,7 @@ describe("job brief commitments", () => {
 
   it("opens, waits for the provider budget and funds without premature sync", async () => {
     const chain = {
+      latestBlockTimestamp: chainTimeAt(new Date("2026-10-22T00:00:00.000Z")),
       findJob: vi.fn(async () => undefined),
       openJob: vi.fn(async () => ({
         jobKey: jobKey("0x0000000000000000000000000000000000000003", 1n),
@@ -430,6 +436,7 @@ describe("job brief commitments", () => {
         escrowState: "Submitted" as const,
         expiredAt: 1_800_000_000,
       })),
+      latestBlockTimestamp: vi.fn(),
       waitForResult: vi.fn(),
       waitForBudget: vi.fn(),
       fundJob: vi.fn(),
@@ -488,6 +495,7 @@ describe("job brief commitments", () => {
     const job = jobKey("0x0000000000000000000000000000000000000003", 1n);
     let refunded = false;
     const chain = {
+      latestBlockTimestamp: chainTimeAt(expiredJobNow()),
       findJob: vi.fn(async () => ({ jobKey: job, jobId: 1n })),
       openJob: vi.fn(),
       getJob: vi.fn(async () => ({
@@ -564,6 +572,7 @@ describe("job brief commitments", () => {
     let budget: bigint | undefined;
     let state: "Opened" | "Funded" | "Released" = "Opened";
     const chain = {
+      latestBlockTimestamp: chainTimeAt(new Date("2026-10-22T00:00:00.000Z")),
       findJob: vi.fn(async (input: { provider: string }) => {
         const jobId = jobIds.get(input.provider.toLowerCase());
         return jobId === undefined
@@ -669,6 +678,7 @@ describe("job brief commitments", () => {
       let failed = false;
       const currentJobKey = jobKey("0x0000000000000000000000000000000000000003", 1n);
       const chain = {
+        latestBlockTimestamp: chainTimeAt(new Date("2026-10-22T00:00:00.000Z")),
         findJob: vi.fn(async () => (exists ? { jobKey: currentJobKey, jobId: 1n } : undefined)),
         openJob: vi.fn(async () => {
           exists = true;
@@ -812,6 +822,7 @@ describe("job brief commitments", () => {
     const sync = vi.fn(async () => ({ state: "Expired" as const, txHash: "sync-tx" }));
     const signer = { sign: vi.fn(async () => ({ signedTransaction: "0x1234" as const })) };
     const chain = {
+      latestBlockTimestamp: chainTimeAt(current),
       hasDecisionPending: vi.fn(async () => false),
       getJob: vi.fn(async () => ({
         vaultState: "Funded",
@@ -990,4 +1001,9 @@ function chainTimeDependencies(chain: object) {
     vault: "0x0000000000000000000000000000000000000001" as const,
     randomSalt: () => `0x${"22".repeat(32)}` as const,
   };
+}
+
+/** Chain time equal to the server clock, for cases that do not skew the two. */
+function chainTimeAt(date: Date) {
+  return vi.fn(async () => Math.floor(date.getTime() / 1000));
 }
