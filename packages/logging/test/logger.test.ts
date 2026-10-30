@@ -75,6 +75,14 @@ describe("createLogger", () => {
     expect(last()["droppedFields"]).toBeUndefined();
   });
 
+  it("keeps a signer key id (K3, K10, relayer) and drops anything else under keyId", () => {
+    const { logger, lines } = capture();
+    for (const keyId of ["K3", "K10", "relayer"]) logger.error("signer_gas_alert", { keyId });
+    expect(lines.map((line) => JSON.parse(line)["keyId"])).toEqual(["K3", "K10", "relayer"]);
+    logger.error("signer_gas_alert", { keyId: "K3 key material" });
+    expect(JSON.parse(lines.at(-1) ?? "{}")["droppedFields"]).toBe(1);
+  });
+
   it("drops every field outside the allowlist and counts it", () => {
     const { logger, last } = capture();
     logger.info("objective_received", {
