@@ -684,8 +684,15 @@ async function resumeSavedReserve(
   const saved = sent.payload["signedTransaction"];
   if (typeof txHash !== "string" || typeof saved !== "string")
     return { state: "failed", errorCode: "reserve-pending" };
-  const spent = await savedNonceSpent(dependencies.chain, saved as Hex);
-  const outcome = await dependencies.chain.reserveOutcome?.(txHash);
+  let spent = await savedNonceSpent(dependencies.chain, saved as Hex);
+  let outcome = await dependencies.chain.reserveOutcome?.(txHash);
+  if (spent && outcome === undefined) {
+    // Review M3: confirm "replaced" on a second read before signing another reserve, so a receipt that a
+    // lagging RPC node has not served yet never leads to a second reservation.
+    await sleepReconcileInterval(dependencies);
+    spent = await savedNonceSpent(dependencies.chain, saved as Hex);
+    outcome = await dependencies.chain.reserveOutcome?.(txHash);
+  }
   if (outcome?.status === "reserved")
     return recordReserved(input, dependencies, attempt, {
       reservationId: outcome.reservationId,
@@ -1221,7 +1228,9 @@ async function nextVaultTransaction(
       ),
   )?.payload["signedTransaction"];
   if (typeof saved === "string") {
-    const state = await savedTransactionState(dependencies.chain, saved as Hex);
+    const state = await savedTransactionState(dependencies.chain, saved as Hex, () =>
+      sleepReconcileInterval(dependencies),
+    );
     if (state === "pending") return { kind: "send", signedTransaction: saved as Hex };
     if (state === "mined" || state === "reverted")
       return { kind: state, txHash: keccak256(saved as Hex) };
