@@ -2,6 +2,8 @@
 // step 1; when the step-2 formula cannot reach the vault's MIN_RESERVATION_TTL it ends `reserve-failed`.
 // BadTtl is decided by the vault's condition on the mined block (saved validBefore < block.timestamp +
 // MIN_RESERVATION_TTL), from the receipt and that block's header only. Any other revert keeps the existing path.
+// SCR-155 §2: "now" in the step-2 formula and the TTL check is the latest block timestamp, never the server
+// clock, and a step gets at most one new attempt for BadTtl, counted from the saved attempts.
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadConfig } from "@czar/config";
 import { buildTree, derivedNonce, PAYEE_KIND, payeeLeaf } from "@czar/hashing";
@@ -26,6 +28,8 @@ const VAULT = "0x0000000000000000000000000000000000000001" as const;
 const PAYEE = "0x0000000000000000000000000000000000000002" as const;
 const HASH = `0x${"01".repeat(32)}`;
 const STALE_TX_HASH = `0x${"0a".repeat(32)}`;
+const SECOND_TX_HASH = `0x${"0b".repeat(32)}`;
+const FRESH_TX_HASH = `0x${"0c".repeat(32)}`;
 const STALE_SIGNED_RESERVE = "0xdead01" as const;
 const FRESH_SIGNED_RESERVE = "0xbeef02" as const;
 const SIGNED_VAULT_CALL = "0x1234" as const;
@@ -41,6 +45,10 @@ const LAST_TIMESTAMP_IN_TTL = STALE_VALID_BEFORE - BigInt(MIN_RESERVATION_TTL_SE
 /** One second later the vault's `BadTtl()` condition holds. */
 const FIRST_TIMESTAMP_PAST_TTL = LAST_TIMESTAMP_IN_TTL + 1n;
 const BAD_TTL_REVERT = { status: "reverted", blockTimestamp: FIRST_TIMESTAMP_PAST_TTL } as const;
+/** SCR-155 §2: the chain's clock runs this far ahead of the server's. */
+const CHAIN_AHEAD_SECONDS = 400;
+/** A guard so an unbounded attempt loop fails the test instead of hanging it. */
+const MAX_RESERVES_SENT = 3;
 const LEAF = payeeLeaf(PAYEE, PAYEE_KIND.X402_PAY_TO, 0, UNIT_AMOUNT);
 const TREE = buildTree([LEAF]);
 
@@ -173,10 +181,159 @@ describe("vault-direct stale saved reserve (SCR-153 §2)", () => {
   });
 });
 
+describe("vault-direct BadTtl attempt bound and chain time (SCR-155 §2)", () => {
+  it("makes exactly one new attempt with validBefore from chain time when the chain runs 400 s ahead", async () => {
+    await seedStaleReserveSent();
+    const run = paidRun({ outcome: BAD_TTL_REVERT, chainAheadSeconds: CHAIN_AHEAD_SECONDS });
+
+    await expect(executeVaultDirectStep(stepInput(), run.dependencies)).resolves.toMatchObject({
+      state: "done",
+    });
+
+    await expectStaleAttemptClosed();
+    await expectFreshAttemptPaid(run, CHAIN_AHEAD_SECONDS);
+    expect(run.chain.reserve).toHaveBeenCalledOnce();
+    expect(run.chain.latestBlockTimestamp).toHaveBeenCalled();
+    expect(await getExecutionTrace(getPool(), PLAN_ID, 0, 2)).toEqual([]);
+  });
+
+  it("fails reserve-failed / BadTtl when chain time, not the server clock, leaves no room", async () => {
+    await seedStaleReserveSent();
+    const run = paidRun({ outcome: BAD_TTL_REVERT, chainAheadSeconds: CHAIN_AHEAD_SECONDS });
+    const expiresAt = new Date(RESUMED_AT.getTime() + CHAIN_AHEAD_SECONDS * 1000);
+
+    await expect(executeVaultDirectStep(stepInput(expiresAt), run.dependencies)).resolves.toEqual({
+      state: "failed",
+      errorCode: "reserve-failed",
+    });
+
+    await expectStaleAttemptClosed();
+    expect(run.chain.reserve).not.toHaveBeenCalled();
+    const fresh = await getExecutionTrace(getPool(), PLAN_ID, 0, 1);
+    expect(fresh.map((row) => row.phase)).toEqual(["step.failed"]);
+    expect(fresh[0]?.payload).toEqual(BAD_TTL_FAILURE);
+  });
+
+  it("ends reserve-failed / BadTtl without a third attempt when the new attempt also reverts BadTtl", async () => {
+    await seedStaleReserveSent();
+    const freshValidBefore = BigInt(RESUMED_AT.getTime() / 1000 + OFFER_TIMEOUT_SECONDS);
+    const run = paidRun({
+      outcome: BAD_TTL_REVERT,
+      firstReserve: new ReserveReverted(
+        FRESH_TX_HASH,
+        freshValidBefore - BigInt(MIN_RESERVATION_TTL_SECONDS) + 1n,
+      ),
+    });
+
+    await expect(executeVaultDirectStep(stepInput(), run.dependencies)).resolves.toEqual({
+      state: "failed",
+      errorCode: "reserve-failed",
+    });
+
+    await expectStaleAttemptClosed();
+    expect(run.chain.reserve).toHaveBeenCalledOnce();
+    expect(run.chain.reserve.mock.calls[0]?.[0]).toMatchObject({
+      signedTransaction: FRESH_SIGNED_RESERVE,
+      validBefore: freshValidBefore,
+    });
+    const second = await getExecutionTrace(getPool(), PLAN_ID, 0, 1);
+    expect(second.map((row) => row.phase)).toEqual([
+      "reserve.sent",
+      "reserve.mined",
+      "step.failed",
+    ]);
+    expect(second[1]?.payload).toEqual({ txHash: FRESH_TX_HASH, message: "BadTtl" });
+    expect(second[2]?.payload).toEqual(BAD_TTL_FAILURE);
+    await expectNoThirdAttempt(run);
+  });
+
+  it("keeps the bound after a restart from saved rows with two BadTtl attempts", async () => {
+    await seedStaleReserveSent();
+    await closeAsBadTtl(0, STALE_TX_HASH);
+    await seedStaleReserveSent(1, SECOND_TX_HASH);
+    await closeAsBadTtl(1, SECOND_TX_HASH);
+    const run = paidRun({ outcome: BAD_TTL_REVERT });
+
+    await expect(executeVaultDirectStep(stepInput(), run.dependencies)).resolves.toEqual({
+      state: "failed",
+      errorCode: "reserve-failed",
+    });
+
+    expect(run.chain.reserve).not.toHaveBeenCalled();
+    expect(run.chain.reserveOutcome).not.toHaveBeenCalled();
+    const second = await getExecutionTrace(getPool(), PLAN_ID, 0, 1);
+    expect(second.map((row) => row.phase)).toEqual([
+      "reserve.sent",
+      "reserve.mined",
+      "step.failed",
+    ]);
+    expect(second[2]?.payload).toEqual(BAD_TTL_FAILURE);
+    await expectNoThirdAttempt(run);
+  });
+
+  it("keeps the bound after a restart while the new attempt's saved reserve has no recorded outcome", async () => {
+    await seedStaleReserveSent();
+    await closeAsBadTtl(0, STALE_TX_HASH);
+    await seedStaleReserveSent(1, SECOND_TX_HASH);
+    const run = paidRun({ outcome: undefined, outcomes: { [SECOND_TX_HASH]: BAD_TTL_REVERT } });
+
+    await expect(executeVaultDirectStep(stepInput(), run.dependencies)).resolves.toEqual({
+      state: "failed",
+      errorCode: "reserve-failed",
+    });
+
+    expect(run.chain.reserve).not.toHaveBeenCalled();
+    expect(run.chain.reserveOutcome).toHaveBeenCalledWith(SECOND_TX_HASH);
+    const second = await getExecutionTrace(getPool(), PLAN_ID, 0, 1);
+    expect(second.map((row) => row.phase)).toEqual([
+      "reserve.sent",
+      "reserve.mined",
+      "step.failed",
+    ]);
+    expect(second[1]?.payload).toEqual({ txHash: SECOND_TX_HASH, message: "BadTtl" });
+    expect(second[2]?.payload).toEqual(BAD_TTL_FAILURE);
+    await expectNoThirdAttempt(run);
+  });
+});
+
+const BAD_TTL_FAILURE = {
+  errorCode: "reserve-failed",
+  stepError: { schemaVersion: "1.0", code: "reserve-failed", message: "BadTtl", retryable: false },
+};
+
+async function expectNoThirdAttempt(run: ReturnType<typeof paidRun>): Promise<void> {
+  expect(await getExecutionTrace(getPool(), PLAN_ID, 0, 2)).toEqual([]);
+  expect(
+    signedSelectors(run.sign).filter((selector) => selector === "reserve").length,
+  ).toBeLessThan(2);
+  expect(run.sign.mock.calls.filter(([, request]) => request.kind === "usdc-3009")).toEqual([]);
+  expect(
+    run.safeFetch.mock.calls.filter(([, options]) => options?.headers?.["payment-signature"]),
+  ).toEqual([]);
+  await expect(stepRow()).resolves.toEqual({ state: "failed", calls_used: 0 });
+}
+
+async function closeAsBadTtl(attempt: number, txHash: string): Promise<void> {
+  await appendExecutionPhase(getPool(), {
+    planId: PLAN_ID,
+    stepIndex: 0,
+    attempt,
+    phase: "reserve.mined",
+    payload: { txHash, message: "BadTtl" },
+  });
+}
+
 type ReserveOutcome = Awaited<ReturnType<NonNullable<VaultDirectChain["reserveOutcome"]>>>;
 
-function paidRun(input: { readonly outcome: ReserveOutcome; readonly firstReserve?: Error }) {
+function paidRun(input: {
+  readonly outcome: ReserveOutcome;
+  readonly outcomes?: Readonly<Record<string, ReserveOutcome>>;
+  readonly firstReserve?: Error;
+  readonly chainAheadSeconds?: number;
+}) {
   let current = RESUMED_AT;
+  const chainNow = () =>
+    BigInt(Math.floor(current.getTime() / 1000) + (input.chainAheadSeconds ?? 0));
   let settled = false;
   const sign = vi.fn(async (_caller: string, request: SignRequest): Promise<SignResult> => {
     if (request.kind === "usdc-3009")
@@ -185,13 +342,21 @@ function paidRun(input: { readonly outcome: ReserveOutcome; readonly firstReserv
     return { signedTransaction: selector === "reserve" ? FRESH_SIGNED_RESERVE : SIGNED_VAULT_CALL };
   });
   const reserve = vi.fn<VaultDirectChain["reserve"]>();
+  // The vault's own BadTtl check, against chain time.
+  reserve.mockImplementation(async (args) => {
+    if (reserve.mock.calls.length > MAX_RESERVES_SENT)
+      throw new Error("More reserve transactions sent than any bound allows.");
+    if (args.validBefore < chainNow() + BigInt(MIN_RESERVATION_TTL_SECONDS))
+      throw new ReserveReverted(FRESH_TX_HASH, chainNow());
+    return { reservationId: FRESH_RESERVATION_ID, txHash: HASH };
+  });
   if (input.firstReserve) reserve.mockRejectedValueOnce(input.firstReserve);
-  reserve.mockResolvedValue({ reservationId: FRESH_RESERVATION_ID, txHash: HASH });
   const chain = {
     stepUsed: vi.fn(async () => 0n),
     envelopeCapacity: vi.fn(async () => ({ cap: UNIT_AMOUNT, exposure: 0n })),
     reserve,
-    reserveOutcome: vi.fn(async () => input.outcome),
+    latestBlockTimestamp: vi.fn(async () => chainNow()),
+    reserveOutcome: vi.fn(async (txHash: string) => input.outcomes?.[txHash] ?? input.outcome),
     settle: vi.fn(async () => {
       settled = true;
       return HASH;
@@ -253,21 +418,21 @@ function paidRun(input: { readonly outcome: ReserveOutcome; readonly firstReserv
     }),
     recordReceipt: async () => true,
   };
-  return { dependencies, chain, sign };
+  return { dependencies, chain, sign, safeFetch };
 }
 
-async function seedStaleReserveSent(): Promise<void> {
+async function seedStaleReserveSent(attempt = 0, txHash = STALE_TX_HASH): Promise<void> {
   await appendExecutionPhase(getPool(), {
     planId: PLAN_ID,
     stepIndex: 0,
-    attempt: 0,
+    attempt,
     phase: "reserve.sent",
     payload: {
       count: 1,
       payee: PAYEE,
       unitAmount: UNIT_AMOUNT.toString(),
       validBefore: STALE_VALID_BEFORE.toString(),
-      txHash: STALE_TX_HASH,
+      txHash,
       signedTransaction: STALE_SIGNED_RESERVE,
     },
   });
@@ -279,8 +444,13 @@ async function expectStaleAttemptClosed(): Promise<void> {
   expect(stale[1]?.payload).toEqual({ txHash: STALE_TX_HASH, message: "BadTtl" });
 }
 
-async function expectFreshAttemptPaid(run: ReturnType<typeof paidRun>): Promise<void> {
-  const freshValidBefore = String(RESUMED_AT.getTime() / 1000 + OFFER_TIMEOUT_SECONDS);
+async function expectFreshAttemptPaid(
+  run: ReturnType<typeof paidRun>,
+  chainAheadSeconds = 0,
+): Promise<void> {
+  const freshValidBefore = String(
+    RESUMED_AT.getTime() / 1000 + chainAheadSeconds + OFFER_TIMEOUT_SECONDS,
+  );
   const fresh = await getExecutionTrace(getPool(), PLAN_ID, 0, 1);
   expect(fresh.map((row) => row.phase)).toEqual([
     "reserve.sent",

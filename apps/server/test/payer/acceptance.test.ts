@@ -81,6 +81,7 @@ describe("payer acceptance boundaries", () => {
     const chain = {
       stepUsed: vi.fn(async () => AMOUNT * 2n),
       envelopeCapacity: vi.fn(async () => ({ cap: 10_000n, exposure: 6_000n })),
+      latestBlockTimestamp: vi.fn(async () => BigInt(Date.parse("2026-10-21T00:00:00Z") / 1000)),
       reserve,
       settle: vi.fn(async () => HASH),
       authorizationState: vi.fn(async () => true),
@@ -140,6 +141,7 @@ describe("payer acceptance boundaries", () => {
       chain: {
         stepUsed: vi.fn(async () => 0n),
         envelopeCapacity: vi.fn(async () => ({ cap: 10_000n, exposure: 8_000n })),
+        latestBlockTimestamp: vi.fn(async () => BigInt(Date.parse("2026-10-21T00:00:00Z") / 1000)),
         reserve,
         settle: vi.fn(async () => HASH),
         authorizationState: vi.fn(async () => true),
@@ -219,6 +221,7 @@ describe("payer acceptance boundaries", () => {
       chain: {
         stepUsed: vi.fn(async () => 0n),
         envelopeCapacity: vi.fn(async () => ({ cap: 10_000n, exposure: 0n })),
+        latestBlockTimestamp: vi.fn(async () => BigInt(Date.parse("2026-10-21T00:00:00Z") / 1000)),
         reserve: vi.fn(async () => ({ reservationId: 4n, txHash: HASH })),
         settle: vi.fn(async () => HASH),
         authorizationState: vi.fn(async () => true),
