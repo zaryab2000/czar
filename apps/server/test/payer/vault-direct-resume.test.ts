@@ -244,6 +244,25 @@ describe("a saved reserve (SCR-159 §2)", () => {
     expect(run.chain.reserve).toHaveBeenCalledOnce();
   });
 
+  it("does not re-sign a mined reserve whose receipt a lagging RPC node has not served yet (review M3)", async () => {
+    const run = paidRun();
+    run.chain.reserve.mockRejectedValueOnce(new Error("RPC dropped before the receipt"));
+    await expect(executeVaultDirectStep(stepInput(), run.dependencies)).rejects.toThrow(
+      "RPC dropped",
+    );
+    // The saved reserve is mined: the count node is past its nonce, the receipt node lags one read.
+    run.mine(run.savedReserve(), "success");
+    run.chain.reserveOutcome.mockResolvedValueOnce(undefined);
+
+    await expect(executeVaultDirectStep(stepInput(), run.dependencies)).resolves.toMatchObject({
+      state: "done",
+    });
+
+    expect(run.chain.reserve).toHaveBeenCalledOnce();
+    const trace = await getExecutionTrace(getPool(), PLAN_ID, 0, 0);
+    expect(trace.filter((row) => row.phase === "reserve.sent")).toHaveLength(1);
+  });
+
   it("recomputes validBefore from chain time when the re-signed reserve's old one no longer clears the TTL", async () => {
     const run = paidRun();
     run.chain.reserve.mockRejectedValueOnce(new Error("RPC dropped before broadcast"));
@@ -260,7 +279,13 @@ describe("a saved reserve (SCR-159 §2)", () => {
 
     const reserveArgs = run.vaultArgs("reserve");
     expect(reserveArgs).toHaveLength(2);
-    const freshValidBefore = (resumedSeconds + BigInt(OFFER_TIMEOUT_SECONDS)).toString();
+    // Review M3: "replaced" is confirmed after one `payer.reconcileSeconds` wait, so chain time has moved on.
+    const confirmWait = BigInt(Number(run.dependencies.config.get("payer.reconcileSeconds")));
+    const freshValidBefore = (
+      resumedSeconds +
+      confirmWait +
+      BigInt(OFFER_TIMEOUT_SECONDS)
+    ).toString();
     expect(reserveArgs[1]).toEqual({
       ...(reserveArgs[0] as Record<string, unknown>),
       validBefore: freshValidBefore,
