@@ -2,7 +2,8 @@
 // SCR-150 Gateway doubles, the real CZ-27 signer and the D92 stand-ins. Kill points: reserve.sent (also with
 // the resume past the saved reserve's TTL window, SCR-153 §2, and with the chain's clock ahead of the
 // server's, SCR-155 §2), call.sent, before settle, between /v1/transfer and gatewayMint, and after an expired
-// lease.
+// lease. With the chain's clock 400 s behind or ahead of the server's, finalize waits for chain time past
+// validBefore (SCR-157 §1).
 // "Kill" is in-process: the executor is aborted at an injected point (a raw transaction is dropped before the
 // node or the payer dies right after it is mined; the seller or `/v1/transfer` answers and the payer dies
 // before reading it), the instance is dropped, and a fresh executor resumes over the same database and chain.
@@ -13,6 +14,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { getAbiItem, parseAbi, toFunctionSelector, type Address, type Hex } from "viem";
 import { derivedNonce } from "@czar/hashing";
 import { czarVaultAbi } from "@czar/vault-client";
+import type { SafeFetch } from "@czar/x402";
 import { setupDatabase } from "#test/db";
 import { getExecutionTrace } from "#src/payer/executions";
 import { MIN_RESERVATION_TTL_SECONDS } from "#src/payer/vault-direct";
@@ -50,6 +52,9 @@ const FUNDED_CAP = 2_000_000n;
 const MS_PER_SECOND = 1000;
 /** SCR-155 §2: the resumed payer's server clock trails chain time by this much. */
 const CHAIN_AHEAD_SECONDS = 400;
+/** SCR-157 §1: the payer's server clock leads chain time by this much. */
+const CHAIN_BEHIND_SECONDS = 400;
+const HTTP_BAD_GATEWAY = 502;
 const reserveSelector = toFunctionSelector(getAbiItem({ abi: czarVaultAbi, name: "reserve" }));
 const settleSelector = toFunctionSelector(getAbiItem({ abi: czarVaultAbi, name: "settle" }));
 const mintSelector = toFunctionSelector("gatewayMint(bytes,bytes)");
@@ -272,6 +277,26 @@ describe.skipIf(!localChainEnabled)(
         expect(envelope.spent).toBe(UNIT_AMOUNT);
         expect(envelope.reserved).toBe(0n);
       });
+      it("sends finalize only after a block past validBefore when the chain runs 400 s behind the server", async () => {
+        const plan = await x402Plan();
+        // A negative lag puts the payer's server clock ahead of chain time.
+        const serverLagMs = -CHAIN_BEHIND_SECONDS * MS_PER_SECOND;
+
+        expect(
+          await executeX402(harness, withLaterCallsFailing(plan), undefined, serverLagMs),
+        ).toEqual({ state: "failed", errorCode: "unpaid-index" });
+        await expectFinalizedAfterValidBefore(plan);
+      });
+
+      it("ends unpaid-index, not reserve-failed, and finalizes by chain time when the chain runs 400 s ahead", async () => {
+        const plan = await x402Plan();
+        const serverLagMs = CHAIN_AHEAD_SECONDS * MS_PER_SECOND;
+
+        expect(
+          await executeX402(harness, withLaterCallsFailing(plan), undefined, serverLagMs),
+        ).toEqual({ state: "failed", errorCode: "unpaid-index" });
+        await expectFinalizedAfterValidBefore(plan);
+      });
     });
 
     describe("pocket pullback mint (TA-21)", () => {
@@ -337,6 +362,39 @@ async function x402Plan(
     maxTimeoutSeconds,
     ...(envelopeLifetimeSeconds === undefined ? {} : { envelopeLifetimeSeconds }),
   });
+}
+
+/** The seller serves the first paid call; every other paid call fails, so its index is released at finalize. */
+function withLaterCallsFailing(plan: X402Plan): X402Plan {
+  let served: string | undefined;
+  const fetch: SafeFetch = async (url, options) => {
+    const header = options?.headers?.["payment-signature"];
+    if (typeof header === "string") {
+      served ??= header;
+      if (header !== served)
+        return { status: HTTP_BAD_GATEWAY, url, headers: {}, body: new Uint8Array() };
+    }
+    return plan.merchant.fetch(url, options);
+  };
+  return { ...plan, merchant: { ...plan.merchant, fetch } };
+}
+
+/** One paid and one released index, finalized in a block whose timestamp is past the reserve's validBefore. */
+async function expectFinalizedAfterValidBefore(plan: X402Plan): Promise<void> {
+  const { validBefore } = await savedReserve(plan);
+  const final = await finalEvents(plan);
+  expect(final).toHaveLength(1);
+  expect(final[0]?.args.settledCount).toBe(1);
+  expect(final[0]?.args.releasedCount).toBe(1);
+  const blockNumber = final[0]?.blockNumber;
+  if (blockNumber === undefined || blockNumber === null)
+    throw new Error("ReservationFinal has no block number.");
+  const block = await harness.chain.reader.getBlock({ blockNumber });
+  expect(block.timestamp).toBeGreaterThan(validBefore);
+  expect(await authorizationsUsed(plan)).toHaveLength(1);
+  const envelope = await envelopeOf(plan);
+  expect(envelope.spent).toBe(UNIT_AMOUNT);
+  expect(envelope.reserved).toBe(0n);
 }
 
 /** The `reserve.sent` the killed payer saved: its transaction hash and `validBefore`. */

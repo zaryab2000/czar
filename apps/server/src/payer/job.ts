@@ -119,6 +119,11 @@ export interface JobChain {
   ): Promise<{ readonly jobKey: Hash32; readonly jobId: bigint; readonly txHash: string }>;
   getJob(jobKey: Hash32): Promise<JobChainView>;
   waitForResult(jobKey: Hash32, expiredAt: number): Promise<JobChainView>;
+  /**
+   * The latest block's timestamp in seconds from a fresh read. It is "now" for every job deadline the chain
+   * enforces: the openJob expiry lead and the refund at `expiredAt` (SCR-157 §1).
+   */
+  latestBlockTimestamp(): Promise<number>;
   waitForBudget(jobKey: Hash32, timeoutMs: number): Promise<bigint | undefined>;
   fundJob(input: {
     readonly jobKey: Hash32;
@@ -331,7 +336,7 @@ async function openOrRecoverJob(
     return recovered;
   }
   const expiration = calculateJobExpiration(
-    dependencies.now(),
+    await dependencies.chain.latestBlockTimestamp(),
     jobDurationHours(dependencies.config, input.capability),
     input.envelopeExpiresAt,
     Number(dependencies.config.get("payer.job.minExpiryLeadSeconds")),
@@ -530,8 +535,7 @@ async function waitForJobResult(
     result.escrowState === "Expired"
   )
     return syncAndReturn(input, dependencies, job, result, attempt, assertLeaseHeld);
-  const expired =
-    Math.floor(dependencies.now().getTime() / MILLISECONDS_PER_SECOND) >= job.expiredAt;
+  const expired = (await dependencies.chain.latestBlockTimestamp()) >= job.expiredAt;
   if (expired && !(await dependencies.chain.hasDecisionPending(job.jobKey))) {
     const transaction =
       (await priorJobTransaction(dependencies, input, attempt, "job.refund.sent", job.jobKey)) ??
@@ -696,11 +700,8 @@ async function runJobRefund(
 ): Promise<string | undefined> {
   if (await dependencies.chain.hasDecisionPending(input.jobKey)) return undefined;
   const view = await dependencies.chain.getJob(input.jobKey);
-  if (
-    (view.vaultState !== "Funded" && view.vaultState !== "Submitted") ||
-    Math.floor(dependencies.now().getTime() / 1000) < view.expiredAt
-  )
-    return undefined;
+  if (view.vaultState !== "Funded" && view.vaultState !== "Submitted") return undefined;
+  if ((await dependencies.chain.latestBlockTimestamp()) < view.expiredAt) return undefined;
   const refundAlreadyClaimed = view.escrowState === "Expired" || view.escrowState === "Rejected";
   let txHash: string | undefined;
   if (!refundAlreadyClaimed) {
@@ -1027,12 +1028,11 @@ function parseChainId(network: string): number {
 }
 
 function calculateJobExpiration(
-  now: Date,
+  nowSeconds: number,
   durationHours: number,
   envelopeExpiresAt: Date,
   minimumLeadSeconds: number,
 ): number {
-  const nowSeconds = Math.floor(now.getTime() / MILLISECONDS_PER_SECOND);
   const requested = nowSeconds + durationHours * SECONDS_PER_HOUR;
   const envelope = Math.floor(envelopeExpiresAt.getTime() / MILLISECONDS_PER_SECOND);
   const expiration = Math.min(requested, envelope);
