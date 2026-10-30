@@ -85,6 +85,7 @@ function fakeRefillChain(native: Partial<Record<RefillKey | "relayer", bigint>>)
         requests.push(request.payload as { target: string; amount: string });
         return { signedTransaction: "0x01" };
       },
+      async abandonTransaction() {},
     },
     keyAddress: (key) => addresses[key],
     getNativeBalance: async (address: Address, blockNumber?: bigint) => {

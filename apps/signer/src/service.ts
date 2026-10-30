@@ -4,6 +4,7 @@
 import {
   encodeFunctionData,
   keccak256,
+  parseTransaction,
   serializeTransaction,
   type Hex,
   type TransactionSerializableEIP1559,
@@ -146,6 +147,11 @@ export interface Signer {
   /** Refused unless every balance is zero (RV-004); the key is destroyed `signer.pocketKeyRetainHours` later. */
   retirePocketKey(caller: string, pocket: Address): Promise<{ destroyAfterMs: number }>;
   destroyRetiredPocketKeys(): Promise<Address[]>;
+  /**
+   * In-process only: a transaction this signer signed for `keyRef` that its sender failed to broadcast. Its
+   * nonce is assigned again when it is still the key's last, so later transactions never wait behind a gap.
+   */
+  abandonTransaction(keyRef: string, signedTransaction: Hex): Promise<void>;
 }
 
 export function createSigner(options: SignerOptions): Signer {
@@ -379,6 +385,11 @@ export function createSigner(options: SignerOptions): Signer {
 
   return {
     sign,
+    abandonTransaction: (keyRef, signedTransaction) =>
+      withNonceLock(keyRef, async () => {
+        if (lastNonces.get(keyRef) === parseTransaction(signedTransaction).nonce)
+          lastNonces.delete(keyRef);
+      }),
     async keyAddress(caller, keyRef) {
       if (!mayReadAddress(caller, keyRef)) throw new Denied("key-not-allowed");
       takeKeyAddressRateSlot(caller);

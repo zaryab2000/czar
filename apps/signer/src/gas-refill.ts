@@ -26,6 +26,7 @@ export interface GasRefillOptions {
         payload: unknown;
       },
     ): Promise<SignResult>;
+    abandonTransaction(keyRef: string, signedTransaction: Hex): Promise<void>;
   };
   readonly keyAddress: (key: GasLowKey) => Address;
   /** Reads the latest balance, or the balance at `blockNumber` when given. */
@@ -117,7 +118,7 @@ async function refillKey(options: GasRefillOptions, key: RefillKey): Promise<Gas
     });
     if (!("signedTransaction" in signed)) throw new Error("gas-refill policy returned a signature");
     fault = "send-failed";
-    receiptBlock = (await options.submitTransaction(signed.signedTransaction)).blockNumber;
+    receiptBlock = await submitOrAbandon(options, signed.signedTransaction);
   } catch {
     return refillFailed(options, key, balance, fault);
   }
@@ -130,6 +131,19 @@ async function refillKey(options: GasRefillOptions, key: RefillKey): Promise<Gas
   }
   if (refilled < min) await signalGasLow(options, key, "below-min-after-refill");
   return { key, balance: refilled, status: "refilled" };
+}
+
+/**
+ * Nothing else holds a refill's signed bytes, so a failed send is never broadcast again: its relayer nonce is
+ * handed back (SCR-159 §2) and the next refill does not wait behind a gap.
+ */
+async function submitOrAbandon(options: GasRefillOptions, transaction: Hex): Promise<bigint> {
+  try {
+    return (await options.submitTransaction(transaction)).blockNumber;
+  } catch (error) {
+    await options.signer.abandonTransaction("relayer", transaction);
+    throw error;
+  }
 }
 
 async function refillFailed(
