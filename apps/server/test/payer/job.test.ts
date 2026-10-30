@@ -871,3 +871,123 @@ function recoveryInput(envelopeExpiresAt: Date) {
     envelopeExpiresAt,
   };
 }
+
+/** SCR-157 §1: the chain's clock runs this far behind or ahead of the server's. */
+const CHAIN_SKEW_SECONDS = 400;
+/** The server clock sits this far past (or before) the job's `expiredAt`. */
+const EXPIRY_MARGIN_SECONDS = 60;
+
+describe("job deadlines by chain time (SCR-157 §1)", () => {
+  it("does not claim a refund before chain time reaches expiredAt when the chain runs 400 s behind", async () => {
+    const current = new Date("2026-10-23T00:00:00Z");
+    const expiredAt = Math.floor(current.getTime() / 1000) - EXPIRY_MARGIN_SECONDS;
+    const chain = fundedJobChain(expiredAt, expiredAt + EXPIRY_MARGIN_SECONDS - CHAIN_SKEW_SECONDS);
+
+    const result = await executeJobStep(recoveryInput(new Date(expiredAt * 1000)), {
+      ...chainTimeDependencies(chain),
+      now: () => current,
+    });
+
+    expect(result).toMatchObject({ state: "Funded" });
+    expect(chain.latestBlockTimestamp).toHaveBeenCalled();
+    expect(chain.claimJobRefund).not.toHaveBeenCalled();
+  });
+
+  it("claims the refund once chain time reaches expiredAt when the chain runs 400 s ahead", async () => {
+    const current = new Date("2026-10-23T00:00:00Z");
+    const expiredAt = Math.floor(current.getTime() / 1000) + EXPIRY_MARGIN_SECONDS;
+    const chain = fundedJobChain(expiredAt, expiredAt - EXPIRY_MARGIN_SECONDS + CHAIN_SKEW_SECONDS);
+
+    const result = await executeJobStep(recoveryInput(new Date(expiredAt * 1000)), {
+      ...chainTimeDependencies(chain),
+      now: () => current,
+    });
+
+    expect(result).toMatchObject({ state: "Expired" });
+    expect(chain.claimJobRefund).toHaveBeenCalledOnce();
+  });
+
+  it("refuses to open a job whose expiry leaves less than the minimum lead by chain time", async () => {
+    const current = new Date("2026-10-23T00:00:00Z");
+    const minimumLead = Number(loadConfig().get("payer.job.minExpiryLeadSeconds"));
+    // The server clock sees the full minimum lead; the chain, 400 s ahead, sees less.
+    const envelopeExpiresAt = new Date(current.getTime() + minimumLead * 1000);
+    const chain = {
+      findJob: vi.fn(async () => undefined),
+      openJob: vi.fn(),
+      latestBlockTimestamp: vi.fn(async () =>
+        Math.floor(current.getTime() / 1000 + CHAIN_SKEW_SECONDS),
+      ),
+    };
+
+    await expect(
+      executeJobStep(recoveryInput(envelopeExpiresAt), {
+        ...chainTimeDependencies(chain),
+        now: () => current,
+      }),
+    ).rejects.toThrow("minimum lead time");
+    expect(chain.openJob).not.toHaveBeenCalled();
+  });
+
+  it("claimJobRefund waits for chain time past expiredAt when the chain runs 400 s behind", async () => {
+    const current = new Date("2026-10-23T00:00:00Z");
+    const expiredAt = Math.floor(current.getTime() / 1000) - EXPIRY_MARGIN_SECONDS;
+    const chain = fundedJobChain(expiredAt, expiredAt + EXPIRY_MARGIN_SECONDS - CHAIN_SKEW_SECONDS);
+
+    await expect(
+      claimJobRefund(
+        {
+          planId: PLAN_ID,
+          stepIndex: 0,
+          envelopeRef: "eip155:5042002:0x0000000000000000000000000000000000000001:1",
+          jobKey: `0x${"11".repeat(32)}`,
+        },
+        { ...chainTimeDependencies(chain), now: () => current },
+      ),
+    ).resolves.toBeUndefined();
+    expect(chain.claimJobRefund).not.toHaveBeenCalled();
+  });
+});
+
+/** A funded job with no submission whose chain reads `chainNow` as the latest block timestamp. */
+function fundedJobChain(expiredAt: number, chainNow: number) {
+  const key = jobKey("0x0000000000000000000000000000000000000003", 7n);
+  let refunded = false;
+  return {
+    findJob: vi.fn(async () => ({ jobKey: key, jobId: 7n })),
+    getJob: vi.fn(async () => ({
+      vaultState: refunded ? "Expired" : "Funded",
+      escrowState: refunded ? "Expired" : "Funded",
+      budget: 1_000n,
+      expiredAt,
+    })),
+    waitForResult: vi.fn(async () => ({
+      vaultState: "Funded",
+      escrowState: "Funded",
+      budget: 1_000n,
+      expiredAt,
+    })),
+    hasDecisionPending: vi.fn(async () => false),
+    latestBlockTimestamp: vi.fn(async () => chainNow),
+    claimJobRefund: vi.fn(async () => {
+      refunded = true;
+      return "refund-tx";
+    }),
+    syncJob: vi.fn(async () => ({ state: "Expired" as const, txHash: "sync-tx" })),
+    openJob: vi.fn(),
+    fundJob: vi.fn(),
+    isFrozenOrPaused: vi.fn(async () => false),
+    envelopeOpen: vi.fn(async () => true),
+  };
+}
+
+function chainTimeDependencies(chain: object) {
+  return {
+    pool: getPool(),
+    config: loadConfig(),
+    chain: chain as never,
+    signer: { sign: vi.fn(async () => ({ signedTransaction: "0x1234" as const })) },
+    vault: "0x0000000000000000000000000000000000000001" as const,
+    randomSalt: () => `0x${"22".repeat(32)}` as const,
+  };
+}
