@@ -1,13 +1,15 @@
 # Track A exit report (SCR-146 §3, amended by SCR-155 §5)
 
-**Status:** READY FOR REVIEW. Runs 1–6 PASS on merged bases. The SCR-155 §2 and §3 code items (#163, #164) and #155 are open PRs with their tests passing; they must merge before sign-off. Track B stays held until Zaryab merges the final version of this report.
+**Status:** READY FOR REVIEW. Runs 1–6 PASS on merged bases. SCR-155 §1–§3 are merged (#155, #163, #164). The SCR-157 PRs (#166, #167) are open with their tests passing; they must merge before sign-off. Track B stays held until Zaryab merges the final version of this report.
 
 ## Gate (SCR-155 §5)
 | # | Item | Status |
 |---|---|---|
-| 1 | SCR-155 §2 (BadTtl: chain time, one new attempt) merged with tests passing | Open: #163, tests passing |
-| 2 | SCR-155 §3 (signer refill at start, per key) merged with tests passing | Open: #164, tests passing |
-| 3 | #155 (SCR-155 §1, `initializeDouble`) merged | Open, ready for review |
+| 1 | SCR-155 §2 (BadTtl: chain time, one new attempt) merged with tests passing | Merged: #163 |
+| 2 | SCR-155 §3 (signer refill at start, per key) merged with tests passing | Merged: #164 |
+| 3 | #155 (SCR-155 §1, `initializeDouble`) merged | Merged: #155 |
+| 3a | SCR-157 §1 (chain time for every on-chain deadline) merged with tests passing | Open: #166 |
+| 3b | SCR-157 §2–§3 (gas-low signal; vault onboarding from wallet-config) merged with tests passing | Open: #167 |
 | 4 | This report updated to the SCR-155 §5 gate | This PR |
 | 5 | Senior reviewer | — |
 | 6 | Architect check | — |
@@ -28,9 +30,11 @@ The FORK browser flow is not part of the gate (SCR-155 §5). `local-v1` is froze
 | All Track A task PRs merged (TA-01…TA-22c, SCR-142…SCR-149 follow-ups, T-126) | Merged into `build-v1` |
 | 2026-10-28/29 follow-ups | Merged: #132, #134, #137, #139, #142, #143, #144, #145, #146, #150, #151, #152, #153, #154 (`build-v1`); #136, #138, #140, #147, #148, #149, #156 (`local-v1`) |
 | SCR-156 `app.origin` | Merged: #159 (SCR), #161 (`build-v1`), #160 (`local-v1`). Sync #162 left open: `local-v1` is frozen (SCR-155 §5) |
-| SCR-155 §1: Gateway doubles' `initializeDouble` | #155, open, ready for review |
-| SCR-155 §2: BadTtl uses chain time; at most one new attempt | #163 (`a4764f4`), open. Tests first (`43bb169`: 6 red). `pnpm lint`, `pnpm typecheck` clean; `@czar/server` 449 passed, 24 skipped, 0 failed; run 5 11/11 (new case: server clock 400 s behind chain → one new attempt from chain time, paid once); run 4 13/13 |
-| SCR-155 §3: signer gas refill at start; each key on its own | #164 (`e3b45ac`), open. Tests first (`b204222`: 5 of 10 red; arc-anvil K8 case red). `pnpm lint`, `pnpm typecheck` clean; `@czar/signer` 149 passed, 20 skipped, 0 failed; run 2 20/20 with a new at-start refill case (K3 at 0 reaches target in the first pass). The post-send balance check is removed: CZ-27 §5.5 does not define it and its balance read raced the key's own spending |
+| SCR-155 §1: Gateway doubles' `initializeDouble` | #155, merged |
+| SCR-155 §2: BadTtl uses chain time; at most one new attempt | #163 (`a4764f4`), merged. Tests first (`43bb169`: 6 red). `pnpm lint`, `pnpm typecheck` clean; `@czar/server` 449 passed, 24 skipped, 0 failed; run 5 11/11 (new case: server clock 400 s behind chain → one new attempt from chain time, paid once); run 4 13/13 |
+| SCR-155 §3: signer gas refill at start; each key on its own | #164 (`e3b45ac`), merged. Tests first (`b204222`: 5 of 10 red; arc-anvil K8 case red). `pnpm lint`, `pnpm typecheck` clean; `@czar/signer` 149 passed, 20 skipped, 0 failed; run 2 20/20 with a new at-start refill case (K3 at 0 reaches target in the first pass). The post-send balance check is removed: CZ-27 §5.5 does not define it and its balance read raced the key's own spending |
+| SCR-157 §1: chain time for every on-chain deadline | #166 (`c92136e`), open. Tests first (vault-direct 5 red, job 6 red; run 5 chain-behind case reverted `NotExpired` before the fix). Finalize waits for a block with `timestamp > validBefore` (the vault reverts `NotExpired` at `<=`, `ReservationLogic.sol:149`); reconcile, call retries, and the job escrow refund, `openJob` lead and decision cutoff use chain time; wait loops sleep `payer.reconcileSeconds` and re-read the block. `pnpm lint`, `pnpm typecheck` clean; `@czar/server` 461 passed, 26 skipped, 0 failed; job 28/28; run 4 13/13; run 5 13/13 (2 new cases). The job path is off by default and covered by unit tests only |
+| SCR-157 §2–§3: gas-low signal; vault onboarding from wallet-config | #167 (`025fc67`), open. Tests first (signer, server 12 red, vault-client 6 red, web). Signer: counter `czar_signer_gas_low{key}` (`apps/signer/src/metrics.ts`) plus a text alert on a below-min balance read at the refill's receipt block, a failed attempt, or the relayer below the sum of targets; alert-channel failures log `alert-failed` and the pass continues; `signer.gasRefillIntervalSeconds` (300). Server: `AppWalletConfig` gains `vaultFactory` (manifest) and `webauthnRpId` (host of `app.origin`); startup fails without a factory. Web: no literal factory, env variable or `"localhost"`; skips `createVault` when `vaultOf` is set and `setPasskey` when the key matches; `VaultExists` by selector is success; "Create vault" disabled at a zero MSCA balance. Spec commit `b7bbcc7` edits `openapi.yaml` as SCR-157 §3 orders. Lint, typecheck clean; signer 162, server 455 (0 failed), vault-client 94 (arc-anvil), web unit 55, `e2e:local-server` 4, run 2 20/20, web e2e 27 passed, 1 failed (`passkey.spec`: needs an external chain on `127.0.0.1:8549`, which only a manual fork provides; ended under SCR-155 §5) |
 | `routing.gatewayEnabled` / `routing.jobEnabled` default `false` | Confirmed in `packages/config/src/registry.ts` |
 
 ## Rulings applied
@@ -43,6 +47,10 @@ The FORK browser flow is not part of the gate (SCR-155 §5). `local-v1` is froze
 | SCR-155 §4 | Non-Arc dust units accepted for Phase 1; stage 2 item | — |
 | SCR-155 §5 | Manual local-chain testing ends; FORK browser flow leaves the gate; runs 1–6 stand; `local-v1` frozen | — |
 | SCR-156 | WebAuthn origin from config key `app.origin` | #159, #161, #160 |
+| SCR-157 §1 | Every CZ-15 comparison against a chain-enforced deadline uses the latest block timestamp; waits poll `payer.reconcileSeconds` | #166 |
+| SCR-157 §2 | Gas-low counter and alert; receipt-block balance; alert failures never stop a pass; `signer.gasRefillIntervalSeconds` | #167 |
+| SCR-157 §3 | `AppWalletConfig.vaultFactory` and `webauthnRpId`; idempotent vault creation; no gas, no button | #167 |
+| SCR-157 §4 | #164's removal of the after-refill check and #163's bound accepted | — |
 
 ## 3.2 Operator steps
 | Step | Status |
@@ -69,20 +77,24 @@ Logs are in `.czar-run-logs/` in the main checkout (git-excluded). All 0 skipped
 |---|---|---|---|
 | BF-1 | Passkey registration rejected with `422 validation`: the server checked `clientDataJSON.origin` against a literal `http://localhost` while the web app runs at `http://localhost:3001` | SCR-156: `app.origin` (#159, #161, #160) | Fixed; verified 2026-10-30 with a Playwright virtual authenticator (`POST /v1/auth/passkey` 201, `POST /v1/auth/session` 201) |
 | BF-2 | Start URL `/onboarding` has no page | `/onboarding/passkey` in `ops/local/README.md` (#160) | Fixed |
-| BF-3 | "Create vault" sent `createVault` to the literal fallback factory `0xA624047E961D13bF49711e1383e7A3EBD3E25ef4` (`apps/web/app/onboarding/vault/page.tsx:10-12`) because the FORK overlay never set `NEXT_PUBLIC_CZAR_VAULT_FACTORY_ADDRESS`; the UserOps succeeded as calls to an address with no code | Not fixed in code; worked around locally by setting the variable | M8 item |
-| BF-4 | Onboarding lets "Create vault" run while the MSCA has no gas, then shows the predicted vault on Step 3 as if it existed; a repeat click reports `VaultExists` as "The network is busy" | — | M8 item |
+| BF-3 | "Create vault" sent `createVault` to the literal fallback factory `0xA624047E961D13bF49711e1383e7A3EBD3E25ef4` (`apps/web/app/onboarding/vault/page.tsx:10-12`) because the FORK overlay never set `NEXT_PUBLIC_CZAR_VAULT_FACTORY_ADDRESS`; the UserOps succeeded as calls to an address with no code | SCR-157 §3: factory from `GET /v1/app/wallet-config` | **Fixed in #167** (open) |
+| BF-4 | Onboarding lets "Create vault" run while the MSCA has no gas, then shows the predicted vault on Step 3 as if it existed; a repeat click reports `VaultExists` as "The network is busy" | SCR-157 §3: `vaultOf` / passkey pre-checks, `VaultExists` by selector, button disabled at a zero MSCA balance | **Fixed in #167** (open) |
 
 ## Open for the architect
-- **Server clock in other `validBefore` waits** (from #163): SCR-155 §2 moves step-2 "now" and the BadTtl trigger to chain time. `waitUntilValidBefore` before finalize (`apps/server/src/payer/vault-direct.ts:916`), the reconcile loop and call retries within `validBefore` still use the server clock. With the chain ahead this only waits longer; with the chain behind, finalize could be sent before `block.timestamp ≥ validBefore`. Needs a ruling on whether these also use chain time.
-
-- **Signer gas alert as a metric** (from #164): CZ-27 §5.5 names `czar_signer_gas_low{key}` as a metric; the signer has only a string alert port. The spec also doesn't define the reported post-refill `balance` (#164 reports the pre-refill balance plus the amount sent).
+- **Intermittent `receipt-arc` failure:** `apps/server/test/evidence/receipt-arc.test.ts` failed with `BadTtl()` on the new-reserve path in 2 of 6 full server-suite runs during #166 (it passes alone 3 of 3). That path comes from #163; #166 does not change it. Cause not found: a test-chain timing race, or an edge case in reading chain time on an on-demand-mining chain.
+- **SCR-157 §1 wording:** the test says finalize waits for `timestamp ≥ validBefore`; the vault needs `>` (#166 uses `>`).
+- **Evaluator decision cutoff** (CZ-17, outside CZ-15) probably still uses the server clock.
+- **02 §7.5:** whether a resumed call's first send is gated by `validBefore` (#166 leaves it ungated, so the stored settled response can be fetched).
+- **Signer metrics scrape:** #167's counter is in process only; the signer listens only on its socket. No HTTP endpoint was added to the process that holds keys.
+- **Server RP ID check:** the server still checks `rpIdHash == sha256("localhost")` (SCR-125, migration 0007 `CHECK (rp_id='localhost')`). Equal to `webauthnRpId` in Phase 1; a public origin needs an SCR.
+- **Gas-low reason codes** `below-target-sum` and `below-min-after-refill` are the builder's names; SCR-157 §2 names none.
+- **`reads.ts` env fallback:** `process.env.CZAR_VAULT_FACTORY_ADDRESS` is read outside `@czar/config`.
+- **Signer alert as metric** (from #164): addressed by #167.
 
 ## 3.4 Outside Track A: M8 (D92) — first Arc testnet run
 These do not block this report:
 - **The real-passkey owner flow** (SCR-155 §5): passkey, vault, funding, limits, pairing, objective, approval, payment, receipt, freeze. It moves from the FORK browser flow to the first Arc testnet run.
 - **The five-minute first-refill finding:** confirm on testnet that a freshly started signer funds K3/K7/K8 in its first pass (SCR-155 §3) before the first objective.
-- BF-3: the web app's vault factory address comes from configuration, with no literal fallback.
-- BF-4: onboarding checks MSCA gas before "Create vault" and reports `VaultExists` as an existing vault.
 - T-050b
 - T-043 (c)
 - G0-05 live Gateway behaviour
