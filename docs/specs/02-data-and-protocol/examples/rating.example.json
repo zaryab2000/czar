@@ -1,0 +1,20 @@
+{
+  "schemaVersion": "1.0",
+  "ratingId": "rtg_01JAV4Q0K8Y8X7M2N3P4Q5R6S7",
+  "userId": "usr_01JAV4Q0K8Y8X7M2N3P4Q5R6S8",
+  "vault": "0xdF30ed33A39cD78C90acd4fbe72012f25BE3CFf0",
+  "objectiveId": "obj_01JAV4Q0K8Y8X7M2N3P4Q5R6S9",
+  "stepIndex": 1,
+  "network": "eip155:5042002",
+  "serviceId": "svc_f961586d8dcd298f70c4c68c87303b22",
+  "versionId": "ver_29152b6ab5cef7b910e438d9f6b3f2a9",
+  "taskClass": "data-json.extract",
+  "value": "good",
+  "obsIds": [
+    "obs_0dadd21ba9a5ea96e1781cea81345e1d",
+    "obs_60264e7276fbfbc6c7077ed2d8106042"
+  ],
+  "surface": "cli",
+  "supersedes": null,
+  "createdAt": "2026-10-30T12:00:00.000Z"
+}

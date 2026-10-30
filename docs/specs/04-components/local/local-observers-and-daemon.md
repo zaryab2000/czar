@@ -286,7 +286,7 @@ stateDiagram-v2
 | `objectives` | `objective_id` TEXT PK, `soul_version`, `detector`, `goal`, `capabilities_json`, `deadline`, `minutes_saved`, `roi_band`, `roi_ratio` REAL, `status`, `objective_hash` BLOB(32), `created_at`, `published_at`, `server_status`, `result_id` | `Objective` (02 §4.3) plus server mirror fields |
 | `objective_evidence` | `objective_id`, `event_id`, `belief_id` | evidence links |
 | `outbox` | `id` INTEGER PK, `kind` (`objective`, `soul-version`, `ingest-report`, `result-ack`), `payload_json`, `idempotency_key`, `attempts`, `next_attempt_at`, `last_error_code` | durable queue to the server |
-| `audit_local` | `id`, `at`, `kind`, `payload_hash` BLOB(32), `bytes`, `destination` (`server`, `model-proxy`), `summary_counts_json` | "what left this machine" |
+| `audit_local` | `id`, `at`, `kind` (incl. `rating`, SCR-160 §8.1), `payload_hash` BLOB(32), `bytes`, `destination` (`server`, `model-proxy`), `summary_counts_json` | "what left this machine" |
 | `settings` | `key` TEXT PK, `value_json` | hourly value, compile time, pause flag, pairing state |
 | `queue_drain` | `plugin_data_path`, `last_seq` | observer queue cursor |
 | `held_artifacts` (N2) | `objective_id` TEXT, `name` TEXT, `content_hash` BLOB(32), `flags_json` TEXT, `held_path` TEXT, `held_at` INTEGER, `released_at` INTEGER, `deleted_at` INTEGER | flagged artifacts held for review outside the project; `local-only` |
@@ -648,3 +648,4 @@ gitleaks rules v8.30.1 (C2-06); Presidio 2.2.364 at `data-privacy-stack/presidio
 | 2026-10-20 | D85 | Local `fill_undo` table. |
 | 2026-10-20 | N2 | Local `held_artifacts` table. |
 | 2026-10-20 | D90 | CZ-02 §5.6 soul source intake and `soulInput.*` parameters; `soul.propose` socket method; tables `source_receipts`, `proposed_beliefs`, `interview_answers`, `source_scans`, `source_consents`; typed `belief_receipts`; `soul_versions.soul_hash_rule`; migration; privacy, security and test lines. CZ-26 runs on soul-source excerpts. |
+| 2026-10-30 | SCR-160 | `czar result` rating prompt (SCR-160 §8.1); `audit_local` kind `rating`. |

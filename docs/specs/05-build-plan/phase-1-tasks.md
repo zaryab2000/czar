@@ -1515,6 +1515,7 @@
   - A service with `n_eff < 5` appears only in `unverified`, never ranked ("unknown is not bad").
   - Index items validate for both readers (Circle `metadata` shape and spec fields).
 - **D83 (2026-10-20):** reputation rows keyed by network; `findService` refuses a non-payment network with 422 `network-not-payable`; `includeMarketView` returns the T-107 view.
+- **SCR-160 (2026-10-30):** the posterior steps and acceptance tests above are superseded. T-091 is delivered as the Flow 4A packages 4A-1 to 4A-7 of SCR-160 §15 (ratings, health facts, Wilson lower-bound ordering, `RankingDecision` 1.2), each as its own PR with the SCR-160 §14 acceptance tests.
 - **N1 (2026-10-20):** required dimensions by payment path (`delivery` only for `erc8183-job` task classes); `exploration_slot` with `selection.unverifiedWithApproval`. Tests: CZ-18 §14 provider-eligibility case.
 
 ### T-092 Planner P-03 decomposition over CZ-18 candidates, eval suite
@@ -1782,3 +1783,4 @@
 | 2026-10-21 | SCR-122, SCR-123 | T-047 sandbox, ids and profile seed; T-046 eval modes, `expectedFields`, code-only extractor, re-plan input, budget path. |
 | 2026-10-25 | SCR-132, SCR-136 | T-050 split into T-050a (local, D92 stand-ins) and T-050b (testnet, M8, with G0-04); new T-122 (execution runtime) and T-123 (interim selection, SCR-131); T-043 reopened without G0-04; T-071 to the evidence/social replan; owners for T-043, T-045, T-090, T-091, T-115. |
 | 2026-10-25 | SCR-127, SCR-133, SCR-136 | New T-124 (Gateway balance projection) and T-125 (owner manual return); T-053 notes; T-085 split; T-105 local key file and later lab entries. |
+| 2026-10-30 | SCR-160 | T-091 delivered as Flow 4A packages 4A-1 to 4A-7 (ratings as the only quality signal, health facts, Wilson lower-bound ranking); no fill rate, latency or edit inference. |
