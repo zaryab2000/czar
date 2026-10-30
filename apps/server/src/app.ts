@@ -58,7 +58,6 @@ export interface AppDependencies extends PairDependencies {
   logger: Logger;
   modelClient?: ModelClient;
   jobDelivery?: JobDeliveryDependencies;
-  appOrigin?: string;
   appReadOptions?: AppReadOptions;
   revisePlanSubjects?: (
     userId: string,
@@ -446,7 +445,7 @@ function appAuthDependencies(dependencies: AppDependencies) {
   return {
     ...dependencies,
     rpcUrl: dependencies.config.get("app.arcRpcUrl") as string,
-    origin: dependencies.appOrigin ?? "http://localhost",
+    origin: dependencies.config.get("app.origin") as string,
   };
 }
 

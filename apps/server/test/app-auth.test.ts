@@ -12,47 +12,18 @@ import { createTestContext, testAppConfig } from "#test/fixtures";
 const getPool = setupDatabase();
 
 describe("passkey registration origin (SCR-156)", () => {
-  async function register(
-    context: ReturnType<typeof createTestContext>,
-    origin: string,
-    seed: number,
-  ): Promise<Response> {
-    const privateKey = Buffer.alloc(32);
-    privateKey[31] = seed;
-    const publicKey = p256.getPublicKey(privateKey, false);
-    const credentialId = Buffer.from(`origin-credential-${seed}`).toString("base64url");
-    const challenge = await createChallenge(context.app, "register");
-    const authData = createAuthenticatorData(publicKey, credentialId, 0, true);
-    return context.app.request("/v1/auth/passkey", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Idempotency-Key": `7${seed}c52b16-41b0-4c35-88cb-2a88d8799b91`,
-      },
-      body: JSON.stringify({
-        challengeId: challenge.challengeId,
-        credentialId,
-        clientDataJSON: createClientData("webauthn.create", challenge.challenge, origin),
-        attestationObject: cbor
-          .encode({ fmt: "none", authData, attStmt: {} })
-          .toString("base64url"),
-        msca: await counterfactualMsca(credentialId, publicKey),
-      }),
-    });
-  }
-
   it("accepts the origin set in app.origin and rejects another port with 422", async () => {
     const context = createTestContext(getPool(), {
       config: testAppConfig({ "app.origin": "http://localhost:3001" }),
     });
-    expect((await register(context, "http://localhost:3001", 2)).status).toBe(201);
-    expect((await register(context, "http://localhost:3002", 3)).status).toBe(422);
+    expect((await registerWithOrigin(context, "http://localhost:3001", 2)).status).toBe(201);
+    expect((await registerWithOrigin(context, "http://localhost:3002", 3)).status).toBe(422);
   });
 
   it("checks against the http://localhost default when app.origin is not set", async () => {
     const context = createTestContext(getPool());
-    expect((await register(context, "http://localhost", 4)).status).toBe(201);
-    expect((await register(context, "http://localhost:3001", 5)).status).toBe(422);
+    expect((await registerWithOrigin(context, "http://localhost", 4)).status).toBe(201);
+    expect((await registerWithOrigin(context, "http://localhost:3001", 5)).status).toBe(422);
   });
 });
 
@@ -248,6 +219,33 @@ function createAuthenticatorData(
     ]),
   );
   return Buffer.concat([prefix, Buffer.alloc(16), length, credential, coseKey]);
+}
+
+async function registerWithOrigin(
+  context: ReturnType<typeof createTestContext>,
+  origin: string,
+  seed: number,
+): Promise<Response> {
+  const privateKey = Buffer.alloc(32);
+  privateKey[31] = seed;
+  const publicKey = p256.getPublicKey(privateKey, false);
+  const credentialId = Buffer.from(`origin-credential-${seed}`).toString("base64url");
+  const challenge = await createChallenge(context.app, "register");
+  const authData = createAuthenticatorData(publicKey, credentialId, 0, true);
+  return context.app.request("/v1/auth/passkey", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Idempotency-Key": `7${seed}c52b16-41b0-4c35-88cb-2a88d8799b91`,
+    },
+    body: JSON.stringify({
+      challengeId: challenge.challengeId,
+      credentialId,
+      clientDataJSON: createClientData("webauthn.create", challenge.challenge, origin),
+      attestationObject: cbor.encode({ fmt: "none", authData, attStmt: {} }).toString("base64url"),
+      msca: await counterfactualMsca(credentialId, publicKey),
+    }),
+  });
 }
 
 function createClientData(type: string, challenge: string, origin = "http://localhost"): string {

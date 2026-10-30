@@ -242,6 +242,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 1,
   },
   {
+    "key": "app.origin",
+    "source": "default",
+    "unit": "origin",
+    "value": "http://localhost",
+  },
+  {
     "key": "app.pairingCodeTtlMinutes",
     "source": "default",
     "unit": "minutes",
