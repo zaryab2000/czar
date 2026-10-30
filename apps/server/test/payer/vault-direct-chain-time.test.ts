@@ -77,7 +77,7 @@ describe("vault-direct chain time for every on-chain deadline (SCR-157 §1)", ()
 
     await expect(executeVaultDirectStep(stepInput(), run.dependencies)).resolves.toEqual({
       state: "failed",
-      errorCode: "unpaid-index",
+      errorCode: "unpaid",
     });
 
     const validBefore = run.reservedValidBefore();
@@ -129,7 +129,7 @@ describe("vault-direct chain time for every on-chain deadline (SCR-157 §1)", ()
 
     await expect(executeVaultDirectStep(stepInput(), run.dependencies)).resolves.toEqual({
       state: "failed",
-      errorCode: "unpaid-index",
+      errorCode: "unpaid",
     });
 
     const until = run.reservedValidBefore() + RECONCILE_GRACE_SECONDS;
@@ -166,7 +166,7 @@ describe("vault-direct chain time for every on-chain deadline (SCR-157 §1)", ()
 
     await expect(executeVaultDirectStep(stepInput(), run.dependencies)).resolves.toEqual({
       state: "failed",
-      errorCode: "unpaid-index",
+      errorCode: "unpaid",
     });
 
     // The first send happens at chain time validBefore − 300 s, the second at − 100 s; a third would be
@@ -181,7 +181,7 @@ describe("vault-direct chain time for every on-chain deadline (SCR-157 §1)", ()
 
     await expect(executeVaultDirectStep(stepInput(), run.dependencies)).resolves.toEqual({
       state: "failed",
-      errorCode: "unpaid-index",
+      errorCode: "unpaid",
     });
 
     expect(run.paidSendChainTimes).toHaveLength(CALL_RETRIES);

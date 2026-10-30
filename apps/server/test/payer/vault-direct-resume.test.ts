@@ -474,7 +474,8 @@ describe("a reverted settle or finalize still reaches a Final reservation (revie
     });
     // The step ends by the settled facts, never by the reverted finalize.
     expect(trace.at(-1)?.payload["stepError"]).toBeUndefined();
-    expect(result).toEqual({ state: "failed", errorCode: "unpaid-index" });
+    // SCR-159 §3 (#171): one paid call of two, so the step is done and index 1 is recorded unpaid.
+    expect(result).toMatchObject({ state: "done" });
   });
 });
 

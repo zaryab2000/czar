@@ -1,4 +1,4 @@
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 import { validateSchema, type StepError, type StepResult } from "@czar/schemas";
 
 export interface ExecutionPhase {
@@ -7,6 +7,15 @@ export interface ExecutionPhase {
   readonly attempt: number;
   readonly phase: string;
   readonly payload: Readonly<Record<string, unknown>>;
+}
+
+/**
+ * SCR-159 §3: the per-call outcome of a reserved index that delivered no accepted result, written as one
+ * `call.error` row per index in the same transaction as the step's terminal state.
+ */
+export interface CallError {
+  readonly index: number;
+  readonly code: "unpaid" | "delivery-failed";
 }
 
 export interface ExecutorLeaseGuard {
@@ -144,6 +153,7 @@ export async function markStepDoneWithResults(
       readonly subjectIndex?: number;
       readonly stepResult: StepResult;
     }[];
+    readonly callErrors?: readonly CallError[];
   },
 ): Promise<void> {
   if (input.results.length === 0)
@@ -171,6 +181,7 @@ export async function markStepDoneWithResults(
         ],
       );
     }
+    await insertCallErrors(client, input);
     const updated = await client.query(
       "UPDATE steps SET state='done',calls_used=GREATEST(calls_used,$3) WHERE plan_id=$1 AND step_index=$2",
       [input.planId, input.stepIndex, input.callsUsed],
@@ -203,6 +214,8 @@ export async function markStepFailed(
     readonly attempt: number;
     readonly errorCode: string;
     readonly stepError?: StepError;
+    readonly callsUsed?: number;
+    readonly callErrors?: readonly CallError[];
   },
 ): Promise<void> {
   if (input.stepError && !validateSchema("step-error", input.stepError))
@@ -211,10 +224,12 @@ export async function markStepFailed(
   try {
     await client.query("BEGIN");
     const updated = await client.query(
-      "UPDATE steps SET state='failed' WHERE plan_id=$1 AND step_index=$2 AND state <> 'done'",
-      [input.planId, input.stepIndex],
+      `UPDATE steps SET state='failed',calls_used=GREATEST(calls_used,$3)
+       WHERE plan_id=$1 AND step_index=$2 AND state <> 'done'`,
+      [input.planId, input.stepIndex, input.callsUsed ?? 0],
     );
     if (updated.rowCount !== 1) throw new Error("Payer step is missing or already done.");
+    await insertCallErrors(client, input);
     await client.query(
       `INSERT INTO step_executions (plan_id,step_index,attempt,phase,payload)
        VALUES ($1,$2,$3,'step.failed',$4::jsonb)`,
@@ -234,6 +249,29 @@ export async function markStepFailed(
     throw error;
   } finally {
     client.release();
+  }
+}
+
+async function insertCallErrors(
+  client: PoolClient,
+  input: {
+    readonly planId: string;
+    readonly stepIndex: number;
+    readonly attempt: number;
+    readonly callErrors?: readonly CallError[];
+  },
+): Promise<void> {
+  for (const callError of input.callErrors ?? []) {
+    await client.query(
+      `INSERT INTO step_executions (plan_id,step_index,attempt,phase,payload)
+       VALUES ($1,$2,$3,'call.error',$4::jsonb)`,
+      [
+        input.planId,
+        input.stepIndex,
+        input.attempt,
+        JSON.stringify({ index: callError.index, code: callError.code }),
+      ],
+    );
   }
 }
 

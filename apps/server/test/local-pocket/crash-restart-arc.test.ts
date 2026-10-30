@@ -334,10 +334,8 @@ describe.skipIf(!localChainEnabled)(
         const plan = await x402Plan(shortTimeoutSeconds());
         await killWithLeaseHeld(plan);
         await waitOutLease();
-        expect(await executeX402(harness, plan, "fresh-worker")).toEqual({
-          state: "failed",
-          errorCode: "unpaid-index",
-        });
+        // SCR-159 §3: one paid and accepted call ends the step done; the released index is unpaid.
+        expect(await executeX402(harness, plan, "fresh-worker")).toMatchObject({ state: "done" });
         const reserved = await reservedEvents(plan);
         expect(reserved).toHaveLength(1);
         expect(await authorizationsUsed(plan)).toHaveLength(1);
@@ -365,17 +363,17 @@ describe.skipIf(!localChainEnabled)(
 
         expect(
           await executeX402(harness, withLaterCallsFailing(plan), undefined, serverLagMs),
-        ).toEqual({ state: "failed", errorCode: "unpaid-index" });
+        ).toMatchObject({ state: "done" });
         await expectFinalizedAfterValidBefore(plan);
       });
 
-      it("ends unpaid-index, not reserve-failed, and finalizes by chain time when the chain runs 400 s ahead", async () => {
+      it("ends done, not reserve-failed, and finalizes by chain time when the chain runs 400 s ahead", async () => {
         const plan = await x402Plan();
         const serverLagMs = CHAIN_AHEAD_SECONDS * MS_PER_SECOND;
 
         expect(
           await executeX402(harness, withLaterCallsFailing(plan), undefined, serverLagMs),
-        ).toEqual({ state: "failed", errorCode: "unpaid-index" });
+        ).toMatchObject({ state: "done" });
         await expectFinalizedAfterValidBefore(plan);
       });
     });
