@@ -272,6 +272,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 120,
   },
   {
+    "key": "app.userOpReceiptTimeoutSeconds",
+    "source": "default",
+    "unit": "s",
+    "value": 120,
+  },
+  {
     "key": "autonomy.baseAtomic",
     "source": "default",
     "unit": "atomic",

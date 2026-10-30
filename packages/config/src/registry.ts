@@ -3453,6 +3453,15 @@ export const PARAMETERS = [
     noDefault: true,
   },
   {
+    key: "app.userOpReceiptTimeoutSeconds",
+    type: "integer",
+    default: 120,
+    unit: "s",
+    reason: "Arc finality is sub-second; covers bundler queueing",
+    source:
+      "docs/specs/06-review/change-requests/SCR-159-track-a-review-defects-resume-rebroadcast-partial-userop.md:62",
+  },
+  {
     key: "indexer.closedPocketQuietHours",
     type: "integer",
     default: 48,
