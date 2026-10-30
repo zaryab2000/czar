@@ -12,6 +12,8 @@ describe("app reads vault factory (SCR-158 §8)", () => {
 
   it("takes the factory from the server's deployment-manifest vaultFactory", () => {
     expect(readsSource).toMatch(/readonly vaultFactory: Address/);
-    expect(appSource).toMatch(/appReadDependencies[\s\S]*?vaultFactory: dependencies\.vaultFactory/);
+    expect(appSource).toMatch(
+      /appReadDependencies[\s\S]*?vaultFactory: dependencies\.vaultFactory/,
+    );
   });
 });

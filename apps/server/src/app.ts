@@ -443,6 +443,7 @@ function appReadDependencies(dependencies: AppDependencies) {
   return {
     pool: dependencies.pool,
     config: dependencies.config,
+    vaultFactory: dependencies.vaultFactory,
     ...(dependencies.appReadOptions ? { options: dependencies.appReadOptions } : {}),
   };
 }
