@@ -14,6 +14,8 @@ export const TEST_NOW = new Date("2026-10-21T00:00:00.000Z");
 export const TEST_USER_ID = "usr_01K7ZT9P4N5Q6R7S8T9V0W1X2Y";
 export const TEST_DEVICE_ID = "dev_01K7ZT9P4N5Q6R7S8T9V0W1X2Y";
 export const TEST_TOKEN = Buffer.alloc(32, 7).toString("base64url");
+/** The CzarVaultFactory every test app is configured with (SCR-157 §3). */
+export const TEST_VAULT_FACTORY = "0x00000000000000000000000000000000000000f1" as const;
 let contextRandomOffset = 0;
 
 export function testAppConfig(overrides: Record<string, unknown> = {}): Config {
@@ -70,6 +72,7 @@ export function createTestContext(
     logger,
     clock,
     random,
+    vaultFactory: options.appReadOptions?.factoryAddress ?? TEST_VAULT_FACTORY,
     ...(options.modelClient ? { modelClient: options.modelClient } : {}),
     ...(options.appReadOptions ? { appReadOptions: options.appReadOptions } : {}),
     ...(options.revisePlanSubjects ? { revisePlanSubjects: options.revisePlanSubjects } : {}),

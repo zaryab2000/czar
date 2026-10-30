@@ -2511,6 +2511,15 @@ export const PARAMETERS = [
       "K7/K8 rows written as signer.gas.<key>.* with min/target/max order assumed from the K3 row",
   },
   {
+    key: "signer.gasRefillIntervalSeconds",
+    type: "integer",
+    default: 300,
+    unit: "s",
+    reason: "CZ-27 §5.5 refill cadence",
+    source:
+      "docs/specs/06-review/change-requests/SCR-157-track-a-closeout-chain-time-gas-alert-onboarding.md:36",
+  },
+  {
     key: "signer.keychainService",
     type: "string",
     default: "dev.czar.signer.keystore",

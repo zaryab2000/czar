@@ -1,7 +1,14 @@
 "use client";
 
 import { toCircleSmartAccount, toModularTransport } from "@circle-fin/modular-wallets-core";
-import { createPublicClient, defineChain, http, type Hex, type Transport } from "viem";
+import {
+  createPublicClient,
+  defineChain,
+  http,
+  type Hex,
+  type PublicClient,
+  type Transport,
+} from "viem";
 import { createBundlerClient, toWebAuthnAccount } from "viem/account-abstraction";
 import { readEnvelopeCount as readCount } from "@czar/vault-client";
 import { getAppWalletConfig } from "#src/app-api";
@@ -24,7 +31,7 @@ export async function sendOwnerUserOperation(
   });
   const webAuthnOwner = toWebAuthnAccount({
     credential: { id: passkey.credentialId, publicKey: passkey.publicKey },
-    rpId: "localhost",
+    rpId: walletConfig.webauthnRpId,
   });
   const owner = {
     ...webAuthnOwner,
@@ -94,10 +101,14 @@ export function getStoredPasskey(): Pick<BrowserPasskey, "credentialId" | "publi
 }
 
 export async function readEnvelopeCount(vault: `0x${string}`): Promise<bigint> {
+  return readCount({ client: await walletPublicClient(), vault });
+}
+
+/** A read-only Arc client on the server-configured browser RPC. */
+export async function walletPublicClient(): Promise<PublicClient> {
   const walletConfig = await getAppWalletConfig();
   const chain = arcChain(walletConfig.arcRpcUrl);
-  const client = createPublicClient({ chain, transport: http(walletConfig.arcRpcUrl) });
-  return readCount({ client, vault });
+  return createPublicClient({ chain, transport: http(walletConfig.arcRpcUrl) });
 }
 
 function arcChain(rpcUrl: string) {

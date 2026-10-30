@@ -6,6 +6,8 @@ const validConfig = {
   arcRpcUrl: "https://rpc.example.test",
   bundlerOrder: ["circle", "pimlico", "alchemy", "zerodev"],
   bundlerEndpoints: {},
+  vaultFactory: "0x00000000000000000000000000000000000000f1",
+  webauthnRpId: "app.czar.example",
 };
 
 afterEach(() => {
@@ -46,6 +48,31 @@ describe("getAppWalletConfig", () => {
         }),
     );
     vi.stubGlobal("fetch", fetchMock);
+    const { getAppWalletConfig } = await import("#src/app-api");
+
+    await expect(getAppWalletConfig()).rejects.toThrow(
+      "Czar received invalid wallet configuration.",
+    );
+  });
+
+  it.each([
+    ["no vault factory", { vaultFactory: undefined }],
+    ["a malformed vault factory", { vaultFactory: "0x1234" }],
+    ["no WebAuthn RP ID", { webauthnRpId: undefined }],
+    ["an empty WebAuthn RP ID", { webauthnRpId: "" }],
+    ["an RP ID with a scheme", { webauthnRpId: "https://app.czar.example" }],
+  ])("rejects a config with %s (SCR-157 §3)", async (_label, change) => {
+    const body = JSON.stringify({ ...validConfig, ...change });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(body, {
+            status: 200,
+            headers: { "Cache-Control": "no-store", "Content-Type": "application/json" },
+          }),
+      ),
+    );
     const { getAppWalletConfig } = await import("#src/app-api");
 
     await expect(getAppWalletConfig()).rejects.toThrow(

@@ -1,11 +1,12 @@
 import { createServer } from "node:http";
 import { createIndexerApi } from "../../indexer/src/api/router.ts";
 import { createPublicClient, defineChain, http, parseAbiItem } from "viem";
+import { E2E_VAULT_FACTORY } from "./e2e-deployment.mjs";
 
 const rpcUrl = process.env["CZAR_ARC_RPC_URL"] ?? "http://127.0.0.1:8549";
 const port = Number(process.env["CZAR_TEST_INDEXER_PORT"] ?? 42070);
 const startBlock = 68383625n;
-const factoryAddress = "0xA624047E961D13bF49711e1383e7A3EBD3E25ef4";
+const factoryAddress = E2E_VAULT_FACTORY;
 const factoryEvent = parseAbiItem(
   "event VaultCreated(address indexed ownerAccount, address indexed vault, uint32 indexed version, address agentSigner, address autonomySigner, address evaluator)",
 );

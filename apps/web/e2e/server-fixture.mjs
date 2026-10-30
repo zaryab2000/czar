@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import { createApp } from "../../server/src/app.ts";
 import { migrate } from "../../server/src/db/migrate.ts";
 import { loadConfig } from "../../server/node_modules/@czar/config/src/index.ts";
+import { E2E_VAULT_FACTORY } from "./e2e-deployment.mjs";
 
 const serverRequire = createRequire(new URL("../../server/package.json", import.meta.url));
 const { Pool } = serverRequire("pg");
@@ -36,9 +37,10 @@ const app = createApp({
   logger: { info() {}, warn() {}, error() {}, debug() {} },
   clock: { now: () => new Date() },
   random: { bytes: randomBytes },
+  vaultFactory: E2E_VAULT_FACTORY,
   appReadOptions: {
     rpcUrl,
-    factoryAddress: "0xA624047E961D13bF49711e1383e7A3EBD3E25ef4",
+    factoryAddress: E2E_VAULT_FACTORY,
     indexerUrl,
   },
 });

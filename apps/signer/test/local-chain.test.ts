@@ -27,6 +27,7 @@ import type { PaymentRef } from "@czar/schemas";
 import { czarVaultAbi, withFeeFloor } from "@czar/vault-client";
 import { CANONICAL_GATEWAY_WALLET } from "../../../ops/local/gateway-doubles.ts";
 import { runGasRefill, startGasRefillJob } from "#src/gas-refill";
+import { createSignerMetrics, type GasLowKey } from "#src/metrics";
 import { returnableAtomic, type Denied } from "#src/policy";
 import { createRpcGasRefillAdapters, createRpcTransactionPreparer } from "#src/runtime-adapters";
 import { pocketReturnGasReserve } from "#src/service";
@@ -1068,6 +1069,10 @@ async function assertGasRefill(signer: K8Signer, node: ArcNode): Promise<void> {
   expect(results.map(({ key, status }) => [key, status])).toEqual(
     keys.map((key) => [key, "refilled"]),
   );
+  // SCR-157 §2: the reported balance is the one read at the refill receipt's block.
+  expect(results.map(({ key, balance }) => [key, balance])).toEqual(
+    keys.map((key) => [key, targetWei(key)]),
+  );
   for (const key of keys) {
     expect(await node.publicClient.getBalance({ address: signer.address(key) })).toBe(
       targetWei(key),
@@ -1077,10 +1082,15 @@ async function assertGasRefill(signer: K8Signer, node: ArcNode): Promise<void> {
 
   await node.testClient.setBalance({ address: signer.address("K3"), value: 0n });
   await node.testClient.setBalance({ address: relayer, value: 0n });
-  const failed = await runGasRefill(localGasRefillOptions(signer, node, alerts));
+  const options = localGasRefillOptions(signer, node, alerts);
+  const failed = await runGasRefill(options);
   expect(failed[0]).toMatchObject({ key: "K3", status: "failed" });
-  expect(alerts).toHaveLength(1);
-  expect(alerts[0]).toContain("relayer");
+  expect(alerts).toEqual([
+    "signer gas low for relayer: below-target-sum",
+    "signer gas low for K3: send-failed",
+  ]);
+  expect(options.metrics.gasLowCount("relayer")).toBe(1);
+  expect(options.metrics.gasLowCount("K3")).toBe(1);
 }
 
 /** Well under the five-minute refill interval: the first pass must not wait for it (SCR-155 §3). */
@@ -1097,12 +1107,8 @@ async function assertGasRefillAtStart(signer: K8Signer, node: ArcNode): Promise<
   });
   const alerts: string[] = [];
   const jobErrors: unknown[] = [];
-  const stop = startGasRefillJob(
-    {
-      ...localGasRefillOptions(signer, node, alerts),
-      ...createRpcGasRefillAdapters({ client: node.publicClient }),
-    },
-    (error) => jobErrors.push(error),
+  const stop = startGasRefillJob(localGasRefillOptions(signer, node, alerts), (error) =>
+    jobErrors.push(error),
   );
   try {
     await vi.waitFor(
@@ -1120,17 +1126,11 @@ function localGasRefillOptions(signer: K8Signer, node: ArcNode, alerts: string[]
   return {
     config: loadConfig(),
     signer: signer.signer,
-    keyAddress: (key: "K3" | "K7" | "K8") => signer.address(key),
-    getNativeBalance: (address: Address) => node.publicClient.getBalance({ address }),
-    submitTransaction: async (transaction: `0x${string}`) => {
-      const hash = await node.publicClient.sendRawTransaction({
-        serializedTransaction: transaction,
-      });
-      const receipt = await node.publicClient.waitForTransactionReceipt({ hash });
-      if (receipt.status !== "success") throw new Error("gas refill reverted on arc-anvil");
-    },
+    keyAddress: (key: GasLowKey) => signer.address(key),
+    ...createRpcGasRefillAdapters({ client: node.publicClient }),
     alert: async (message: string) => {
       alerts.push(message);
     },
+    metrics: createSignerMetrics(),
   };
 }

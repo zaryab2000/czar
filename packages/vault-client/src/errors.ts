@@ -1,5 +1,11 @@
 // T-026: revert data decoded to the custom-error names of ICzarVault and ICzarVaultFactory (03 czar-vault.md §9.2).
-import { BaseError, ContractFunctionRevertedError, decodeErrorResult, type Hex } from "viem";
+import {
+  BaseError,
+  ContractFunctionRevertedError,
+  decodeErrorResult,
+  toFunctionSelector,
+  type Hex,
+} from "viem";
 import { czarVaultAbi, czarVaultFactoryAbi } from "./abi.ts";
 
 /** The vault and the factory share no selector, so one combined ABI decodes both. */
@@ -62,3 +68,41 @@ export function decodeViemError(error: unknown): DecodedRevert | undefined {
 
 /** The names of every custom error the client decodes (vault and factory). */
 export const errorNames = (): readonly string[] => ERRORS_ABI.map((e) => e.name);
+
+const VAULT_EXISTS_SELECTOR = toFunctionSelector("VaultExists()").slice(2).toLowerCase();
+const HEX_RUN = /0x[0-9a-fA-F]{8,}/g;
+const MAX_CAUSE_DEPTH = 16;
+
+/**
+ * True when an error from any path (viem, a bundler's JSON-RPC error, an account's wrapped revert)
+ * carries the factory's `VaultExists` revert data. Matches by selector, never by message text,
+ * because bundlers return encoded revert data rather than a decoded name (SCR-157 §3).
+ */
+export function isVaultExistsError(error: unknown): boolean {
+  return revertDataIn(error).some((data) => {
+    const hex = data.slice(2).toLowerCase();
+    // A selector starts on a 4-byte boundary at the front, or after 32-byte words when wrapped.
+    for (let index = hex.indexOf(VAULT_EXISTS_SELECTOR); index >= 0;) {
+      if (index % 8 === 0 && decodeRevert(`0x${hex.slice(index)}`).name === "VaultExists")
+        return true;
+      index = hex.indexOf(VAULT_EXISTS_SELECTOR, index + 1);
+    }
+    return false;
+  });
+}
+
+/** Every hex run in the error chain's `data` fields (nested one level) and messages. */
+function revertDataIn(error: unknown): Hex[] {
+  const found: Hex[] = [];
+  let current: unknown = error;
+  for (let depth = 0; current instanceof Error && depth < MAX_CAUSE_DEPTH; depth += 1) {
+    const data = (current as { data?: unknown }).data;
+    const fields: unknown[] =
+      typeof data === "object" && data !== null ? Object.values(data) : [data];
+    for (const value of [...fields, current.message]) {
+      if (typeof value === "string") found.push(...((value.match(HEX_RUN) ?? []) as Hex[]));
+    }
+    current = current.cause;
+  }
+  return found;
+}

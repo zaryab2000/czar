@@ -133,4 +133,23 @@ describe("local signer runtime adapters", () => {
       hash: `0x${"ab".repeat(32)}`,
     });
   });
+
+  it("returns the receipt's block and reads a balance at a given block (SCR-157 §2)", async () => {
+    const getBalance = vi.fn(async () => 5n);
+    const adapters = createRpcGasRefillAdapters({
+      client: {
+        getBalance,
+        sendRawTransaction: async () => `0x${"ab".repeat(32)}` as `0x${string}`,
+        waitForTransactionReceipt: async () => ({ status: "success" as const, blockNumber: 42n }),
+      } as never,
+    });
+    const address = "0x0000000000000000000000000000000000000003";
+
+    await expect(adapters.submitTransaction(`0x${"01".repeat(32)}`)).resolves.toEqual({
+      blockNumber: 42n,
+    });
+    await adapters.getNativeBalance(address, 42n);
+    await adapters.getNativeBalance(address);
+    expect(getBalance.mock.calls).toEqual([[{ address, blockNumber: 42n }], [{ address }]]);
+  });
 });

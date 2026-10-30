@@ -5,8 +5,6 @@ import { toWebAuthnAccount } from "viem/account-abstraction";
 import { createPublicClient, defineChain, http } from "viem";
 import { getAppWalletConfig } from "#src/app-api";
 
-const RP_ID = "localhost";
-
 export interface BrowserPasskey {
   readonly credentialId: string;
   readonly publicKey: `0x${string}`;
@@ -23,10 +21,11 @@ export function supportsPasskeys(): boolean {
 }
 
 export async function createPasskey(challenge: Uint8Array): Promise<BrowserPasskey> {
+  const { webauthnRpId } = await getAppWalletConfig();
   const credential = await navigator.credentials.create({
     publicKey: {
       challenge: Uint8Array.from(challenge).buffer,
-      rp: { id: RP_ID, name: "Czar" },
+      rp: { id: webauthnRpId, name: "Czar" },
       user: {
         id: crypto.getRandomValues(new Uint8Array(32)),
         name: "Czar owner",
@@ -69,10 +68,11 @@ export async function createPasskeyAssertion(
   readonly clientDataJSON: string;
   readonly signature: string;
 }> {
+  const { webauthnRpId } = await getAppWalletConfig();
   const credential = await navigator.credentials.get({
     publicKey: {
       challenge: Uint8Array.from(challenge).buffer,
-      rpId: RP_ID,
+      rpId: webauthnRpId,
       allowCredentials: [{ id: fromBase64Url(credentialId).buffer, type: "public-key" }],
       userVerification: "required",
     },
@@ -102,7 +102,7 @@ export async function counterfactualMsca(passkey: BrowserPasskey): Promise<strin
   const client = createPublicClient({ chain, transport: http(walletConfig.arcRpcUrl) });
   const owner = toWebAuthnAccount({
     credential: { id: passkey.credentialId, publicKey: passkey.publicKey },
-    rpId: RP_ID,
+    rpId: walletConfig.webauthnRpId,
   });
   const account = await toCircleSmartAccount({
     client: client as unknown as Parameters<typeof toCircleSmartAccount>[0]["client"],

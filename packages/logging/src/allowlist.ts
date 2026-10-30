@@ -110,8 +110,10 @@ export const FIELD_RULES: readonly FieldRule[] = [
   { name: /^([a-z][A-Za-z0-9]*Ms|durationMs)$/, accept: nonNegativeInteger },
   { name: /^method$/, accept: matches(/^(GET|POST|PUT|PATCH|DELETE)$/) },
   { name: /^route$/, accept: matches(/^[a-z][A-Za-z0-9]{0,63}$/) },
+  /** Signer key ids (`K3`…`K20`, `relayer`; CZ-27 §4), the audit log's actor key id. */
+  { name: /^keyId$/, accept: matches(/^(K[0-9]{1,2}|relayer)$/) },
   {
-    name: /^(state|status|outcome|kind|mode|host|layer|rule|entity|czarCode|errorCode|method|route|network|keyId)$/,
+    name: /^(state|status|outcome|kind|mode|host|layer|rule|entity|czarCode|errorCode|method|route|network)$/,
     accept: matches(ENUM_TOKEN),
   },
   { name: /^(rules|entities|flags|hosts)$/, accept: enumList },
