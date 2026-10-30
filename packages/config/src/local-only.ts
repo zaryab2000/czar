@@ -46,6 +46,14 @@ export async function validateLocalOnlyConfig(options: LocalOnlyGuardOptions): P
       }
     }
   }
+  const appOrigin = options.config.get("app.origin");
+  if (typeof appOrigin !== "string" || !isLocalhostOrigin(appOrigin)) {
+    throw new ConfigError(
+      "invalid-value",
+      "app.origin",
+      "refusing to start: app.origin must be http://localhost with an optional port in Phase 1",
+    );
+  }
   if (!hasLoopback && options.requireAnvilNodeInfo !== true) return;
 
   const overlayPath =
@@ -120,6 +128,15 @@ function isAllowedUrl(value: string): boolean {
 function isHttpUrl(value: string): boolean {
   try {
     return new URL(value).protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
+function isLocalhostOrigin(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" && url.hostname === "localhost" && url.origin === value;
   } catch {
     return false;
   }
