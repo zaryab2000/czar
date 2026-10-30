@@ -250,6 +250,14 @@ export function createSigner(options: SignerOptions): Signer {
   }
 
   /** `nonce = max(pending count from the RPC, last nonce assigned to this key + 1)` (SCR-159 §2). */
+  /** Hands back a signed transaction's nonce while it is still the key's last one (SCR-159 §2). */
+  function releaseNonce(keyRef: string, signedTransaction: Hex): Promise<void> {
+    return withNonceLock(keyRef, async () => {
+      if (lastNonces.get(keyRef) === parseTransaction(signedTransaction).nonce)
+        lastNonces.delete(keyRef);
+    });
+  }
+
   function assignNonce(
     keyRef: string,
     tx: TransactionSerializableEIP1559,
@@ -332,16 +340,22 @@ export function createSigner(options: SignerOptions): Signer {
       });
       const { signedTransaction } = signed;
       digest = signed.txDigest;
-      await audit.write({
-        at: nowMs(),
-        caller,
-        keyRef,
-        kind,
-        digest,
-        purpose,
-        outcome: "signed",
-        ...(decision.rule === undefined ? {} : { rule: decision.rule }),
-      });
+      try {
+        await audit.write({
+          at: nowMs(),
+          caller,
+          keyRef,
+          kind,
+          digest,
+          purpose,
+          outcome: "signed",
+          ...(decision.rule === undefined ? {} : { rule: decision.rule }),
+        });
+      } catch (error) {
+        // Review M1: the transaction is never returned, so its nonce is handed back for the next request.
+        await releaseNonce(keyRef, signedTransaction);
+        throw error;
+      }
       if (decision.alert !== undefined) {
         const observedAt =
           decision.alert.apiObservedAt === null
@@ -385,11 +399,7 @@ export function createSigner(options: SignerOptions): Signer {
 
   return {
     sign,
-    abandonTransaction: (keyRef, signedTransaction) =>
-      withNonceLock(keyRef, async () => {
-        if (lastNonces.get(keyRef) === parseTransaction(signedTransaction).nonce)
-          lastNonces.delete(keyRef);
-      }),
+    abandonTransaction: releaseNonce,
     async keyAddress(caller, keyRef) {
       if (!mayReadAddress(caller, keyRef)) throw new Denied("key-not-allowed");
       takeKeyAddressRateSlot(caller);
