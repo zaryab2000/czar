@@ -1,6 +1,6 @@
 # Track A exit report (SCR-146 §3, amended by SCR-155 §5)
 
-**Status:** READY FOR REVIEW. Runs 1–6 PASS on merged bases. SCR-155 §1–§3 are merged (#155, #163, #164). The SCR-157 PRs (#166, #167, approved with SCR-158 changes) are open with their tests passing; they must merge before sign-off. Track B stays held until Zaryab merges the final version of this report.
+**Status:** READY FOR ARCHITECT CHECK. Runs 1–6 PASS on merged bases. SCR-155 §1–§3 are merged (#155, #163, #164). The SCR-157 PRs (#166, #167, approved with SCR-158 changes) are open with their tests passing; they must merge before sign-off. Track B stays held until Zaryab merges the final version of this report.
 
 ## Gate (SCR-155 §5)
 | # | Item | Status |
@@ -8,10 +8,13 @@
 | 1 | SCR-155 §2 (BadTtl: chain time, one new attempt) merged with tests passing | Merged: #163 |
 | 2 | SCR-155 §3 (signer refill at start, per key) merged with tests passing | Merged: #164 |
 | 3 | #155 (SCR-155 §1, `initializeDouble`) merged | Merged: #155 |
-| 3a | SCR-157 §1 (chain time for every on-chain deadline) merged with tests passing | Open: #166 |
-| 3b | SCR-157 §2–§3 (gas-low signal; vault onboarding from wallet-config) merged with tests passing | Open: #167 |
+| 3a | SCR-157 §1 (chain time for every on-chain deadline) merged with tests passing | Merged: #166 |
+| 3b | SCR-157 §2–§3 (gas-low signal; vault onboarding from wallet-config) merged with tests passing | Merged: #167 |
+| 3c | SCR-159 §1–§2 (resume without re-probe; safe re-send; per-key nonces) with tests passing | Open: #173 (`14aa6cf`) |
+| 3d | SCR-159 §3 (steps with paid calls end done; unpaid per call) with tests passing | Open: #171 (`f7160e9`, contains #173) |
+| 3e | SCR-159 §4 (owner UserOperations wait for inclusion) with tests passing | Open: #172 (`4597704`) |
 | 4 | This report updated to the SCR-155 §5 gate | This PR |
-| 5 | Senior reviewer | — |
+| 5 | Senior reviewer | Done: independent review of #173 + #171 + #172 (see "Independent review") |
 | 6 | Architect check | — |
 | 7 | Zaryab's merge | — |
 
@@ -57,6 +60,11 @@ The FORK browser flow is not part of the gate (SCR-155 §5). `local-v1` is froze
 | SCR-158 §5–§6 | Signer metrics collection and a public-origin RP ID are stage 2 | — |
 | SCR-158 §7 | Gas-low reason codes | #167 |
 | SCR-158 §8 | `reads.ts` takes the vault factory from the deployment manifest, never `process.env` | #167 (`14a5310`) |
+| SCR-159 §1 | A resumed step never re-runs the pre-check; it continues from its last saved phase and reaches finalize | #173 |
+| SCR-159 §2 | Saved transactions re-sent only while they can land; any revert ends the step; per-key signer nonces | #173 |
+| SCR-159 §3 | A step with ≥ 1 paid and accepted call ends `done`; unpaid / delivery-failed per call | #171 |
+| SCR-159 §4 | Owner UserOperations wait for inclusion (`app.userOpReceiptTimeoutSeconds`, 120) | #172 |
+| SCR-159 §5 | Gateway-path items and dispatcher throughput recorded, not Track A | — |
 | SCR-158 §9 | #167's `openapi.yaml` commit (`b7bbcc7`) adopted as the SCR-157 §3 spec edit | #167 |
 
 ## 3.2 Operator steps
@@ -87,8 +95,42 @@ Logs are in `.czar-run-logs/` in the main checkout (git-excluded). All 0 skipped
 | BF-3 | "Create vault" sent `createVault` to the literal fallback factory `0xA624047E961D13bF49711e1383e7A3EBD3E25ef4` (`apps/web/app/onboarding/vault/page.tsx:10-12`) because the FORK overlay never set `NEXT_PUBLIC_CZAR_VAULT_FACTORY_ADDRESS`; the UserOps succeeded as calls to an address with no code | SCR-157 §3: factory from `GET /v1/app/wallet-config` | **Fixed in #167** (open) |
 | BF-4 | Onboarding lets "Create vault" run while the MSCA has no gas, then shows the predicted vault on Step 3 as if it existed; a repeat click reports `VaultExists` as "The network is busy" | SCR-157 §3: `vaultOf` / passkey pre-checks, `VaultExists` by selector, button disabled at a zero MSCA balance | **Fixed in #167** (open) |
 
+## SCR-159 PRs and results
+| PR | Head | What it does | Tests (written first, red then green) |
+|---|---|---|---|
+| #173 | `14aa6cf` | §1–§2: the pre-check runs only without `reserve.sent`; reserve, settle, finalize, closeEnvelope and pocket register/gas/fund follow the saved-transaction rule (status 0 → recorded, reserve ends `reserve-failed`/`reverted`; nonce ≤ saved → same bytes; nonce > saved → re-sign once); per-key signer nonce lock; plus review fixes M2, M3, M1 (in-spec part) | resume 14, close 3, pocket 3, nonce 5, saved-transaction confirm 3, run 5 +2 |
+| #171 | `f7160e9` | §3: after finalize, paid = settled on chain, accepted = paid with a usable body; ≥ 1 accepted → `done`; per-call `call.error` rows; zero accepted → `failed` `unpaid` / `delivery-failed`. Contains #173 (merge order) | partial 5 |
+| #172 | `4597704` | §4: `sendOwnerUserOperation` `waitForInclusion`, bounded by `app.userOpReceiptTimeoutSeconds`; vault setup, limits, freeze/unfreeze and manual return wait; a reverted receipt shows "failed on-chain" | wallet, vault-setup inclusion 3, category limits, manual return |
+
+Combined verification on `5c126eb` + #173 + #171 + #172: `pnpm lint` and `pnpm typecheck` clean; config 65/65; schemas 32/32; signer 168 passed, 0 failed; server 503 passed, 0 failed (rerun; the first full run hung in `receipt-arc.test.ts` and was stopped after 20 min, and `receipt-arc` alone passed 2/2); web unit 65/65; `e2e:local-server` 4/4; run 2 20/20; run 4 13/13; run 5 15/15; `FOUNDRY_PROFILE=arc arc-forge test` 440 passed, 0 failed. Logs: `.czar-run-logs/2026-10-30-scr159-final/`. `apps/web/e2e/passkey.spec.ts` needs a chain on 127.0.0.1:8549 (M8 item).
+
+## Independent review (senior reviewer row)
+A fresh reviewer with only the combined diff, CLAUDE.md and SCR-159 found **no critical defect** (nothing can lose or double-spend funds).
+| # | Severity | Finding | Action |
+|---|---|---|---|
+| M1 | major | A K3 transaction signed but never broadcast leaves a nonce gap: later K3 transactions queue until the signer restarts (`apps/signer/src/service.ts` `assignNonce`) | Fixed in #173: a failed signed-audit write hands the nonce back. Not fixed (needs spec): server lease loss / crash between sign and save, and a failed `lowerAutoLimit` send; proposed SCR text below |
+| M2 | major | A reverted `settle` (e.g. `AlreadyDone` after a third party's permissionless `finalize`) ended the step without finalize, so the reservation stayed open and USDC locked | Fixed in #173, test first |
+| M3 | major | Behind a load-balanced RPC, a mined reserve could be classified "replaced" and re-signed, orphaning a reservation | Fixed in #173: "replaced" confirmed by a second read `payer.reconcileSeconds` later, test first |
+| m1 | minor | Rows saved before this change (no `calls`, no `signedTransaction`) wedge on resume | Not fixed: upgrade with no in-flight steps; the first testnet database is fresh |
+| m2 | minor | A reverted `closeEnvelope` is never retried (spec "never sent again") | Not fixed; proposed SCR text below |
+| m3 | minor | A reverted pocket transaction throws on every pass | Listed under "Before `routing.gatewayEnabled` is turned on" |
+
+**Proposed spec text (hard stop; not applied):**
+- SCR-159 §2 "Signer nonce assignment", add: "`last` counts only while it was assigned less than `payer.txWaitSeconds` ago; after that the RPC pending count alone decides. A caller that signs and then does not broadcast or save hands the nonce back (`abandonTransaction`, available to socket callers)."
+- SCR-159 §2 closeEnvelope, add: "After a reverted `closeEnvelope`, re-read the envelope; when it is still `Open` with no open reservations, pockets or jobs, sign the close once more."
+- `openapi.yaml` `AppWalletConfig` (from #172): add required `userOpReceiptTimeoutSeconds` (integer, minimum 1), "Seconds the app waits for an owner UserOperation receipt on the accepting bundler, from `app.userOpReceiptTimeoutSeconds` (SCR-159 §4)". Until then the web reads the key's registry default.
+
+## Blocker outside Track A
+- `build-v1` at `71f119c` (#170, SCR-160) adds the `rating` and `ranking-decision` schemas and moves `Plan` to `1.3` without code changes. Every test that loads `@czar/schemas` fails ("Schema metadata is stale"); regenerating then fails the web typecheck against `Plan` 1.3. SCR-160 implementation is Track B, so it was not touched; the SCR-159 PRs are verified on `5c126eb`.
+
 ## Known intermittent test
-- `apps/server/test/evidence/receipt-arc.test.ts` fails intermittently with `BadTtl()` on the new-reserve path. Cause: on-demand mining on the local test chain. No effect on testnet. No fix now (SCR-158 §1). Seen in 3 of 8 full server-suite runs between #166 and #167; it passes when run alone.
+- `apps/server/test/evidence/receipt-arc.test.ts` fails intermittently with `BadTtl()` on the new-reserve path. Cause: on-demand mining on the local test chain. No effect on testnet. No fix now (SCR-158 §1). On 2026-10-30 one full run hung in this test instead of failing (no block arrives for the chain-time waits, and the test has no timeout); it was stopped after 20 min, and the test alone and the full rerun passed. Seen in 3 of 8 full server-suite runs between #166 and #167; it passes when run alone.
+
+## Before `routing.gatewayEnabled` is turned on
+- Nothing in production drains or closes a funded pocket after its Gateway steps (`executePullback` and `closePocket` are never called) (SCR-159 §5).
+- `prepareDelegate` reads its trace at step index 0 (`pocket.ts:440`) (SCR-159 §5).
+- The exact-match `pocket-return` value check can keep refusing when `maxFeePerGas` moves between the server's and the signer's preparation (SCR-159 §5).
+- A reverted pocket register/gas/fund transaction throws on every later pass; with register landed and fund reverted, `openPockets > 0` blocks closing the envelope (review m3).
 
 ## Before `routing.jobEnabled` is turned on
 - The CZ-16 evaluator decision cutoff on chain time (SCR-158 §4).
@@ -109,6 +151,7 @@ These do not block this report:
 - any real device
 
 ## Stage 2
+- **Dispatcher throughput** (SCR-159 §5): `waitForAuthorization` and `waitUntilValidBefore` block the single dispatcher for up to `validBefore + payer.reconcileGraceSeconds`; acceptable for one owner in Phase 1.
 - **Signer metrics collection** (SCR-158 §5): `czar_signer_gas_low{key}` is in-process only; the signer listens only on its Unix socket.
 - **RP ID for a public origin** (SCR-158 §6): an SCR so the server derives the RP ID from `app.origin` and changes the `rp_id` CHECK (migration 0007).
 - **Non-Arc dust units** (SCR-155 §4): CZ-27 §5.3 compares native wei with `signer.pocketDustAtomic` off Arc. A new SCR must define dust in that chain's native units before any non-Arc network is enabled.
@@ -116,6 +159,6 @@ These do not block this report:
 ## 3.5 Sign-off
 | Step | Status |
 |---|---|
-| Designated senior reviewer verified the evidence | |
+| Designated senior reviewer verified the evidence | Independent reviewer (fresh agent, combined diff of #173 + #171 + #172, CLAUDE.md, SCR-159), 2026-10-30: no critical defect; majors M2 and M3 fixed, M1 fixed in its in-spec part with proposed SCR text for the rest; minors recorded (see "Independent review") |
 | Architect check against SCR-146 and SCR-155 §5 | |
 | Zaryab merged this report (Track A closed) | |
