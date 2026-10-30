@@ -534,6 +534,10 @@ components:
           type: string
           minLength: 1
           description: WebAuthn RP ID, the host name of app.origin (SCR-156, SCR-157 §3).
+        userOpReceiptTimeoutSeconds:
+          type: integer
+          minimum: 1
+          description: "Seconds the app waits for an owner UserOperation receipt on the accepting bundler, from app.userOpReceiptTimeoutSeconds (SCR-159 §4, SCR-161 §4). Optional; the app falls back to the registry default when absent."
 
     Me:
       type: object

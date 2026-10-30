@@ -253,6 +253,13 @@ export type SlVersionId = string;
  * via the `definition` "SlPolicyVersion".
  */
 export type SlPolicyVersion = string;
+/**
+ * Rating id (SCR-160), minted by the server.
+ *
+ * This interface was referenced by `Common`'s JSON-Schema
+ * via the `definition` "RatingId".
+ */
+export type RatingId = string;
 
 /**
  * Shared primitive formats referenced by every Czar schema (spec 02 §2.1).

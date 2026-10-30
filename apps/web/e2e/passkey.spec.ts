@@ -340,7 +340,7 @@ function approvalFixture(): { readonly plan: AppPlan; readonly intent: ApprovalI
   const leaves = [payeeLeaf(payee, PAYEE_KIND.X402_PAY_TO, 0, BigInt(cap))];
   const payeeRoot = buildTree(leaves).root;
   const base = {
-    schemaVersion: "1.2" as const,
+    schemaVersion: "1.3" as const,
     planId: "pln_01J00000000000000000000000",
     objectiveId: "obj_01J00000000000000000000000",
     objectiveHash: `0x${"1".repeat(64)}` as Hex,

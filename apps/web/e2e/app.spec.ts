@@ -418,7 +418,7 @@ test("approval review shows the plan path and payment details", async ({ page })
       contentType: "application/json",
       headers: { "X-Czar-Large-Cap-Warn-Bps": "5000" },
       body: JSON.stringify({
-        schemaVersion: "1.2",
+        schemaVersion: "1.3",
         planId: "pln_01J00000000000000000000000",
         objectiveId: "obj_01J00000000000000000000000",
         objectiveHash: `0x${"1".repeat(64)}`,

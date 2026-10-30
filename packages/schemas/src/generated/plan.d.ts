@@ -30,9 +30,9 @@ export type PayeeLeaf = {
  */
 export interface Plan {
   /**
-   * Schema version, major.minor; this file is 1.2 (2026-10-20: steps[].why and untestedOptions, D91; neither is in planHash).
+   * Schema version, major.minor; this file is 1.2 (2026-10-20: steps[].why and untestedOptions, D91; neither is in planHash); 1.3 (SCR-160): approvalReasons; why.alternativesLost reasons unrated and health-blocked.
    */
-  schemaVersion: "1.2";
+  schemaVersion: "1.3";
   /**
    * Plan id.
    */
@@ -190,6 +190,14 @@ export interface Plan {
      */
     nEff: number;
   }[];
+  /**
+   * Why this plan needs the owner's explicit approval (SCR-160 §9.3): a paid step uses an unrated supplier, or one with an uncleared health fact for this owner, or the N1 exploration slot. Not in planHash. A plan with a non-empty list is never opened under earned allowance.
+   *
+   * @maxItems 4
+   *
+   * Items: Reason.
+   */
+  approvalReasons?: ("unrated" | "health-fact" | "exploration-slot")[];
 }
 /**
  * One step of a plan (spec 02 §4.6).
@@ -381,7 +389,9 @@ export interface Step {
         | "output-format"
         | "probe-failed"
         | "payee-changed"
-        | "not-in-top-k";
+        | "not-in-top-k"
+        | "unrated"
+        | "health-blocked";
     }[];
     /**
      * Retrieved candidates not chosen beyond the ten listed.

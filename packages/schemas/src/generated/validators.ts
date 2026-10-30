@@ -1,6 +1,6 @@
 // Generated from docs/specs/02-data-and-protocol/schemas. Do not edit.
 import { validateSchema } from "#src/validator";
-import type { AcceptanceReport, ActivityEvent, CapabilityCard, DemandProofLeaf, DemandProofLeafV2, Envelope, EvidenceBatch, InterviewSubmission, JobBrief, JobRecord, MarketView, ObjectiveSubmission, Objective, PaymentRef, Plan, PocketRecord, ProposedBelief, RankingDecision, Receipt, Reservation, SoulVersionLeaf, Soul, SourceReceipt, SourceScan, StepError, StepResult, TaskSpec } from "./types.ts";
+import type { AcceptanceReport, ActivityEvent, CapabilityCard, DemandProofLeaf, DemandProofLeafV2, Envelope, EvidenceBatch, InterviewSubmission, JobBrief, JobRecord, MarketView, ObjectiveSubmission, Objective, PaymentRef, Plan, PocketRecord, ProposedBelief, RankingDecision, Rating, Receipt, Reservation, SoulVersionLeaf, Soul, SourceReceipt, SourceScan, StepError, StepResult, TaskSpec } from "./types.ts";
 
 export function validateAcceptanceReport(value: unknown): value is AcceptanceReport {
   return validateSchema("acceptance-report", value);
@@ -72,6 +72,10 @@ export function validateProposedBelief(value: unknown): value is ProposedBelief 
 
 export function validateRankingDecision(value: unknown): value is RankingDecision {
   return validateSchema("ranking-decision", value);
+}
+
+export function validateRating(value: unknown): value is Rating {
+  return validateSchema("rating", value);
 }
 
 export function validateReceipt(value: unknown): value is Receipt {

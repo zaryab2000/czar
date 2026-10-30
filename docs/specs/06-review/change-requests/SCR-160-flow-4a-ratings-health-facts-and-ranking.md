@@ -48,6 +48,8 @@ The receipt leaf's `obs_id` therefore carries the derived value. No leaf shape a
 
 ## 4. `StepResult` 1.1 (spec 02 §4.15; `schemas/step-result.schema.json`)
 
+> **Timing (SCR-161):** the schema file stays at 1.0 until package 4A-2, because every StepResult producer is in the payer code that 4A-2 changes. The architect applies the 1.1 schema edit in the same window as 4A-2; the rules below are final.
+
 - `schemaVersion` const `"1.1"`.
 - New required fields: `callIndex` (integer 0–4095; the authorization index for vault-direct, the nanopayment index for pockets, `0` for a job), `obsId` (`SlObsId`).
 - New optional field: `subjectIndex` (integer ≥ 0; the `TaskSpec` subject this call served, D84).
@@ -103,8 +105,8 @@ CREATE INDEX observations_user ON observations(user_id, created_at DESC);
 
 | Rail | Row written | `settled_at` set when (CZ-15 calls `markSettled(obs_id, now(), tx)`) | `released_at` set when (`markReleased(obs_id)`) |
 |---|---|---|---|
-| `x402-exact` | at `call.result` (response received, before acceptance finishes) | CZ-19 `authorizations.settled` is true for `(reservationId, index)` (the payer's settle phase, CZ-15 §5.2 step 6) | the index is released unused at `finalize` (step 8) |
-| `gateway-batched` | at the nanopayment response | the Gateway row for `(pocket, nonce)` is `completed` (CZ-19 §5.6 poll) | the Gateway row is `failed` |
+| `x402-exact` | at `auth.signed`, `responded_at` and `delivered` NULL; `call.result` fills them (SCR-161 §5) | CZ-19 `authorizations.settled` is true for `(reservationId, index)` (the payer's settle phase, CZ-15 §5.2 step 6) | the index is released unused at `finalize` (step 8) |
+| `gateway-batched` | at nanopayment signing, filled at the response (SCR-161 §5) | the Gateway row for `(pocket, nonce)` is `completed` (CZ-19 §5.6 poll) | the Gateway row is `failed` |
 | `erc8183-job` | at `JobOpened` (`delivered = NULL`) | `JobFunded` is mined | the job is cancelled or `Released` unfunded |
 
 - `settled_at` is the server clock when CZ-15 first observes the fact; `settlement_tx` is the hash when known (block timestamps are stage 2).

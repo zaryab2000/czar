@@ -423,7 +423,7 @@ type PaymentRef =
 ### 4.15 `StepResult`
 
 - **Purpose:** the only form in which untrusted merchant output leaves the reader: it goes to the paying agent (code), acceptance and write-back, **never to the planner** (D74, RV-018; the planner's re-plan input is only `{stepIndex, errorCode, flags}`). Produced by the reader model under a fixed schema. **Superseded by D74:** "the only form in which untrusted merchant output reaches the planner".
-- **Schema:** `schemas/step-result.schema.json` (1.1, SCR-160)
+- **Schema:** `schemas/step-result.schema.json` (1.0 today; the SCR-160 rows `callIndex`, `subjectIndex`, `obsId` below land as 1.1 together with Flow 4A package 4A-2, SCR-161)
 
 | Field | Type | R | PC | Description |
 |---|---|---|---|---|
