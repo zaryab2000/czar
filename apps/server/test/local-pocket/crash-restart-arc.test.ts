@@ -1,7 +1,8 @@
 // SCR-146 §3.3 run 5 (SCR-150 §5): kill and resume the CZ-15 payer on a CLEAN pinned arc-anvil with the
 // SCR-150 Gateway doubles, the real CZ-27 signer and the D92 stand-ins. Kill points: reserve.sent (also with
-// the resume past the saved reserve's TTL window, SCR-153 §2), call.sent, before settle, between /v1/transfer
-// and gatewayMint, and after an expired lease.
+// the resume past the saved reserve's TTL window, SCR-153 §2, and with the chain's clock ahead of the
+// server's, SCR-155 §2), call.sent, before settle, between /v1/transfer and gatewayMint, and after an expired
+// lease.
 // "Kill" is in-process: the executor is aborted at an injected point (a raw transaction is dropped before the
 // node or the payer dies right after it is mined; the seller or `/v1/transfer` answers and the payer dies
 // before reading it), the instance is dropped, and a fresh executor resumes over the same database and chain.
@@ -47,6 +48,8 @@ const KILLED = "injected crash";
 const FUNDED_STEP_CAP = 400_000n;
 const FUNDED_CAP = 2_000_000n;
 const MS_PER_SECOND = 1000;
+/** SCR-155 §2: the resumed payer's server clock trails chain time by this much. */
+const CHAIN_AHEAD_SECONDS = 400;
 const reserveSelector = toFunctionSelector(getAbiItem({ abi: czarVaultAbi, name: "reserve" }));
 const settleSelector = toFunctionSelector(getAbiItem({ abi: czarVaultAbi, name: "settle" }));
 const mintSelector = toFunctionSelector("gatewayMint(bytes,bytes)");
@@ -130,6 +133,38 @@ describe.skipIf(!localChainEnabled)(
         expect(fresh.find((row) => row.phase === "reserve.mined")?.payload["reservationId"]).toBe(
           reserved[0]?.args.reservationId?.toString(),
         );
+        await expectPaidExactlyOnce(plan);
+      });
+
+      it("makes one new attempt from chain time when the chain runs 400 s ahead of the server", async () => {
+        const plan = await x402Plan();
+        harness.chain.crash.arm({
+          name: "reserve-unsent-chain-ahead",
+          when: "before-send",
+          match: sentTo(plan, reserveSelector),
+        });
+        await expect(executeX402(harness, plan)).rejects.toThrow(KILLED);
+        const saved = await savedReserve(plan);
+        await advanceChainTimeTo(saved.validBefore - BigInt(MIN_RESERVATION_TTL_SECONDS) + 1n);
+        const chainBefore = (await harness.chain.reader.getBlock()).timestamp;
+        const serverLagMs = CHAIN_AHEAD_SECONDS * MS_PER_SECOND;
+        const serverBefore = BigInt(
+          Math.floor((harness.clock.now().getTime() - serverLagMs) / MS_PER_SECOND),
+        );
+
+        expect((await executeX402(harness, plan, undefined, serverLagMs)).state).toBe("done");
+        expect(await attemptPhases(plan, 0)).toEqual(["reserve.sent", "reserve.mined"]);
+        const fresh = await getExecutionTrace(getPool(), plan.planId, 0, 1);
+        const sent = fresh.filter((row) => row.phase === "reserve.sent");
+        expect(sent).toHaveLength(1);
+        const freshValidBefore = BigInt(String(sent[0]?.payload["validBefore"]));
+        const ttl = BigInt(defaultTimeoutSeconds());
+        expect(freshValidBefore - ttl).toBeGreaterThanOrEqual(chainBefore);
+        expect(freshValidBefore - ttl).toBeGreaterThan(
+          serverBefore + BigInt(CHAIN_AHEAD_SECONDS / 2),
+        );
+        expect(fresh.at(-1)?.phase).toBe("step.done");
+        expect(await getExecutionTrace(getPool(), plan.planId, 0, 2)).toEqual([]);
         await expectPaidExactlyOnce(plan);
       });
 

@@ -515,6 +515,8 @@ function arcPayerChain(): VaultDirectChain {
         functionName: "stepUsed",
         args: [envelopeId, stepIndex],
       }),
+    latestBlockTimestamp: async () =>
+      (await publicClient.getBlock({ blockTag: "latest" })).timestamp,
     reserve: async ({ signedTransaction }) => {
       const txHash = await sendSigned(signedTransaction);
       const reservationId = await publicClient.readContract({

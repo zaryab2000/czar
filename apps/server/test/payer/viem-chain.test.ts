@@ -1,6 +1,7 @@
 // SCR-153 §2: the vault-direct chain adapter reports a status-0 `reserve` with the timestamp of the block that
 // mined it, read from the receipt and that block's header only. It never replays the transaction with
 // `eth_call` and block overrides (the Arc testnet RPC may not support them).
+// SCR-155 §2: "now" for a fresh reserve is the latest block timestamp from a fresh read on every call.
 import { describe, expect, it } from "vitest";
 import { createPublicClient, custom, type Address, type Hex } from "viem";
 import { createViemVaultDirectChain } from "#src/payer/viem-chain";
@@ -15,6 +16,7 @@ const SIGNED_RESERVE = "0xdead01" as Hex;
 const MINED_BLOCK = 77n;
 const MINED_AT = 1_790_000_123n;
 const REVERTED = "0x0";
+const LATER_BY_SECONDS = 12n;
 
 describe("viem vault-direct chain: reverted reserve", () => {
   it("reports a reverted saved reserve with its mined block's timestamp", async () => {
@@ -54,10 +56,24 @@ describe("viem vault-direct chain: reverted reserve", () => {
   });
 });
 
+describe("viem vault-direct chain: chain time", () => {
+  it("reads the latest block's timestamp fresh on every call", async () => {
+    const node = fakeNode();
+    const chain = createViemVaultDirectChain({ client: node.client, vault: VAULT, usdc: USDC });
+
+    await expect(chain.latestBlockTimestamp()).resolves.toBe(MINED_AT);
+    node.advance(LATER_BY_SECONDS);
+    await expect(chain.latestBlockTimestamp()).resolves.toBe(MINED_AT + LATER_BY_SECONDS);
+
+    expect(node.blockRequests).toEqual(["latest", "latest"]);
+  });
+});
+
 /** A JSON-RPC node at the transport boundary: one reverted `reserve` mined in `MINED_BLOCK`. */
 function fakeNode(options: { mined: boolean } = { mined: true }) {
   const methods: string[] = [];
-  const blockRequests: bigint[] = [];
+  const blockRequests: (bigint | string)[] = [];
+  let timestamp = MINED_AT;
   const receipt = {
     transactionHash: TX_HASH,
     transactionIndex: "0x0",
@@ -88,24 +104,33 @@ function fakeNode(options: { mined: boolean } = { mined: true }) {
             return hex(MINED_BLOCK);
           case "eth_getTransactionReceipt":
             return options.mined ? receipt : null;
-          case "eth_getBlockByNumber":
-            blockRequests.push(BigInt(String(list[0])));
-            return blockHeader(BigInt(String(list[0])));
+          case "eth_getBlockByNumber": {
+            const tag = String(list[0]);
+            blockRequests.push(tag === "latest" ? tag : BigInt(tag));
+            return blockHeader(tag === "latest" ? MINED_BLOCK : BigInt(tag), timestamp);
+          }
           default:
             throw new Error(`unexpected RPC method ${method}`);
         }
       },
     }),
   });
-  return { client, methods, blockRequests };
+  return {
+    client,
+    methods,
+    blockRequests,
+    advance: (seconds: bigint) => {
+      timestamp += seconds;
+    },
+  };
 }
 
-function blockHeader(number: bigint) {
+function blockHeader(number: bigint, timestamp: bigint) {
   return {
     number: hex(number),
     hash: BLOCK_HASH,
     parentHash: `0x${"0c".repeat(32)}`,
-    timestamp: hex(MINED_AT),
+    timestamp: hex(timestamp),
     baseFeePerGas: "0x1",
     gasLimit: "0x1c9c380",
     gasUsed: "0x5208",

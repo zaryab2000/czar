@@ -74,6 +74,11 @@ export function createViemVaultDirectChain(input: {
         envelope.shortfall;
       return { cap: envelope.cap, exposure };
     },
+    async latestBlockTimestamp() {
+      // A block read is never served from viem's cache (SCR-155 §2: a fresh read).
+      const block = await input.client.getBlock({ blockTag: "latest" });
+      return block.timestamp;
+    },
     async reserve(args) {
       const txHash = await input.client.sendRawTransaction({
         serializedTransaction: args.signedTransaction,
