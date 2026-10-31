@@ -2284,14 +2284,6 @@ export const PARAMETERS = [
     source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:674",
   },
   {
-    key: "selection.halfLifeDays",
-    type: "integer",
-    default: 14,
-    unit: "days",
-    reason: "SL-C9 data-json",
-    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:666",
-  },
-  {
     key: "selection.maxProbesPerQuery",
     type: "integer",
     default: 5,
@@ -2299,14 +2291,6 @@ export const PARAMETERS = [
     reason: "live 402 probes per query in parallel",
     source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:722",
     notes: "prose only",
-  },
-  {
-    key: "selection.nMin",
-    type: "integer",
-    default: 5,
-    unit: "count",
-    reason: "SL-C10 unverified threshold",
-    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:667",
   },
   {
     key: "selection.plannerUnknownPolicy",
@@ -2334,14 +2318,6 @@ export const PARAMETERS = [
     source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:675",
   },
   {
-    key: "selection.riskQuantile",
-    type: "number",
-    default: 0.2,
-    unit: "",
-    reason: "SL-C10 default; user posture may lower it",
-    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:668",
-  },
-  {
     key: "selection.snapshotRefreshSeconds",
     type: "integer",
     default: 300,
@@ -2357,22 +2333,6 @@ export const PARAMETERS = [
     reason: "flag snapshot_age above this",
     source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:703",
     notes: "prose only",
-  },
-  {
-    key: "selection.wCost",
-    type: "number",
-    default: 0.2,
-    unit: "",
-    reason: "SL-C10",
-    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:669",
-  },
-  {
-    key: "selection.wLatency",
-    type: "number",
-    default: 0.1,
-    unit: "",
-    reason: "SL-C10",
-    source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:669",
   },
   {
     key: "selection.testBuyer.enabled",
@@ -3127,7 +3087,7 @@ export const PARAMETERS = [
     type: "integer",
     default: 6,
     unit: "count",
-    reason: "One more than selection.nMin, as selection.seedJobRuns",
+    reason: "One more than selection.testBuyer.minReceipts, as selection.seedJobRuns",
     source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:767",
   },
   {
@@ -3507,5 +3467,52 @@ export const PARAMETERS = [
     source:
       "docs/specs/06-review/change-requests/SCR-149-daemon-server-origin-and-result-polling.md:16",
     noDefault: true,
+  },
+  {
+    key: "rating.windowDays",
+    type: "integer",
+    default: 14,
+    unit: "days",
+    reason:
+      "F4-07; Airbnb's 14-day transaction-bound review window (x402 Market Unfairness Report §5.2.2)",
+    source:
+      "docs/specs/06-review/change-requests/SCR-160-flow-4a-ratings-health-facts-and-ranking.md:383",
+  },
+  {
+    key: "health.consecutiveFailures",
+    type: "integer",
+    default: 3,
+    unit: "count",
+    reason:
+      "F4-05; three unsettled failures in a row put a supplier behind approval (each costs gas on Arc)",
+    source:
+      "docs/specs/06-review/change-requests/SCR-160-flow-4a-ratings-health-facts-and-ranking.md:384",
+  },
+  {
+    key: "selection.confidenceZ",
+    type: "number",
+    default: 1.959964,
+    unit: "",
+    reason: "95% two-sided normal quantile for the Wilson lower bound; a convention, not a weight",
+    source:
+      "docs/specs/06-review/change-requests/SCR-160-flow-4a-ratings-health-facts-and-ranking.md:385",
+  },
+  {
+    key: "selection.ratingRefreshDebounceSeconds",
+    type: "integer",
+    default: 30,
+    unit: "s",
+    reason: "coalesces refreshes after a burst of ratings",
+    source:
+      "docs/specs/06-review/change-requests/SCR-160-flow-4a-ratings-health-facts-and-ranking.md:386",
+  },
+  {
+    key: "selection.testBuyer.minReceipts",
+    type: "integer",
+    default: 5,
+    unit: "count",
+    reason: "replaces selection.nMin in the test-buyer's selection rule",
+    source:
+      "docs/specs/06-review/change-requests/SCR-160-flow-4a-ratings-health-facts-and-ranking.md:387",
   },
 ] as const satisfies readonly ParameterSpec[];

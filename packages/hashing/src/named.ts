@@ -2,7 +2,7 @@
 // Inputs are the 02 objects; optional fields left undefined are omitted from the preimage.
 import { H, jcs } from "./jcs.ts";
 import type { Hash32 } from "./eip712.ts";
-import type { TaskSpec } from "@czar/schemas";
+import type { PaymentRef, TaskSpec } from "@czar/schemas";
 import { keccak256 } from "viem";
 
 export const HASH_RULE = "czar-hash-v1";
@@ -281,6 +281,55 @@ export function reportHash(report: Readonly<Record<string, unknown>>): Hash32 {
 export function paymentRefHash(ref: Readonly<Record<string, unknown>>): Hash32 {
   const { reservationId: _r, index: _i, ...rest } = ref;
   return H(rest);
+}
+
+/** Identifies one payment across retries and crash recovery (SCR-160 §3). */
+export function dedupKey(ref: PaymentRef): string {
+  switch (ref.rail) {
+    case "x402-exact":
+      return [
+        "x402-exact",
+        ref.network,
+        ref.payer.toLowerCase(),
+        ref.payTo.toLowerCase(),
+        canonicalNonce(ref.nonce),
+      ].join(":");
+    case "gateway-batched":
+      return [
+        "gateway-batched",
+        ref.network,
+        ref.payer.toLowerCase(),
+        ref.payTo.toLowerCase(),
+        canonicalNonce(ref.nonce),
+      ].join(":");
+    case "erc8183-job":
+      if (!/^(0|[1-9]\d*)$/.test(ref.jobId))
+        throw new TypeError("ERC-8183 jobId must be canonical decimal.");
+      return `erc8183:${ref.network}:${ref.contract.toLowerCase()}:${ref.jobId}`;
+    default:
+      throw new TypeError(`Unsupported PaymentRef rail for dedup key: ${ref.rail}`);
+  }
+}
+
+function canonicalNonce(nonce: string): string {
+  if (!/^0x[\da-f]{64}$/i.test(nonce))
+    throw new TypeError("PaymentRef nonce must be a 32-byte hex value.");
+  return nonce.toLowerCase();
+}
+
+/** Derives a stable observation ID from a canonical payment deduplication key. */
+export function obsId(key: string): string {
+  return `obs_${keccak256(new TextEncoder().encode(key)).slice(2, 34)}`;
+}
+
+/** Derives the stable ERC-8183 provider service ID (SCR-160 §3). */
+export function serviceId(
+  network: string,
+  providerAddress: string,
+  escrowContract: string,
+): string {
+  const preimage = `${network}|${providerAddress.toLowerCase()}|${escrowContract.toLowerCase()}`;
+  return `svc_${keccak256(new TextEncoder().encode(preimage)).slice(2, 34)}`;
 }
 
 /** `inputCommit = H({hashRule, kind: "job-input", inputs, inputSalt})` (RV-025). */

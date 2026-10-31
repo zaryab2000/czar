@@ -722,6 +722,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 8000,
   },
   {
+    "key": "health.consecutiveFailures",
+    "source": "default",
+    "unit": "count",
+    "value": 3,
+  },
+  {
     "key": "indexer.closedPocketQuietHours",
     "source": "default",
     "unit": "hours",
@@ -1697,6 +1703,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 60,
   },
   {
+    "key": "rating.windowDays",
+    "source": "default",
+    "unit": "days",
+    "value": 14,
+  },
+  {
     "key": "reader.maxChars",
     "source": "default",
     "unit": "chars",
@@ -1891,6 +1903,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 3600,
   },
   {
+    "key": "selection.confidenceZ",
+    "source": "default",
+    "unit": "",
+    "value": 1.959964,
+  },
+  {
     "key": "selection.czarRegisteredServices",
     "source": "default",
     "unit": "service-map",
@@ -1901,12 +1919,6 @@ exports[`registry > matches the dump snapshot 1`] = `
     "source": "default",
     "unit": "days",
     "value": 90,
-  },
-  {
-    "key": "selection.halfLifeDays",
-    "source": "default",
-    "unit": "days",
-    "value": 14,
   },
   {
     "key": "selection.marketMaxListings",
@@ -1987,12 +1999,6 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 5,
   },
   {
-    "key": "selection.nMin",
-    "source": "default",
-    "unit": "count",
-    "value": 5,
-  },
-  {
     "key": "selection.paymentNetwork",
     "source": "default",
     "unit": "chain-namespace-key",
@@ -2011,6 +2017,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 2000,
   },
   {
+    "key": "selection.ratingRefreshDebounceSeconds",
+    "source": "default",
+    "unit": "s",
+    "value": 30,
+  },
+  {
     "key": "selection.registeredRecrawlHours",
     "source": "default",
     "unit": "hours",
@@ -2027,12 +2039,6 @@ exports[`registry > matches the dump snapshot 1`] = `
     "source": "default",
     "unit": "count",
     "value": 50,
-  },
-  {
-    "key": "selection.riskQuantile",
-    "source": "default",
-    "unit": "",
-    "value": 0.2,
   },
   {
     "key": "selection.seedJobRuns",
@@ -2090,6 +2096,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 100000,
   },
   {
+    "key": "selection.testBuyer.minReceipts",
+    "source": "default",
+    "unit": "count",
+    "value": 5,
+  },
+  {
     "key": "selection.testBuyer.newServicesPerWeek",
     "source": "default",
     "unit": "count",
@@ -2112,18 +2124,6 @@ exports[`registry > matches the dump snapshot 1`] = `
     "source": "default",
     "unit": "flag",
     "value": true,
-  },
-  {
-    "key": "selection.wCost",
-    "source": "default",
-    "unit": "",
-    "value": 0.2,
-  },
-  {
-    "key": "selection.wLatency",
-    "source": "default",
-    "unit": "",
-    "value": 0.1,
   },
   {
     "key": "shadow.days",

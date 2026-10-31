@@ -14,6 +14,8 @@ import {
   PAYEE_KIND,
   buildTree,
   categoryHash,
+  dedupKey,
+  obsId,
   payeeLeaf,
   paymentRefHash,
   verifyProof,
@@ -1292,7 +1294,7 @@ function createPayerBoundary(
         idempotencyKey: randomUUID(),
         now: options.clock.now(),
         acceptance: {
-          obsId: `obs_${options.random.bytes(16).toString("hex")}`,
+          obsId: obsId(dedupKey(paymentRef)),
           profileId,
           envelopeRef: input.envelopeRef,
           stepIndex: input.step.stepIndex,
