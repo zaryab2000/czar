@@ -3,7 +3,7 @@
 // `delivery-failed` (settled on chain, no usable body). A step with zero paid calls ends `failed` / `unpaid`.
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadConfig } from "@czar/config";
-import { buildTree, PAYEE_KIND, payeeLeaf } from "@czar/hashing";
+import { buildTree, NO_RESPONSE_COMMIT, PAYEE_KIND, payeeLeaf } from "@czar/hashing";
 import type { StepResult } from "@czar/schemas";
 import type { SignRequest, SignResult } from "@czar/signer";
 import {
@@ -217,6 +217,19 @@ describe("vault-direct partial steps (SCR-159 §3)", () => {
       responded_at: null,
       settled_at: expect.any(Date),
     });
+    expect(run.receiptIndices()).toEqual([0, 1]);
+    const trace = await getPool().query<{ payload: { status: string; bodyCommit: string; bodyRef?: string } }>(
+      `SELECT payload FROM step_executions WHERE plan_id=$1 AND phase='call.result'
+       AND payload->>'callIndex'='1'`,
+      [PLAN_ID],
+    );
+    expect(trace.rows[0]?.payload).toMatchObject({
+      status: "no-response",
+      bodyCommit: NO_RESPONSE_COMMIT,
+      fields: [],
+      flags: [],
+    });
+    expect(trace.rows[0]?.payload.bodyRef).toBeUndefined();
   });
 
   it("does not retry a blocked fetch target", async () => {

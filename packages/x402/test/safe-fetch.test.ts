@@ -193,6 +193,29 @@ describe("redirects", () => {
 });
 
 describe("limits", () => {
+  it.each([
+    ["ECONNREFUSED", "connection-refused"],
+    ["ECONNRESET", "connection-reset"],
+    ["ENETUNREACH", "network-unreachable"],
+  ])("classifies %s without exposing transport details", async (code, outcome) => {
+    const { safeFetch } = fetcherWith({ "api.example.com": [PUBLIC] }, async () => {
+      throw Object.assign(new Error("private transport detail"), { code });
+    });
+    await expect(safeFetch("https://api.example.com/x")).rejects.toMatchObject({
+      code: "upstream-unavailable",
+      outcome,
+      message: "upstream-unavailable: transport",
+    });
+  });
+
+  it("keeps DNS failure outside seller-side outcomes", async () => {
+    const { safeFetch } = fetcherWith({}, slow);
+    await expect(safeFetch("https://missing.example/x")).rejects.toMatchObject({
+      code: "fetch-blocked",
+      rule: "dns",
+    });
+  });
+
   it("refuses a body over the caller's byte cap", async () => {
     const { transport } = scripted({
       "api.example.com/big": { status: 200, body: "x".repeat(2048) },

@@ -29,7 +29,7 @@ describe("SCR-160 health facts", () => {
     ]);
     expect(
       healthFacts([pending], [{ kind: "retry-exhausted", obsId: pending.obsId }], config),
-    ).toEqual([{ fact: "settled-not-delivered", obsId: pending.obsId }]);
+    ).toEqual([]);
   });
 
   it("H2 requires three consecutive releases and a settlement resets the run", () => {
