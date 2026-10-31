@@ -630,6 +630,43 @@ describe("pocket funding", () => {
     expect(settled.rows.every((row) => row.settled_at instanceof Date)).toBe(true);
   });
 
+  it("does not sign an alternate Gateway payee without a committed service identity", async () => {
+    const { challenge, input } = gatewayRetryFixture();
+    const primary = "0x0000000000000000000000000000000000000004";
+    const alternate = input.steps[0]?.payee;
+    if (!alternate) throw new Error("Gateway fixture has no alternate payee.");
+    const step = input.steps[0];
+    if (!step) throw new Error("Gateway fixture has no step.");
+    const sign = vi.fn(async () => ({
+      signature: `0x${"ab".repeat(65)}` as const,
+      digest: `0x${"cd".repeat(32)}` as const,
+    }));
+    const safeFetch = vi.fn(async () => ({
+      status: 402,
+      url: "http://127.0.0.1:4021/data",
+      headers: { "payment-required": challenge },
+      body: new Uint8Array(),
+    }));
+
+    await expect(
+      payGatewaySteps(
+        {
+          ...input,
+          steps: [{ ...step, payee: primary, alternates: [alternate] }],
+        },
+        {
+          pool: getPool(),
+          config: loadConfig(),
+          signer: { sign },
+          safeFetch,
+          now: () => new Date("2026-10-22T00:00:00Z"),
+          gatewayStatus: vi.fn(async () => "pending" as const),
+        },
+      ),
+    ).rejects.toThrow(/service|payee/i);
+    expect(sign).not.toHaveBeenCalled();
+  });
+
   it("retries a failed nanopayment with the same signed payment header", async () => {
     const payTo = "0x0000000000000000000000000000000000000003";
     const encodedRequired = encodePaymentRequired({

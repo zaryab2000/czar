@@ -114,6 +114,87 @@ describe("vault-direct executor", () => {
     expect(safeFetch).not.toHaveBeenCalled();
   });
 
+  it("does not sign an alternate x402 payee without a committed service identity", async () => {
+    const alternate = "0x0000000000000000000000000000000000000003" as const;
+    const offer = buildPaymentRequired({
+      url: "http://127.0.0.1:4021/data",
+      description: "alternate seller",
+      serviceName: "alternate",
+      tags: [],
+      network: "eip155:5042002",
+      amount: "1000",
+      payTo: alternate,
+      maxTimeoutSeconds: 30,
+    });
+    const leaves = [PAYEE, alternate].map((payee) =>
+      payeeLeaf(payee, PAYEE_KIND.X402_PAY_TO, 0, 1000n),
+    );
+    const payeeRoot = buildTree(leaves).root;
+    const sign = vi.fn(async () => {
+      throw new Error("alternate payee reached K3 signer");
+    });
+    const input: VaultDirectInput = {
+      planId: PLAN_ID,
+      envelopeRef: "eip155:5042002:0x0000000000000000000000000000000000000001:1",
+      envelopeId: 1n,
+      envelopeExpiresAt: new Date("2026-10-22T00:00:00Z"),
+      vault: VAULT,
+      plan: {
+        network: "eip155:5042002",
+        expiresAt: "2026-10-22T00:00:00.000Z",
+        payeeLeaves: [PAYEE, alternate].map((payee) => ({
+          payee,
+          kind: PAYEE_KIND.X402_PAY_TO,
+          stepIndex: 0,
+          stepCap: "1000",
+        })),
+        payeeRoot,
+      } as never,
+      step: {
+        stepIndex: 0,
+        stepId: "stp_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
+        kind: "x402-exact",
+        capability: "web-search",
+        serviceId: "svc_11111111111111111111111111111111",
+        resource: { url: "http://127.0.0.1:4021/data", method: "GET" },
+        payee: PAYEE,
+        alternates: [alternate],
+        unitAmount: "1000",
+        expectedCalls: 1,
+        stepCap: "1000",
+        routingReason: "vault-direct",
+        acceptanceProfileId: "prof_11111111111111111111111111111111",
+        callInputs: [{ callIndex: 0, input: { q: "one" } }],
+      },
+      userId: TEST_USER_ID,
+      deviceId: "dev_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
+      dispatchLease: { assertHeld: vi.fn() },
+    };
+    const result = await executeVaultDirectStep(input, {
+      pool: getPool(),
+      config: loadConfig(),
+      signer: { sign },
+      chain: {
+        stepUsed: async () => 0n,
+        envelopeCapacity: async () => ({ cap: 1000n, exposure: 0n }),
+        latestBlockTimestamp: async () => 1_761_000_000n,
+      } as never,
+      safeFetch: vi.fn(async () => ({
+        status: 402,
+        url: "http://127.0.0.1:4021/data",
+        headers: { "payment-required": encodePaymentRequired(offer) },
+        body: new Uint8Array(),
+      })),
+      now: () => new Date("2026-10-21T00:00:00Z"),
+      boundary: vi.fn(),
+      recordReceipt: vi.fn(async () => false),
+      objects: { put: vi.fn(), get: vi.fn() },
+    });
+
+    expect(result.state).toBe("failed");
+    expect(sign).not.toHaveBeenCalled();
+  });
+
   it("keeps the dispatcher lease while running an unpaid step", async () => {
     const envelopeRef = "eip155:5042002:0x0000000000000000000000000000000000000001:1";
     await getPool().query(
