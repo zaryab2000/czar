@@ -257,6 +257,47 @@ describe("job brief commitments", () => {
     ]);
   });
 
+  it("observes a rejection mined while syncing an already funded Submitted job", async () => {
+    const current = new Date("2026-10-23T00:00:00Z");
+    const input = recoveryInput(new Date(current.getTime() + 60_000));
+    const key = jobKey(input.jobEscrow, 7n);
+    let rejected = false;
+    const chain = {
+      findJob: vi.fn(async () => ({ jobKey: key, jobId: 7n })),
+      getJob: vi.fn(async () => ({
+        vaultState: rejected ? ("Expired" as const) : ("Submitted" as const),
+        escrowState: rejected ? ("Rejected" as const) : ("Submitted" as const),
+        budget: 1_000n,
+        expiredAt: Math.floor(current.getTime() / 1_000) + 60,
+      })),
+      syncJob: vi.fn(async () => {
+        rejected = true;
+        return { state: "Expired" as const, txHash: "sync-tx" };
+      }),
+    };
+    await executeJobStep(input, {
+      pool: getPool(),
+      config: loadConfig(),
+      chain: chain as never,
+      signer: { sign: vi.fn(async () => ({ signedTransaction: "0x1234" as const })) },
+      vault: input.vault,
+      now: () => current,
+      randomSalt: () => `0x${"22".repeat(32)}`,
+    });
+    const observation = await getPool().query<{
+      job_state: string;
+      delivered: number | null;
+      settled_at: Date | null;
+    }>(
+      `SELECT job_state,delivered,settled_at FROM observations
+       WHERE objective_id=(SELECT objective_id FROM plans WHERE plan_id=$1)`,
+      [PLAN_ID],
+    );
+    expect(observation.rows).toMatchObject([
+      { job_state: "Expired", delivered: 0, settled_at: expect.any(Date) },
+    ]);
+  });
+
   it("requires each alternate job provider to have its own approved leaf proof", () => {
     const primary = "0x0000000000000000000000000000000000000003";
     const alternate = "0x0000000000000000000000000000000000000004";
