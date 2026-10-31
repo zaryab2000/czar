@@ -1,0 +1,12 @@
+{
+  "taskClass": "data-json.extract",
+  "priceAtomic": "25",
+  "suppliers": [
+    { "label": "M1", "serviceId": "svc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "good": 5, "bad": 0 },
+    { "label": "M2", "serviceId": "svc_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "good": 9, "bad": 1 },
+    { "label": "M3", "serviceId": "svc_cccccccccccccccccccccccccccccccc", "good": 0, "bad": 0 }
+  ],
+  "afterCorrection": { "label": "M2", "good": 8, "bad": 2 },
+  "afterH1": { "label": "M1", "fact": "settled-not-delivered" },
+  "afterH4": { "label": "M2", "fact": "injection-blocked" }
+}
