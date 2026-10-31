@@ -83,6 +83,21 @@ describe("createLogger", () => {
     expect(JSON.parse(lines.at(-1) ?? "{}")["droppedFields"]).toBe(1);
   });
 
+  it("allows only the bounded rating event fields", () => {
+    const { logger, last } = capture();
+    logger.info("ratings_prompt_shown", { surface: "cli", steps: 2 });
+    expect(last()).toMatchObject({ surface: "cli", steps: 2 });
+    logger.info("ratings_posted", { surface: "web", value: "good" });
+    expect(last()).toMatchObject({ surface: "web", value: "good" });
+    logger.info("ratings_corrected", {
+      surface: "private user text", value: "merchant response", steps: -1,
+    });
+    expect(last()["surface"]).toBeUndefined();
+    expect(last()["value"]).toBeUndefined();
+    expect(last()["steps"]).toBeUndefined();
+    expect(last()["droppedFields"]).toBe(3);
+  });
+
   it("drops every field outside the allowlist and counts it", () => {
     const { logger, last } = capture();
     logger.info("objective_received", {
