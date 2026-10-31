@@ -5,6 +5,8 @@ import type { LedgerReceipt, Me } from "@czar/schemas";
 import { appApi } from "#src/app-api";
 import { ACCOUNT_REFRESH_EVENT } from "#src/app-shell";
 import { receiptStatusText } from "#src/receipt-status";
+import { ResultCard } from "#src/result-card";
+import { resultsThisWeek, thisWeekHeading } from "#src/result-cards";
 import { useAppData } from "#src/use-app-data";
 import { getStoredPasskey, sendOwnerUserOperation } from "#src/wallet";
 import { formatUsd } from "@czar/web/money-format";
@@ -39,6 +41,7 @@ export default function HomePage() {
       />
       {data.me.mode === "shadow" && <ShadowSummaryCard />}
       <OwnerControls me={data.me} refresh={refresh} />
+      <ThisWeekSection />
       <section className="panel">
         <h2>Weekly limits</h2>
         {data.me.limits.length === 0 ? (
@@ -87,6 +90,28 @@ export default function HomePage() {
         <a href="/receipts">View receipts</a>
       </section>
     </div>
+  );
+}
+
+function ThisWeekSection() {
+  const load = useCallback(() => appApi.listAllAppResults(), []);
+  const { data, error, loading, refresh } = useAppData(load);
+  const thisWeek = resultsThisWeek(data?.items ?? [], new Date());
+
+  return (
+    <section className="page-stack" aria-label="This week">
+      <h2>This week</h2>
+      {loading && !data && <p role="status">Loading results…</p>}
+      {error && <DataError message={error} refresh={refresh} />}
+      {data && (
+        <>
+          <p>{thisWeekHeading(thisWeek.length)}</p>
+          {thisWeek.map((card) => (
+            <ResultCard card={card} key={card.objectiveId} />
+          ))}
+        </>
+      )}
+    </section>
   );
 }
 
