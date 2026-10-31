@@ -121,13 +121,15 @@ async function buildPlan(
   const steps = collected.steps.map((step, index) => {
     if (!step.serviceId || !step.why) return step;
     const health = healthByStep[index]?.length ?? 0;
-    const explanation = health
-      ? " No ratings yet. Czar will ask before using it. A supplier health fact also requires approval."
-      : " No ratings yet. Czar will ask before using it.";
+    const unrated = collected.unratedStepIndices.has(index);
+    const explanation = [
+      ...(unrated ? [" No ratings yet. Czar will ask before using it."] : []),
+      ...(health ? [" A supplier health fact also requires approval."] : []),
+    ].join("");
     return { ...step, why: { ...step.why, summary: `${step.why.summary}${explanation}` } };
   });
   const approvalReasons: NonNullable<Plan["approvalReasons"]> = [];
-  if (steps.some((step) => step.serviceId)) approvalReasons.push("unrated");
+  if (collected.unratedStepIndices.size > 0) approvalReasons.push("unrated");
   if (healthByStep.some((facts) => facts.length > 0)) approvalReasons.push("health-fact");
   if (collected.hasExploration) approvalReasons.push("exploration-slot");
   if (steps.length === 0 && droppedSteps.length === 0) return null;
@@ -192,6 +194,7 @@ interface StepCollection {
   readonly droppedSteps: NonNullable<Plan["droppedSteps"]>;
   readonly rankingIds: string[];
   readonly hasExploration: boolean;
+  readonly unratedStepIndices: ReadonlySet<number>;
   readonly jobExpiresMs: number;
 }
 
@@ -272,11 +275,17 @@ async function completeCollectedSteps(args: {
   readonly ports: PlannerPorts;
   readonly network: string;
   readonly gatewayVolumeAtomic: bigint;
-}): Promise<Pick<StepCollection, "steps" | "leaves" | "hasExploration" | "jobExpiresMs">> {
+}): Promise<
+  Pick<
+    StepCollection,
+    "steps" | "leaves" | "hasExploration" | "unratedStepIndices" | "jobExpiresMs"
+  >
+> {
   const { entries, input, config, ports, network, gatewayVolumeAtomic } = args;
   const steps: Step[] = [];
   const leaves: Plan["payeeLeaves"] = [];
   let hasExploration = false;
+  const unratedStepIndices = new Set<number>();
   let jobExpiresMs = input.now.getTime();
   for (const entry of entries) {
     if (entry.kind === "unpaid") {
@@ -295,11 +304,12 @@ async function completeCollectedSteps(args: {
     });
     if (!planStep) continue;
     steps.push(planStep.step);
+    if (entry.candidate.fromExploration) unratedStepIndices.add(planStep.step.stepIndex);
     leaves.push(...planStep.leaves);
     hasExploration ||= entry.candidate.fromExploration;
     if (planStep.jobExpiresMs) jobExpiresMs = Math.max(jobExpiresMs, planStep.jobExpiresMs);
   }
-  return { steps, leaves, hasExploration, jobExpiresMs };
+  return { steps, leaves, hasExploration, unratedStepIndices, jobExpiresMs };
 }
 
 function preparePaidStep(
@@ -414,6 +424,7 @@ async function selectCandidate(
           defaultMax,
         );
   const decision = await ports.ranking.rank({
+    userId: input.userId,
     taskClass: taskClassFor(capability, config),
     capability,
     taskSpec: {
@@ -442,7 +453,14 @@ async function selectCandidate(
   });
   const probed =
     candidates.length === 0 && failures.length > 0 && failures.every((value) => value === "timeout")
-      ? await indexFallback({ ranked, input, ports, network, max })
+      ? await indexFallback({
+          ranked,
+          input,
+          ports,
+          network,
+          max,
+          ...(exploration ? { exploration } : {}),
+        })
       : candidates;
   probed.sort((a, b) => a.rank - b.rank);
   const selected = probed[0];
@@ -531,8 +549,9 @@ async function indexFallback(args: {
   readonly ports: PlannerPorts;
   readonly network: string;
   readonly max: bigint;
+  readonly exploration?: string;
 }): Promise<Candidate[]> {
-  const { ranked, input, ports, network, max } = args;
+  const { ranked, input, ports, network, max, exploration } = args;
   const candidates: Candidate[] = [];
   for (const [rank, row] of ranked.entries()) {
     if (input.excludedServices?.has(row.serviceId)) continue;
@@ -549,7 +568,7 @@ async function indexFallback(args: {
       offers: [offer],
       amount: BigInt(offer.amount),
       rank,
-      fromExploration: false,
+      fromExploration: row.serviceId === exploration,
       unprobed: true,
     });
   }

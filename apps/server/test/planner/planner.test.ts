@@ -72,6 +72,7 @@ function makePlanner(
     readonly profileSource?: PlannerPorts["profiles"];
     readonly health?: PlannerPorts["health"];
     readonly remaining?: string;
+    readonly unrated?: boolean;
   } = {},
 ) {
   const spec = {
@@ -101,21 +102,34 @@ function makePlanner(
             query: { task: "search", constraints: {}, risk_quantile: 0.5, weights: {} },
             candidates_considered: options.candidateCount ?? 1,
             excluded: [],
-            ranked: Array.from({ length: options.candidateCount ?? 1 }, (_, index) => ({
-              rank: index + 1,
-              service_id: `svc_${String.fromCharCode(97 + index).repeat(32)}`,
-              version_id: "svcver_1",
-              score: 0.9,
-              features: {},
-              evidence_refs: [],
-              evidence_age_days: 0,
-              missing: [],
-              badges: [],
-              explanation: "ranked",
-            })),
-            unverified: [],
+            ranked: Array.from(
+              { length: options.unrated ? 0 : (options.candidateCount ?? 1) },
+              (_, index) => ({
+                rank: index + 1,
+                service_id: `svc_${String.fromCharCode(97 + index).repeat(32)}`,
+                version_id: "svcver_1",
+                score: 0.9,
+                features: {},
+                evidence_refs: [],
+                evidence_age_days: 0,
+                missing: [],
+                badges: [],
+                explanation: "ranked",
+              }),
+            ),
+            unverified: options.unrated
+              ? [{ service_id: fakeService().serviceId, reason: "unrated", n_eff: 0 }]
+              : [],
             missing_dimensions_for_class: [],
-            insufficient_evidence: false,
+            insufficient_evidence: options.unrated ?? false,
+            ...(options.unrated
+              ? {
+                  exploration_slot: {
+                    service_id: fakeService().serviceId,
+                    reason: "no-ranked-candidate",
+                  },
+                }
+              : {}),
           };
         },
       },
@@ -320,9 +334,15 @@ describe("planner fallback", () => {
   });
 
   it("requires owner approval for an unrated paid supplier despite earned allowance", async () => {
-    const built = await makePlanner({ remaining: "999999999" });
+    const built = await makePlanner({ remaining: "999999999", unrated: true });
     expect(built?.plan.approvalReasons).toContain("unrated");
     expect(built?.approvalNeeded).toBe(true);
+  });
+
+  it("uses real ranked evidence without adding an unrated approval reason", async () => {
+    const built = await makePlanner({ remaining: "999999999" });
+    expect(built?.plan.approvalReasons).toBeUndefined();
+    expect(built?.approvalNeeded).toBe(false);
   });
 
   it("adds a health reason for the owner and excludes H4-blocked suppliers", async () => {
@@ -330,12 +350,13 @@ describe("planner fallback", () => {
       openOwnerFacts: async () => ["settled-not-delivered" as const],
       isInjectionBlocked: async () => false,
     };
-    const built = await makePlanner({ remaining: "999999999", health });
-    expect(built?.plan.approvalReasons).toEqual(["unrated", "health-fact"]);
+    const built = await makePlanner({ remaining: "999999999", health, unrated: true });
+    expect(built?.plan.approvalReasons).toEqual(["unrated", "health-fact", "exploration-slot"]);
     expect(built?.approvalNeeded).toBe(true);
     expect(
       await makePlanner({
         health: { ...health, isInjectionBlocked: async () => true },
+        unrated: true,
       }),
     ).toBeNull();
   });
@@ -530,6 +551,7 @@ describe("planner fallback", () => {
     const rankingQueries: RankingQuery[] = [];
     await makePlanner({ rankingQueries });
     expect(rankingQueries).toHaveLength(1);
+    expect(rankingQueries[0]?.userId).toBe("usr_01K7ZT9P4N5Q6R7S8T9V0W1X2Y");
     expect(JSON.stringify(rankingQueries[0])).not.toContain("merchant.example");
     expect(rankingQueries[0]).not.toHaveProperty("goal");
     expect(rankingQueries[0]).not.toHaveProperty("description");
