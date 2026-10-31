@@ -125,6 +125,25 @@ test("Home shows only this week's results and the same rating control", async ({
   await expect(week.getByRole("button", { name: "Good" })).toBeVisible();
 });
 
+test("Home keeps balances and owner controls when results fail", async ({ page }) => {
+  await stubAccount(page);
+  await page.route("**/v1/app/results?**", (route) =>
+    route.fulfill({
+      status: 503,
+      contentType: "application/problem+json",
+      body: JSON.stringify({ detail: "Results are temporarily unavailable." }),
+    }),
+  );
+  await page.goto("/home");
+
+  await expect(page.getByRole("heading", { name: "Your Czar account" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Balances" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Account controls" })).toBeVisible();
+  const week = page.getByRole("region", { name: "This week" });
+  await expect(week.getByRole("alert")).toBeVisible();
+  await expect(week.getByRole("button", { name: "Try again" })).toBeVisible();
+});
+
 test("an expired result shows Rating closed without rating controls", async ({ page }) => {
   await stubAccount(page);
   await stubRatings(page, "2026-10-01T00:00:00.000Z");
