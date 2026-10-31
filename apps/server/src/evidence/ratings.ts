@@ -46,7 +46,10 @@ interface RatingInput {
 
 interface OwnerResult {
   readonly controlled: boolean;
-  readonly vault: string | null;
+  readonly envelope_ref: string | null;
+  readonly plan: {
+    readonly steps?: readonly { readonly stepIndex: number; readonly payee: string }[];
+  } | null;
   readonly provenance: Result["provenance"];
   readonly created_at: Date;
 }
@@ -56,6 +59,8 @@ interface EligibleObservation {
   readonly user_id: string;
   readonly vault: string;
   readonly envelope_ref: string;
+  readonly rail: string;
+  readonly dedup_key: string;
   readonly network: string;
   readonly service_id: string;
   readonly version_id: string;
@@ -113,9 +118,14 @@ async function submitWithinTransaction(
     !owner.provenance.some((entry) => entry.stepIndex === input.request.stepIndex && entry.accepted)
   )
     throw new RatingRejected(422, "not-producing");
-  const observations = await loadEligibleObservations(client, input.request);
+  const payee = owner.plan?.steps?.find(
+    (step) => step.stepIndex === input.request.stepIndex,
+  )?.payee;
+  const settled = await loadEligibleObservations(client, input.request);
+  if (settled.length === 0) throw new RatingRejected(409, "nothing-settled");
+  assertPayingVault(settled, owner.envelope_ref, input.userId);
+  const observations = settled.filter((observation) => isAttributedToPayee(observation, payee));
   if (observations.length === 0) throw new RatingRejected(409, "nothing-settled");
-  assertPayingVault(observations, owner.vault, input.userId);
   const windowClosesAt = new Date(
     owner.created_at.getTime() + Number(config.get("rating.windowDays")) * 86_400_000,
   );
@@ -188,9 +198,10 @@ async function submitWithinTransaction(
 
 async function loadOwnerResult(client: PoolClient, input: RatingInput): Promise<OwnerResult> {
   const found = await client.query<OwnerResult>(
-    `SELECT u.controlled,u.vault,r.provenance,r.created_at
+    `SELECT u.controlled,o.envelope_ref,p.plan,r.provenance,r.created_at
      FROM objectives o JOIN users u ON u.user_id=o.user_id
      JOIN results r ON r.objective_id=o.objective_id AND r.result_id=o.result_id
+     LEFT JOIN plans p ON p.plan_id=o.plan_id
      WHERE o.objective_id=$1 AND o.user_id=$2 FOR UPDATE OF o`,
     [input.request.objectiveId, input.userId],
   );
@@ -204,7 +215,8 @@ async function loadEligibleObservations(
   request: RatingRequest,
 ): Promise<EligibleObservation[]> {
   const found = await client.query<EligibleObservation>(
-    `SELECT obs_id,user_id,vault,envelope_ref,network,service_id,version_id,task_class
+    `SELECT obs_id,user_id,vault,envelope_ref,rail,dedup_key,network,service_id,
+       version_id,task_class
      FROM observations WHERE objective_id=$1 AND step_index=$2
        AND settled_at IS NOT NULL AND released_at IS NULL
        AND (rail <> 'erc8183-job' OR job_state='Completed') ORDER BY call_index,obs_id`,
@@ -215,20 +227,38 @@ async function loadEligibleObservations(
 
 function assertPayingVault(
   observations: readonly EligibleObservation[],
-  vault: string | null,
+  envelopeRef: string | null,
   userId: string,
 ): void {
+  const vault = envelopeRef?.split(":")[2];
   if (
+    !envelopeRef ||
     !vault ||
+    !/^eip155:[0-9]+:0x[0-9a-f]{40}:[0-9]+$/i.test(envelopeRef) ||
     observations.some(
       (row) =>
         row.user_id !== userId ||
-        row.vault.toLowerCase() !== vault.toLowerCase() ||
-        row.envelope_ref.split(":")[2]?.toLowerCase() !== vault.toLowerCase(),
+        row.envelope_ref.toLowerCase() !== envelopeRef.toLowerCase() ||
+        row.vault.toLowerCase() !== vault.toLowerCase(),
     )
   ) {
     throw new RatingRejected(403, "not-your-payment");
   }
+}
+
+const PAYMENT_DEDUP_KEY =
+  /^(x402-exact|gateway-batched):(eip155:[0-9]+):0x[0-9a-f]{40}:(0x[0-9a-f]{40}):0x[0-9a-f]{64}$/;
+
+function isAttributedToPayee(observation: EligibleObservation, payee: string | undefined): boolean {
+  if (!payee || !/^0x[0-9a-fA-F]{40}$/.test(payee)) return false;
+  if (observation.rail === "erc8183-job") return true;
+  const match = PAYMENT_DEDUP_KEY.exec(observation.dedup_key);
+  return (
+    match !== null &&
+    match[1] === observation.rail &&
+    match[2] === observation.network &&
+    match[3] === payee.toLowerCase()
+  );
 }
 
 function assertOneSupplier(
