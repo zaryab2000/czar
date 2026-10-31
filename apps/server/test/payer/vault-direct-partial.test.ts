@@ -6,7 +6,12 @@ import { loadConfig } from "@czar/config";
 import { buildTree, PAYEE_KIND, payeeLeaf } from "@czar/hashing";
 import type { StepResult } from "@czar/schemas";
 import type { SignRequest, SignResult } from "@czar/signer";
-import { buildPaymentRequired, encodeBase64Json, encodePaymentRequired } from "@czar/x402";
+import {
+  buildPaymentRequired,
+  encodeBase64Json,
+  encodePaymentRequired,
+  SafeFetchError,
+} from "@czar/x402";
 import { completeObjective } from "#src/objectives/completion";
 import {
   executeVaultDirectStep,
@@ -44,8 +49,15 @@ const TREE = buildTree([payeeLeaf(PAYEE, PAYEE_KIND.X402_PAY_TO, 0, STEP_CAP)]);
  * - `settled-error`: settles, then returns a 5xx with its PAYMENT-RESPONSE and no usable body.
  * - `settled-empty`: settles and returns a 2xx with an empty body.
  * - `silent-settle`: settles on chain, then returns a 5xx with no PAYMENT-RESPONSE.
+ * - `no-response`: settles on chain, then the transport fails before any response arrives.
  */
-type MerchantMode = "ok" | "error" | "settled-error" | "settled-empty" | "silent-settle";
+type MerchantMode =
+  | "ok"
+  | "error"
+  | "settled-error"
+  | "settled-empty"
+  | "silent-settle"
+  | "no-response";
 
 beforeAll(async () => seedDevice(getPool()));
 beforeEach(async () => {
@@ -178,6 +190,32 @@ describe("vault-direct partial steps (SCR-159 §3)", () => {
     expect(run.receiptIndices()).toEqual([0]);
   });
 
+  it("reconciles a settled authorization when the merchant returns no response", async () => {
+    const run = partialRun(["ok", "no-response", "error"]);
+
+    await expect(executeVaultDirectStep(stepInput(), run.dependencies)).resolves.toMatchObject({
+      state: "done",
+    });
+
+    expect(run.settledIndices()).toEqual([0, 1]);
+    const observations = await getPool().query<{
+      call_index: number;
+      delivered: number | null;
+      responded_at: Date | null;
+      settled_at: Date | null;
+    }>(
+      `SELECT call_index,delivered,responded_at,settled_at FROM observations
+       WHERE objective_id=$1 ORDER BY call_index`,
+      [OBJECTIVE],
+    );
+    expect(observations.rows[1]).toMatchObject({
+      call_index: 1,
+      delivered: 0,
+      responded_at: null,
+      settled_at: expect.any(Date),
+    });
+  });
+
   it("stays pending without a terminal state while a paid call's receipt is not yet stored", async () => {
     const run = partialRun(["ok", "error", "ok"], { receiptStored: false });
 
@@ -239,6 +277,10 @@ function partialRun(modes: readonly MerchantMode[], options: { receiptStored?: b
       const index = Number(new URL(url).searchParams.get("q")?.replace("call-", ""));
       const mode = modes[index];
       if (mode === undefined) throw new Error(`No merchant mode for call ${index}.`);
+      if (mode === "no-response") {
+        used.add(index);
+        throw new SafeFetchError("upstream-unavailable", "transport");
+      }
       return merchantResponse(url, mode, () => used.add(index));
     },
   );
