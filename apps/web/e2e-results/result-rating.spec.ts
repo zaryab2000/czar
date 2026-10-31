@@ -159,7 +159,10 @@ test("a lost rating response retries with the same idempotency key", async ({ pa
       await route.fulfill({
         status: 422,
         contentType: "application/problem+json",
-        body: JSON.stringify({ detail: "A rating already exists.", czarCode: "supersedes-required" }),
+        body: JSON.stringify({
+          detail: "A rating already exists.",
+          czarCode: "supersedes-required",
+        }),
       });
       return;
     }
@@ -181,6 +184,11 @@ test("a lost rating response retries with the same idempotency key", async ({ pa
   const card = page.getByRole("article", { name: `Result ${objectiveId}` });
   await card.getByRole("button", { name: "Good" }).click();
   await expect(card.getByRole("alert")).toBeVisible();
+  await card.getByRole("button", { name: "Bad" }).click();
+  await expect(
+    card.getByText("Retry the previous rating for this supplier before changing it."),
+  ).toBeVisible();
+  expect(keys).toHaveLength(1);
   await card.getByRole("button", { name: "Good" }).click();
   await expect(card.getByRole("button", { name: "Change" })).toBeVisible();
   expect(keys).toHaveLength(2);

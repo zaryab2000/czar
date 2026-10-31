@@ -1,11 +1,22 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { appApi, type AppResultCard, type AppResultSupplier } from "#src/app-api";
+import {
+  AppApiError,
+  appApi,
+  type AppRatingRequest,
+  type AppResultCard,
+  type AppResultSupplier,
+} from "#src/app-api";
 import { ratingThanks, resultRatingCopy } from "#src/result-cards";
 
 interface ResultCardProps {
   readonly card: AppResultCard;
+}
+
+interface RatingAttempt {
+  readonly body: AppRatingRequest;
+  readonly key: string;
 }
 
 /** Show a delivered objective and the owner's rating controls for each supplier. */
@@ -16,15 +27,17 @@ export function ResultCard({ card }: ResultCardProps) {
   const [notices, setNotices] = useState<Record<number, string>>({});
   const [errors, setErrors] = useState<Record<number, string>>({});
   const posting = useRef(false);
+  const attempts = useRef(new Map<number, RatingAttempt>());
 
   useEffect(() => setSuppliers(card.suppliers), [card.suppliers]);
 
   async function rate(supplier: AppResultSupplier, value: "good" | "bad") {
     if (posting.current || (!supplier.canRate && !supplier.canCorrect)) return;
-    if (supplier.canCorrect && !supplier.ratingId) {
+    const attempt = prepareRatingAttempt(attempts.current, card.objectiveId, supplier, value);
+    if (typeof attempt === "string") {
       setErrors((previous) => ({
         ...previous,
-        [supplier.stepIndex]: "Czar could not identify the rating to change. Reload this page.",
+        [supplier.stepIndex]: attempt,
       }));
       return;
     }
@@ -32,12 +45,8 @@ export function ResultCard({ card }: ResultCardProps) {
     setBusyStep(supplier.stepIndex);
     setErrors((previous) => ({ ...previous, [supplier.stepIndex]: "" }));
     try {
-      const accepted = await appApi.submitAppRating({
-        objectiveId: card.objectiveId,
-        stepIndex: supplier.stepIndex,
-        value,
-        ...(supplier.canCorrect && supplier.ratingId ? { supersedes: supplier.ratingId } : {}),
-      });
+      const accepted = await appApi.submitAppRating(attempt.body, attempt.key);
+      attempts.current.delete(supplier.stepIndex);
       setSuppliers((previous) =>
         previous.map((item) =>
           item.stepIndex === supplier.stepIndex
@@ -68,6 +77,9 @@ export function ResultCard({ card }: ResultCardProps) {
         }));
       }
     } catch (cause) {
+      if (cause instanceof AppApiError && cause.status < 500) {
+        attempts.current.delete(supplier.stepIndex);
+      }
       setErrors((previous) => ({
         ...previous,
         [supplier.stepIndex]:
@@ -103,6 +115,30 @@ export function ResultCard({ card }: ResultCardProps) {
       ))}
     </article>
   );
+}
+
+function prepareRatingAttempt(
+  attempts: Map<number, RatingAttempt>,
+  objectiveId: string,
+  supplier: AppResultSupplier,
+  value: "good" | "bad",
+): RatingAttempt | string {
+  if (supplier.canCorrect && !supplier.ratingId) {
+    return "Czar could not identify the rating to change. Reload this page.";
+  }
+  const body: AppRatingRequest = {
+    objectiveId,
+    stepIndex: supplier.stepIndex,
+    value,
+    ...(supplier.canCorrect ? { supersedes: supplier.ratingId } : {}),
+  };
+  const previous = attempts.get(supplier.stepIndex);
+  if (previous && (previous.body.value !== value || previous.body.supersedes !== body.supersedes)) {
+    return "Retry the previous rating for this supplier before changing it.";
+  }
+  const attempt = previous ?? { body, key: crypto.randomUUID() };
+  attempts.set(supplier.stepIndex, attempt);
+  return attempt;
 }
 
 interface SupplierRatingRowProps {

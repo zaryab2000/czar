@@ -14,22 +14,19 @@ import { shadowTotalsFixture } from "#src/summary-fixtures";
 
 export default function HomePage() {
   const load = useCallback(async () => {
-    const [me, approvals, receipts, manualReturns, results] = await Promise.all([
+    const [me, approvals, receipts, manualReturns] = await Promise.all([
       appApi.getMe(),
       appApi.listApprovals(),
       appApi.listReceipts(),
       appApi.listAllManualReturns(),
-      appApi.listAllAppResults(),
     ]);
-    return { me, approvals, receipts, manualReturns, results };
+    return { me, approvals, receipts, manualReturns };
   }, []);
   const { data, error, loading, refresh } = useAppData(load);
 
   if (loading && !data) return <p role="status">Loading your Czar account…</p>;
   if (error && !data) return <DataError message={error} refresh={refresh} />;
   if (!data) return <DataError message="Czar could not load current data." refresh={refresh} />;
-
-  const thisWeek = resultsThisWeek(data.results.items, new Date());
 
   return (
     <div className="page-stack">
@@ -44,13 +41,7 @@ export default function HomePage() {
       />
       {data.me.mode === "shadow" && <ShadowSummaryCard />}
       <OwnerControls me={data.me} refresh={refresh} />
-      <section className="page-stack" aria-label="This week">
-        <h2>This week</h2>
-        <p>{thisWeekHeading(thisWeek.length)}</p>
-        {thisWeek.map((card) => (
-          <ResultCard card={card} key={card.objectiveId} />
-        ))}
-      </section>
+      <ThisWeekSection />
       <section className="panel">
         <h2>Weekly limits</h2>
         {data.me.limits.length === 0 ? (
@@ -99,6 +90,28 @@ export default function HomePage() {
         <a href="/receipts">View receipts</a>
       </section>
     </div>
+  );
+}
+
+function ThisWeekSection() {
+  const load = useCallback(() => appApi.listAllAppResults(), []);
+  const { data, error, loading, refresh } = useAppData(load);
+  const thisWeek = resultsThisWeek(data?.items ?? [], new Date());
+
+  return (
+    <section className="page-stack" aria-label="This week">
+      <h2>This week</h2>
+      {loading && !data && <p role="status">Loading results…</p>}
+      {error && <DataError message={error} refresh={refresh} />}
+      {data && (
+        <>
+          <p>{thisWeekHeading(thisWeek.length)}</p>
+          {thisWeek.map((card) => (
+            <ResultCard card={card} key={card.objectiveId} />
+          ))}
+        </>
+      )}
+    </section>
   );
 }
 

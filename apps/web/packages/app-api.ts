@@ -288,10 +288,10 @@ export const appApi = {
     return request<AppPage<AppResultCard>>(`/v1/app/results?${query}`);
   },
   listAllAppResults: () => listAllAppResults(),
-  submitAppRating: (body: AppRatingRequest) =>
+  submitAppRating: (body: AppRatingRequest, key = idempotencyKey()) =>
     request<AppRatingAccepted>("/v1/app/ratings", {
       method: "POST",
-      headers: { "Idempotency-Key": idempotencyKey() },
+      headers: { "Idempotency-Key": key },
       body: JSON.stringify(body),
     }),
   getSoulPointer: () => request<SoulPointer>("/v1/soul/pointer"),
