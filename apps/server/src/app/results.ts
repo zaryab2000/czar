@@ -98,7 +98,7 @@ export async function listAppResults(
      FROM results r JOIN objectives o ON o.objective_id=r.objective_id
      JOIN users u ON u.user_id=o.user_id
      LEFT JOIN plans p ON p.plan_id=o.plan_id
-     WHERE o.user_id=$1 AND o.result_id=r.result_id
+     WHERE o.user_id=$1 AND o.state='delivered' AND o.result_id=r.result_id
        AND ($2::timestamptz IS NULL OR (r.created_at,o.objective_id)<($2,$3))
      ORDER BY r.created_at DESC,o.objective_id DESC LIMIT $4`,
     [userId, cursor?.deliveredAt ?? null, cursor?.objectiveId ?? null, limit + 1],
@@ -138,7 +138,7 @@ async function loadResultRows(
      FROM objectives o JOIN results r ON r.objective_id=o.objective_id AND r.result_id=o.result_id
      JOIN users u ON u.user_id=o.user_id
      LEFT JOIN plans p ON p.plan_id=o.plan_id
-     WHERE o.user_id=$1 AND o.objective_id=ANY($2::text[])`,
+     WHERE o.user_id=$1 AND o.state='delivered' AND o.objective_id=ANY($2::text[])`,
     [userId, objectives],
   );
   return result.rows;

@@ -13,6 +13,7 @@ const OLD_OBJECTIVE = "obj_01K7ZT9P4N5Q6R7S8T9V0W1X2V";
 const EMPTY_OBJECTIVE = "obj_01K7ZT9P4N5Q6R7S8T9V0W1X2T";
 const BAD_VAULT_OBJECTIVE = "obj_01K7ZT9P4N5Q6R7S8T9V0W1X2S";
 const JOB_OBJECTIVE = "obj_01K7ZT9P4N5Q6R7S8T9V0W1X2R";
+const FAILED_OBJECTIVE = "obj_01K7ZT9P4N5Q6R7S8T9V0W1X2P";
 const FOREIGN_OBJECTIVE = "obj_01K7ZT9P4N5Q6R7S8T9V0W1X2Q";
 const FOREIGN_USER = "usr_01K7ZT9P4N5Q6R7S8T9V0W1X2Z";
 const FOREIGN_DEVICE = "dev_01K7ZT9P4N5Q6R7S8T9V0W1X2Z";
@@ -70,6 +71,10 @@ beforeAll(async () => {
     "UPDATE observations SET rail='erc8183-job',job_state='Submitted' WHERE objective_id=$1",
     [JOB_OBJECTIVE],
   );
+  await seedResult(pool, FAILED_OBJECTIVE, TEST_NOW);
+  await pool.query("UPDATE objectives SET state='failed' WHERE objective_id=$1", [
+    FAILED_OBJECTIVE,
+  ]);
   await pool.query("INSERT INTO users(user_id,vault) VALUES($1,$2)", [FOREIGN_USER, VAULT]);
   await pool.query(
     `INSERT INTO devices(device_id,user_id,device_name,platform,token_hash)
@@ -292,6 +297,10 @@ describe("Flow 4A rating intake", () => {
     expect((await get("?limit=0")).status).toBe(400);
     expect((await get("?cursor=not-a-cursor")).status).toBe(400);
     expect((await app.request("/v1/app/results")).status).toBe(401);
+    const failedPrompt = await app.request(`/v1/objectives/${FAILED_OBJECTIVE}/rating-prompt`, {
+      headers: { Authorization: `Bearer ${TEST_TOKEN}` },
+    });
+    expect(failedPrompt.status).toBe(404);
     const first = await get("?limit=2");
     expect(first.status).toBe(200);
     const page = (await first.json()) as { items: Record<string, unknown>[]; nextCursor: string };
