@@ -16,7 +16,7 @@ export function createReceiptInputFromTrace(
   reports: readonly AcceptanceReceiptRecord[],
 ): PaymentReceiptInput {
   const call = trace.findLast(
-    (row) => row.phase === "call.result" && row.payload["index"] === context.index,
+    (row) => row.phase === "call.response" && row.payload["index"] === context.index,
   );
   if (!call) throw new Error("Settled call is missing its durable receipt trace.");
   const { paymentRef, requestCommit, responseCommit, requirementsHashSeen } = call.payload;

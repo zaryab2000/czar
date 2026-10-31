@@ -42,7 +42,7 @@ describe("receipt input from durable payment trace", () => {
       } as never,
       [
         {
-          phase: "call.result",
+          phase: "call.response",
           at: completedAt,
           payload: {
             index: 0,
@@ -85,7 +85,7 @@ describe("receipt input from durable payment trace", () => {
     ];
     const trace = [
       {
-        phase: "call.result",
+        phase: "call.response",
         at: new Date("2026-10-25T12:00:04Z"),
         payload: {
           index: 0,
@@ -100,7 +100,7 @@ describe("receipt input from durable payment trace", () => {
         },
       },
       {
-        phase: "call.result",
+        phase: "call.response",
         at: new Date("2026-10-25T12:00:05Z"),
         payload: {
           index: 1,
