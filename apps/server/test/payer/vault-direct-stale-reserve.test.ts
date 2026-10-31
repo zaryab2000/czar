@@ -493,6 +493,7 @@ async function expectFreshAttemptPaid(
     "reserve.mined",
     "auth.signed",
     "call.sent",
+    "call.attempt",
     "call.response",
     "settle.sent",
     "settle.mined",

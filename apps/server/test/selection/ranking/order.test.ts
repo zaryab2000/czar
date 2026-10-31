@@ -70,7 +70,9 @@ describe("SCR-160 registered ranking", () => {
       expect.closeTo(0.5958, 4),
       expect.closeTo(0.5655, 4),
     ]);
-    expect(first.unverified).toEqual([{ service_id: m3.serviceId, version_id: versionId, reason: "unrated", n_eff: 0 }]);
+    expect(first.unverified).toEqual([
+      { service_id: m3.serviceId, version_id: versionId, reason: "unrated", n_eff: 0 },
+    ]);
 
     const corrected = orderCandidates([m1, { ...m2, ...worked.afterCorrection }, m3], 1.959964);
     expect(corrected.ranked.map((row) => row.service_id)).toEqual([m1.serviceId, m2.serviceId]);
