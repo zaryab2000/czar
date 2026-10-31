@@ -200,8 +200,10 @@ function memoryObjectStore(): VaultDirectDependencies["objects"] {
 
 function deliveredResult(context: BoundaryInput): StepResult {
   return {
-    schemaVersion: "1.0",
+    schemaVersion: "1.1",
     stepIndex: context.input.step.stepIndex,
+    callIndex: context.index,
+    obsId: context.obsId,
     status: "delivered",
     source: {
       origin: MERCHANT_ORIGIN,

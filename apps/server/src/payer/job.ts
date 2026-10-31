@@ -4,15 +4,27 @@ import {
   deliverableUploadDigest,
   inputCommit,
   jobKey,
+  obsId,
+  dedupKey,
+  serviceId,
   type Hash32,
 } from "@czar/hashing";
-import { validateSchema, type JobBrief, type TaskSpec } from "@czar/schemas";
+import { validateSchema, type JobBrief, type PaymentRef, type TaskSpec } from "@czar/schemas";
 import type { Config } from "@czar/config";
 import type { Signer } from "@czar/signer";
 import type { Pool } from "pg";
 import { decodeErrorResult, keccak256, type Address, type Hex, type PublicClient } from "viem";
 import { randomUUID } from "node:crypto";
 import { czarVaultAbi } from "@czar/vault-client";
+import {
+  fillResponse,
+  insertAtSign,
+  markReleased,
+  markSettled,
+  observationOwner,
+  setJobState,
+  type JobState,
+} from "#src/evidence/observations";
 import {
   acquireExecutorLease,
   appendExecutionPhase,
@@ -313,6 +325,7 @@ interface OpenedJob {
   readonly provider: Address;
   readonly expiredAt: number;
   readonly inputSalt: Hash32;
+  readonly observationId: string;
 }
 
 async function openOrRecoverJob(
@@ -331,7 +344,14 @@ async function openOrRecoverJob(
   const inputSalt = priorSalt(trace) ?? dependencies.randomSalt();
   if (existing) {
     const view = await dependencies.chain.getJob(existing.jobKey);
-    const recovered = { ...existing, provider, expiredAt: view.expiredAt, inputSalt };
+    const observationId = await observeOpenedJob(input, dependencies, provider, existing.jobId);
+    const recovered = {
+      ...existing,
+      provider,
+      expiredAt: view.expiredAt,
+      inputSalt,
+      observationId,
+    };
     await persistBrief(input, dependencies, recovered);
     return recovered;
   }
@@ -382,7 +402,8 @@ async function openOrRecoverJob(
     });
   assertLeaseHeld();
   const opened = await dependencies.chain.openJob(transaction);
-  const job = { ...opened, provider, expiredAt: expiration, inputSalt };
+  const observationId = await observeOpenedJob(input, dependencies, provider, opened.jobId);
+  const job = { ...opened, provider, expiredAt: expiration, inputSalt, observationId };
   await persistBrief(input, dependencies, job);
   await recordJobPhase(dependencies, input, attempt, "job.opened", {
     jobKey: opened.jobKey,
@@ -390,8 +411,82 @@ async function openOrRecoverJob(
     provider,
     txHash: opened.txHash,
     expiredAt: expiration,
+    observationId,
   });
   return job;
+}
+
+/** Persist the open-time identity before budget negotiation or funding can proceed. */
+async function observeOpenedJob(
+  input: JobExecutionInput,
+  dependencies: JobExecutionDependencies,
+  provider: Address,
+  jobId: bigint,
+): Promise<string> {
+  const paymentRef: PaymentRef = {
+    schemaVersion: "1.0",
+    rail: "erc8183-job",
+    network: input.network,
+    contract: input.jobEscrow,
+    jobId: jobId.toString(),
+    client: input.vault,
+    provider,
+    evaluator: input.evaluator,
+    budget: input.targetBudget,
+  };
+  const id = obsId(dedupKey(paymentRef));
+  const owner = await observationOwner(dependencies.pool, input.planId);
+  return insertAtSign(dependencies.pool, {
+    ...owner,
+    vault: input.vault,
+    network: input.network,
+    rail: "erc8183-job",
+    serviceId: serviceId(input.network, provider, input.jobEscrow),
+    versionId: "ver_unknown",
+    taskClass: input.capability,
+    envelopeRef: input.envelopeRef,
+    stepIndex: input.stepIndex,
+    paymentRef,
+    paymentId: `pay_${id.slice(4)}`,
+  });
+}
+
+async function observeJobState(
+  dependencies: JobExecutionDependencies,
+  job: OpenedJob,
+  state: JobChainView["vaultState"],
+  transaction?: string,
+): Promise<void> {
+  const id = job.observationId;
+  const at = dependencies.now();
+  if (["Funded", "Submitted", "Completed", "Rejected"].includes(state))
+    await markSettled(
+      dependencies.pool,
+      id,
+      at,
+      transaction && /^0x[0-9a-f]{64}$/.test(transaction) ? transaction : undefined,
+    );
+  if (state === "Rejected") {
+    await fillResponse(dependencies.pool, id, undefined, 0);
+    return;
+  }
+  await setJobState(dependencies.pool, id, state as JobState, at);
+  if (state === "Released") await markReleased(dependencies.pool, id, at);
+}
+
+async function observeSavedFunding(
+  input: JobExecutionInput,
+  dependencies: JobExecutionDependencies,
+  job: OpenedJob,
+  attempt: number,
+): Promise<void> {
+  const trace = await getExecutionTrace(dependencies.pool, input.planId, input.stepIndex, attempt);
+  const funded = trace.findLast(
+    (row) => row.phase === "job.funded" && row.payload["jobKey"] === job.jobKey,
+  );
+  if (!funded) return;
+  const tx = funded.payload["txHash"];
+  await observeJobState(dependencies, job, "Funded", typeof tx === "string" ? tx : undefined);
 }
 
 export function proofForJobProvider(
@@ -412,6 +507,8 @@ async function awaitAndFundJob(
   assertLeaseHeld: () => void,
 ): Promise<JobExecutionResult | undefined> {
   let view = await dependencies.chain.getJob(job.jobKey);
+  if (view.vaultState === "Expired") await observeSavedFunding(input, dependencies, job, attempt);
+  await observeJobState(dependencies, job, view.vaultState);
   let budget = view.budget;
   if (view.vaultState === "Released") return undefined;
   if (
@@ -455,6 +552,7 @@ async function awaitAndFundJob(
     );
     budget = await dependencies.chain.waitForBudget(job.jobKey, timeoutMs);
     view = await dependencies.chain.getJob(job.jobKey);
+    await observeJobState(dependencies, job, view.vaultState);
     budget = view.budget ?? budget;
   }
   if (budget === undefined || budget <= 0n || budget > input.stepCap) {
@@ -515,6 +613,7 @@ async function awaitAndFundJob(
     budget: budget.toString(),
     txHash,
   });
+  await observeJobState(dependencies, job, "Funded", txHash);
   const fundedView = await dependencies.chain.getJob(job.jobKey);
   return await waitForJobResult(input, dependencies, job, fundedView, attempt, assertLeaseHeld);
 }
@@ -553,6 +652,7 @@ async function waitForJobResult(
     });
     await syncJob(input, dependencies, job.jobKey, attempt, assertLeaseHeld);
     const synced = await dependencies.chain.getJob(job.jobKey);
+    await observeJobState(dependencies, job, synced.vaultState);
     return {
       state: synced.vaultState,
       jobKey: job.jobKey,
@@ -612,6 +712,7 @@ async function cancelOrSyncJob(
       jobKey: job.jobKey,
       txHash,
     });
+    await observeJobState(dependencies, job, "Released");
   } catch (error) {
     if (!isJobNotCancellable(error)) throw error;
     await syncJob(input, dependencies, job.jobKey, attempt, assertLeaseHeld);
@@ -642,6 +743,8 @@ async function syncAndReturn(
     state: synced.state,
     txHash: synced.txHash,
   });
+  if (synced.state === "Expired") await observeSavedFunding(input, dependencies, job, attempt);
+  await observeJobState(dependencies, job, synced.state);
   return {
     state: synced.state,
     jobKey: job.jobKey,

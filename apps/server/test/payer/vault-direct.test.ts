@@ -1,6 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   executeVaultDirectStep,
+  type BoundaryInput,
   type SettledReceiptContext,
   type VaultDirectInput,
 } from "#src/payer/vault-direct";
@@ -25,6 +26,7 @@ beforeEach(async () => {
   await getPool().query("DELETE FROM executor_leases");
   await getPool().query("DELETE FROM step_executions");
   await getPool().query("DELETE FROM steps");
+  await getPool().query("DELETE FROM observations");
   await getPool().query("DELETE FROM plans");
   await getPool().query("DELETE FROM objectives");
   const submission = makeObjectiveSubmission(OBJECTIVE);
@@ -164,8 +166,10 @@ describe("vault-direct executor", () => {
 
   it("rolls back the result when the paid-step done write fails", async () => {
     const stepResult = {
-      schemaVersion: "1.0" as const,
+      schemaVersion: "1.1" as const,
       stepIndex: 0,
+      callIndex: 0,
+      obsId: `obs_${"a".repeat(32)}`,
       status: "delivered" as const,
       source: { origin: "https://merchant.test", payTo: PAYEE, paymentRefHash: HASH },
       fields: [],
@@ -385,15 +389,20 @@ describe("vault-direct executor", () => {
     };
     let current = new Date("2026-10-21T00:00:00Z");
     const stepResult = {
-      schemaVersion: "1.0" as const,
+      schemaVersion: "1.1" as const,
       stepIndex: 0,
+      callIndex: 0,
+      obsId: `obs_${"a".repeat(32)}`,
       status: "delivered" as const,
       source: { origin: "http://127.0.0.1:4021", payTo: PAYEE, paymentRefHash: HASH },
       fields: [],
       flags: [],
       bodyCommit: HASH,
     };
-    const boundary = vi.fn(async () => stepResult);
+    const boundary = vi.fn(async (context: BoundaryInput) => ({
+      ...stepResult,
+      obsId: context.obsId,
+    }));
     let receiptAvailable = false;
     const recordReceipt = vi.fn(async (_input: SettledReceiptContext) => receiptAvailable);
     const dependencies = {
@@ -448,7 +457,17 @@ describe("vault-direct executor", () => {
     );
     const result = await executeVaultDirectStep(input, dependencies);
 
-    expect(result).toMatchObject({ state: "pending", stepResults: [stepResult] });
+    expect(result).toMatchObject({
+      state: "pending",
+      stepResults: [{ ...stepResult, obsId: expect.stringMatching(/^obs_[0-9a-f]{32}$/) }],
+    });
+    const observation = await getPool().query<{ obs_id: string }>(
+      "SELECT obs_id FROM observations WHERE objective_id=$1",
+      [OBJECTIVE],
+    );
+    expect(observation.rows).toHaveLength(1);
+    if (result.state !== "pending") throw new Error("Expected a pending paid result.");
+    expect(result.stepResults[0]).toMatchObject({ obsId: observation.rows[0]?.obs_id });
     await expect(
       getPool().query("SELECT state FROM steps WHERE plan_id=$1 AND step_index=0", [PLAN_ID]),
     ).resolves.toMatchObject({ rows: [{ state: "queued" }] });
@@ -501,7 +520,7 @@ describe("vault-direct executor", () => {
     receiptAvailable = true;
     await expect(executeVaultDirectStep(input, dependencies)).resolves.toMatchObject({
       state: "done",
-      stepResults: [stepResult],
+      stepResults: [{ ...stepResult, obsId: observation.rows[0]?.obs_id }],
     });
     expect(chain.settle).toHaveBeenCalledTimes(1);
     expect(successfulAuthorizationSignatures).toBe(1);
@@ -514,6 +533,8 @@ describe("vault-direct executor", () => {
         "SELECT payload FROM step_executions WHERE plan_id=$1 AND step_index=0 AND phase='step.result'",
         [PLAN_ID],
       ),
-    ).resolves.toMatchObject({ rows: [{ payload: { stepResult } }] });
+    ).resolves.toMatchObject({
+      rows: [{ payload: { stepResult: { ...stepResult, obsId: observation.rows[0]?.obs_id } } }],
+    });
   });
 });

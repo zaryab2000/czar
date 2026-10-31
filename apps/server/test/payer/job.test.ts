@@ -58,6 +58,10 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
+  await getPool().query(
+    "DELETE FROM observations WHERE objective_id=(SELECT objective_id FROM plans WHERE plan_id=$1)",
+    [PLAN_ID],
+  );
   await getPool().query("DELETE FROM payer_job_deliverables");
   await getPool().query("DELETE FROM payer_job_briefs");
   await getPool().query("DELETE FROM step_executions");
@@ -155,6 +159,17 @@ describe("job brief commitments", () => {
     expect(chain.openJob).not.toHaveBeenCalled();
     expect(chain.fundJob).not.toHaveBeenCalled();
     expect(chain.syncJob).toHaveBeenCalledOnce();
+    const expiredObservation = await getPool().query<{
+      job_state: string;
+      delivered: number | null;
+      settled_at: Date | null;
+    }>(
+      "SELECT job_state,delivered,settled_at FROM observations WHERE objective_id=(SELECT objective_id FROM plans WHERE plan_id=$1)",
+      [PLAN_ID],
+    );
+    expect(expiredObservation.rows).toHaveLength(1);
+    expect(expiredObservation.rows[0]).toMatchObject({ job_state: "Expired", delivered: 0 });
+    expect(expiredObservation.rows[0]?.settled_at).toBeInstanceOf(Date);
   });
 
   it.each([60, -60])(
@@ -189,6 +204,19 @@ describe("job brief commitments", () => {
       expect(chain.openJob).not.toHaveBeenCalled();
       expect(chain.fundJob).not.toHaveBeenCalled();
       expect(chain.syncJob).toHaveBeenCalledOnce();
+      const observation = await getPool().query<{
+        job_state: string;
+        delivered: number;
+        settled_at: Date;
+        responded_at: Date;
+      }>(
+        "SELECT job_state,delivered,settled_at,responded_at FROM observations WHERE objective_id=(SELECT objective_id FROM plans WHERE plan_id=$1)",
+        [PLAN_ID],
+      );
+      expect(observation.rows).toHaveLength(1);
+      expect(observation.rows[0]).toMatchObject({ job_state: "Completed", delivered: 1 });
+      expect(observation.rows[0]?.settled_at).toBeInstanceOf(Date);
+      expect(observation.rows[0]?.responded_at).toBeInstanceOf(Date);
     },
   );
 
@@ -665,12 +693,29 @@ describe("job brief commitments", () => {
     expect(result).toMatchObject({ state: "Funded", alternateProvider: alternate });
     expect(chain.cancelJob).toHaveBeenCalledOnce();
     expect(chain.fundJob).toHaveBeenCalledOnce();
+    const observations = await getPool().query<{
+      job_state: string;
+      released_at: Date | null;
+      settled_at: Date | null;
+    }>(
+      "SELECT job_state,released_at,settled_at FROM observations WHERE objective_id=(SELECT objective_id FROM plans WHERE plan_id=$1) ORDER BY call_index",
+      [PLAN_ID],
+    );
+    expect(observations.rows).toHaveLength(2);
+    expect(observations.rows[0]).toMatchObject({ job_state: "Released", settled_at: null });
+    expect(observations.rows[0]?.released_at).toBeInstanceOf(Date);
+    expect(observations.rows[1]).toMatchObject({ job_state: "Funded", released_at: null });
+    expect(observations.rows[1]?.settled_at).toBeInstanceOf(Date);
   });
 
   it("job_killResume_matrix_rereadsChainStateWithoutOpeningOrFundingTwice", async () => {
     const phases = ["open", "budget-wait", "fund", "submit", "sync"] as const;
     for (const failAt of phases) {
       await getPool().query("DELETE FROM step_executions");
+      await getPool().query(
+        "DELETE FROM observations WHERE objective_id=(SELECT objective_id FROM plans WHERE plan_id=$1)",
+        [PLAN_ID],
+      );
       let exists = failAt === "submit" || failAt === "sync";
       let state: "Opened" | "Funded" | "Submitted" =
         failAt === "submit" || failAt === "sync" ? "Submitted" : "Opened";
@@ -772,6 +817,10 @@ describe("job brief commitments", () => {
       };
       if (failAt !== "submit")
         await expect(executeJobStep(input, dependencies)).rejects.toThrow("executor stopped");
+      const beforeResume = await getPool().query<{ obs_id: string }>(
+        "SELECT obs_id FROM observations WHERE objective_id=(SELECT objective_id FROM plans WHERE plan_id=$1)",
+        [PLAN_ID],
+      );
       const result = await executeJobStep(input, dependencies);
       expect(result.state).toBe(failAt === "submit" || failAt === "sync" ? "Submitted" : "Funded");
       expect(chain.openJob).toHaveBeenCalledTimes(
@@ -780,6 +829,18 @@ describe("job brief commitments", () => {
       expect(chain.fundJob).toHaveBeenCalledTimes(
         failAt === "fund" ? 1 : failAt === "submit" || failAt === "sync" ? 0 : 1,
       );
+      const afterResume = await getPool().query<{
+        obs_id: string;
+        settled_at: Date | null;
+        job_state: string;
+      }>(
+        "SELECT obs_id,settled_at,job_state FROM observations WHERE objective_id=(SELECT objective_id FROM plans WHERE plan_id=$1)",
+        [PLAN_ID],
+      );
+      expect(afterResume.rows).toHaveLength(1);
+      if (beforeResume.rows[0])
+        expect(afterResume.rows[0]?.obs_id).toBe(beforeResume.rows[0].obs_id);
+      expect(afterResume.rows[0]?.settled_at).toBeInstanceOf(Date);
     }
   });
 

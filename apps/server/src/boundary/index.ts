@@ -16,6 +16,9 @@ export interface BoundaryInput {
   readonly statusCode: number;
   readonly mimeType: string;
   readonly stepIndex: number;
+  readonly callIndex: number;
+  readonly obsId: string;
+  readonly subjectIndex?: number;
   readonly source: StepResult["source"];
   readonly bodyRef?: string;
   readonly bodyCommit: string;
@@ -317,8 +320,11 @@ function makeFailureStepResult(
   status: "http-error" | "timeout",
 ): StepResult {
   return {
-    schemaVersion: "1.0",
+    schemaVersion: "1.1",
     stepIndex: input.stepIndex,
+    callIndex: input.callIndex,
+    obsId: input.obsId,
+    ...(input.subjectIndex === undefined ? {} : { subjectIndex: input.subjectIndex }),
     status,
     source: input.source,
     fields: [],
@@ -510,8 +516,11 @@ function makeStepResult(
   const found = new Set(fields.map((field) => field.name));
   const missing = input.expectedKeys.filter((key) => !found.has(key));
   const result = {
-    schemaVersion: "1.0" as const,
+    schemaVersion: "1.1" as const,
     stepIndex: input.stepIndex,
+    callIndex: input.callIndex,
+    obsId: input.obsId,
+    ...(input.subjectIndex === undefined ? {} : { subjectIndex: input.subjectIndex }),
     status: missing.length ? ("unknown" as const) : ("delivered" as const),
     source: input.source,
     fields,

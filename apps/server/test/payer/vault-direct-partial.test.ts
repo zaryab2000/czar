@@ -54,6 +54,7 @@ beforeEach(async () => {
   await getPool().query("DELETE FROM executor_leases");
   await getPool().query("DELETE FROM step_executions");
   await getPool().query("DELETE FROM steps");
+  await getPool().query("DELETE FROM observations");
   await getPool().query("DELETE FROM plans");
   await getPool().query("DELETE FROM objectives");
   const submission = makeObjectiveSubmission(OBJECTIVE);
@@ -321,8 +322,10 @@ function boundaryResult(context: BoundaryInput): StepResult {
     context.response.status < 300 &&
     context.response.body.byteLength > 0;
   return {
-    schemaVersion: "1.0",
+    schemaVersion: "1.1",
     stepIndex: 0,
+    callIndex: context.index,
+    obsId: context.obsId,
     status: usable ? "delivered" : "http-error",
     source: { origin: "http://127.0.0.1:4021", payTo: PAYEE, paymentRefHash: HASH },
     fields: usable ? [{ name: "answer", value: "42", confidence: 1 }] : [],

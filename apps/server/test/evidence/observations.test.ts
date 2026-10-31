@@ -35,7 +35,7 @@ function paymentRef(nonce: string): PaymentRef {
   };
 }
 
-function signedInput(nonce: string, callIndex = 0) {
+function signedInput(nonce: string) {
   return {
     userId: TEST_USER_ID,
     vault: VAULT,
@@ -47,9 +47,27 @@ function signedInput(nonce: string, callIndex = 0) {
     objectiveId: OBJECTIVE_ID,
     envelopeRef: ENVELOPE_REF,
     stepIndex: 0,
-    callIndex,
     paymentRef: paymentRef(nonce),
-    paymentId: `payment-${callIndex}`,
+    paymentId: `pay_${nonce.slice(0, 32)}`,
+  };
+}
+
+function openedJobInput() {
+  return {
+    ...signedInput("66".repeat(32)),
+    rail: "erc8183-job" as const,
+    taskClass: "data-json.extract",
+    paymentRef: {
+      schemaVersion: "1.0" as const,
+      rail: "erc8183-job" as const,
+      network: "eip155:5042002",
+      contract: "0x0000000000000000000000000000000000000004" as const,
+      jobId: "7",
+      client: VAULT,
+      provider: PAYEE,
+      evaluator: "0x0000000000000000000000000000000000000005" as const,
+      budget: "1000",
+    },
   };
 }
 
@@ -99,6 +117,11 @@ describe("payment observations (SCR-160 §14.1–2)", () => {
       delivered: null,
       controlled: false,
     });
+    const finalRef = { ...input.paymentRef, settlementTx: `0x${"99".repeat(32)}` };
+    expect(paymentRefHash(finalRef)).not.toBe(paymentRefHash(input.paymentRef));
+    expect((await getObservation(getPool(), expectedId))?.paymentRefHash).toBe(
+      paymentRefHash(input.paymentRef),
+    );
   });
 
   it("fills response and chain settlement once without overwriting first facts", async () => {
@@ -119,7 +142,7 @@ describe("payment observations (SCR-160 §14.1–2)", () => {
 
   it("keeps an unused authorization released and a silent settled call undelivered", async () => {
     const released = await insertAtSign(getPool(), signedInput("33".repeat(32)));
-    const silent = await insertAtSign(getPool(), signedInput("44".repeat(32), 1));
+    const silent = await insertAtSign(getPool(), signedInput("44".repeat(32)));
     await markReleased(getPool(), released, AT);
     await markSettled(getPool(), silent, AT);
     await fillResponse(getPool(), silent, undefined, 0);
@@ -131,18 +154,69 @@ describe("payment observations (SCR-160 §14.1–2)", () => {
       settledAt: AT,
       delivered: 0,
       respondedAt: null,
+      callIndex: 1,
     });
+  });
+
+  it("allocates a new ordinal when a released call is signed again at local index zero", async () => {
+    const first = await insertAtSign(getPool(), signedInput("77".repeat(32)));
+    await markReleased(getPool(), first, AT);
+    const second = await insertAtSign(getPool(), signedInput("88".repeat(32)));
+    expect(first).not.toBe(second);
+    expect(await getObservation(getPool(), first)).toMatchObject({ callIndex: 0 });
+    expect(await getObservation(getPool(), second)).toMatchObject({ callIndex: 1 });
   });
 
   it("copies the controlled flag at insert and advances a job state", async () => {
     await getPool().query("UPDATE users SET controlled=true WHERE user_id=$1", [TEST_USER_ID]);
-    const id = await insertAtSign(getPool(), signedInput("55".repeat(32)));
+    const id = await insertAtSign(getPool(), openedJobInput());
+    expect(await getObservation(getPool(), id)).toMatchObject({
+      controlled: true,
+      jobState: "Opened",
+      settledAt: null,
+      delivered: null,
+    });
     await setJobState(getPool(), id, "Funded");
+    await markSettled(getPool(), id, AT);
     await setJobState(getPool(), id, "Completed", AT);
     expect(await getObservation(getPool(), id)).toMatchObject({
       controlled: true,
       jobState: "Completed",
+      settledAt: AT,
+      delivered: 1,
       respondedAt: AT,
     });
+  });
+
+  it("records job expiry delivery only when it expired directly from Funded", async () => {
+    const funded = await insertAtSign(getPool(), openedJobInput());
+    const submitted = await insertAtSign(getPool(), {
+      ...openedJobInput(),
+      paymentRef: { ...openedJobInput().paymentRef, jobId: "8" },
+      paymentId: `pay_${"88".repeat(16)}`,
+    });
+    await setJobState(getPool(), funded, "Funded");
+    await setJobState(getPool(), submitted, "Funded");
+    await setJobState(getPool(), submitted, "Submitted");
+    await setJobState(getPool(), funded, "Expired", AT);
+    await setJobState(getPool(), submitted, "Expired", AT);
+    expect(await getObservation(getPool(), funded)).toMatchObject({
+      jobState: "Expired",
+      delivered: 0,
+      respondedAt: AT,
+    });
+    expect(await getObservation(getPool(), submitted)).toMatchObject({
+      jobState: "Expired",
+      delivered: null,
+      respondedAt: AT,
+    });
+  });
+
+  it("rejects reattribution of a signed payment to another objective", async () => {
+    const signed = signedInput("99".repeat(32));
+    await insertAtSign(getPool(), signed);
+    await expect(insertAtSign(getPool(), { ...signed, taskClass: "other" })).rejects.toThrow(
+      "Observation identity collision",
+    );
   });
 });

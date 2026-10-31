@@ -58,6 +58,10 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
+  await getPool().query(
+    "DELETE FROM observations WHERE objective_id=(SELECT objective_id FROM plans WHERE plan_id=$1)",
+    [PLAN_ID],
+  );
   await getPool().query("DELETE FROM step_executions");
   await getPool().query("DELETE FROM payer_pullback_gateway_failures WHERE plan_id=$1", [PLAN_ID]);
   await getPool().query("DELETE FROM plan_pocket_keys WHERE plan_id=$1", [PLAN_ID]);
@@ -521,6 +525,7 @@ describe("pocket funding", () => {
           stepId: "stp_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
           kind: "gateway-nano" as const,
           capability: "lookup",
+          serviceId: "svc_0123456789abcdef0123456789abcdef",
           payee: payTo,
           unitAmount: "1000",
           expectedCalls: 4,
@@ -552,7 +557,19 @@ describe("pocket funding", () => {
     await payGatewaySteps(input, dependencies);
     expect(safeFetch).toHaveBeenCalledTimes(8);
     expect(await refreshGatewayStatuses(input, dependencies)).toEqual(Array(4).fill("pending"));
+    const pending = await getPool().query<{ settled_at: Date | null }>(
+      "SELECT settled_at FROM observations WHERE envelope_ref=$1 ORDER BY call_index",
+      [input.envelopeRef],
+    );
+    expect(pending.rows).toHaveLength(4);
+    expect(pending.rows.every((row) => row.settled_at === null)).toBe(true);
     expect(await refreshGatewayStatuses(input, dependencies)).toEqual(Array(4).fill("completed"));
+    const settled = await getPool().query<{ settled_at: Date | null }>(
+      "SELECT settled_at FROM observations WHERE envelope_ref=$1 ORDER BY call_index",
+      [input.envelopeRef],
+    );
+    expect(settled.rows).toHaveLength(4);
+    expect(settled.rows.every((row) => row.settled_at instanceof Date)).toBe(true);
   });
 
   it("retries a failed nanopayment with the same signed payment header", async () => {
@@ -631,6 +648,7 @@ describe("pocket funding", () => {
           stepId: "stp_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
           kind: "gateway-nano" as const,
           capability: "lookup",
+          serviceId: "svc_0123456789abcdef0123456789abcdef",
           payee: payTo,
           unitAmount: "1000",
           expectedCalls: 1,
@@ -702,6 +720,7 @@ describe("pocket funding", () => {
           stepId: "stp_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
           kind: "gateway-nano" as const,
           capability: "lookup",
+          serviceId: "svc_0123456789abcdef0123456789abcdef",
           payee: payTo,
           unitAmount: "1000",
           expectedCalls: 1,
@@ -742,7 +761,114 @@ describe("pocket funding", () => {
         now: () => new Date("2026-10-22T00:00:00Z"),
         gatewayStatus: vi.fn(async (): Promise<"pending" | "completed"> => "pending"),
       }),
-    ).rejects.toThrow("HTTP 409");
+    ).resolves.toBeUndefined();
     expect(calls).toBe(2);
+    const observations = await getPool().query<{
+      delivered: number | null;
+      settled_at: Date | null;
+    }>("SELECT delivered,settled_at FROM observations WHERE envelope_ref=$1", [input.envelopeRef]);
+    expect(observations.rows).toMatchObject([{ delivered: 0, settled_at: null }]);
+  });
+
+  it("keeps one signed observation across no-response resume and silent Gateway settlement", async () => {
+    const payTo = "0x0000000000000000000000000000000000000003";
+    const challenge = encodePaymentRequired({
+      ...buildPaymentRequired({
+        url: "http://127.0.0.1:4021/data",
+        description: "Gateway fixture",
+        serviceName: "fixture",
+        tags: [],
+        network: "eip155:5042002",
+        amount: "1000",
+        payTo,
+        maxTimeoutSeconds: 30,
+      }),
+      accepts: [
+        {
+          scheme: "exact",
+          network: "eip155:5042002",
+          amount: "1000",
+          asset: "0x3600000000000000000000000000000000000000",
+          payTo,
+          maxTimeoutSeconds: 30,
+          extra: { name: "GatewayWalletBatched" },
+        },
+      ],
+    });
+    const input = {
+      planId: PLAN_ID,
+      envelopeRef: "eip155:5042002:0x0000000000000000000000000000000000000002:1",
+      plan: { network: "eip155:5042002" },
+      pocket: POCKET as `0x${string}`,
+      steps: [
+        {
+          stepIndex: 0,
+          stepId: "stp_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
+          kind: "gateway-nano" as const,
+          capability: "lookup",
+          serviceId: "svc_0123456789abcdef0123456789abcdef",
+          payee: payTo,
+          unitAmount: "1000",
+          expectedCalls: 1,
+          stepCap: "1000",
+          routingReason: "below-pocket-threshold",
+          acceptanceProfileId: "prof_00000000000000000000000000000000",
+          resource: { url: "http://127.0.0.1:4021/data", method: "GET" as const },
+          callInputs: [{ callIndex: 0, input: { n: 0 } }],
+        },
+      ],
+    };
+    let requests = 0;
+    const signer = {
+      sign: vi.fn(async () => ({
+        signature: `0x${"ab".repeat(65)}` as const,
+        digest: `0x${"cd".repeat(32)}` as const,
+      })),
+    };
+    const dependencies = {
+      pool: getPool(),
+      config: loadConfig(),
+      signer,
+      safeFetch: vi.fn(async (_url: string, options?: { headers?: Record<string, string> }) => {
+        requests += 1;
+        if (!options?.headers?.["payment-signature"])
+          return {
+            status: 402,
+            url: "http://127.0.0.1:4021/data",
+            headers: { "payment-required": challenge },
+            body: new Uint8Array(),
+          };
+        throw new Error("simulated no response");
+      }),
+      now: () => new Date("2026-10-22T00:00:00Z"),
+      gatewayStatus: vi.fn(async (): Promise<"completed"> => "completed"),
+    };
+    await payGatewaySteps(input, dependencies);
+    const first = await getPool().query<{ obs_id: string; responded_at: Date | null }>(
+      "SELECT obs_id,responded_at FROM observations WHERE envelope_ref=$1",
+      [input.envelopeRef],
+    );
+    expect(first.rows).toHaveLength(1);
+    expect(first.rows[0]?.responded_at).toBeNull();
+    await payGatewaySteps(input, dependencies);
+    expect(signer.sign).toHaveBeenCalledOnce();
+    expect(await refreshGatewayStatuses(input, dependencies)).toEqual(["completed"]);
+    const final = await getPool().query<{
+      obs_id: string;
+      delivered: number;
+      settled_at: Date;
+      responded_at: Date | null;
+    }>("SELECT obs_id,delivered,settled_at,responded_at FROM observations WHERE envelope_ref=$1", [
+      input.envelopeRef,
+    ]);
+    expect(final.rows).toHaveLength(1);
+    expect(final.rows[0]).toMatchObject({
+      obs_id: first.rows[0]?.obs_id,
+      delivered: 0,
+      responded_at: null,
+    });
+    expect(final.rows[0]?.settled_at).toBeInstanceOf(Date);
+    await payGatewaySteps(input, dependencies);
+    expect(signer.sign).toHaveBeenCalledOnce();
   });
 });

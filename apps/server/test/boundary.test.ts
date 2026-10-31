@@ -251,6 +251,8 @@ function boundaryInput(body: string) {
     statusCode: 200,
     mimeType: "application/json",
     stepIndex: 0,
+    callIndex: 0,
+    obsId: `obs_${"a".repeat(32)}`,
     source,
     bodyCommit: `0x${"b".repeat(64)}`,
     expectedKeys: ["price"],

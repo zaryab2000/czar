@@ -5,13 +5,25 @@
  */
 export interface StepResult {
   /**
-   * Schema version, major.minor; this file is 1.0.
+   * Schema version, major.minor; this file is 1.1.
    */
-  schemaVersion: "1.0";
+  schemaVersion: "1.1";
   /**
    * Step index.
    */
   stepIndex: number;
+  /**
+   * Authorization index for this paid call; zero for an ERC-8183 job.
+   */
+  callIndex: number;
+  /**
+   * TaskSpec subject served by this paid call when known.
+   */
+  subjectIndex?: number;
+  /**
+   * Observation identity for this paid call.
+   */
+  obsId: string;
   /**
    * Outcome vocabulary (SL).
    */
