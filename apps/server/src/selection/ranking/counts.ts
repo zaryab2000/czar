@@ -165,7 +165,7 @@ export function startSupplierCountsRefresh(input: {
   readonly policyVersion: string;
   readonly now?: () => Date;
   readonly onError: (error: unknown) => void;
-}): { stop(): void; ready: Promise<void> } {
+}): { stop(): Promise<void>; ready: Promise<void> } {
   const intervalSeconds = Number(input.config.get("selection.snapshotRefreshSeconds"));
   const debounceSeconds = Number(input.config.get("selection.ratingRefreshDebounceSeconds"));
   const confidenceZ = Number(input.config.get("selection.confidenceZ"));
@@ -173,8 +173,13 @@ export function startSupplierCountsRefresh(input: {
   let debounce: ReturnType<typeof setTimeout> | undefined;
   let active: Promise<void> | undefined;
   let stopped = false;
+  let pending = false;
   const run = () => {
-    if (stopped || active) return;
+    if (stopped) return;
+    if (active) {
+      pending = true;
+      return;
+    }
     active = refreshSupplierCounts({
       pool: input.pool,
       network: input.network,
@@ -184,10 +189,19 @@ export function startSupplierCountsRefresh(input: {
       leaseSeconds: intervalSeconds,
       now: now(),
     })
-      .then(() => undefined)
+      .then((refreshed) => {
+        if (!refreshed && !stopped) {
+          if (debounce) clearTimeout(debounce);
+          debounce = setTimeout(run, debounceSeconds * 1000);
+        }
+      })
       .catch(input.onError)
       .finally(() => {
         active = undefined;
+        if (pending && !stopped) {
+          pending = false;
+          run();
+        }
       });
   };
   const interval = setInterval(run, intervalSeconds * 1000);
@@ -206,11 +220,12 @@ export function startSupplierCountsRefresh(input: {
   });
   return {
     ready,
-    stop() {
+    async stop() {
       stopped = true;
       clearInterval(interval);
       if (debounce) clearTimeout(debounce);
       unregister();
+      await active;
     },
   };
 }
