@@ -110,7 +110,26 @@ async function buildPlan(
   const categoryId = keccak256(stringToHex(category));
   const hasAgent = await ports.agentHosts.hasAgentHost(input.deviceId);
   const collected = await collectSteps({ input, config, ports, network, hasAgent });
-  const { steps, leaves, droppedSteps } = collected;
+  const { leaves, droppedSteps } = collected;
+  const healthByStep = await Promise.all(
+    collected.steps.map(async (step) =>
+      step.serviceId
+        ? ((await ports.health?.openOwnerFacts(input.userId, network, step.serviceId)) ?? [])
+        : [],
+    ),
+  );
+  const steps = collected.steps.map((step, index) => {
+    if (!step.serviceId || !step.why) return step;
+    const health = healthByStep[index]?.length ?? 0;
+    const explanation = health
+      ? " No ratings yet. Czar will ask before using it. A supplier health fact also requires approval."
+      : " No ratings yet. Czar will ask before using it.";
+    return { ...step, why: { ...step.why, summary: `${step.why.summary}${explanation}` } };
+  });
+  const approvalReasons: NonNullable<Plan["approvalReasons"]> = [];
+  if (steps.some((step) => step.serviceId)) approvalReasons.push("unrated");
+  if (healthByStep.some((facts) => facts.length > 0)) approvalReasons.push("health-fact");
+  if (collected.hasExploration) approvalReasons.push("exploration-slot");
   if (steps.length === 0 && droppedSteps.length === 0) return null;
   const hasPocket = steps.some((step) => step.kind === "gateway-nano");
   const pocket = hasPocket ? await ports.pocketKeys.createPocketKey(planId) : undefined;
@@ -151,6 +170,7 @@ async function buildPlan(
     createdAt: input.now.toISOString(),
     ...(droppedSteps.length ? { droppedSteps } : {}),
     taskSpec: input.taskSpec,
+    ...(approvalReasons.length ? { approvalReasons } : {}),
   };
   const hash = recomputePlanHash({ ...partial, planHash: `0x${"0".repeat(64)}` as Hash32 });
   const plan = { ...partial, planHash: hash };
@@ -162,7 +182,7 @@ async function buildPlan(
     approvalNeeded:
       BigInt(plan.cap) > remaining ||
       (Boolean(config.get("planner.newPayeeNeedsApproval")) && leaves.length > 0) ||
-      collected.hasExploration,
+      approvalReasons.length > 0,
   };
 }
 
@@ -448,6 +468,7 @@ async function probeRanked(args: {
   const failures: string[] = [];
   for (const [rank, row] of ranked.entries()) {
     if (input.excludedServices?.has(row.serviceId)) continue;
+    if (await ports.health?.isInjectionBlocked(network, row.serviceId)) continue;
     const service = await ports.directory.get(row.serviceId);
     if (
       !service ||
@@ -515,6 +536,7 @@ async function indexFallback(args: {
   const candidates: Candidate[] = [];
   for (const [rank, row] of ranked.entries()) {
     if (input.excludedServices?.has(row.serviceId)) continue;
+    if (await ports.health?.isInjectionBlocked(network, row.serviceId)) continue;
     const service = await ports.directory.get(row.serviceId);
     const offer = service?.accepts.find(
       (item) => item.network === network && isUsablePlannerOffer(item),

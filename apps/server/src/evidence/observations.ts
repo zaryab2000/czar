@@ -1,6 +1,7 @@
 import { dedupKey, obsId, paymentRefHash } from "@czar/hashing";
 import { validateSchema, type PaymentRef } from "@czar/schemas";
 import type { Pool } from "pg";
+import { clearFacts, healthFacts, writeFacts } from "#src/evidence/health";
 
 export interface ObservationInsert {
   readonly userId: string;
@@ -202,6 +203,7 @@ export async function fillResponse(
     [id, respondedAt ?? null, delivered ?? null],
   );
   await requireObservation(pool, id);
+  await evaluateResponseHealth(pool, id);
 }
 
 /** Settle only after the caller has observed the vault or Gateway settlement fact. */
@@ -222,10 +224,16 @@ export async function markSettled(
   );
   const row = await requireObservation(pool, id);
   if (row.releasedAt) throw new Error(`Cannot settle released observation ${id}.`);
+  await evaluateResponseHealth(pool, id);
 }
 
 /** Release only an authorization proven unused or a failed Gateway row. */
-export async function markReleased(pool: Pool, id: string, at: Date): Promise<void> {
+export async function markReleased(
+  pool: Pool,
+  id: string,
+  at: Date,
+  consecutiveFailures = 3,
+): Promise<void> {
   await pool.query(
     `${EXISTING_ROW}
        SET released_at=COALESCE(observations.released_at,$2)
@@ -234,6 +242,25 @@ export async function markReleased(pool: Pool, id: string, at: Date): Promise<vo
   );
   const row = await requireObservation(pool, id);
   if (row.settledAt) throw new Error(`Cannot release settled observation ${id}.`);
+  if (row.rail !== "erc8183-job") {
+    const recent = await pool.query<{ obs_id: string }>(
+      `SELECT obs_id FROM observations
+       WHERE user_id=$1 AND network=$2 AND service_id=$3 AND rail<>'erc8183-job'
+       ORDER BY created_at DESC,call_index DESC LIMIT $4`,
+      [row.userId, row.network, row.serviceId, consecutiveFailures],
+    );
+    const observations = await Promise.all(
+      recent.rows.map((item) => requireObservation(pool, item.obs_id)),
+    );
+    await writeFacts(pool, healthFacts(observations, [], { consecutiveFailures }));
+  }
+}
+
+async function evaluateResponseHealth(pool: Pool, id: string): Promise<void> {
+  const row = await requireObservation(pool, id);
+  if (row.rail === "erc8183-job" || !row.settledAt) return;
+  await writeFacts(pool, healthFacts([row], [], { consecutiveFailures: 3 }));
+  if (row.delivered === 1) await clearFacts(pool, id);
 }
 
 /** Advance the stored escrow state without rolling back a terminal or newer fact. */

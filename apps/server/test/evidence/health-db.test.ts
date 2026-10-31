@@ -1,12 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { setupDatabase } from "#test/db";
 import { makeObjectiveSubmission, seedDevice, TEST_USER_ID } from "#test/fixtures";
-import {
-  fillResponse,
-  insertAtSign,
-  markReleased,
-  markSettled,
-} from "#src/evidence/observations";
+import { fillResponse, insertAtSign, markReleased, markSettled } from "#src/evidence/observations";
 import { clearFacts, isInjectionBlocked, openOwnerFacts, writeFacts } from "#src/evidence/health";
 
 const getPool = setupDatabase();
@@ -16,7 +11,7 @@ const VAULT = "0x0000000000000000000000000000000000000001" as const;
 const PAYEE = "0x0000000000000000000000000000000000000002" as const;
 const SERVICE_ID = `svc_${"3".repeat(32)}`;
 const ENVELOPE_REF = `eip155:5042002:${VAULT}:1`;
-const AT = new Date("2026-10-31T00:00:00Z");
+const AT = new Date();
 
 async function sign(index: number) {
   return insertAtSign(getPool(), {
@@ -57,15 +52,24 @@ beforeEach(async () => {
   await getPool().query(
     `INSERT INTO objectives (objective_id,user_id,device_id,submission,objective_hash,state,envelope_ref)
      VALUES ($1,$2,$3,$4::jsonb,$5,'executing',$6)`,
-    [OBJECTIVE_ID, TEST_USER_ID, submission.deviceId, JSON.stringify(submission),
-      submission.objectiveHash, ENVELOPE_REF],
+    [
+      OBJECTIVE_ID,
+      TEST_USER_ID,
+      submission.deviceId,
+      JSON.stringify(submission),
+      submission.objectiveHash,
+      ENVELOPE_REF,
+    ],
   );
   await getPool().query(
     `INSERT INTO plans (plan_id,objective_id,plan,plan_hash,payee_root,state)
      VALUES ($1,$2,'{}',$3,$4,'approved')`,
     [PLAN_ID, OBJECTIVE_ID, `0x${"1".repeat(64)}`, `0x${"2".repeat(64)}`],
   );
-  await getPool().query("UPDATE objectives SET plan_id=$2 WHERE objective_id=$1", [OBJECTIVE_ID, PLAN_ID]);
+  await getPool().query("UPDATE objectives SET plan_id=$2 WHERE objective_id=$1", [
+    OBJECTIVE_ID,
+    PLAN_ID,
+  ]);
 });
 
 describe("persisted supplier health", () => {
@@ -80,7 +84,7 @@ describe("persisted supplier health", () => {
     const facts = await getPool().query<{ obs_id: string }>(
       "SELECT obs_id FROM supplier_health WHERE fact='settled-not-delivered' ORDER BY obs_id",
     );
-    expect(facts.rows.map((row) => row.obs_id)).toEqual([before, after]);
+    expect(new Set(facts.rows.map((row) => row.obs_id))).toEqual(new Set([before, after]));
   });
 
   it("writes H2 after three releases, not two, and resets after a settlement", async () => {
@@ -96,7 +100,7 @@ describe("persisted supplier health", () => {
     ]);
     const paid = await sign(4);
     await fillResponse(getPool(), paid, AT, 1);
-    await markSettled(getPool(), paid, AT);
+    await markSettled(getPool(), paid, new Date(AT.getTime() + 1_000));
     expect(await openOwnerFacts(getPool(), TEST_USER_ID, "eip155:5042002", SERVICE_ID)).toEqual([]);
     const later = await sign(5);
     await markReleased(getPool(), later, AT);

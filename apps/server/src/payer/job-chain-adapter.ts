@@ -117,6 +117,79 @@ export function createJobChainAdapter(input: {
     return Number(block.timestamp);
   }
 
+  async function getJobHistory(
+    jobKeyValue: Hash32,
+    openedTransaction: Hash32,
+    terminalTransaction?: Hash32,
+  ): Promise<{ readonly submitted: boolean; readonly rejectionReason?: Hash32 } | undefined> {
+    try {
+      const opened = await input.client.getTransactionReceipt({ hash: openedTransaction });
+      if (opened.status !== "success") return undefined;
+      const { jobId } = await readView(jobKeyValue);
+      const matchesOpen = opened.logs.some((log) => {
+        if (log.address.toLowerCase() !== input.vault.toLowerCase()) return false;
+        try {
+          const event = decodeEventLog({
+            abi: czarVaultAbi,
+            eventName: "JobOpened",
+            data: log.data,
+            topics: log.topics,
+          });
+          return (
+            event.args.jobKey === jobKeyValue &&
+            BigInt(event.args.jobId) === jobId &&
+            event.args.jobEscrow.toLowerCase() === input.jobEscrow.toLowerCase()
+          );
+        } catch {
+          return false;
+        }
+      });
+      if (!matchesOpen) return undefined;
+      const fromBlock = opened.blockNumber;
+      const terminalReceipt = terminalTransaction
+        ? await input.client.getTransactionReceipt({ hash: terminalTransaction })
+        : undefined;
+      if (terminalReceipt && terminalReceipt.status !== "success") return undefined;
+      const toBlock = terminalReceipt?.blockNumber ?? (await input.client.getBlockNumber());
+      if (toBlock < fromBlock) return undefined;
+      const chunk = BigInt(Number(input.config.get("indexer.getLogsBlockRange")));
+      if (chunk < 1n) return undefined;
+      let funded = false;
+      let submitted = false;
+      let rejectionReason: Hash32 | undefined;
+      for (let start = fromBlock; start <= toBlock; start += chunk) {
+        const end = start + chunk - 1n < toBlock ? start + chunk - 1n : toBlock;
+        const logs = await input.client.getLogs({
+          address: input.jobEscrow,
+          fromBlock: start,
+          toBlock: end,
+        });
+        for (const log of logs) {
+          if (log.address.toLowerCase() !== input.jobEscrow.toLowerCase()) continue;
+          let event: ReturnType<typeof decodeEventLog>;
+          try {
+            event = decodeEventLog({
+              abi: CIRCLE_JOB_ABI,
+              data: log.data,
+              topics: log.topics,
+            });
+          } catch {
+            continue;
+          }
+          if (!("jobId" in event.args) || BigInt(event.args.jobId as bigint) !== jobId) continue;
+          if (event.eventName === "JobFunded") funded = true;
+          if (event.eventName === "JobSubmitted") submitted = true;
+          if (event.eventName === "JobRejected" && "reason" in event.args)
+            rejectionReason = event.args.reason as Hash32;
+        }
+      }
+      return funded ? { submitted, ...(rejectionReason ? { rejectionReason } : {}) } : undefined;
+    } catch {
+      // An incomplete RPC range is unknown evidence, never a supplier-failure fact.
+      return undefined;
+    }
+  }
+
   async function waitForStatus(
     jobKeyValue: Hash32,
     isComplete: (view: JobChainView) => boolean,
@@ -196,6 +269,7 @@ export function createJobChainAdapter(input: {
       return { jobKey: event.args.jobKey, jobId: BigInt(event.args.jobId), txHash: hash };
     },
     getJob: async (jobKeyValue) => readView(jobKeyValue),
+    getJobHistory,
     waitForBudget: async (jobKeyValue, timeoutMs) => {
       const current = await readView(jobKeyValue);
       if (current.budget && current.budget > 0n) return current.budget;

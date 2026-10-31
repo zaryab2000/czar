@@ -787,7 +787,12 @@ async function sendGatewayCall(
           await fillResponse(dependencies.pool, observationId, undefined, 0);
         await markSettled(dependencies.pool, observationId, dependencies.now());
       } else {
-        await markReleased(dependencies.pool, observationId, dependencies.now());
+        await markReleased(
+          dependencies.pool,
+          observationId,
+          dependencies.now(),
+          Number(dependencies.config.get("health.consecutiveFailures")),
+        );
       }
       return;
     }
@@ -1003,7 +1008,12 @@ export async function refreshGatewayStatuses(
           await fillResponse(dependencies.pool, id, undefined, 0);
         await markSettled(dependencies.pool, id, dependencies.now());
       } else if (state === "failed") {
-        await markReleased(dependencies.pool, id, dependencies.now());
+        await markReleased(
+          dependencies.pool,
+          id,
+          dependencies.now(),
+          Number(dependencies.config.get("health.consecutiveFailures")),
+        );
       }
       statuses.push(state);
     }

@@ -73,6 +73,7 @@ function openedJobInput() {
 
 beforeAll(async () => seedDevice(getPool()));
 beforeEach(async () => {
+  await getPool().query("DELETE FROM supplier_health");
   await getPool().query("DELETE FROM observations");
   await getPool().query("DELETE FROM objectives");
   await getPool().query("UPDATE users SET controlled=false WHERE user_id=$1", [TEST_USER_ID]);

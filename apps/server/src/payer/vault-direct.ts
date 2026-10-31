@@ -1190,6 +1190,8 @@ async function settleAndFinalize(
       ),
     );
     if (await dependencies.chain.isSettled({ reservationId, index: call.index })) {
+      if (!completed.some((entry) => entry.index === call.index))
+        await fillResponse(dependencies.pool, id, undefined, 0);
       const settleTx = signedTrace.findLast(
         (phase) =>
           phase.phase === "settle.mined" &&
@@ -1203,10 +1205,13 @@ async function settleAndFinalize(
         dependencies.now(),
         typeof settleTx === "string" && /^0x[0-9a-f]{64}$/.test(settleTx) ? settleTx : undefined,
       );
-      if (!completed.some((entry) => entry.index === call.index))
-        await fillResponse(dependencies.pool, id, undefined, 0);
     } else {
-      await markReleased(dependencies.pool, id, dependencies.now());
+      await markReleased(
+        dependencies.pool,
+        id,
+        dependencies.now(),
+        Number(dependencies.config.get("health.consecutiveFailures")),
+      );
     }
   }
   // Review M2: an index left unsettled by a reverted settle is booked by finalize; record its receipt now.

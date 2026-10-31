@@ -56,6 +56,7 @@ import {
 } from "#src/evidence/receipts";
 import { createReceiptInputFromTrace } from "#src/evidence/receipt-input";
 import { fillResponse } from "#src/evidence/observations";
+import { isInjectionBlocked, openOwnerFacts } from "#src/evidence/health";
 import { computePromptHash, type ModelClient } from "#src/models/proxy";
 import {
   executeVaultDirectStep,
@@ -1430,6 +1431,12 @@ function createPlannerPorts(
     profiles: createPlannerProfileSource(acceptance),
     pocketKeys: createPlannerPocketKeySource(signer),
     agentHosts: { hasAgentHost: async () => false },
+    health: {
+      openOwnerFacts: (userId, network, serviceId) =>
+        openOwnerFacts(options.pool, userId, network, serviceId),
+      isInjectionBlocked: (network, serviceId) =>
+        isInjectionBlocked(options.pool, network, serviceId),
+    },
     allowance: {
       async remaining(userId, categoryId) {
         try {
