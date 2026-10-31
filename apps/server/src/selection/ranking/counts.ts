@@ -3,7 +3,7 @@ import { H, jcsString, ratingLineageRoot } from "@czar/hashing";
 import type { Config } from "@czar/config";
 import type { Pool, PoolClient } from "pg";
 import { acquireExecutorLease, releaseExecutorLease } from "#src/payer/executions";
-import { setRankingRefreshHandler } from "#src/evidence/ratings";
+import { registerRankingRefreshHandler } from "#src/evidence/ratings";
 import { wilsonLower } from "#src/selection/ranking/lower-bound";
 
 interface RatingRow {
@@ -118,7 +118,9 @@ async function writeCounts(client: PoolClient, input: RefreshInput): Promise<voi
   const groups = new Map<string, RatingRow[]>();
   for (const row of result.rows) {
     const key = JSON.stringify([row.service_id, row.version_id, row.task_class]);
-    groups.set(key, [...(groups.get(key) ?? []), row]);
+    const group = groups.get(key);
+    if (group) group.push(row);
+    else groups.set(key, [row]);
   }
   for (const rows of groups.values()) {
     const first = rows[0];
@@ -198,7 +200,7 @@ export function startSupplierCountsRefresh(input: {
     leaseSeconds: intervalSeconds,
     now: now(),
   }).then(() => undefined);
-  setRankingRefreshHandler(() => {
+  const unregister = registerRankingRefreshHandler(() => {
     if (debounce) clearTimeout(debounce);
     debounce = setTimeout(run, debounceSeconds * 1000);
   });
@@ -208,7 +210,7 @@ export function startSupplierCountsRefresh(input: {
       stopped = true;
       clearInterval(interval);
       if (debounce) clearTimeout(debounce);
-      setRankingRefreshHandler(null);
+      unregister();
     },
   };
 }

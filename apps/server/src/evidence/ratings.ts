@@ -93,15 +93,16 @@ export async function submitRating(
   }
 }
 
-let rankingRefreshHandler: (() => void) | null = null;
+const rankingRefreshHandlers = new Set<() => void>();
 
-/** Registers the process-local refresh signal; the periodic worker covers restarts. */
-export function setRankingRefreshHandler(handler: (() => void) | null): void {
-  rankingRefreshHandler = handler;
+/** Registers a process-local refresh signal; periodic workers cover restarts. */
+export function registerRankingRefreshHandler(handler: () => void): () => void {
+  rankingRefreshHandlers.add(handler);
+  return () => rankingRefreshHandlers.delete(handler);
 }
 
 export function requestRankingRefresh(_accepted: RatingAccepted): void {
-  rankingRefreshHandler?.();
+  for (const handler of rankingRefreshHandlers) handler();
 }
 
 async function submitWithinTransaction(
