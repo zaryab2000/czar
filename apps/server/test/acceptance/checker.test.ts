@@ -246,17 +246,17 @@ describe("acceptance checker", () => {
     expect(result.report.decision).toBe("inconclusive");
   });
 
-  it("marks a paid attempt with no response as delivery inconclusive", async () => {
+  it("fails delivery for a paid attempt with no response", async () => {
     const checker = await makeChecker();
     const result = await checker.check(
       inputFor(checker, 11, { responseArrived: false, statusCode: null, bodyText: null }),
     );
     expect(result.report.checks[0]).toMatchObject({
       name: "delivery",
-      result: "inconclusive",
+      result: "fail",
       detail: { reason: "no-response" },
     });
-    expect(result.report.decision).toBe("inconclusive");
+    expect(result.report.decision).toBe("fail");
   });
 
   it.each([

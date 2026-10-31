@@ -60,13 +60,8 @@ export function healthFacts(
   for (const row of rows) {
     const evidence = reports.filter((report) => report.obsId === row.obsId);
     if (row.rail !== "erc8183-job") {
-      const exhausted = evidence.some((report) => report.kind === "retry-exhausted");
       const expiredOnResume = evidence.some((report) => report.kind === "resume-past-valid-before");
-      if (
-        row.settledAt &&
-        !expiredOnResume &&
-        (row.delivered === 0 || (row.delivered === null && exhausted))
-      )
+      if (row.settledAt && !expiredOnResume && row.delivered === 0)
         facts.push({ fact: "settled-not-delivered", obsId: row.obsId });
     } else if (row.settledAt) {
       const expiredWithoutSubmission =
@@ -118,6 +113,10 @@ export function healthFacts(
 /** Writes immutable facts; replaying a payment never duplicates its fact. */
 export async function writeFacts(pool: Pool, facts: readonly FactCandidate[]): Promise<void> {
   for (const { fact, obsId } of facts) {
+    const attributable = await isAttributable(pool, obsId);
+    if (attributable === null)
+      throw new Error(`Cannot write supplier health fact: observation ${obsId} is missing.`);
+    if (!attributable) continue;
     const result = await pool.query(
       `INSERT INTO supplier_health (fact,obs_id,user_id,network,service_id,version_id)
        SELECT $1,obs_id,user_id,network,service_id,version_id
@@ -138,6 +137,7 @@ export async function writeFacts(pool: Pool, facts: readonly FactCandidate[]): P
 
 /** Clears owner-specific facts only after an explicitly approved, delivered settlement. */
 export async function clearFacts(pool: Pool, obsId: string): Promise<void> {
+  if (!(await isAttributable(pool, obsId))) return;
   await pool.query(
     `UPDATE supplier_health h
      SET cleared_at=now(),cleared_by_obs_id=o.obs_id
@@ -150,6 +150,33 @@ export async function clearFacts(pool: Pool, obsId: string): Promise<void> {
        AND h.user_id=o.user_id AND h.network=o.network AND h.service_id=o.service_id
        AND h.obs_id<>o.obs_id AND h.at<o.settled_at AND h.cleared_at IS NULL`,
     [obsId],
+  );
+}
+
+/** A payment to an unbound alternate retains settlement evidence but never counts for this supplier. */
+export async function isAttributable(pool: Pool, obsId: string): Promise<boolean | null> {
+  const result = await pool.query<{
+    rail: string;
+    network: string;
+    dedup_key: string;
+    payee: string | null;
+  }>(
+    `SELECT o.rail,o.network,o.dedup_key,s.step->>'payee' AS payee
+     FROM observations o
+     LEFT JOIN objectives obj ON obj.objective_id=o.objective_id
+     LEFT JOIN steps s ON s.plan_id=obj.plan_id AND s.step_index=o.step_index
+     WHERE o.obs_id=$1`,
+    [obsId],
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+  if (row.rail === "erc8183-job") return true;
+  const parts = row.dedup_key.split(":");
+  return (
+    parts.length === 6 &&
+    parts[0] === row.rail &&
+    `${parts[1]}:${parts[2]}` === row.network &&
+    parts[4] === row.payee?.toLowerCase()
   );
 }
 

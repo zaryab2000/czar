@@ -244,9 +244,12 @@ export async function markReleased(
   if (row.settledAt) throw new Error(`Cannot release settled observation ${id}.`);
   if (row.rail !== "erc8183-job") {
     const recent = await pool.query<{ obs_id: string }>(
-      `SELECT obs_id FROM observations
-       WHERE user_id=$1 AND network=$2 AND service_id=$3 AND rail<>'erc8183-job'
-       ORDER BY created_at DESC,call_index DESC LIMIT $4`,
+      `SELECT o.obs_id FROM observations o
+       JOIN objectives obj ON obj.objective_id=o.objective_id
+       JOIN steps s ON s.plan_id=obj.plan_id AND s.step_index=o.step_index
+       WHERE o.user_id=$1 AND o.network=$2 AND o.service_id=$3 AND o.rail<>'erc8183-job'
+         AND split_part(o.dedup_key,':',5)=lower(s.step->>'payee')
+       ORDER BY o.created_at DESC,o.call_index DESC LIMIT $4`,
       [row.userId, row.network, row.serviceId, consecutiveFailures],
     );
     const observations = await Promise.all(

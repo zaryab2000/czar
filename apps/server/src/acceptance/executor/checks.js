@@ -4,7 +4,7 @@ function check(name, result, detail) {
 
 function deliveryCheck(input) {
   if (!input.paid) return check("delivery", "not_checked");
-  if (!input.responseArrived) return check("delivery", "inconclusive", { reason: "no-response" });
+  if (!input.responseArrived) return check("delivery", "fail", { reason: "no-response" });
   if (input.statusCode === null || input.statusCode < 200 || input.statusCode >= 300)
     return check("delivery", "fail", { reason: "http-status" });
   if (input.bodyBytes === 0) return check("delivery", "fail", { reason: "empty-body" });

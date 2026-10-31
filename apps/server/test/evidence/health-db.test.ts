@@ -19,7 +19,7 @@ const SERVICE_ID = `svc_${"3".repeat(32)}`;
 const ENVELOPE_REF = `eip155:5042002:${VAULT}:1`;
 const AT = new Date();
 
-async function sign(index: number) {
+async function sign(index: number, payTo: `0x${string}` = PAYEE) {
   return insertAtSign(getPool(), {
     userId: TEST_USER_ID,
     vault: VAULT,
@@ -37,7 +37,7 @@ async function sign(index: number) {
       network: "eip155:5042002",
       asset: "0x0000000000000000000000000000000000000003",
       payer: VAULT,
-      payTo: PAYEE,
+      payTo,
       amount: "1000",
       nonce: `0x${index.toString(16).padStart(64, "0")}` as const,
       validBefore: 1_800_000_000,
@@ -105,9 +105,25 @@ beforeEach(async () => {
     OBJECTIVE_ID,
     PLAN_ID,
   ]);
+  await getPool().query(
+    "INSERT INTO steps (plan_id,step_index,step,state) VALUES ($1,0,$2::jsonb,'offered')",
+    [PLAN_ID, JSON.stringify({ payee: PAYEE })],
+  );
 });
 
 describe("persisted supplier health", () => {
+  it("retains alternate settlement without attributing a health fact to the approved payee", async () => {
+    const alternate = await sign(9, "0x0000000000000000000000000000000000000009");
+    await fillResponse(getPool(), alternate, AT, 0);
+    await markSettled(getPool(), alternate, AT);
+    const observation = await getPool().query(
+      "SELECT settled_at,delivered FROM observations WHERE obs_id=$1",
+      [alternate],
+    );
+    expect(observation.rows[0]).toMatchObject({ settled_at: expect.any(Date), delivered: 0 });
+    expect(await openOwnerFacts(getPool(), TEST_USER_ID, "eip155:5042002", SERVICE_ID)).toEqual([]);
+  });
+
   it("writes H1 once whether delivery failure precedes or follows settlement", async () => {
     const before = await sign(1);
     await fillResponse(getPool(), before, AT, 0);
@@ -149,10 +165,6 @@ describe("persisted supplier health", () => {
     const first = await sign(1);
     const second = await sign(2);
     const third = await sign(3);
-    await getPool().query(
-      "INSERT INTO steps (plan_id,step_index,step,state) VALUES ($1,0,'{}','offered')",
-      [PLAN_ID],
-    );
     await getPool().query(
       `INSERT INTO step_executions (plan_id,step_index,attempt,phase,payload)
        VALUES ($1,0,0,'auth.signed',$2::jsonb),($1,0,0,'call.unpaid',$3::jsonb)`,
