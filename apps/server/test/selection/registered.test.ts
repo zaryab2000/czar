@@ -7,12 +7,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createAcceptancePorts } from "#src/acceptance/ports";
 import type { RankingQuery } from "#src/planner/ports";
 import { createRegisteredSelection } from "#src/selection/registered/index";
+import { rankingPolicyVersion } from "#src/selection/ranking/decision";
 import { setupDatabase } from "#test/db";
 
 const getPool = setupDatabase();
 const SERVICE_A = `svc_${"a".repeat(32)}`;
 const SERVICE_B = `svc_${"b".repeat(32)}`;
 const SERVICE_VERSION = `svc_${"c".repeat(32)}`;
+const SERVICE_RATED = `svc_${"d".repeat(32)}`;
 const NETWORK = "eip155:5042002";
 const USDC_ASSET = "0x3600000000000000000000000000000000000000";
 const RESOURCE = "https://merchant.example/v1/search";
@@ -253,6 +255,44 @@ beforeEach(async () => {
 });
 
 describe("registered selection", () => {
+  it("ranks only ratings for the current verified probe version", async () => {
+    let schema = { type: "object", properties: { answer: { type: "string" } } };
+    const fetchImpl = vi.fn<SafeFetch>(async (url) =>
+      response("25", "0xaaa", NETWORK, schema, bareUrl(url)),
+    );
+    const services = { [SERVICE_RATED]: registration(RESOURCE) };
+    const at = new Date("2026-10-25T00:00:00Z");
+    const initial = setup(fetchImpl, services, () => at);
+    expect((await initial.rank.rank(query())).ranked).toEqual([]);
+    const rows = await getPool().query<{ version_id: string }>(
+      "SELECT version_id FROM service_versions WHERE service_id=$1",
+      [SERVICE_RATED],
+    );
+    const versionA = rows.rows[0]!.version_id;
+    const policyVersion = rankingPolicyVersion({ confidenceZ: 1.959964, consecutiveFailures: 3 });
+    await getPool().query(
+      `INSERT INTO supplier_counts(network,service_id,version_id,task_class,good,bad,
+         owners_rated,owners_bad,lower_bound,lineage_root,policy_version,computed_at)
+       VALUES($1,$2,$3,'data-json',3,0,1,0,0.4385,'0x' || repeat('a',64),$4,$5)`,
+      [NETWORK, SERVICE_RATED, versionA, policyVersion, at],
+    );
+    const rated = await setup(fetchImpl, services, () => at).rank.rank(query());
+    expect(rated.ranked).toMatchObject([
+      { service_id: SERVICE_RATED, version_id: versionA, features: { good: 3, bad: 0 } },
+    ]);
+    expect(validateSchema("ranking-decision", rated)).toBe(true);
+    schema = { type: "object", properties: { answer: { type: "number" } } };
+    const changed = await setup(fetchImpl, services, () => at).rank.rank(query());
+    expect(changed.ranked).toEqual([]);
+    expect(changed.unverified).toEqual([
+      { service_id: SERVICE_RATED, reason: "unrated", n_eff: 0 },
+    ]);
+    expect(
+      (await getPool().query("SELECT good FROM supplier_counts WHERE version_id=$1", [versionA]))
+        .rows[0]?.good,
+    ).toBe(3);
+  });
+
   it("records the verified probe version and only advances its last seen time", async () => {
     let current = new Date("2026-10-25T00:00:00Z");
     const fetchImpl = vi.fn<SafeFetch>(async (url) =>
