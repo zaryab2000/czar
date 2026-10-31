@@ -14,10 +14,13 @@ import { makeObjectiveSubmission, seedDevice, TEST_USER_ID } from "#test/fixture
 import { loadConfig } from "@czar/config";
 import { buildTree, pocketLeaf } from "@czar/hashing";
 import { KEY_IDS } from "@czar/signer";
+import { appendExecutionPhase } from "#src/payer/executions";
 import {
+  buildExactPaymentPayload,
   buildPaymentRequired,
   decodeBase64Json,
   encodePaymentRequired,
+  readPaymentRequired,
   SafeFetchError,
 } from "@czar/x402";
 
@@ -665,6 +668,78 @@ describe("pocket funding", () => {
       ),
     ).rejects.toThrow(/service|payee/i);
     expect(sign).not.toHaveBeenCalled();
+  });
+
+  it("reconciles a previously signed alternate Gateway payment without signing again", async () => {
+    const { challenge, input } = gatewayRetryFixture();
+    const step = input.steps[0];
+    if (!step?.payee) throw new Error("Gateway fixture has no step payee.");
+    const alternate = step.payee;
+    const read = readPaymentRequired({
+      status: 402,
+      headers: { "payment-required": challenge },
+      body: "",
+    });
+    if (!read.ok) throw new Error("Gateway fixture has no valid challenge.");
+    const offer = read.paymentRequired.accepts[0];
+    if (!offer) throw new Error("Gateway fixture has no accepted offer.");
+    const nonce = `0x${"11".repeat(32)}` as const;
+    const validBefore = String(Math.floor(Date.parse("2026-10-22T00:00:00Z") / 1000) + 30);
+    const paymentPayload = buildExactPaymentPayload({
+      resource: read.resource,
+      accepted: offer,
+      authorization: {
+        from: POCKET,
+        to: alternate,
+        value: "1000",
+        validAfter: "0",
+        validBefore,
+        nonce,
+      },
+      signature: `0x${"ab".repeat(65)}`,
+    });
+    await appendExecutionPhase(getPool(), {
+      planId: PLAN_ID,
+      stepIndex: 0,
+      attempt: 0,
+      phase: "pocket.auth.signed[0]",
+      payload: {
+        index: 0,
+        paymentPayload,
+        nonce,
+        paymentId: "pay_11111111111111111111111111111111",
+      },
+    });
+    const sign = vi.fn();
+    const gatewayStatus = vi.fn(async () => "completed" as const);
+    const resumeInput = {
+      ...input,
+      steps: [
+        { ...step, payee: "0x0000000000000000000000000000000000000004", alternates: [alternate] },
+      ],
+    };
+    await payGatewaySteps(resumeInput, {
+      pool: getPool(),
+      config: loadConfig(),
+      signer: { sign },
+      safeFetch: vi.fn(async () => ({
+        status: 402,
+        url: "http://127.0.0.1:4021/data",
+        headers: { "payment-required": challenge },
+        body: new Uint8Array(),
+      })),
+      now: () => new Date("2026-10-22T00:00:00Z"),
+      gatewayStatus,
+    });
+
+    expect(sign).not.toHaveBeenCalled();
+    expect(gatewayStatus).toHaveBeenCalledOnce();
+    const observation = await getPool().query<{ settled_at: Date | null }>(
+      "SELECT settled_at FROM observations WHERE envelope_ref=$1",
+      [input.envelopeRef],
+    );
+    expect(observation.rows).toHaveLength(1);
+    expect(observation.rows[0]?.settled_at).toBeInstanceOf(Date);
   });
 
   it("retries a failed nanopayment with the same signed payment header", async () => {

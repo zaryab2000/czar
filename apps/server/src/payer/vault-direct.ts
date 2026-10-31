@@ -492,6 +492,8 @@ async function precheckCalls(input: VaultDirectInput, dependencies: VaultDirectD
     });
     if (!choice.ok || BigInt(choice.offer.amount) > BigInt(input.step.stepCap) / BigInt(maxCount))
       return { calls: prepared, errorCode: "price-or-payee-drift" };
+    if (choice.offer.payTo.toLowerCase() !== input.step.payee?.toLowerCase())
+      return { calls: prepared, errorCode: "price-or-payee-drift" };
     const firstOffer = prepared[0]?.offer;
     if (
       firstOffer &&

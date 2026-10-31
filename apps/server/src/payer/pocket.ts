@@ -660,6 +660,11 @@ async function payGatewayStep(
       BigInt(choice.offer.amount) > BigInt(step.stepCap) / BigInt(step.expectedCalls)
     )
       throw new Error("Gateway offer exceeds the approved step cap or payees.");
+    if (
+      choice.offer.payTo.toLowerCase() !== step.payee?.toLowerCase() &&
+      !trace.some((row) => row.phase === `pocket.auth.signed[${call.callIndex}]`)
+    )
+      throw new Error("Gateway alternate payee has no committed service identity.");
     await sendGatewayCall(
       input,
       step,

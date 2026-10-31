@@ -11,7 +11,7 @@ import { buildPaymentRequired, encodeBase64Json, encodePaymentRequired } from "@
 import type { SignRequest, SignResult } from "@czar/signer";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { setupDatabase } from "#test/db";
-import { markStepDoneWithResults } from "#src/payer/executions";
+import { appendExecutionPhase, markStepDoneWithResults } from "#src/payer/executions";
 import { makeObjectiveSubmission, seedDevice, TEST_USER_ID } from "#test/fixtures";
 
 const getPool = setupDatabase();
@@ -51,6 +51,44 @@ beforeEach(async () => {
     [PLAN_ID],
   );
 });
+
+async function seedMinedAlternateReservation(
+  offer: ReturnType<typeof buildPaymentRequired>,
+  alternate: `0x${string}`,
+): Promise<void> {
+  const accepted = offer.accepts[0];
+  if (!accepted) throw new Error("Alternate x402 fixture has no accepted offer.");
+  const validBefore = Math.floor(Date.parse("2026-10-21T00:00:00Z") / 1000) + 30;
+  await appendExecutionPhase(getPool(), {
+    planId: PLAN_ID,
+    stepIndex: 0,
+    attempt: 0,
+    phase: "reserve.sent",
+    payload: {
+      payee: alternate,
+      unitAmount: "1000",
+      count: 1,
+      validBefore: String(validBefore),
+      txHash: HASH,
+      signedTransaction: "0x02",
+      calls: [
+        {
+          index: 0,
+          offer: accepted,
+          paymentRequired: offer,
+          resource: { url: offer.resource.url },
+        },
+      ],
+    },
+  });
+  await appendExecutionPhase(getPool(), {
+    planId: PLAN_ID,
+    stepIndex: 0,
+    attempt: 0,
+    phase: "reserve.mined",
+    payload: { reservationId: "4", validBefore, txHash: HASH },
+  });
+}
 
 describe("vault-direct executor", () => {
   it("never reserves, signs, or fetches for an unpaid step", async () => {
@@ -130,8 +168,8 @@ describe("vault-direct executor", () => {
       payeeLeaf(payee, PAYEE_KIND.X402_PAY_TO, 0, 1000n),
     );
     const payeeRoot = buildTree(leaves).root;
-    const sign = vi.fn(async () => {
-      throw new Error("alternate payee reached K3 signer");
+    const sign = vi.fn(async (_caller: string, request: SignRequest) => {
+      throw new Error(`alternate payee reached ${request.kind} signer`);
     });
     const input: VaultDirectInput = {
       planId: PLAN_ID,
@@ -170,7 +208,7 @@ describe("vault-direct executor", () => {
       deviceId: "dev_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
       dispatchLease: { assertHeld: vi.fn() },
     };
-    const result = await executeVaultDirectStep(input, {
+    const dependencies = {
       pool: getPool(),
       config: loadConfig(),
       signer: { sign },
@@ -189,10 +227,16 @@ describe("vault-direct executor", () => {
       boundary: vi.fn(),
       recordReceipt: vi.fn(async () => false),
       objects: { put: vi.fn(), get: vi.fn() },
-    });
+    };
+    const result = await executeVaultDirectStep(input, dependencies);
 
     expect(result.state).toBe("failed");
     expect(sign).not.toHaveBeenCalled();
+
+    await seedMinedAlternateReservation(offer, alternate);
+    await expect(executeVaultDirectStep(input, dependencies)).rejects.toThrow(
+      "alternate payee reached usdc-3009 signer",
+    );
   });
 
   it("keeps the dispatcher lease while running an unpaid step", async () => {
