@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { H } from "@czar/hashing";
+import { H, serviceVersionId } from "@czar/hashing";
 import type { Config } from "@czar/config";
 import type { CapabilityCard, RankingDecision } from "@czar/schemas";
 import {
@@ -11,6 +11,12 @@ import {
 import { keccak256, toBytes } from "viem";
 import type { Pool } from "pg";
 import type { RankingQuery, PlannerService } from "#src/planner/ports";
+import { isInjectionBlocked, openOwnerFacts } from "#src/evidence/health";
+import { readSupplierCountSnapshot } from "#src/selection/ranking/counts";
+import { makeRankingDecision, rankingPolicyVersion } from "#src/selection/ranking/decision";
+import { saveRankingDecision } from "#src/selection/ranking/decision-store";
+import { orderCandidates } from "#src/selection/ranking/order";
+import { recordServiceVersion } from "#src/selection/service-versions";
 
 interface ProbeInput {
   readonly query?: Readonly<Record<string, string>>;
@@ -46,6 +52,7 @@ interface RegisteredRecord {
   readonly outputSchema: Readonly<Record<string, unknown>> | null;
   readonly inputFields: readonly CardField[];
   readonly outputFields: readonly CardField[];
+  readonly versionIds: ReadonlyMap<string, string>;
 }
 
 interface ProbeOutcome {
@@ -67,6 +74,7 @@ interface SnapshotOffer {
   readonly siwx: boolean;
   readonly siwxOnly: boolean;
   readonly batchSettlement: boolean;
+  readonly versionId: string | null;
 }
 
 type SnapshotProbe =
@@ -82,21 +90,21 @@ interface SnapshotService {
   readonly probe: SnapshotProbe;
 }
 
-interface InterimPolicyDescriptor {
-  readonly policy: "czar-registered-interim";
-  readonly scr: "SCR-138";
+interface ProbePolicyDescriptor {
+  readonly policy: "czar-registered-probe-snapshot";
+  readonly scr: "SCR-163";
   readonly network: string;
   readonly usdcAsset: string;
   readonly offerRule: "scheme-exact,asset-usdc,no-siwx,no-siwx-only,no-batch-settlement";
   readonly unverifiedWithApproval: boolean;
   readonly exploration: "lowest-eligible-live-price-then-serviceId";
-  readonly ranked: "none";
+  readonly ranked: "current-version-wilson";
 }
 
-interface InterimSnapshot {
-  readonly kind: "czar-registered-interim-snapshot";
+interface ProbeSnapshot {
+  readonly kind: "czar-registered-probe-snapshot";
   readonly policy_version: string;
-  readonly descriptor: InterimPolicyDescriptor;
+  readonly descriptor: ProbePolicyDescriptor;
   readonly network: string;
   readonly services: readonly SnapshotService[];
 }
@@ -140,7 +148,12 @@ export function createRegisteredSelection(
     if (cached && now().getTime() - cached.fetchedAt < recrawlMs) return cached.outcome;
     const active = pending.get(serviceId);
     if (active) return active;
-    const request = probe(serviceId, registration, options.safeFetch, timeoutMs, now)
+    const request = probe(serviceId, registration, options.safeFetch, {
+      pool: options.pool,
+      network,
+      timeoutMs,
+      now,
+    })
       .then((outcome) => {
         probes.set(serviceId, { outcome, fetchedAt: now().getTime() });
         return outcome;
@@ -175,8 +188,7 @@ export function createRegisteredSelection(
           query,
           services,
           descriptor,
-          riskQuantile: 0.05,
-          weights: {},
+          config: options.config,
           retentionDays: Number(options.config.get("selection.decisionRetentionDays")),
           pool: options.pool,
           now,
@@ -225,12 +237,43 @@ async function probe(
   serviceId: string,
   registration: Registration,
   safeFetch: SafeFetch,
-  timeoutMs: number,
-  now: () => Date,
+  options: {
+    readonly pool: Pool;
+    readonly network: string;
+    readonly timeoutMs: number;
+    readonly now: () => Date;
+  },
 ): Promise<ProbeOutcome> {
-  const probedAt = now().toISOString();
+  const outcome = await readRegisteredProbe(serviceId, registration, safeFetch, options);
+  if (!outcome.record) return outcome;
+  for (const versionId of new Set(outcome.record.versionIds.values())) {
+    await recordServiceVersion({
+      pool: options.pool,
+      network: options.network,
+      serviceId,
+      versionId,
+      now: new Date(outcome.probedAt),
+    });
+  }
+  return outcome;
+}
+
+async function readRegisteredProbe(
+  serviceId: string,
+  registration: Registration,
+  safeFetch: SafeFetch,
+  options: {
+    readonly network: string;
+    readonly timeoutMs: number;
+    readonly now: () => Date;
+  },
+): Promise<ProbeOutcome> {
+  const probedAt = options.now().toISOString();
   try {
-    const response = await safeFetch(probeUrl(registration), probeOptions(registration, timeoutMs));
+    const response = await safeFetch(
+      probeUrl(registration),
+      probeOptions(registration, options.timeoutMs),
+    );
     if (
       response.status !== 402 ||
       new URL(response.url).origin !== new URL(registration.resource.url).origin
@@ -245,6 +288,17 @@ async function probe(
       return { record: null, probedAt };
     const declared = result.extensions.bazaar?.schema;
     const outputSchema = responseSchema(declared);
+    const versionIds = new Map<string, string>();
+    for (const offer of result.paymentRequired.accepts) {
+      if (offer.network !== options.network) continue;
+      const payTo = offer.payTo.toLowerCase();
+      const versionId = serviceVersionId({
+        payTo,
+        resource: registration.resource,
+        schema: declared ?? null,
+      });
+      versionIds.set(payTo, versionId);
+    }
     return {
       probedAt,
       record: {
@@ -256,6 +310,7 @@ async function probe(
           objectAt(declared, ...declaredInputPath(registration.resource.method), "properties"),
         ),
         outputFields: cardFields(objectAt(outputSchema, "properties")),
+        versionIds,
       },
     };
   } catch {
@@ -349,7 +404,7 @@ function toPlannerService(record: RegisteredRecord): PlannerService & { probeInp
 
 interface EligibilityResult {
   readonly excluded: RankingDecision["excluded"];
-  readonly eligible: readonly { serviceId: string; amount: bigint }[];
+  readonly eligible: readonly { serviceId: string; amount: bigint; versionId: string }[];
   readonly candidatesConsidered: number;
 }
 
@@ -360,15 +415,13 @@ async function createDecision(args: {
     registration: Registration;
     outcome: ProbeOutcome;
   }[];
-  readonly descriptor: InterimPolicyDescriptor;
-  readonly riskQuantile: number;
-  readonly weights: Readonly<Record<string, number>>;
+  readonly descriptor: ProbePolicyDescriptor;
+  readonly config: Config;
   readonly retentionDays: number;
   readonly pool: Pool;
   readonly now: () => Date;
 }): Promise<RankingDecision> {
-  const { query, services, descriptor, riskQuantile, weights, now } = args;
-  const policy = policyVersion(descriptor);
+  const { query, services, descriptor, now } = args;
   const snapshot = makeSnapshot(services, descriptor);
   const eligibility = evaluateSnapshot(
     snapshot.services,
@@ -376,40 +429,59 @@ async function createDecision(args: {
     descriptor.network,
     descriptor.usdcAsset,
   );
-  const snapshotId = await persistSnapshot(args.pool, snapshot, now(), args.retentionDays);
-  return {
-    schemaVersion: "1.3",
-    query_id: randomUUID(),
-    received_at: now().toISOString(),
-    policy_version: policy,
-    snapshot_id: snapshotId,
-    snapshot_anchor_tx: null,
-    query: {
-      task: query.capability,
-      task_class: query.taskClass,
-      constraints: { max_price_atomic: query.max_price_atomic },
-      risk_quantile: riskQuantile,
-      weights,
-    },
-    candidates_considered: eligibility.candidatesConsidered,
-    excluded: eligibility.excluded,
-    ranked: [],
-    unverified: eligibility.eligible.map(({ serviceId }) => ({
-      service_id: serviceId,
-      reason: "n_eff_below_min",
-      n_eff: 0,
-    })),
-    missing_dimensions_for_class: [],
-    insufficient_evidence: true,
-    ...(descriptor.unverifiedWithApproval && eligibility.eligible[0]
-      ? {
-          exploration_slot: {
-            service_id: eligibility.eligible[0].serviceId,
-            reason: "no-ranked-candidate" as const,
-          },
-        }
-      : {}),
-  };
+  await persistSnapshot(args.pool, snapshot, now(), args.retentionDays);
+  const confidenceZ = Number(args.config.get("selection.confidenceZ"));
+  const consecutiveFailures = Number(args.config.get("health.consecutiveFailures"));
+  const activePolicyVersion = rankingPolicyVersion({ confidenceZ, consecutiveFailures });
+  const countSnapshot = await readSupplierCountSnapshot({
+    pool: args.pool,
+    network: descriptor.network,
+    policyVersion: activePolicyVersion,
+    now: now(),
+    retentionDays: args.retentionDays,
+  });
+  const candidates = await Promise.all(
+    eligibility.eligible.map(async ({ serviceId, amount, versionId }) => {
+      const count = countSnapshot.counts.find(
+        (row) =>
+          row.service_id === serviceId &&
+          row.version_id === versionId &&
+          row.task_class === query.taskClass,
+      );
+      const healthFacts = query.userId
+        ? await openOwnerFacts(args.pool, query.userId, descriptor.network, serviceId)
+        : [];
+      return {
+        serviceId,
+        versionId,
+        priceAtomic: amount.toString(),
+        good: count?.good ?? 0,
+        bad: count?.bad ?? 0,
+        lowerBound: count?.lower_bound ?? null,
+        ownersRated: count?.owners_rated ?? 0,
+        ownersBad: count?.owners_bad ?? 0,
+        computedAt: count?.computed_at ?? now(),
+        lineageRoot: count?.lineage_root ?? null,
+        healthFacts,
+        injectionBlocked: await isInjectionBlocked(args.pool, descriptor.network, serviceId),
+      };
+    }),
+  );
+  const ordered = orderCandidates(candidates, confidenceZ, now(), consecutiveFailures);
+  const decision = makeRankingDecision({
+    query,
+    candidatesConsidered: eligibility.candidatesConsidered,
+    ranked: ordered.ranked,
+    unverified: ordered.unverified,
+    excluded: [...eligibility.excluded, ...ordered.excluded],
+    policyVersion: activePolicyVersion,
+    snapshotId: countSnapshot.snapshotId,
+    receivedAt: now(),
+    queryId: randomUUID(),
+    unverifiedWithApproval: descriptor.unverifiedWithApproval,
+  });
+  await saveRankingDecision(args.pool, decision);
+  return decision;
 }
 
 function makeSnapshot(
@@ -418,10 +490,10 @@ function makeSnapshot(
     registration: Registration;
     outcome: ProbeOutcome;
   }[],
-  descriptor: InterimPolicyDescriptor,
-): InterimSnapshot {
+  descriptor: ProbePolicyDescriptor,
+): ProbeSnapshot {
   return {
-    kind: "czar-registered-interim-snapshot",
+    kind: "czar-registered-probe-snapshot",
     policy_version: policyVersion(descriptor),
     descriptor,
     network: descriptor.network,
@@ -438,7 +510,12 @@ function makeSnapshot(
             ? {
                 state: "ok" as const,
                 probedAt: outcome.probedAt,
-                offers: outcome.record.accepts.map(reduceOffer).toSorted(compareSnapshotOffer),
+                offers: outcome.record.accepts
+                  .map((offer) => ({
+                    ...reduceOffer(offer),
+                    versionId: outcome.record!.versionIds.get(offer.payTo.toLowerCase()) ?? null,
+                  }))
+                  .toSorted(compareSnapshotOffer),
               }
             : { state: "failed" as const, probedAt: outcome.probedAt },
         };
@@ -454,7 +531,7 @@ function evaluateSnapshot(
 ): EligibilityResult {
   const candidates = services.filter((service) => service.capabilities.includes(query.capability));
   const excluded: RankingDecision["excluded"] = [];
-  const eligible: Array<{ serviceId: string; amount: bigint }> = [];
+  const eligible: Array<{ serviceId: string; amount: bigint; versionId: string }> = [];
   for (const service of candidates) {
     const result = evaluateService(service, network, usdcAsset, query.max_price_atomic);
     if (result.excluded) excluded.push(result.excluded);
@@ -471,7 +548,7 @@ function evaluateService(
   maxPrice: string,
 ): {
   excluded?: RankingDecision["excluded"][number];
-  eligible?: { serviceId: string; amount: bigint };
+  eligible?: { serviceId: string; amount: bigint; versionId: string };
 } {
   if (service.probe.state === "failed")
     return {
@@ -507,10 +584,24 @@ function evaluateService(
   const cheapest = affordable.reduce((left, right) =>
     BigInt(left.amount) <= BigInt(right.amount) ? left : right,
   );
-  return { eligible: { serviceId: service.serviceId, amount: BigInt(cheapest.amount) } };
+  if (!cheapest.versionId)
+    return {
+      excluded: {
+        service_id: service.serviceId,
+        gate: "probe-failed",
+        detail: "version-unavailable",
+      },
+    };
+  return {
+    eligible: {
+      serviceId: service.serviceId,
+      amount: BigInt(cheapest.amount),
+      versionId: cheapest.versionId,
+    },
+  };
 }
 
-function reduceOffer(offer: PaymentRequirements): SnapshotOffer {
+function reduceOffer(offer: PaymentRequirements): Omit<SnapshotOffer, "versionId"> {
   return {
     network: /^eip155:[1-9][0-9]{0,19}$/.test(offer.network) ? offer.network : null,
     scheme: /^[a-z0-9-]{1,32}$/.test(offer.scheme) ? offer.scheme : null,
@@ -547,7 +638,7 @@ function compareNullableText(left: string | null, right: string | null): number 
 
 async function persistSnapshot(
   pool: Pool,
-  snapshot: InterimSnapshot,
+  snapshot: ProbeSnapshot,
   usedAt: Date,
   retentionDays: number,
 ) {
@@ -578,20 +669,20 @@ function policyDescriptor(
   network: string,
   usdcAsset: string,
   unverifiedWithApproval: boolean,
-): InterimPolicyDescriptor {
+): ProbePolicyDescriptor {
   return {
-    policy: "czar-registered-interim",
-    scr: "SCR-138",
+    policy: "czar-registered-probe-snapshot",
+    scr: "SCR-163",
     network,
     usdcAsset,
     offerRule: "scheme-exact,asset-usdc,no-siwx,no-siwx-only,no-batch-settlement",
     unverifiedWithApproval,
     exploration: "lowest-eligible-live-price-then-serviceId",
-    ranked: "none",
+    ranked: "current-version-wilson",
   };
 }
 
-function policyVersion(descriptor: InterimPolicyDescriptor): string {
+function policyVersion(descriptor: ProbePolicyDescriptor): string {
   return `pol_${H(descriptor).slice(2, 18)}`;
 }
 

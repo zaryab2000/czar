@@ -1,3 +1,4 @@
+import { taskClassFor } from "#src/selection/task-class";
 import { loadConfig, type Config } from "@czar/config";
 import {
   buildTree,
@@ -58,7 +59,6 @@ interface Candidate {
 interface PaidStepDraft {
   readonly kind: "paid";
   readonly candidate: Candidate;
-  readonly alternates: readonly Candidate[];
   readonly capability: string;
   readonly callInputs: NonNullable<Step["callInputs"]>;
   readonly template?: string;
@@ -121,13 +121,15 @@ async function buildPlan(
   const steps = collected.steps.map((step, index) => {
     if (!step.serviceId || !step.why) return step;
     const health = healthByStep[index]?.length ?? 0;
-    const explanation = health
-      ? " No ratings yet. Czar will ask before using it. A supplier health fact also requires approval."
-      : " No ratings yet. Czar will ask before using it.";
+    const unrated = collected.unratedStepIndices.has(index);
+    const explanation = [
+      ...(unrated ? [" No ratings yet. Czar will ask before using it."] : []),
+      ...(health ? [" A supplier health fact also requires approval."] : []),
+    ].join("");
     return { ...step, why: { ...step.why, summary: `${step.why.summary}${explanation}` } };
   });
   const approvalReasons: NonNullable<Plan["approvalReasons"]> = [];
-  if (steps.some((step) => step.serviceId)) approvalReasons.push("unrated");
+  if (collected.unratedStepIndices.size > 0) approvalReasons.push("unrated");
   if (healthByStep.some((facts) => facts.length > 0)) approvalReasons.push("health-fact");
   if (collected.hasExploration) approvalReasons.push("exploration-slot");
   if (steps.length === 0 && droppedSteps.length === 0) return null;
@@ -192,6 +194,7 @@ interface StepCollection {
   readonly droppedSteps: NonNullable<Plan["droppedSteps"]>;
   readonly rankingIds: string[];
   readonly hasExploration: boolean;
+  readonly unratedStepIndices: ReadonlySet<number>;
   readonly jobExpiresMs: number;
 }
 
@@ -244,7 +247,6 @@ async function collectSteps(args: {
     entries.push({
       kind: "paid",
       candidate: result.selected,
-      alternates: result.alternates,
       capability,
       ...prepared,
     });
@@ -272,11 +274,17 @@ async function completeCollectedSteps(args: {
   readonly ports: PlannerPorts;
   readonly network: string;
   readonly gatewayVolumeAtomic: bigint;
-}): Promise<Pick<StepCollection, "steps" | "leaves" | "hasExploration" | "jobExpiresMs">> {
+}): Promise<
+  Pick<
+    StepCollection,
+    "steps" | "leaves" | "hasExploration" | "unratedStepIndices" | "jobExpiresMs"
+  >
+> {
   const { entries, input, config, ports, network, gatewayVolumeAtomic } = args;
   const steps: Step[] = [];
   const leaves: Plan["payeeLeaves"] = [];
   let hasExploration = false;
+  const unratedStepIndices = new Set<number>();
   let jobExpiresMs = input.now.getTime();
   for (const entry of entries) {
     if (entry.kind === "unpaid") {
@@ -295,18 +303,19 @@ async function completeCollectedSteps(args: {
     });
     if (!planStep) continue;
     steps.push(planStep.step);
+    if (entry.candidate.fromExploration) unratedStepIndices.add(planStep.step.stepIndex);
     leaves.push(...planStep.leaves);
     hasExploration ||= entry.candidate.fromExploration;
     if (planStep.jobExpiresMs) jobExpiresMs = Math.max(jobExpiresMs, planStep.jobExpiresMs);
   }
-  return { steps, leaves, hasExploration, jobExpiresMs };
+  return { steps, leaves, hasExploration, unratedStepIndices, jobExpiresMs };
 }
 
 function preparePaidStep(
   candidate: Candidate,
   capability: string,
   taskSpec: TaskSpec,
-): Omit<PaidStepDraft, "kind" | "candidate" | "alternates" | "capability"> | null {
+): Omit<PaidStepDraft, "kind" | "candidate" | "capability"> | null {
   const fields = candidate.service.extensions.czar.card["inputFields"];
   const oneStringKey = getSingleStringInput(fields);
   const template =
@@ -404,7 +413,7 @@ async function selectCandidate(
   config: Config,
   ports: PlannerPorts,
   network: string,
-): Promise<{ decision: RankingDecision; selected?: Candidate; alternates: Candidate[] }> {
+): Promise<{ decision: RankingDecision; selected?: Candidate }> {
   const defaultMax = BigInt(Number(config.get("planner.defaultMaxUnitAtomic")));
   const max =
     input.constraints?.maxTotal === undefined
@@ -414,6 +423,7 @@ async function selectCandidate(
           defaultMax,
         );
   const decision = await ports.ranking.rank({
+    userId: input.userId,
     taskClass: taskClassFor(capability, config),
     capability,
     taskSpec: {
@@ -442,14 +452,20 @@ async function selectCandidate(
   });
   const probed =
     candidates.length === 0 && failures.length > 0 && failures.every((value) => value === "timeout")
-      ? await indexFallback({ ranked, input, ports, network, max })
+      ? await indexFallback({
+          ranked,
+          input,
+          ports,
+          network,
+          max,
+          ...(exploration ? { exploration } : {}),
+        })
       : candidates;
   probed.sort((a, b) => a.rank - b.rank);
   const selected = probed[0];
   return {
     decision,
     ...(selected ? { selected } : {}),
-    alternates: selected ? probed.slice(1) : [],
   };
 }
 
@@ -531,8 +547,9 @@ async function indexFallback(args: {
   readonly ports: PlannerPorts;
   readonly network: string;
   readonly max: bigint;
+  readonly exploration?: string;
 }): Promise<Candidate[]> {
-  const { ranked, input, ports, network, max } = args;
+  const { ranked, input, ports, network, max, exploration } = args;
   const candidates: Candidate[] = [];
   for (const [rank, row] of ranked.entries()) {
     if (input.excludedServices?.has(row.serviceId)) continue;
@@ -549,7 +566,7 @@ async function indexFallback(args: {
       offers: [offer],
       amount: BigInt(offer.amount),
       rank,
-      fromExploration: false,
+      fromExploration: row.serviceId === exploration,
       unprobed: true,
     });
   }
@@ -558,7 +575,6 @@ async function indexFallback(args: {
 
 async function makePaidStep(args: {
   readonly candidate: Candidate;
-  readonly alternates: readonly Candidate[];
   readonly capability: string;
   readonly index: number;
   readonly input: PlannerRequest;
@@ -572,7 +588,6 @@ async function makePaidStep(args: {
 }): Promise<{ step: Step; leaves: Plan["payeeLeaves"]; jobExpiresMs?: number } | null> {
   const {
     candidate,
-    alternates,
     capability,
     index,
     input,
@@ -600,9 +615,9 @@ async function makePaidStep(args: {
     gatewayVolumeAtomic,
   });
   if (!decision) return null;
-  const details = paymentDetails({ decision, candidate, alternates, expectedCalls, index, config });
+  const details = paymentDetails({ decision, candidate, expectedCalls, index, config });
   if (!details) return null;
-  const { job, baseAmount, stepCap, paidTo, pays, leaves } = details;
+  const { job, baseAmount, stepCap, paidTo, leaves } = details;
   const step: Step = {
     stepIndex: index,
     stepId: stepIdentifier(input, index),
@@ -611,7 +626,7 @@ async function makePaidStep(args: {
     resource: candidate.service.resource,
     kind: decision.kind,
     payee: paidTo,
-    ...(pays.length > 1 ? { alternates: pays.slice(1) } : {}),
+    alternates: [],
     unitAmount: baseAmount.toString(),
     expectedCalls,
     stepCap: stepCap.toString(),
@@ -693,7 +708,6 @@ function routeCandidate(args: {
 function paymentDetails(args: {
   readonly decision: RouteDecision;
   readonly candidate: Candidate;
-  readonly alternates: readonly Candidate[];
   readonly expectedCalls: number;
   readonly index: number;
   readonly config: Config;
@@ -702,10 +716,9 @@ function paymentDetails(args: {
   readonly baseAmount: bigint;
   readonly stepCap: bigint;
   readonly paidTo: string;
-  readonly pays: string[];
   readonly leaves: Plan["payeeLeaves"];
 } | null {
-  const { decision, candidate, alternates, expectedCalls, index, config } = args;
+  const { decision, candidate, expectedCalls, index, config } = args;
   const job = decision.kind === "erc8183-job";
   const listedPrice = candidate.service.listedPrice;
   if (job && listedPrice === undefined) return null;
@@ -726,25 +739,9 @@ function paymentDetails(args: {
   if (stepCap < baseAmount * BigInt(expectedCalls)) return null;
   const paidTo = job ? candidate.service.providerAddress : offer!.payTo;
   if (!paidTo) return null;
-  const matchingAlternates = alternates
-    .filter(
-      (row) =>
-        (row.jobProvider ?? false) === job &&
-        (job || row.offer?.extra["name"] === offer?.extra["name"]) &&
-        row.amount * BigInt(expectedCalls) <= stepCap,
-    )
-    .slice(0, Number(config.get("planner.maxAlternates")));
-  const pays = [
-    paidTo,
-    ...matchingAlternates
-      .map((row) => (job ? row.service.providerAddress : row.offer?.payTo))
-      .filter((value): value is string => Boolean(value)),
-  ];
   const kind = job ? PAYEE_KIND.ERC8183_PROVIDER : PAYEE_KIND.X402_PAY_TO;
-  const leaves = pays.map(
-    (payee) => ({ payee, kind, stepIndex: index, stepCap: stepCap.toString() }) as const,
-  );
-  return { job, baseAmount, stepCap, paidTo, pays, leaves };
+  const leaves = [{ payee: paidTo, kind, stepIndex: index, stepCap: stepCap.toString() }];
+  return { job, baseAmount, stepCap, paidTo, leaves };
 }
 
 function jobExpiry(service: PlannerService, now: Date, config: Config): number {
@@ -811,11 +808,6 @@ function categoryFor(capability: string, config: Config): string {
         : mapping["*"]) ??
     "general"
   );
-}
-
-function taskClassFor(capability: string, config: Config): string {
-  const mapping = config.get("planner.capabilityToTaskClass") as Record<string, string>;
-  return mapping[capability] ?? capability;
 }
 
 function matchedFields(fields: readonly string[], outputs: unknown): string[] {

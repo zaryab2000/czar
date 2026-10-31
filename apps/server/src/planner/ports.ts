@@ -2,6 +2,7 @@ import type { PaymentRequirements } from "@czar/x402";
 import type { RankingDecision, TaskSpec } from "@czar/schemas";
 
 export interface RankingQuery {
+  readonly userId?: string;
   readonly taskClass: string;
   readonly capability: string;
   readonly taskSpec: Pick<TaskSpec, "kind" | "topic" | "fields" | "output">;

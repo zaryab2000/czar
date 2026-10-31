@@ -41,6 +41,8 @@ import {
   createRegisteredSelection,
   type RegisteredSelection,
 } from "#src/selection/registered/index";
+import { startSupplierCountsRefresh } from "#src/selection/ranking/counts";
+import { rankingPolicyVersion } from "#src/selection/ranking/decision";
 import { createPlanner } from "#src/planner/index";
 import type { PlannerPorts } from "#src/planner/ports";
 import { createSafeProber } from "#src/planner/probe";
@@ -273,6 +275,30 @@ export async function createServerMain(options: ServerMainOptions): Promise<Serv
       }),
   });
   const app = createServerApp(options, objects, plannerOperations);
+  const rankingRefresh = startSupplierCountsRefresh({
+    pool: options.pool,
+    config: options.config,
+    network: String(options.config.get("selection.paymentNetwork")),
+    policyVersion: rankingPolicyVersion({
+      confidenceZ: Number(options.config.get("selection.confidenceZ")),
+      consecutiveFailures: Number(options.config.get("health.consecutiveFailures")),
+    }),
+    now: options.clock.now,
+    onError: () =>
+      options.logger.error("supplier_counts_refresh_failed", {
+        rule: "supplier-counts",
+        state: "error",
+      }),
+  });
+  try {
+    await rankingRefresh.ready;
+  } catch (error) {
+    await rankingRefresh.stop();
+    await workers.stop();
+    await dispatcher.stop();
+    payerRuntime.stop();
+    throw error;
+  }
   return {
     app,
     acceptance,
@@ -283,6 +309,7 @@ export async function createServerMain(options: ServerMainOptions): Promise<Serv
     async close() {
       await workers.stop();
       await dispatcher.stop();
+      await rankingRefresh.stop();
       payerRuntime.stop();
     },
   };

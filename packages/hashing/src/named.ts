@@ -11,6 +11,11 @@ export const NO_RESPONSE_COMMIT: Hash32 = keccak256(
   new TextEncoder().encode("czar:no-response:v1"),
 );
 
+/** SCR-160 §9.2 lineage over the raw sorted rating-id list. */
+export function ratingLineageRoot(ratingIds: readonly string[]): Hash32 {
+  return keccak256(new TextEncoder().encode(ratingIds.toSorted().join(",")));
+}
+
 export interface SlRequestInput {
   readonly method: string;
   readonly url: string;

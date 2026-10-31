@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { Pool } from "pg";
+import { registerRankingRefreshHandler } from "#src/evidence/ratings";
 import { setupDatabase } from "#test/db";
 import { createTestContext, seedDevice, TEST_NOW, TEST_TOKEN, TEST_USER_ID } from "#test/fixtures";
 
@@ -21,6 +22,7 @@ const CHANGED_VAULT_OBJECTIVE = "obj_01K7ZT9P4N5Q6R7S8T9V0W1X2M";
 const ALTERNATE_OBJECTIVE = "obj_01K7ZT9P4N5Q6R7S8T9V0W1X2K";
 const MIXED_PAYEE_OBJECTIVE = "obj_01K7ZT9P4N5Q6R7S8T9V0W1X2J";
 const LOG_OBJECTIVE = "obj_01K7ZT9P4N5Q6R7S8T9V0W1X2H";
+const REFRESH_OBJECTIVE = "obj_01K7ZT9P4N5Q6R7S8T9V0W1X2G";
 const FOREIGN_OBJECTIVE = "obj_01K7ZT9P4N5Q6R7S8T9V0W1X2Q";
 const FOREIGN_USER = "usr_01K7ZT9P4N5Q6R7S8T9V0W1X2Z";
 const FOREIGN_DEVICE = "dev_01K7ZT9P4N5Q6R7S8T9V0W1X2Z";
@@ -125,6 +127,35 @@ beforeAll(async () => {
 });
 
 describe("Flow 4A rating intake", () => {
+  it("returns a committed rating when the post-commit refresh signal fails", async () => {
+    const pool = getPool();
+    await seedResult(pool, REFRESH_OBJECTIVE, new Date(TEST_NOW.getTime() - 13 * 86_400_000));
+    await seedObservations(pool, REFRESH_OBJECTIVE, 1, 1000);
+    const onRefreshError = vi.fn();
+    const unregister = registerRankingRefreshHandler(() => {
+      throw new Error("refresh signal failed");
+    }, onRefreshError);
+    try {
+      const { app } = createTestContext(pool);
+      const response = await postRating(app, {
+        objectiveId: REFRESH_OBJECTIVE,
+        stepIndex: 0,
+        value: "good",
+      });
+      expect(response.status).toBe(202);
+      expect(onRefreshError).toHaveBeenCalledWith(expect.any(Error));
+      expect(
+        (
+          await pool.query("SELECT rating_id FROM ratings WHERE objective_id=$1", [
+            REFRESH_OBJECTIVE,
+          ])
+        ).rowCount,
+      ).toBe(1);
+    } finally {
+      unregister();
+    }
+  });
+
   it("binds one owner judgement to all 20 settled calls, then allows one correction", async () => {
     const pool = getPool();
     const { app } = createTestContext(pool);

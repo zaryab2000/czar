@@ -1,3 +1,5 @@
+import { AmbiguousTransferError } from "#src/evidence/indexer-settlement";
+import { taskClassFor } from "#src/selection/task-class";
 import type { Config } from "@czar/config";
 import {
   derivedNonce,
@@ -12,12 +14,14 @@ import {
   obsId,
   paymentRefHash,
   NO_RESPONSE_COMMIT,
+  serviceVersionId,
   type Hash32,
 } from "@czar/hashing";
 import {
   validateSchema,
   type PaymentRef,
   type Plan,
+  type RankingDecision,
   type Step,
   type StepResult,
 } from "@czar/schemas";
@@ -42,6 +46,7 @@ import {
   acquireExecutorLease,
   appendExecutionPhase,
   getExecutionTrace,
+  markStepDoneKeepingResults,
   markStepDoneWithResults,
   markStepFailed,
   markStepHandedOff,
@@ -79,6 +84,10 @@ const BAD_TTL = "BadTtl";
  */
 const NEW_ATTEMPTS_AFTER_BAD_TTL = 1;
 const RESERVE_FAILED = "reserve-failed";
+/** SCR-163 §5–§6: the supplier's live version differs within a step, from its settled calls or from selection. */
+const SERVICE_VERSION_DRIFT = "service-version-drift";
+const VERSION_ID = /^ver_[0-9a-f]{32}$/;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** SCR-159 §2: the outcome a saved transaction's status-0 receipt is recorded with, and the reserve's message. */
 const REVERTED = "reverted";
 /** Cross-cutting §5.2 `StepError` codes for a call, or a step, without an accepted paid result (SCR-159 §3). */
@@ -342,9 +351,12 @@ async function executeStep(
         : { callInputs: input.step.callInputs.slice(usage.used) }),
     },
   };
-  const prechecked =
-    savedPreparedCalls(executionInput, trace) ??
-    (await precheckCalls(executionInput, dependencies));
+  const saved = savedPreparedCalls(executionInput, trace);
+  const prechecked = saved ?? (await precheckCalls(executionInput, dependencies));
+  if (!saved && !prechecked.errorCode) {
+    const drift = await versionDrift(executionInput, dependencies, prechecked.calls);
+    if (drift) return stopForVersionDrift(input, dependencies, attempt, usage, drift);
+  }
   if (prechecked.errorCode) {
     await markStepFailed(dependencies.pool, {
       planId: input.planId,
@@ -361,6 +373,44 @@ async function executeStep(
   // SCR-153 §2: the saved reserve reverted BadTtl, so start again from step 1 as `attempt + 1`.
   if (result === STALE_RESERVE) return executeStep(input, dependencies);
   return result;
+}
+
+/** SCR-163 §5–§6: record the evidence, then stop before any reserve or signature. */
+async function stopForVersionDrift(
+  input: VaultDirectInput,
+  dependencies: VaultDirectDependencies,
+  attempt: number,
+  usage: { readonly used: number; readonly remaining: number },
+  drift: VersionDrift,
+): Promise<VaultDirectResult> {
+  dependencies.assertLeaseHeld?.();
+  await appendExecutionPhase(dependencies.pool, {
+    planId: input.planId,
+    stepIndex: input.step.stepIndex,
+    attempt,
+    phase: "precheck.version-drift",
+    payload: { serviceId: input.step.serviceId ?? null, ...drift },
+  });
+  if (drift.reason === "resume") {
+    await markStepDoneKeepingResults(dependencies.pool, {
+      planId: input.planId,
+      stepIndex: input.step.stepIndex,
+      attempt,
+      callsUsed: usage.used,
+      callErrors: Array.from({ length: usage.remaining }, (_, offset) => ({
+        index: usage.used + offset,
+        code: "service-version-drift" as const,
+      })),
+    });
+    return { state: "done", stepResults: [] };
+  }
+  await markStepFailed(dependencies.pool, {
+    planId: input.planId,
+    stepIndex: input.step.stepIndex,
+    attempt,
+    errorCode: SERVICE_VERSION_DRIFT,
+  });
+  return { state: "failed", errorCode: SERVICE_VERSION_DRIFT };
 }
 
 /**
@@ -412,6 +462,8 @@ interface PreparedCall {
     readonly description?: string;
     readonly mimeType?: string;
   };
+  /** SCR-163 §1: the service version computed from this call's live pre-check; null when unknown. */
+  readonly versionId: string | null;
 }
 
 interface RenderedRequest {
@@ -424,6 +476,7 @@ interface RenderedRequest {
 /** The pre-check's offer for one call, saved in `reserve.sent` so a resumed attempt needs no new probe. */
 interface SavedCall {
   readonly index: number;
+  readonly versionId?: string | null;
   readonly offer: PaymentRequirements;
   readonly paymentRequired: PaymentRequired;
   readonly paymentIdentifier?: { readonly required: boolean };
@@ -433,6 +486,7 @@ interface SavedCall {
 function savedCall(call: PreparedCall): SavedCall {
   return {
     index: call.index,
+    versionId: call.versionId,
     offer: call.offer,
     paymentRequired: call.paymentRequired,
     ...(call.paymentIdentifier === undefined ? {} : { paymentIdentifier: call.paymentIdentifier }),
@@ -478,6 +532,8 @@ function restorePreparedCall(input: VaultDirectInput, entry: unknown): PreparedC
       ? {}
       : { paymentIdentifier: saved.paymentIdentifier }),
     resource: saved.resource,
+    // Rows saved before SCR-163 carry no version; their observations stay ver_unknown.
+    versionId: typeof saved.versionId === "string" ? saved.versionId : null,
   };
 }
 
@@ -533,9 +589,101 @@ async function precheckCalls(input: VaultDirectInput, dependencies: VaultDirectD
         ? {}
         : { paymentIdentifier: read.extensions.paymentIdentifier }),
       resource: read.resource,
+      versionId: liveVersionId(input, choice.offer.payTo, read.extensions.bazaar?.schema),
     });
   }
   return { calls: prepared, errorCode: prepared.length === 0 ? "unsupported-offer" : undefined };
+}
+
+/**
+ * SCR-163 §1: the version of the step's service from one live 402: its payee, the step's registered
+ * resource and the sanitized Bazaar schema. Null when the resource method has no version identity.
+ */
+function liveVersionId(
+  input: VaultDirectInput,
+  payTo: string,
+  schema: Readonly<Record<string, unknown>> | undefined,
+): string | null {
+  const resource = input.step.resource;
+  if (!resource || (resource.method !== "GET" && resource.method !== "POST")) return null;
+  return serviceVersionId({
+    payTo,
+    resource: { url: resource.url, method: resource.method },
+    schema: schema ?? null,
+  });
+}
+
+type VersionDrift =
+  | { readonly reason: "precheck"; readonly liveVersionIds: readonly string[] }
+  | {
+      readonly reason: "resume";
+      readonly savedVersionId: string;
+      readonly liveVersionIds: readonly string[];
+    }
+  | {
+      readonly reason: "selection";
+      readonly selectionVersionId: string;
+      readonly liveVersionId: string;
+      readonly rankingDecisionId: string;
+    };
+
+/**
+ * SCR-163 §5–§6: before any reserve or signature, the live versions of a fresh pre-check must agree with
+ * each other, with the version saved on the step's settled calls, and with the version the selection used.
+ */
+async function versionDrift(
+  input: VaultDirectInput,
+  dependencies: VaultDirectDependencies,
+  calls: readonly PreparedCall[],
+): Promise<VersionDrift | undefined> {
+  const live = [...new Set(calls.map((call) => call.versionId).filter(isVersionId))];
+  if (live.length > 1) return { reason: "precheck", liveVersionIds: live };
+  const liveVersion = live[0];
+  if (liveVersion === undefined) return undefined;
+  const saved = await dependencies.pool.query<{ version_id: string }>(
+    `SELECT DISTINCT o.version_id FROM observations o JOIN plans p ON p.objective_id=o.objective_id
+     WHERE p.plan_id=$1 AND o.step_index=$2 AND o.settled_at IS NOT NULL AND o.released_at IS NULL
+       AND o.version_id <> 'ver_unknown'`,
+    [input.planId, input.step.stepIndex],
+  );
+  const savedVersion = saved.rows.find((row) => row.version_id !== liveVersion)?.version_id;
+  if (savedVersion !== undefined)
+    return { reason: "resume", savedVersionId: savedVersion, liveVersionIds: live };
+  const selection = await selectedVersion(dependencies.pool, input);
+  if (selection && selection.versionId !== liveVersion)
+    return {
+      reason: "selection",
+      selectionVersionId: selection.versionId,
+      liveVersionId: liveVersion,
+      rankingDecisionId: selection.rankingDecisionId,
+    };
+  return undefined;
+}
+
+/** SCR-163 §6: the version the plan's stored RankingDecision used for this step's service, if any. */
+async function selectedVersion(
+  pool: Pool,
+  input: VaultDirectInput,
+): Promise<{ readonly versionId: string; readonly rankingDecisionId: string } | undefined> {
+  const ids = (input.plan.rankingDecisionIds ?? []).filter((id) => UUID.test(id));
+  if (ids.length === 0 || !input.step.serviceId) return undefined;
+  const stored = await pool.query<{ query_id: string; decision: Partial<RankingDecision> }>(
+    "SELECT query_id::text AS query_id,decision FROM ranking_decisions WHERE query_id = ANY($1::uuid[])",
+    [ids],
+  );
+  for (const id of ids.toReversed()) {
+    const decision = stored.rows.find((row) => row.query_id === id)?.decision;
+    const entry = [...(decision?.ranked ?? []), ...(decision?.unverified ?? [])].find(
+      (candidate) => candidate.service_id === input.step.serviceId,
+    );
+    const versionId = entry && "version_id" in entry ? entry.version_id : undefined;
+    if (isVersionId(versionId)) return { versionId, rankingDecisionId: id };
+  }
+  return undefined;
+}
+
+function isVersionId(value: unknown): value is string {
+  return typeof value === "string" && VERSION_ID.test(value);
 }
 
 async function executeReservedCalls(
@@ -1590,8 +1738,8 @@ async function authorizeAndCall(
     network: call.offer.network,
     rail: "x402-exact",
     serviceId,
-    versionId: "ver_unknown",
-    taskClass: input.step.capability,
+    versionId: call.versionId ?? "ver_unknown",
+    taskClass: taskClassFor(input.step.capability, dependencies.config),
     envelopeRef: input.envelopeRef,
     stepIndex: input.step.stepIndex,
     paymentRef: signedRef,
@@ -2038,7 +2186,15 @@ async function waitForExactTransfer(
     BigInt(payment.validBefore) +
     BigInt(Number(dependencies.config.get("payer.reconcileGraceSeconds")));
   for (;;) {
-    const transferTx = await dependencies.findExactTransferTx?.(payment);
+    let transferTx: string | null | undefined;
+    try {
+      transferTx = await dependencies.findExactTransferTx?.(payment);
+    } catch (error) {
+      // SCR-163 §7: ambiguity fails closed (no receipt, no H1) and the step moves on; the indexer
+      // raises `indexer_transfer_ambiguous`. Any other lookup error still stops the step.
+      if (error instanceof AmbiguousTransferError) return null;
+      throw error;
+    }
     if (transferTx) return transferTx;
     if ((await dependencies.chain.latestBlockTimestamp()) > until) return null;
     await sleepReconcileInterval(dependencies);

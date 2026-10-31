@@ -71,7 +71,7 @@ export function createIndexerExactTransferLookup(
       return null;
     }
     if (response.status === 404) return null;
-    if (response.status === 409) throw new Error("Indexer exact transfer lookup is ambiguous.");
+    if (response.status === 409) throw new AmbiguousTransferError();
     if (response.status >= 500) return null;
     if (!response.ok)
       throw new Error(`Indexer exact transfer lookup returned HTTP ${response.status}.`);
@@ -311,4 +311,12 @@ function matches(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** SCR-163 §7 `409`: more than one matching transfer. Callers fail closed: no receipt, no fact. */
+export class AmbiguousTransferError extends Error {
+  constructor() {
+    super("Indexer exact transfer lookup is ambiguous.");
+    this.name = "AmbiguousTransferError";
+  }
 }

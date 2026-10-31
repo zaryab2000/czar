@@ -3,6 +3,7 @@
 // `delivery-failed` (settled on chain, no usable body). A step with zero paid calls ends `failed` / `unpaid`.
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadConfig } from "@czar/config";
+import { AmbiguousTransferError } from "#src/evidence/indexer-settlement";
 import {
   buildTree,
   dedupKey,
@@ -11,6 +12,7 @@ import {
   PAYEE_KIND,
   payeeLeaf,
   paymentRefHash,
+  serviceVersionId,
 } from "@czar/hashing";
 import type { StepResult } from "@czar/schemas";
 import type { SignRequest, SignResult } from "@czar/signer";
@@ -74,6 +76,8 @@ type MerchantMode =
 
 beforeAll(async () => seedDevice(getPool()));
 beforeEach(async () => {
+  schemaLabels = {};
+  await getPool().query("DELETE FROM ranking_decisions");
   await getPool().query("DELETE FROM results");
   await getPool().query("DELETE FROM outbox_events");
   await getPool().query("DELETE FROM executor_leases");
@@ -340,16 +344,39 @@ describe("vault-direct partial steps (SCR-159 §3)", () => {
     expect(await healthFactCount()).toBe(1);
   });
 
-  it("does not sign or attribute a paid call when transfer proof is ambiguous", async () => {
+  it("fails closed on ambiguous transfer proof: no receipt, no H1, settlement-unproven, step ends (SCR-163 §7)", async () => {
+    const run = partialRun(["ok", "no-response", "error"]);
+    let lookups = 0;
+    const dependencies = {
+      ...run.dependencies,
+      findExactTransferTx: async () => {
+        lookups += 1;
+        throw new AmbiguousTransferError();
+      },
+    };
+    await expect(executeVaultDirectStep(stepInput(), dependencies)).resolves.toMatchObject({
+      state: "done",
+    });
+    expect(lookups).toBe(1);
+    expect(run.settledIndices()).toEqual([0, 1]);
+    expect(run.receiptIndices()).toEqual([0]);
+    expect(await healthFactCount()).toBe(0);
+    const trace = await getPool().query<{ payload: { index: number } }>(
+      "SELECT payload FROM step_executions WHERE plan_id=$1 AND phase='settlement-unproven'",
+      [PLAN_ID],
+    );
+    expect(trace.rows.map((row) => row.payload.index)).toEqual([1]);
+  });
+
+  it("still stops on an indexer error that is not ambiguity", async () => {
     const run = partialRun(["ok", "no-response", "error"]);
     const dependencies = {
       ...run.dependencies,
       findExactTransferTx: async () => {
-        throw new Error("Indexer exact transfer lookup is ambiguous.");
+        throw new Error("Indexer exact transfer lookup returned HTTP 400.");
       },
     };
-    await expect(executeVaultDirectStep(stepInput(), dependencies)).rejects.toThrow("ambiguous");
-    expect(run.settledIndices()).toEqual([0, 1]);
+    await expect(executeVaultDirectStep(stepInput(), dependencies)).rejects.toThrow("HTTP 400");
     expect(run.receiptIndices()).toEqual([0]);
     expect(await healthFactCount()).toBe(0);
   });
@@ -446,6 +473,156 @@ describe("vault-direct partial steps (SCR-159 §3)", () => {
     expect(await callErrors()).toEqual([]);
   });
 });
+
+describe("vault-direct service-version drift (SCR-163 §5–§6)", () => {
+  it("writes the probed service version on every observation", async () => {
+    schemaLabels = { 0: "a", 1: "a", 2: "a" };
+    const run = partialRun(["ok", "ok", "ok"]);
+    await executeVaultDirectStep(stepInput(), run.dependencies);
+    const versions = await observationVersions();
+    expect(versions).toHaveLength(3);
+    expect(new Set(versions).size).toBe(1);
+    expect(versions[0]).toMatch(/^ver_[0-9a-f]{32}$/);
+  });
+
+  it("writes the selection task class, not the raw capability, on every observation (SCR-160 §9.1)", async () => {
+    const run = partialRun(["ok", "ok", "ok"]);
+    await executeVaultDirectStep(stepInput(), run.dependencies);
+    const classes = await getPool().query<{ task_class: string }>(
+      "SELECT DISTINCT task_class FROM observations WHERE objective_id=$1",
+      [OBJECTIVE],
+    );
+    expect(classes.rows).toEqual([{ task_class: "data-json.search" }]);
+  });
+
+  it("stops before reserving when pre-checks within one step produce different versions", async () => {
+    schemaLabels = { 0: "a", 1: "b", 2: "a" };
+    const run = partialRun(["ok", "ok", "ok"]);
+    const result = await executeVaultDirectStep(stepInput(), run.dependencies);
+    expect(result).toMatchObject({ state: "failed", errorCode: "service-version-drift" });
+    expect(run.chain.reserve).not.toHaveBeenCalled();
+    expect(run.signedAuthorizations()).toBe(0);
+    expect(await driftEvidence()).toMatchObject({ reason: "precheck" });
+  });
+
+  it("stops before reserving when the live version differs from the selected version", async () => {
+    schemaLabels = { 0: "b", 1: "b", 2: "b" };
+    const selected = await storeSelection("a");
+    const run = partialRun(["ok", "ok", "ok"]);
+    const result = await executeVaultDirectStep(
+      stepInput({ rankingDecisionIds: [selected.queryId] }),
+      run.dependencies,
+    );
+    expect(result).toMatchObject({ state: "failed", errorCode: "service-version-drift" });
+    expect(run.chain.reserve).not.toHaveBeenCalled();
+    expect(await driftEvidence()).toMatchObject({
+      reason: "selection",
+      selectionVersionId: selected.versionId,
+      rankingDecisionId: selected.queryId,
+    });
+  });
+
+  it("pays when the live version equals the selected version", async () => {
+    schemaLabels = { 0: "a", 1: "a", 2: "a" };
+    const selected = await storeSelection("a");
+    const run = partialRun(["ok", "ok", "ok"]);
+    const result = await executeVaultDirectStep(
+      stepInput({ rankingDecisionIds: [selected.queryId] }),
+      run.dependencies,
+    );
+    expect(result.state).toBe("done");
+    expect(await observationVersions()).toEqual([
+      selected.versionId,
+      selected.versionId,
+      selected.versionId,
+    ]);
+  });
+
+  it("does not stop for a plan without a stored selection and records a null selection version", async () => {
+    schemaLabels = { 0: "a", 1: "a", 2: "a" };
+    const run = partialRun(["ok", "ok", "ok"]);
+    const result = await executeVaultDirectStep(stepInput(), run.dependencies);
+    expect(result.state).toBe("done");
+    expect(await driftEvidence()).toBeUndefined();
+  });
+
+  it("keeps settled calls under their saved version and signs no call at a new version", async () => {
+    schemaLabels = { 0: "a", 1: "a", 2: "a" };
+    const first = partialRun(["ok", "error", "error"]);
+    const firstResult = await executeVaultDirectStep(stepInput(), first.dependencies);
+    expect(firstResult.state).toBe("done");
+    const saved = await observationVersions("settled");
+    expect(saved).toHaveLength(1);
+    // The step is re-run for its remaining calls (a new attempt) and the merchant changed its schema.
+    await getPool().query("UPDATE steps SET state='queued' WHERE plan_id=$1", [PLAN_ID]);
+    schemaLabels = { 0: "b", 1: "b", 2: "b" };
+    const second = partialRun(["ok", "ok", "ok"]);
+    const result = await executeVaultDirectStep(stepInput({ attempt: 1 }), second.dependencies);
+    expect(result.state).toBe("done");
+    expect(second.chain.reserve).not.toHaveBeenCalled();
+    expect(second.signedAuthorizations()).toBe(0);
+    expect(await observationVersions("settled")).toEqual(saved);
+    expect(await driftEvidence()).toMatchObject({ reason: "resume", savedVersionId: saved[0] });
+  });
+});
+
+async function observationVersions(filter?: "settled"): Promise<string[]> {
+  const result = await getPool().query<{ version_id: string }>(
+    `SELECT version_id FROM observations WHERE objective_id=$1
+       ${filter === "settled" ? "AND settled_at IS NOT NULL" : ""}
+     ORDER BY call_index`,
+    [OBJECTIVE],
+  );
+  return result.rows.map((row) => row.version_id);
+}
+
+async function driftEvidence(): Promise<Record<string, unknown> | undefined> {
+  const result = await getPool().query<{ payload: Record<string, unknown> }>(
+    `SELECT payload FROM step_executions WHERE plan_id=$1 AND phase='precheck.version-drift'
+     ORDER BY execution_id DESC LIMIT 1`,
+    [PLAN_ID],
+  );
+  return result.rows[0]?.payload;
+}
+
+/** Stores a RankingDecision whose unverified entry selected this step's service at the label's version. */
+async function storeSelection(label: string): Promise<{ queryId: string; versionId: string }> {
+  const versionId = serviceVersionId({
+    payTo: PAYEE,
+    resource: { url: MERCHANT_URL, method: "GET" },
+    schema: {
+      type: "object",
+      properties: { output: { type: "object", properties: { [label]: {} } } },
+    },
+  });
+  const queryId = "00000000-0000-4000-8000-000000000001";
+  const snapshotId = HASH;
+  await getPool().query(
+    `INSERT INTO selection_interim_snapshots(snapshot_id,body_jcs,created_at,last_used_at)
+     VALUES($1,'{}',now(),now()) ON CONFLICT DO NOTHING`,
+    [snapshotId],
+  );
+  await getPool().query(
+    `INSERT INTO ranking_decisions(query_id,snapshot_id,policy_version,decision,created_at)
+     VALUES($1,$2,'pol_0000000000000000',$3::jsonb,now())`,
+    [
+      queryId,
+      snapshotId,
+      JSON.stringify({
+        unverified: [
+          {
+            service_id: "svc_11111111111111111111111111111111",
+            version_id: versionId,
+            reason: "unrated",
+            n_eff: 0,
+          },
+        ],
+        ranked: [],
+      }),
+    ],
+  );
+  return { queryId, versionId };
+}
 
 function partialRun(
   modes: readonly MerchantMode[],
@@ -565,6 +742,8 @@ function partialRun(
     settledIndices: () => [...settled].toSorted((left, right) => left - right),
     receiptIndices: () => [...new Set(receipts)].toSorted((left, right) => left - right),
     receiptContexts: () => [...receiptContexts],
+    signedAuthorizations: () =>
+      sign.mock.calls.filter(([, request]) => request.kind === "usdc-3009").length,
   };
 }
 
@@ -575,7 +754,12 @@ async function healthFactCount(): Promise<number> {
   return Number(result.rows[0]?.count ?? "0");
 }
 
+/** SCR-163: the Bazaar output-schema label each call's live 402 declares (absent = no schema). */
+let schemaLabels: Record<number, string> = {};
+
 function paymentRequired(url: string) {
+  const index = Number(new URL(url).searchParams.get("q")?.replace("call-", ""));
+  const label = schemaLabels[index];
   const offer = buildPaymentRequired({
     url: MERCHANT_URL,
     description: "local test merchant",
@@ -586,10 +770,26 @@ function paymentRequired(url: string) {
     payTo: PAYEE,
     maxTimeoutSeconds: OFFER_TIMEOUT_SECONDS,
   });
+  const declared =
+    label === undefined
+      ? offer
+      : {
+          ...offer,
+          extensions: {
+            ...offer.extensions,
+            bazaar: {
+              info: { input: {}, output: {} },
+              schema: {
+                type: "object",
+                properties: { output: { type: "object", properties: { [label]: {} } } },
+              },
+            },
+          },
+        };
   return {
     status: 402,
     url,
-    headers: { "payment-required": encodePaymentRequired(offer) },
+    headers: { "payment-required": encodePaymentRequired(declared as typeof offer) },
     body: new Uint8Array(),
   };
 }
@@ -639,8 +839,11 @@ function boundaryResult(context: BoundaryInput): StepResult {
   };
 }
 
-function stepInput(): VaultDirectInput {
+function stepInput(
+  options: { rankingDecisionIds?: readonly string[]; attempt?: number } = {},
+): VaultDirectInput {
   return {
+    ...(options.attempt === undefined ? {} : { attempt: options.attempt }),
     planId: PLAN_ID,
     envelopeRef: ENVELOPE_REF,
     envelopeId: 1n,
@@ -662,6 +865,9 @@ function stepInput(): VaultDirectInput {
       steps: [],
       payeeLeaves: [{ payee: PAYEE, kind: 1, stepIndex: 0, stepCap: STEP_CAP.toString() }],
       payeeRoot: TREE.root,
+      ...(options.rankingDecisionIds === undefined
+        ? {}
+        : { rankingDecisionIds: [...options.rankingDecisionIds] }),
       shadow: false,
       createdAt: "2026-10-21T00:00:00.000Z",
       taskSpec: {} as never,
