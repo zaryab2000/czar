@@ -84,30 +84,46 @@ export async function submitRating(
   readonly replayed: boolean;
 }> {
   const client = await pool.connect();
+  let outcome: Awaited<ReturnType<typeof submitWithinTransaction>>;
   try {
     await client.query("BEGIN");
-    const outcome = await submitWithinTransaction(client, config, input);
+    outcome = await submitWithinTransaction(client, config, input);
     await client.query("COMMIT");
-    if (!outcome.replayed) requestRankingRefresh(outcome.accepted);
-    return outcome;
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
   } finally {
     client.release();
   }
+  if (!outcome.replayed) requestRankingRefresh(outcome.accepted);
+  return outcome;
 }
 
-const rankingRefreshHandlers = new Set<() => void>();
+interface RankingRefreshHandler {
+  readonly signal: () => void;
+  readonly onError: (error: unknown) => void;
+}
+
+const rankingRefreshHandlers = new Set<RankingRefreshHandler>();
 
 /** Registers a process-local refresh signal; periodic workers cover restarts. */
-export function registerRankingRefreshHandler(handler: () => void): () => void {
+export function registerRankingRefreshHandler(
+  signal: () => void,
+  onError: (error: unknown) => void,
+): () => void {
+  const handler = { signal, onError };
   rankingRefreshHandlers.add(handler);
   return () => rankingRefreshHandlers.delete(handler);
 }
 
 export function requestRankingRefresh(_accepted: RatingAccepted): void {
-  for (const handler of rankingRefreshHandlers) handler();
+  for (const handler of rankingRefreshHandlers) {
+    try {
+      handler.signal();
+    } catch (error) {
+      handler.onError(error);
+    }
+  }
 }
 
 async function submitWithinTransaction(

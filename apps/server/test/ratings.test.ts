@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { Pool } from "pg";
 import { registerRankingRefreshHandler } from "#src/evidence/ratings";
 import { setupDatabase } from "#test/db";
@@ -129,11 +129,12 @@ beforeAll(async () => {
 describe("Flow 4A rating intake", () => {
   it("returns a committed rating when the post-commit refresh signal fails", async () => {
     const pool = getPool();
-    await seedResult(pool, REFRESH_OBJECTIVE, TEST_NOW);
+    await seedResult(pool, REFRESH_OBJECTIVE, new Date(TEST_NOW.getTime() - 13 * 86_400_000));
     await seedObservations(pool, REFRESH_OBJECTIVE, 1, 1000);
+    const onRefreshError = vi.fn();
     const unregister = registerRankingRefreshHandler(() => {
       throw new Error("refresh signal failed");
-    });
+    }, onRefreshError);
     try {
       const { app } = createTestContext(pool);
       const response = await postRating(app, {
@@ -142,9 +143,13 @@ describe("Flow 4A rating intake", () => {
         value: "good",
       });
       expect(response.status).toBe(202);
+      expect(onRefreshError).toHaveBeenCalledWith(expect.any(Error));
       expect(
-        (await pool.query("SELECT rating_id FROM ratings WHERE objective_id=$1", [REFRESH_OBJECTIVE]))
-          .rowCount,
+        (
+          await pool.query("SELECT rating_id FROM ratings WHERE objective_id=$1", [
+            REFRESH_OBJECTIVE,
+          ])
+        ).rowCount,
       ).toBe(1);
     } finally {
       unregister();

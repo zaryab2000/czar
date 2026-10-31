@@ -252,7 +252,7 @@ export function startSupplierCountsRefresh(input: {
   const unregister = registerRankingRefreshHandler(() => {
     if (debounce) clearTimeout(debounce);
     debounce = setTimeout(run, debounceSeconds * 1000);
-  });
+  }, input.onError);
   return {
     ready,
     async stop() {
