@@ -988,6 +988,7 @@ async function settleAndFinalize(
     mimeType: string;
   }[] = [];
   const noResponses: number[] = [];
+  const interruptedResponses: number[] = [];
   for (const call of calls) {
     const result = await authorizeAndCall(
       input,
@@ -1002,6 +1003,7 @@ async function settleAndFinalize(
     if (result.response)
       completed.push({ ...result.response, maxTimeoutSeconds: call.offer.maxTimeoutSeconds });
     else if (result.noResponse) noResponses.push(call.index);
+    else if (result.responseInterrupted) interruptedResponses.push(call.index);
     else if (result.errorCode) {
       await appendExecutionPhase(dependencies.pool, {
         planId: input.planId,
@@ -1019,7 +1021,11 @@ async function settleAndFinalize(
   }[] = [];
   const authorized: number[] = [];
   let receiptPending = false;
-  for (const index of [...completed.map((entry) => entry.index), ...noResponses]) {
+  for (const index of [
+    ...completed.map((entry) => entry.index),
+    ...noResponses,
+    ...interruptedResponses,
+  ]) {
     const authorizationUsed = await waitForAuthorization(
       dependencies,
       reservationId,
@@ -1595,6 +1601,26 @@ async function authorizeAndCall(
     (row) => row.phase === "call.response" && row.payload["index"] === call.index,
   );
   if (priorResult) return restoreCallResult(dependencies, priorResult, call);
+  const priorInterrupted = trace.findLast(
+    (row) => row.phase === "call.response-interrupted" && row.payload["index"] === call.index,
+  );
+  const interruptedAttempt = trace.some(
+    (row) =>
+      row.phase === "call.attempt" &&
+      row.payload["index"] === call.index &&
+      row.payload["responseArrived"] === true,
+  );
+  if (priorInterrupted || interruptedAttempt) {
+    if (!priorInterrupted)
+      await appendExecutionPhase(dependencies.pool, {
+        planId: input.planId,
+        stepIndex: input.step.stepIndex,
+        attempt,
+        phase: "call.response-interrupted",
+        payload: { index: call.index },
+      });
+    return { responseInterrupted: true };
+  }
   const priorNoResponse = trace.findLast(
     (row) => row.phase === "call.no-response" && row.payload["index"] === call.index,
   );
@@ -1620,6 +1646,7 @@ async function authorizeAndCall(
   let settledResponse: SafeFetchResponse | undefined;
   let errorCode = "unpaid";
   let responseArrived = false;
+  let responseInterrupted = false;
   let finalOutcome: SafeFetchOutcome = "unknown-transport";
   for (let retry = 0; retry < Number(dependencies.config.get("payer.callRetries")); retry += 1) {
     // 02 §7.5: retries only within validBefore, by chain time (SCR-157 §1); USDC refuses the authorization
@@ -1643,12 +1670,22 @@ async function authorizeAndCall(
       )
         throw error;
       finalOutcome = error.outcome;
+      if (error.responseArrived) {
+        responseArrived = true;
+        responseInterrupted = true;
+        await fillResponse(dependencies.pool, observationId, dependencies.now(), undefined);
+      }
       await appendExecutionPhase(dependencies.pool, {
         planId: input.planId,
         stepIndex: input.step.stepIndex,
         attempt,
         phase: "call.attempt",
-        payload: { index: call.index, retry, outcome: finalOutcome },
+        payload: {
+          index: call.index,
+          retry,
+          outcome: finalOutcome,
+          ...(error.responseArrived ? { responseArrived: true } : {}),
+        },
       });
       errorCode = "upstream-unavailable";
       continue;
@@ -1675,6 +1712,16 @@ async function authorizeAndCall(
   const response = settledResponse;
   if (!response) {
     dependencies.assertLeaseHeld?.();
+    if (responseInterrupted) {
+      await appendExecutionPhase(dependencies.pool, {
+        planId: input.planId,
+        stepIndex: input.step.stepIndex,
+        attempt,
+        phase: "call.response-interrupted",
+        payload: { index: call.index },
+      });
+      return { responseInterrupted: true };
+    }
     if (responseArrived || expiredBeforeSend)
       return { errorCode: expiredBeforeSend ? "authorization-expired" : errorCode };
     await appendExecutionPhase(dependencies.pool, {

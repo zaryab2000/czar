@@ -36,13 +36,20 @@ export class SafeFetchError extends Error {
   readonly code: "fetch-blocked" | "upstream-unavailable";
   readonly rule: SafeFetchRule;
   readonly outcome: SafeFetchOutcome;
+  readonly responseArrived: boolean;
 
-  constructor(code: SafeFetchError["code"], rule: SafeFetchRule, outcome?: SafeFetchOutcome) {
+  constructor(
+    code: SafeFetchError["code"],
+    rule: SafeFetchRule,
+    outcome?: SafeFetchOutcome,
+    responseArrived = false,
+  ) {
     super(`${code}: ${rule}`);
     this.name = "SafeFetchError";
     this.code = code;
     this.rule = rule;
     this.outcome = outcome ?? (rule === "dns" ? "dns-failure" : "unknown-transport");
+    this.responseArrived = responseArrived;
   }
 }
 
@@ -406,6 +413,7 @@ export function createSafeFetch(deps: SafeFetchDeps) {
           "upstream-unavailable",
           signal.aborted ? "timeout" : "transport",
           signal.aborted ? "connected-timeout" : classifyTransportError(error),
+          true,
         );
       }
       return {
