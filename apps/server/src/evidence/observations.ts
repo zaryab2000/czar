@@ -253,7 +253,6 @@ export async function setJobState(
            responded_at=COALESCE(observations.responded_at,$3),
            delivered=COALESCE(observations.delivered,
              CASE WHEN $2='Completed' THEN 1
-                  WHEN $2='Expired' AND observations.job_state='Funded' THEN 0
                   ELSE NULL END)
      WHERE observations.rail='erc8183-job'
        AND (observations.job_state IS NULL

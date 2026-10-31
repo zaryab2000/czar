@@ -201,7 +201,7 @@ describe("payment observations (SCR-160 §14.1–2)", () => {
     });
   });
 
-  it("records job expiry delivery only when it expired directly from Funded", async () => {
+  it("keeps job expiry delivery unknown without proof of submission history", async () => {
     const funded = await insertAtSign(getPool(), openedJobInput());
     const submitted = await insertAtSign(getPool(), {
       ...openedJobInput(),
@@ -215,7 +215,7 @@ describe("payment observations (SCR-160 §14.1–2)", () => {
     await setJobState(getPool(), submitted, "Expired", AT);
     expect(await getObservation(getPool(), funded)).toMatchObject({
       jobState: "Expired",
-      delivered: 0,
+      delivered: null,
       respondedAt: AT,
     });
     expect(await getObservation(getPool(), submitted)).toMatchObject({

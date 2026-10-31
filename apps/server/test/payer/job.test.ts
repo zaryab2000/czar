@@ -168,7 +168,7 @@ describe("job brief commitments", () => {
       [PLAN_ID],
     );
     expect(expiredObservation.rows).toHaveLength(1);
-    expect(expiredObservation.rows[0]).toMatchObject({ job_state: "Expired", delivered: 0 });
+    expect(expiredObservation.rows[0]).toMatchObject({ job_state: "Expired", delivered: null });
     expect(expiredObservation.rows[0]?.settled_at).toBeInstanceOf(Date);
   });
 
