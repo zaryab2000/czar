@@ -144,6 +144,50 @@ test("Home keeps balances and owner controls when results fail", async ({ page }
   await expect(week.getByRole("button", { name: "Try again" })).toBeVisible();
 });
 
+test("a lost rating response retries with the same idempotency key", async ({ page }) => {
+  await stubAccount(page);
+  const posted = await stubRatings(page);
+  const keys: string[] = [];
+  await page.route("**/v1/app/ratings", async (route) => {
+    keys.push(route.request().headers()["idempotency-key"] ?? "");
+    if (keys.length === 1) {
+      posted.push(route.request().postDataJSON() as { value: "good" | "bad" });
+      await route.abort("failed");
+      return;
+    }
+    if (keys[1] !== keys[0]) {
+      await route.fulfill({
+        status: 422,
+        contentType: "application/problem+json",
+        body: JSON.stringify({ detail: "A rating already exists.", czarCode: "supersedes-required" }),
+      });
+      return;
+    }
+    await route.fulfill({
+      status: 202,
+      contentType: "application/json",
+      body: JSON.stringify({
+        ratingId: ratingIds[0],
+        objectiveId,
+        stepIndex: 0,
+        value: "good",
+        receipts: 1,
+        windowClosesAt: "2099-01-01T00:00:00.000Z",
+      }),
+    });
+  });
+  await page.goto("/receipts");
+
+  const card = page.getByRole("article", { name: `Result ${objectiveId}` });
+  await card.getByRole("button", { name: "Good" }).click();
+  await expect(card.getByRole("alert")).toBeVisible();
+  await card.getByRole("button", { name: "Good" }).click();
+  await expect(card.getByRole("button", { name: "Change" })).toBeVisible();
+  expect(keys).toHaveLength(2);
+  expect(keys[0]).toBeTruthy();
+  expect(keys[1]).toBe(keys[0]);
+});
+
 test("an expired result shows Rating closed without rating controls", async ({ page }) => {
   await stubAccount(page);
   await stubRatings(page, "2026-10-01T00:00:00.000Z");
