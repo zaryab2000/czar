@@ -42,6 +42,9 @@ const STEADY = `svc_${"a".repeat(32)}`;
 const FLAKY = `svc_${"b".repeat(32)}`;
 const getPool = setupDatabase();
 let harness: LocalPocketHarness;
+// Each plan opens its own merchant (fresh payTo), so every plan is a new service version (SCR-163 §1).
+// Ranking is read at the version the owner rated, as selection does for a stored candidate.
+const ratedVersion = new Map<string, string>();
 
 describe.skipIf(!localChainEnabled)("Flow 4A slice on a local Arc chain (SCR-160 §16)", () => {
   beforeAll(async () => {
@@ -68,6 +71,7 @@ describe.skipIf(!localChainEnabled)("Flow 4A slice on a local Arc chain (SCR-160
       expect(rows).toHaveLength(1);
       expect(rows[0]?.settled).toBe(true);
       expect(rows[0]?.version_id).toMatch(/^ver_[0-9a-f]{32}$/);
+      ratedVersion.set(plan === steady ? STEADY : FLAKY, rows[0]!.version_id);
       await deliver(plan);
     }
 
@@ -278,12 +282,7 @@ async function rank(vault: VaultFixture) {
     [STEADY, STEADY_PRICE],
     [FLAKY, FLAKY_PRICE],
   ] as const) {
-    const version = await getPool().query<{ version_id: string }>(
-      `SELECT version_id FROM observations WHERE service_id=$1 AND version_id<>'ver_unknown'
-       ORDER BY created_at DESC LIMIT 1`,
-      [serviceId],
-    );
-    const versionId = version.rows[0]!.version_id;
+    const versionId = ratedVersion.get(serviceId)!;
     const count = await getPool().query<{
       good: number;
       bad: number;
