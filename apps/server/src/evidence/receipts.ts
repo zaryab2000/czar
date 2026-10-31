@@ -1,4 +1,4 @@
-import { paymentRefHash, type SlReceipt } from "@czar/hashing";
+import { NO_RESPONSE_COMMIT, paymentRefHash, type SlReceipt } from "@czar/hashing";
 import type { Config } from "@czar/config";
 import type { PaymentRef, Receipt } from "@czar/schemas";
 import { validateSchema } from "@czar/schemas";
@@ -22,6 +22,8 @@ export interface PaymentReceiptInput {
   readonly disclosure: Receipt["disclosure"];
   readonly attestation: Omit<SlReceipt, "paymentRefHash">;
   readonly bodyRef?: string;
+  /** Exact USDC transfer transaction used only for verification; not part of the signed PaymentRef. */
+  readonly verifiedTransferTx?: string;
 }
 
 export interface PaymentReceiptDependencies {
@@ -42,12 +44,25 @@ export async function createPaymentReceipt(
   dependencies: PaymentReceiptDependencies,
 ): Promise<SignedPaymentReceipt | null> {
   if (input.state !== "settled") return null;
-  if (input.payment.rail !== "x402-exact" || !input.payment.settlementTx)
+  if (
+    input.outcome === "no-response" &&
+    (input.attestation.responseCommit !== NO_RESPONSE_COMMIT ||
+      input.attestation.statusCode !== 0 ||
+      input.responseSize !== 0 ||
+      input.mimeType !== "" ||
+      input.bodyRef !== undefined)
+  )
+    throw new TypeError("No-response receipt must use the fixed sentinel and no HTTP metadata.");
+  if (input.payment.rail !== "x402-exact")
+    throw new Error("Vault receipt requires an x402-exact PaymentRef.");
+  const transferTx = input.payment.settlementTx ?? input.verifiedTransferTx;
+  if (!transferTx || !/^0x[\da-fA-F]{64}$/.test(transferTx))
     throw new Error("Vault receipt requires a settled x402-exact PaymentRef with a transaction.");
   const paymentHash = paymentRefHash(input.payment);
   const stored = await readStoredReceipt(dependencies.pool, input, paymentHash);
   if (stored) return stored;
-  if (!(await dependencies.settlement.isSettled(input.payment))) return null;
+  const proofPayment = { ...input.payment, settlementTx: transferTx };
+  if (!(await dependencies.settlement.isSettled(proofPayment))) return null;
   const payment = { ...input.payment } as PaymentRef;
   const createdAt = dependencies.now();
   const receiptData = receiptFields(input, payment, paymentHash, createdAt);
@@ -149,7 +164,7 @@ function receiptFields(
       size: input.requestSize,
     },
     response: {
-      status_code: timing.statusCode,
+      ...(input.outcome === "no-response" ? {} : { status_code: timing.statusCode }),
       commit: timing.responseCommit,
       size: input.responseSize,
       mime: input.mimeType,

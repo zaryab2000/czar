@@ -3,7 +3,13 @@
 // `delivery-failed` (settled on chain, no usable body). A step with zero paid calls ends `failed` / `unpaid`.
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadConfig } from "@czar/config";
-import { buildTree, NO_RESPONSE_COMMIT, PAYEE_KIND, payeeLeaf } from "@czar/hashing";
+import {
+  buildTree,
+  NO_RESPONSE_COMMIT,
+  PAYEE_KIND,
+  payeeLeaf,
+  paymentRefHash,
+} from "@czar/hashing";
 import type { StepResult } from "@czar/schemas";
 import type { SignRequest, SignResult } from "@czar/signer";
 import {
@@ -59,6 +65,7 @@ type MerchantMode =
   | "settled-empty"
   | "silent-settle"
   | "no-response"
+  | "dns-failure"
   | "blocked";
 
 beforeAll(async () => seedDevice(getPool()));
@@ -93,8 +100,8 @@ beforeEach(async () => {
     [PLAN_ID, OBJECTIVE, HASH, HASH],
   );
   await getPool().query(
-    "INSERT INTO steps (plan_id,step_index,step,state) VALUES ($1,0,'{}','queued')",
-    [PLAN_ID],
+    "INSERT INTO steps (plan_id,step_index,step,state) VALUES ($1,0,$2::jsonb,'queued')",
+    [PLAN_ID, JSON.stringify({ payee: PAYEE })],
   );
 });
 
@@ -218,7 +225,9 @@ describe("vault-direct partial steps (SCR-159 §3)", () => {
       settled_at: expect.any(Date),
     });
     expect(run.receiptIndices()).toEqual([0, 1]);
-    const trace = await getPool().query<{ payload: { status: string; bodyCommit: string; bodyRef?: string } }>(
+    const trace = await getPool().query<{
+      payload: { status: string; bodyCommit: string; bodyRef?: string };
+    }>(
       `SELECT payload FROM step_executions WHERE plan_id=$1 AND phase='call.result'
        AND payload->>'callIndex'='1'`,
       [PLAN_ID],
@@ -230,6 +239,99 @@ describe("vault-direct partial steps (SCR-159 §3)", () => {
       flags: [],
     });
     expect(trace.rows[0]?.payload.bodyRef).toBeUndefined();
+  });
+
+  it("keeps DNS failure unattributed after a paid no-response call", async () => {
+    const run = partialRun(["ok", "dns-failure", "error"]);
+    await executeVaultDirectStep(stepInput(), run.dependencies);
+    const observation = await getPool().query<{ delivered: number | null }>(
+      "SELECT delivered FROM observations WHERE objective_id=$1 AND call_index=1",
+      [OBJECTIVE],
+    );
+    expect(observation.rows[0]?.delivered).toBeNull();
+    expect(await healthFactCount()).toBe(0);
+  });
+
+  it("keeps the paid step pending until an exact transfer proof is indexed", async () => {
+    const run = partialRun(["ok", "no-response", "error"]);
+    const dependencies = { ...run.dependencies, findExactTransferTx: async () => null };
+    await expect(executeVaultDirectStep(stepInput(), dependencies)).resolves.toMatchObject({
+      state: "pending",
+    });
+    expect(run.settledIndices()).toEqual([0, 1]);
+    expect(run.receiptIndices()).toEqual([0]);
+  });
+
+  it("attributes an uninterrupted settled connection reset and records each retry outcome", async () => {
+    const run = partialRun(["ok", "no-response", "error"]);
+    await executeVaultDirectStep(stepInput(), run.dependencies);
+    const observation = await getPool().query<{ delivered: number | null }>(
+      "SELECT delivered FROM observations WHERE objective_id=$1 AND call_index=1",
+      [OBJECTIVE],
+    );
+    expect(observation.rows[0]?.delivered).toBe(0);
+    expect(await healthFactCount()).toBe(1);
+    const attempts = await getPool().query<{ payload: Record<string, unknown> }>(
+      `SELECT payload FROM step_executions WHERE plan_id=$1 AND phase='call.attempt'
+       AND payload->>'index'='1' ORDER BY execution_id`,
+      [PLAN_ID],
+    );
+    expect(attempts.rows.map((row) => row.payload["outcome"])).toEqual([
+      "connection-reset",
+      "connection-reset",
+      "connection-reset",
+    ]);
+    for (const row of attempts.rows)
+      expect(Object.keys(row.payload).toSorted()).toEqual(["index", "outcome", "retry"]);
+  });
+
+  it("keeps a crash-resumed no-response unattributed", async () => {
+    const run = partialRun(["ok", "no-response", "error"], { crashPaidIndex: 1 });
+    await expect(executeVaultDirectStep(stepInput(), run.dependencies)).rejects.toThrow(
+      "simulated worker crash",
+    );
+    await executeVaultDirectStep(stepInput(), run.dependencies);
+    const observation = await getPool().query<{ delivered: number | null }>(
+      "SELECT delivered FROM observations WHERE objective_id=$1 AND call_index=1",
+      [OBJECTIVE],
+    );
+    expect(observation.rows[0]?.delivered).toBeNull();
+    expect(await healthFactCount()).toBe(0);
+  });
+
+  it("does not attribute a final transport failure after executor lease loss", async () => {
+    const run = partialRun(["ok", "no-response", "error"]);
+    let failures = 0;
+    let leaseLost = false;
+    const safeFetch: typeof run.dependencies.safeFetch = async (url, options) => {
+      try {
+        return await run.dependencies.safeFetch(url, options);
+      } catch (error) {
+        failures += 1;
+        if (failures === 3) leaseLost = true;
+        throw error;
+      }
+    };
+    await expect(
+      executeVaultDirectStep(
+        {
+          ...stepInput(),
+          dispatchLease: {
+            assertHeld: () => {
+              if (leaseLost) throw new Error("simulated executor lease loss");
+            },
+          },
+        },
+        { ...run.dependencies, safeFetch },
+      ),
+    ).rejects.toThrow("simulated executor lease loss");
+    await executeVaultDirectStep(stepInput(), run.dependencies);
+    const observation = await getPool().query<{ delivered: number | null }>(
+      "SELECT delivered FROM observations WHERE objective_id=$1 AND call_index=1",
+      [OBJECTIVE],
+    );
+    expect(observation.rows[0]?.delivered).toBeNull();
+    expect(await healthFactCount()).toBe(0);
   });
 
   it("does not retry a blocked fetch target", async () => {
@@ -253,12 +355,16 @@ describe("vault-direct partial steps (SCR-159 §3)", () => {
   });
 });
 
-function partialRun(modes: readonly MerchantMode[], options: { receiptStored?: boolean } = {}) {
+function partialRun(
+  modes: readonly MerchantMode[],
+  options: { receiptStored?: boolean; crashPaidIndex?: number } = {},
+) {
   let current = new Date("2026-10-21T00:00:00Z");
   const chainNow = () => BigInt(Math.floor(current.getTime() / MS_PER_SECOND));
   const used = new Set<number>();
   const settled = new Set<number>();
   let final = false;
+  let crashPending = options.crashPaidIndex;
   const receipts: number[] = [];
   const sign = vi.fn(async (_caller: string, request: SignRequest): Promise<SignResult> => {
     if (request.kind === "usdc-3009")
@@ -302,10 +408,19 @@ function partialRun(modes: readonly MerchantMode[], options: { receiptStored?: b
       const index = Number(new URL(url).searchParams.get("q")?.replace("call-", ""));
       const mode = modes[index];
       if (mode === undefined) throw new Error(`No merchant mode for call ${index}.`);
+      if (crashPending === index) {
+        crashPending = undefined;
+        used.add(index);
+        throw new Error("simulated worker crash");
+      }
       if (mode === "blocked") throw new SafeFetchError("fetch-blocked", "url");
+      if (mode === "dns-failure") {
+        used.add(index);
+        throw new SafeFetchError("fetch-blocked", "dns");
+      }
       if (mode === "no-response") {
         used.add(index);
-        throw new SafeFetchError("upstream-unavailable", "transport");
+        throw new SafeFetchError("upstream-unavailable", "transport", "connection-reset");
       }
       return merchantResponse(url, mode, () => used.add(index));
     },
@@ -326,7 +441,23 @@ function partialRun(modes: readonly MerchantMode[], options: { receiptStored?: b
       current = new Date(current.getTime() + milliseconds);
     },
     boundary,
+    noResponseBoundary: async (context) => ({
+      schemaVersion: "1.1",
+      stepIndex: 0,
+      callIndex: context.index,
+      obsId: context.obsId,
+      status: "no-response",
+      source: {
+        origin: "http://127.0.0.1:4021",
+        payTo: PAYEE,
+        paymentRefHash: paymentRefHash(context.paymentRef),
+      },
+      fields: [],
+      flags: [],
+      bodyCommit: NO_RESPONSE_COMMIT,
+    }),
     recordReceipt,
+    findExactTransferTx: async () => HASH,
     objects: { put: async () => "body-ref", get: async () => new Uint8Array() },
   };
   return {
@@ -336,6 +467,13 @@ function partialRun(modes: readonly MerchantMode[], options: { receiptStored?: b
     settledIndices: () => [...settled].toSorted((left, right) => left - right),
     receiptIndices: () => [...new Set(receipts)].toSorted((left, right) => left - right),
   };
+}
+
+async function healthFactCount(): Promise<number> {
+  const result = await getPool().query<{ count: string }>(
+    "SELECT count(*)::text AS count FROM supplier_health WHERE fact='settled-not-delivered'",
+  );
+  return Number(result.rows[0]?.count ?? "0");
 }
 
 function paymentRequired(url: string) {

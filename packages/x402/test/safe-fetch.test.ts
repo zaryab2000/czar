@@ -217,10 +217,14 @@ describe("limits", () => {
   });
 
   it("distinguishes a timeout after connection from one before connection", async () => {
-    const connected = fetcherWith({ "api.example.com": [PUBLIC] }, (target) => {
-      target.onConnected?.();
-      return new Promise(() => undefined);
-    }, { timeoutMs: 10 });
+    const connected = fetcherWith(
+      { "api.example.com": [PUBLIC] },
+      (target) => {
+        target.onConnected?.();
+        return new Promise(() => undefined);
+      },
+      { timeoutMs: 10 },
+    );
     await expect(connected.safeFetch("https://api.example.com/x")).rejects.toMatchObject({
       outcome: "connected-timeout",
     });

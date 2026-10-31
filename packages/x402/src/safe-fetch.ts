@@ -343,16 +343,21 @@ export function createSafeFetch(deps: SafeFetchDeps) {
         headers,
         ...(body === undefined ? {} : { body }),
         signal,
-        onConnected: () => { connected = true; },
+        onConnected: () => {
+          connected = true;
+        },
       });
       const timeout = new Promise<never>((_, reject) =>
         signal.addEventListener(
           "abort",
-          () => reject(new SafeFetchError(
-            "upstream-unavailable",
-            "timeout",
-            connected ? "connected-timeout" : "timeout-before-connect",
-          )),
+          () =>
+            reject(
+              new SafeFetchError(
+                "upstream-unavailable",
+                "timeout",
+                connected ? "connected-timeout" : "timeout-before-connect",
+              ),
+            ),
           { once: true },
         ),
       );
@@ -365,7 +370,9 @@ export function createSafeFetch(deps: SafeFetchDeps) {
           "upstream-unavailable",
           signal.aborted ? "timeout" : "transport",
           signal.aborted
-            ? connected ? "connected-timeout" : "timeout-before-connect"
+            ? connected
+              ? "connected-timeout"
+              : "timeout-before-connect"
             : classifyTransportError(error),
         );
       }
@@ -412,8 +419,8 @@ export function createSafeFetch(deps: SafeFetchDeps) {
 }
 
 function classifyTransportError(error: unknown): SafeFetchOutcome {
-  const code = typeof error === "object" && error !== null && "code" in error
-    ? error.code : undefined;
+  const code =
+    typeof error === "object" && error !== null && "code" in error ? error.code : undefined;
   if (code === "ECONNREFUSED") return "connection-refused";
   if (code === "ECONNRESET") return "connection-reset";
   if (code === "ENETUNREACH" || code === "EHOSTUNREACH") return "network-unreachable";

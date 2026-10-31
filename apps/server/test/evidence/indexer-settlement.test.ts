@@ -240,4 +240,63 @@ describe("indexer settlement lookup", () => {
 
     await expect(verifyX402Transfer(client as never, payment)).resolves.toBe(false);
   });
+
+  it.each([
+    ["nonce", { nonce: `0x${"33".repeat(32)}` }],
+    ["payer", { payer: "0x0000000000000000000000000000000000000003" }],
+    ["payee", { payTo: "0x0000000000000000000000000000000000000003" }],
+    ["amount", { amount: "1001" }],
+  ])("rejects a transfer with the wrong %s", async (_field, changed) => {
+    const authorizationAbi = [
+      {
+        type: "event",
+        name: "AuthorizationUsed",
+        anonymous: false,
+        inputs: [
+          { name: "authorizer", type: "address", indexed: true },
+          { name: "nonce", type: "bytes32", indexed: true },
+        ],
+      },
+    ] as const;
+    const transferAbi = [
+      {
+        type: "event",
+        name: "Transfer",
+        anonymous: false,
+        inputs: [
+          { name: "from", type: "address", indexed: true },
+          { name: "to", type: "address", indexed: true },
+          { name: "value", type: "uint256", indexed: false },
+        ],
+      },
+    ] as const;
+    const client = {
+      getTransactionReceipt: vi.fn(async () => ({
+        status: "success",
+        logs: [
+          {
+            address: payment.asset,
+            topics: encodeEventTopics({
+              abi: authorizationAbi,
+              eventName: "AuthorizationUsed",
+              args: { authorizer: payment.payer, nonce: payment.nonce },
+            }),
+            data: "0x",
+          },
+          {
+            address: payment.asset,
+            topics: encodeEventTopics({
+              abi: transferAbi,
+              eventName: "Transfer",
+              args: { from: payment.payer, to: payment.payTo },
+            }),
+            data: encodeAbiParameters([{ type: "uint256" }], [BigInt(payment.amount)]),
+          },
+        ],
+      })),
+    };
+    await expect(verifyX402Transfer(client as never, { ...payment, ...changed })).resolves.toBe(
+      false,
+    );
+  });
 });

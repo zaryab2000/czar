@@ -18,6 +18,7 @@ import {
   obsId,
   payeeLeaf,
   paymentRefHash,
+  NO_RESPONSE_COMMIT,
   verifyProof,
   type Hash32,
 } from "@czar/hashing";
@@ -61,6 +62,7 @@ import { computePromptHash, type ModelClient } from "#src/models/proxy";
 import {
   executeVaultDirectStep,
   type BoundaryInput,
+  type NoResponseBoundaryInput,
   type SettledReceiptContext,
   type VaultDirectChain,
   type VaultDirectInput,
@@ -135,7 +137,7 @@ export interface ServerMainOptions extends PairDependencies {
   readonly safeFetch: SafeFetch;
   readonly settlement?: PaymentReceiptDependencies["settlement"];
   readonly receiptInput?: (
-    context: SettledReceiptContext,
+    context: BoundaryInput & { readonly stepResult: unknown },
     stepResult: unknown,
     reportHashes: readonly string[],
   ) => PaymentReceiptInput;
@@ -232,6 +234,7 @@ export async function createServerMain(options: ServerMainOptions): Promise<Serv
     signerClient,
     objects,
     boundary,
+    createPayerNoResponseBoundary(options, acceptance),
     recordReceipt,
   );
   const workers = startPlannerWorkers(options, plannerOperations);
@@ -407,6 +410,7 @@ function createPayerDependencies(
   signer: ServerSigner,
   objects: ObjectStore,
   boundary: ReturnType<typeof createPayerBoundary>,
+  noResponseBoundary: ReturnType<typeof createPayerNoResponseBoundary>,
   recordReceipt: ReturnType<typeof createReceiptBuilder>,
 ) {
   return {
@@ -417,6 +421,7 @@ function createPayerDependencies(
     now: options.clock.now,
     objects,
     boundary,
+    noResponseBoundary,
     recordReceipt,
   };
 }
@@ -1356,6 +1361,56 @@ function createPayerBoundary(
   };
 }
 
+function createPayerNoResponseBoundary(
+  options: ServerMainOptions,
+  acceptance: Awaited<ReturnType<typeof createAcceptanceChecker>>,
+) {
+  return async (context: NoResponseBoundaryInput): Promise<StepResult> => {
+    const { input, paymentRef } = context;
+    if (paymentRef.rail !== "x402-exact" || !input.step.serviceId || !input.step.resource)
+      throw new TypeError("No-response x402 call lacks its approved supplier identity.");
+    const payTo = paymentRef.payTo;
+    const report = await acceptance.check({
+      obsId: context.obsId,
+      profileId: input.step.acceptanceProfileId,
+      envelopeRef: input.envelopeRef,
+      stepIndex: input.step.stepIndex,
+      serviceId: input.step.serviceId,
+      step: input.step,
+      bodyText: null,
+      statusCode: null,
+      responseArrived: false,
+      elapsedMs: Math.max(0, options.clock.now().getTime() - context.requestedAt.getTime()),
+      maxTimeoutSeconds: context.maxTimeoutSeconds,
+      mimeType: "",
+      paid: true,
+      screen: { available: true, label: "none" },
+    });
+    await appendExecutionPhase(options.pool, {
+      planId: input.planId,
+      stepIndex: input.step.stepIndex,
+      attempt: context.attempt,
+      phase: "acceptance.result",
+      payload: { index: context.index, reportHash: report.report.reportHash, obsId: context.obsId },
+    });
+    return {
+      schemaVersion: "1.1",
+      stepIndex: input.step.stepIndex,
+      callIndex: context.index,
+      obsId: context.obsId,
+      status: "no-response",
+      source: {
+        origin: new URL(input.step.resource.url).origin,
+        payTo,
+        paymentRefHash: paymentRefHash(paymentRef),
+      },
+      fields: [],
+      flags: [],
+      bodyCommit: NO_RESPONSE_COMMIT,
+    };
+  };
+}
+
 function createReceiptBuilder(options: ServerMainOptions, signer: Pick<Signer, "sign">) {
   return async (context: SettledReceiptContext): Promise<boolean> => {
     const acceptance = await options.pool.query<{ report_hash: string; obs_id: string }>(
@@ -1375,7 +1430,8 @@ function createReceiptBuilder(options: ServerMainOptions, signer: Pick<Signer, "
       checks: AcceptanceReport["checks"];
     }>(
       `SELECT report_hash,obs_id,checks FROM acceptance_reports
-       WHERE report_hash=$1 AND obs_id=$2 AND envelope_ref=$3 AND step_index=$4 AND body_ref=$5`,
+       WHERE report_hash=$1 AND obs_id=$2 AND envelope_ref=$3 AND step_index=$4
+         AND body_ref IS NOT DISTINCT FROM $5`,
       [
         acceptanceRef.report_hash,
         acceptanceRef.obs_id,
@@ -1385,18 +1441,19 @@ function createReceiptBuilder(options: ServerMainOptions, signer: Pick<Signer, "
       ],
     );
     const reportHashes = reports.rows.map((row) => row.report_hash);
-    const input = options.receiptInput
-      ? options.receiptInput(context, context.stepResult, reportHashes)
-      : createReceiptInputFromTrace(
-          context,
-          await getExecutionTrace(
-            options.pool,
-            context.input.planId,
-            context.input.step.stepIndex,
-            context.attempt,
-          ),
-          reports.rows,
-        );
+    const input =
+      options.receiptInput && context.response
+        ? options.receiptInput(context, context.stepResult, reportHashes)
+        : createReceiptInputFromTrace(
+            context,
+            await getExecutionTrace(
+              options.pool,
+              context.input.planId,
+              context.input.step.stepIndex,
+              context.attempt,
+            ),
+            reports.rows,
+          );
     const settlement =
       options.settlement ??
       createIndexerSettlement(

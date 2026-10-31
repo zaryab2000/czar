@@ -1,4 +1,4 @@
-import { H, type Hash32 } from "@czar/hashing";
+import { H, NO_RESPONSE_COMMIT, type Hash32 } from "@czar/hashing";
 import type { Receipt, StepResult } from "@czar/schemas";
 import type { PaymentReceiptInput } from "#src/evidence/receipts";
 import type { ExecutionPhaseRow } from "#src/payer/executions";
@@ -15,13 +15,20 @@ export function createReceiptInputFromTrace(
   trace: readonly ExecutionPhaseRow[],
   reports: readonly AcceptanceReceiptRecord[],
 ): PaymentReceiptInput {
-  const call = trace.findLast(
+  const response = trace.findLast(
     (row) => row.phase === "call.response" && row.payload["index"] === context.index,
   );
+  const call =
+    response ??
+    trace.findLast(
+      (row) => row.phase === "call.no-response" && row.payload["index"] === context.index,
+    );
   if (!call) throw new Error("Settled call is missing its durable receipt trace.");
-  const { paymentRef, requestCommit, responseCommit, requirementsHashSeen } = call.payload;
+  const noResponse = call.phase === "call.no-response";
+  const { paymentRef, requestCommit, requirementsHashSeen } = call.payload;
+  const responseCommit = noResponse ? NO_RESPONSE_COMMIT : call.payload["responseCommit"];
   const requestSize = call.payload["requestSize"];
-  const responseSize = call.payload["responseSize"];
+  const responseSize = noResponse ? 0 : call.payload["responseSize"];
   if (
     H(paymentRef) !== H(context.paymentRef) ||
     typeof requestCommit !== "string" ||
@@ -41,10 +48,19 @@ export function createReceiptInputFromTrace(
   const report = reports.find((item) => item.report_hash === reportHash && item.obs_id === obsId);
   if (!report) throw new Error("Acceptance report is missing for the settled call.");
   const result = context.stepResult as StepResult;
-  const statusCode = call.payload["status"];
-  const contentType = call.payload["contentType"];
+  const statusCode = noResponse ? 0 : call.payload["status"];
+  const contentType = noResponse ? "" : call.payload["contentType"];
   if (typeof statusCode !== "number" || typeof contentType !== "string")
     throw new Error("Settled call receipt trace has invalid response metadata.");
+  if (
+    noResponse &&
+    (result.status !== "no-response" ||
+      result.bodyCommit !== NO_RESPONSE_COMMIT ||
+      context.bodyRef !== undefined)
+  )
+    throw new Error("Settled no-response trace must have no response body.");
+  if (noResponse && !("verifiedTransferTx" in context))
+    throw new Error("Settled no-response trace is missing verified transfer evidence.");
   const originAsserted = result.source.origin;
   const tRequest = unixSeconds(context.requestedAt);
   const tPaymentSigned = unixSeconds(context.signedAt);
@@ -80,7 +96,10 @@ export function createReceiptInputFromTrace(
     outcome,
     disclosure: "hash-only",
     attestation,
-    bodyRef: context.bodyRef,
+    ...(context.bodyRef === undefined ? {} : { bodyRef: context.bodyRef }),
+    ...(noResponse && "verifiedTransferTx" in context
+      ? { verifiedTransferTx: context.verifiedTransferTx }
+      : {}),
   };
 }
 

@@ -10,6 +10,8 @@ import {
   verifyProof,
   dedupKey,
   obsId,
+  paymentRefHash,
+  NO_RESPONSE_COMMIT,
   type Hash32,
 } from "@czar/hashing";
 import {
@@ -30,6 +32,7 @@ import {
   type PaymentPayload,
   type PaymentRequired,
   type PaymentRequirements,
+  type SafeFetchOutcome,
 } from "@czar/x402";
 import type { SafeFetch, SafeFetchOptions, SafeFetchResponse } from "@czar/x402";
 import type { Pool } from "pg";
@@ -147,6 +150,10 @@ export interface VaultDirectDependencies {
   readonly safeFetch: SafeFetch;
   readonly now: () => Date;
   readonly boundary: (input: BoundaryInput) => Promise<unknown>;
+  readonly noResponseBoundary?: (input: NoResponseBoundaryInput) => Promise<unknown>;
+  readonly findExactTransferTx?: (
+    payment: Extract<PaymentRef, { rail: "x402-exact" }>,
+  ) => Promise<string | null>;
   readonly recordReceipt: (input: SettledReceiptContext) => Promise<boolean>;
   readonly objects: {
     put(bytes: Uint8Array): Promise<string>;
@@ -231,9 +238,25 @@ export interface BoundaryInput {
   };
 }
 
-export interface SettledReceiptContext extends BoundaryInput {
-  readonly stepResult: unknown;
+export interface NoResponseBoundaryInput {
+  readonly input: VaultDirectInput;
+  readonly paymentRef: PaymentRef;
+  readonly index: number;
+  readonly obsId: string;
+  readonly attempt: number;
+  readonly requestedAt: Date;
+  readonly maxTimeoutSeconds: number;
 }
+
+export type SettledReceiptContext =
+  | (BoundaryInput & { readonly stepResult: unknown })
+  | (NoResponseBoundaryInput & {
+      readonly signedAt: Date;
+      readonly stepResult: unknown;
+      readonly verifiedTransferTx: string;
+      readonly bodyRef?: never;
+      readonly response?: never;
+    });
 
 export type VaultDirectResult =
   | { readonly state: "handed_off"; readonly assembly: readonly AssemblyEntry[] }
@@ -964,6 +987,7 @@ async function settleAndFinalize(
     responseSize: number;
     mimeType: string;
   }[] = [];
+  const noResponses: number[] = [];
   for (const call of calls) {
     const result = await authorizeAndCall(
       input,
@@ -977,6 +1001,7 @@ async function settleAndFinalize(
     );
     if (result.response)
       completed.push({ ...result.response, maxTimeoutSeconds: call.offer.maxTimeoutSeconds });
+    else if (result.noResponse) noResponses.push(call.index);
     else if (result.errorCode) {
       await appendExecutionPhase(dependencies.pool, {
         planId: input.planId,
@@ -994,15 +1019,15 @@ async function settleAndFinalize(
   }[] = [];
   const authorized: number[] = [];
   let receiptPending = false;
-  for (const entry of completed) {
+  for (const index of [...completed.map((entry) => entry.index), ...noResponses]) {
     const authorizationUsed = await waitForAuthorization(
       dependencies,
       reservationId,
-      entry.index,
+      index,
       validBefore,
     );
     if (!authorizationUsed) continue;
-    authorized.push(entry.index);
+    authorized.push(index);
   }
   const unsettled: number[] = [];
   for (const index of authorized) {
@@ -1190,7 +1215,10 @@ async function settleAndFinalize(
       ),
     );
     if (await dependencies.chain.isSettled({ reservationId, index: call.index })) {
-      if (!completed.some((entry) => entry.index === call.index))
+      const noResponse = signedTrace.findLast(
+        (phase) => phase.phase === "call.no-response" && phase.payload["index"] === call.index,
+      );
+      if (noResponse?.payload["sellerFailureEvidenced"] === true)
         await fillResponse(dependencies.pool, id, undefined, 0);
       const settleTx = signedTrace.findLast(
         (phase) =>
@@ -1203,7 +1231,9 @@ async function settleAndFinalize(
         dependencies.pool,
         id,
         dependencies.now(),
-        typeof settleTx === "string" && /^0x[0-9a-f]{64}$/.test(settleTx) ? settleTx : undefined,
+        !noResponse && typeof settleTx === "string" && /^0x[0-9a-f]{64}$/.test(settleTx)
+          ? settleTx
+          : undefined,
       );
     } else {
       await markReleased(
@@ -1213,6 +1243,76 @@ async function settleAndFinalize(
         Number(dependencies.config.get("health.consecutiveFailures")),
       );
     }
+  }
+  for (const index of noResponses) {
+    if (!(await dependencies.chain.isSettled({ reservationId, index }))) continue;
+    const call = calls.find((candidate) => candidate.index === index);
+    const auth = signedTrace.findLast(
+      (row) => row.phase === "auth.signed" && row.payload["index"] === index,
+    );
+    const sent = signedTrace.findLast(
+      (row) => row.phase === "call.sent" && row.payload["index"] === index,
+    );
+    if (!call || !auth || !sent || !dependencies.noResponseBoundary)
+      throw new Error("Settled no-response call lacks its durable signed request or boundary.");
+    const payload = auth.payload["paymentPayload"] as PaymentPayload;
+    const paymentRef = signedPaymentRef(input, call, reservationId, validBefore, payload);
+    const observationId = obsId(dedupKey(paymentRef));
+    const priorResult = signedTrace.findLast(
+      (row) => row.phase === "call.result" && row.payload["callIndex"] === index,
+    );
+    const candidate =
+      priorResult?.payload ??
+      (await dependencies.noResponseBoundary({
+        input,
+        paymentRef,
+        index,
+        obsId: observationId,
+        attempt,
+        requestedAt: sent.at,
+        maxTimeoutSeconds: call.offer.maxTimeoutSeconds,
+      }));
+    if (!validateSchema("step-result", candidate))
+      throw new TypeError("No-response boundary returned an invalid StepResult.");
+    const stepResult = candidate as StepResult;
+    if (
+      stepResult.status !== "no-response" ||
+      stepResult.obsId !== observationId ||
+      stepResult.callIndex !== index ||
+      stepResult.bodyCommit !== NO_RESPONSE_COMMIT ||
+      stepResult.source.paymentRefHash !== paymentRefHash(paymentRef) ||
+      stepResult.fields.length !== 0 ||
+      stepResult.flags.length !== 0 ||
+      "bodyRef" in stepResult
+    )
+      throw new TypeError("No-response StepResult does not match its paid authorization.");
+    completedResults.push({ index, stepResult });
+    if (!priorResult)
+      await appendExecutionPhase(dependencies.pool, {
+        planId: input.planId,
+        stepIndex: input.step.stepIndex,
+        attempt,
+        phase: "call.result",
+        payload: { ...stepResult },
+      });
+    const transferTx = await dependencies.findExactTransferTx?.(paymentRef);
+    if (!transferTx) {
+      receiptPending = true;
+      continue;
+    }
+    const receiptStored = await dependencies.recordReceipt({
+      input,
+      paymentRef,
+      index,
+      obsId: observationId,
+      attempt,
+      requestedAt: sent.at,
+      signedAt: auth.at,
+      maxTimeoutSeconds: call.offer.maxTimeoutSeconds,
+      stepResult,
+      verifiedTransferTx: transferTx,
+    });
+    if (!receiptStored) receiptPending = true;
   }
   // Review M2: an index left unsettled by a reverted settle is booked by finalize; record its receipt now.
   for (const [index, context] of contexts) {
@@ -1485,6 +1585,10 @@ async function authorizeAndCall(
     (row) => row.phase === "call.response" && row.payload["index"] === call.index,
   );
   if (priorResult) return restoreCallResult(dependencies, priorResult, call);
+  const priorNoResponse = trace.findLast(
+    (row) => row.phase === "call.no-response" && row.payload["index"] === call.index,
+  );
+  if (priorNoResponse) return { noResponse: true };
   const priorUnpaid = trace.findLast(
     (row) => row.phase === "call.unpaid" && row.payload["index"] === call.index,
   );
@@ -1505,6 +1609,8 @@ async function authorizeAndCall(
   // response is kept so the call reaches settle, the boundary (CZ-16 delivery fails) and the receipt.
   let settledResponse: SafeFetchResponse | undefined;
   let errorCode = "unpaid";
+  let responseArrived = false;
+  let finalOutcome: SafeFetchOutcome = "unknown-transport";
   for (let retry = 0; retry < Number(dependencies.config.get("payer.callRetries")); retry += 1) {
     // 02 §7.5: retries only within validBefore, by chain time (SCR-157 §1); USDC refuses the authorization
     // once `block.timestamp ≥ validBefore`.
@@ -1521,10 +1627,30 @@ async function authorizeAndCall(
         ),
       });
     } catch (error) {
-      if (!(error instanceof SafeFetchError) || error.code !== "upstream-unavailable") throw error;
+      if (
+        !(error instanceof SafeFetchError) ||
+        (error.code !== "upstream-unavailable" && error.rule !== "dns")
+      )
+        throw error;
+      finalOutcome = error.outcome;
+      await appendExecutionPhase(dependencies.pool, {
+        planId: input.planId,
+        stepIndex: input.step.stepIndex,
+        attempt,
+        phase: "call.attempt",
+        payload: { index: call.index, retry, outcome: finalOutcome },
+      });
       errorCode = "upstream-unavailable";
       continue;
     }
+    responseArrived = true;
+    await appendExecutionPhase(dependencies.pool, {
+      planId: input.planId,
+      stepIndex: input.step.stepIndex,
+      attempt,
+      phase: "call.attempt",
+      payload: { index: call.index, retry, outcome: "response" },
+    });
     await fillResponse(dependencies.pool, observationId, dependencies.now(), undefined);
     const attemptSettlement = readSettlement(response.headers);
     const moved = attemptSettlement.state === "settled" || attemptSettlement.state === "pending";
@@ -1537,7 +1663,31 @@ async function authorizeAndCall(
     if (response.status >= 200 && response.status < 300 && moved) break;
   }
   const response = settledResponse;
-  if (!response) return { errorCode: expiredBeforeSend ? "authorization-expired" : errorCode };
+  if (!response) {
+    dependencies.assertLeaseHeld?.();
+    if (responseArrived || expiredBeforeSend)
+      return { errorCode: expiredBeforeSend ? "authorization-expired" : errorCode };
+    await appendExecutionPhase(dependencies.pool, {
+      planId: input.planId,
+      stepIndex: input.step.stepIndex,
+      attempt,
+      phase: "call.no-response",
+      payload: {
+        index: call.index,
+        paymentRef: signedRef,
+        requestCommit: slRequestCommit({
+          ...call.request,
+          body: call.request.body ?? new Uint8Array(),
+        }),
+        requirementsHashSeen: H(call.paymentRequired),
+        requestSize: call.request.body?.byteLength ?? 0,
+        sellerFailureEvidenced:
+          !savedAuth &&
+          ["connection-refused", "connection-reset", "connected-timeout"].includes(finalOutcome),
+      },
+    });
+    return { noResponse: true };
+  }
   const settlement = readSettlement(response.headers);
   if (settlement.state !== "settled" && settlement.state !== "pending")
     return { errorCode: "unpaid" };
@@ -1658,7 +1808,7 @@ function signedPaymentRef(
   reservationId: bigint,
   validBefore: bigint,
   payload: PaymentPayload,
-): PaymentRef {
+): Extract<PaymentRef, { rail: "x402-exact" }> {
   const reservationNumber = Number(reservationId);
   const expiryNumber = Number(validBefore);
   if (!Number.isSafeInteger(reservationNumber) || !Number.isSafeInteger(expiryNumber))
