@@ -45,4 +45,13 @@ describe("SCR-163 service version identity", () => {
     ).not.toBe(base);
     expect(serviceVersionId({ payTo, resource, schema: { type: "object" } })).not.toBe(base);
   });
+
+  it("uses Czar JCS address normalization inside a Bazaar schema", () => {
+    const address = `0x${"ab".repeat(20)}`;
+    const lower = { type: "string", default: address };
+    const upper = { type: "string", default: address.toUpperCase().replace("0X", "0x") };
+    expect(serviceVersionId({ payTo, resource, schema: upper })).toBe(
+      serviceVersionId({ payTo, resource, schema: lower }),
+    );
+  });
 });
