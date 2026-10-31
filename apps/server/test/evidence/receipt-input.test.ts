@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { H, type Hash32 } from "@czar/hashing";
+import { H, NO_RESPONSE_COMMIT, type Hash32 } from "@czar/hashing";
 import { createReceiptInputFromTrace } from "#src/evidence/receipt-input";
 
 const HASH = `0x${"11".repeat(32)}` as Hash32;
@@ -19,6 +19,57 @@ const payment = {
 };
 
 describe("receipt input from durable payment trace", () => {
+  it("encodes a settled no-response attempt with signed status zero", () => {
+    const completedAt = new Date("2026-10-25T12:00:04Z");
+    const noResponsePayment = { ...payment, settlementTx: undefined };
+    const input = createReceiptInputFromTrace(
+      {
+        input: {
+          planId: "plan",
+          envelopeRef: "eip155:5042002:0x0000000000000000000000000000000000000001:1",
+          step: { stepIndex: 0, acceptanceProfileId: "prof_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+        },
+        paymentRef: noResponsePayment,
+        verifiedTransferTx: HASH,
+        index: 0,
+        requestedAt: new Date("2026-10-25T12:00:01Z"),
+        signedAt: new Date("2026-10-25T12:00:02Z"),
+        stepResult: {
+          status: "no-response",
+          source: { origin: "https://merchant.example" },
+          bodyCommit: NO_RESPONSE_COMMIT,
+        },
+      } as never,
+      [
+        {
+          phase: "call.no-response",
+          at: completedAt,
+          payload: {
+            index: 0,
+            paymentRef: noResponsePayment,
+            requestCommit: HASH,
+            requirementsHashSeen: HASH,
+            requestSize: 12,
+          },
+        },
+        {
+          phase: "acceptance.result",
+          at: completedAt,
+          payload: { index: 0, reportHash: HASH, obsId: "obs_1" },
+        },
+      ],
+      [{ report_hash: HASH, obs_id: "obs_1", checks: [] }],
+    );
+    expect(input.outcome).toBe("no-response");
+    expect(input.attestation).toMatchObject({
+      responseCommit: NO_RESPONSE_COMMIT,
+      statusCode: 0,
+      outcome: 3,
+    });
+    expect(input.responseSize).toBe(0);
+    expect(input.bodyRef).toBeUndefined();
+    expect(input.verifiedTransferTx).toBe(HASH);
+  });
   it("commits to checks rather than the enclosing AcceptanceReport hash", () => {
     const checks = [{ name: "delivery", result: "pass" }];
     const completedAt = new Date("2026-10-25T12:00:04Z");

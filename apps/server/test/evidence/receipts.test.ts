@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createPaymentReceipt } from "#src/evidence/receipts";
-import { jcs, paymentRefHash, type Hash32 } from "@czar/hashing";
+import { jcs, NO_RESPONSE_COMMIT, paymentRefHash, type Hash32 } from "@czar/hashing";
 import { loadConfig } from "@czar/config";
 import { parseRequest, type SignRequest } from "@czar/signer";
 import { keccak256 } from "viem";
@@ -15,6 +15,100 @@ beforeEach(async () => {
 });
 
 describe("settled payment receipts", () => {
+  it("signs a no-response receipt without inventing an HTTP status", async () => {
+    const base = receiptInput("settled");
+    const signer = await testSigner();
+    const { settlementTx, ...stablePayment } = base.payment;
+    const isSettled = vi.fn(async () => true);
+    const input = {
+      ...base,
+      payment: stablePayment,
+      verifiedTransferTx: settlementTx,
+      outcome: "no-response" as const,
+      responseSize: 0,
+      mimeType: "",
+      attestation: {
+        ...base.attestation,
+        responseCommit: NO_RESPONSE_COMMIT,
+        statusCode: 0,
+        outcome: 3,
+      },
+    };
+    const signed = await createPaymentReceipt(input, {
+      pool: getPool(),
+      config: loadConfig(),
+      signer,
+      settlement: { isSettled },
+      now: () => new Date("2026-10-21T00:00:00Z"),
+    });
+    expect(isSettled).toHaveBeenCalledExactlyOnceWith({
+      ...stablePayment,
+      settlementTx,
+    });
+    expect(signed?.receipt.outcome).toBe("no-response");
+    expect(signed?.paymentRef).toEqual(stablePayment);
+    expect(signed?.receipt.payment_ref_hash).toBe(paymentRefHash(stablePayment));
+    expect(signed?.receipt.response).toEqual({
+      commit: NO_RESPONSE_COMMIT,
+      size: 0,
+      mime: "",
+    });
+    expect(signed?.receipt.sig.length).toBeGreaterThan(130);
+  });
+
+  it("refuses to sign a no-response receipt with HTTP metadata", async () => {
+    const base = receiptInput("settled");
+    const sign = vi.fn();
+    const invalid = {
+      ...base,
+      outcome: "no-response" as const,
+      attestation: { ...base.attestation, statusCode: 200 },
+    };
+    await expect(
+      createPaymentReceipt(invalid, {
+        pool: getPool(),
+        config: loadConfig(),
+        signer: { sign },
+        settlement: { isSettled: async () => true },
+        now: () => new Date("2026-10-21T00:00:00Z"),
+      }),
+    ).rejects.toThrow("No-response receipt must use the fixed sentinel");
+    expect(sign).not.toHaveBeenCalled();
+  });
+
+  it("requires an exact transfer proof before signing a stable no-response PaymentRef", async () => {
+    const base = receiptInput("settled");
+    const { settlementTx: _settlementTx, ...stablePayment } = base.payment;
+    const sign = vi.fn();
+    const input = {
+      ...base,
+      payment: stablePayment,
+      outcome: "no-response" as const,
+      responseSize: 0,
+      mimeType: "",
+      attestation: {
+        ...base.attestation,
+        responseCommit: NO_RESPONSE_COMMIT,
+        statusCode: 0,
+        outcome: 3,
+      },
+    };
+    const dependencies = {
+      pool: getPool(),
+      config: loadConfig(),
+      signer: { sign },
+      settlement: { isSettled: async () => false },
+      now: () => new Date("2026-10-21T00:00:00Z"),
+    };
+    await expect(createPaymentReceipt(input, dependencies)).rejects.toThrow("with a transaction");
+    await expect(
+      createPaymentReceipt(
+        { ...input, verifiedTransferTx: base.payment.settlementTx },
+        dependencies,
+      ),
+    ).resolves.toBeNull();
+    expect(sign).not.toHaveBeenCalled();
+  });
   it("sends the full PaymentRef through the real signer request parser", async () => {
     const input = receiptInput("settled");
     const signer = await testSigner();
