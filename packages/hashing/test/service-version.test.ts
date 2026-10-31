@@ -33,8 +33,16 @@ describe("SCR-163 service version identity", () => {
 
   it("changes with payee, resource, or schema", () => {
     const base = serviceVersionId({ payTo, resource, schema: null });
-    expect(serviceVersionId({ payTo: `0x${"2".repeat(40)}`, resource, schema: null })).not.toBe(base);
-    expect(serviceVersionId({ payTo, resource: { ...resource, url: "https://a.example/y" }, schema: null })).not.toBe(base);
+    expect(serviceVersionId({ payTo: `0x${"2".repeat(40)}`, resource, schema: null })).not.toBe(
+      base,
+    );
+    expect(
+      serviceVersionId({
+        payTo,
+        resource: { ...resource, url: "https://a.example/y" },
+        schema: null,
+      }),
+    ).not.toBe(base);
     expect(serviceVersionId({ payTo, resource, schema: { type: "object" } })).not.toBe(base);
   });
 });
