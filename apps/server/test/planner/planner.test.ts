@@ -70,6 +70,8 @@ function makePlanner(
       probeInput?: PlannerService["probeInput"];
     }>;
     readonly profileSource?: PlannerPorts["profiles"];
+    readonly health?: PlannerPorts["health"];
+    readonly remaining?: string;
   } = {},
 ) {
   const spec = {
@@ -80,6 +82,7 @@ function makePlanner(
     envFile: {
       ...(options.gatewayEnabled ? { "routing.gatewayEnabled": true } : {}),
       ...(options.jobEnabled ? { "routing.jobEnabled": true } : {}),
+      "planner.newPayeeNeedsApproval": false,
     },
   });
   const planner = createPlanner({
@@ -131,7 +134,8 @@ function makePlanner(
       profiles: options.profileSource ?? { profileIdFor: () => `prof_${"b".repeat(32)}` },
       pocketKeys: { createPocketKey: async () => `0x${"3".repeat(40)}` },
       agentHosts: { hasAgentHost: async () => options.hasAgent ?? true },
-      allowance: { remaining: async () => "0" },
+      allowance: { remaining: async () => options.remaining ?? "0" },
+      ...(options.health ? { health: options.health } : {}),
       prober: {
         probe: async (resource, probeInput) => {
           options.probeCalls?.push({ resource, ...(probeInput ? { probeInput } : {}) });
@@ -313,6 +317,27 @@ describe("planner fallback", () => {
     };
     const built = await makePlanner({ service: explored });
     expect(built?.approvalNeeded).toBe(true);
+  });
+
+  it("requires owner approval for an unrated paid supplier despite earned allowance", async () => {
+    const built = await makePlanner({ remaining: "999999999" });
+    expect(built?.plan.approvalReasons).toContain("unrated");
+    expect(built?.approvalNeeded).toBe(true);
+  });
+
+  it("adds a health reason for the owner and excludes H4-blocked suppliers", async () => {
+    const health = {
+      openOwnerFacts: async () => ["settled-not-delivered" as const],
+      isInjectionBlocked: async () => false,
+    };
+    const built = await makePlanner({ remaining: "999999999", health });
+    expect(built?.plan.approvalReasons).toEqual(["unrated", "health-fact"]);
+    expect(built?.approvalNeeded).toBe(true);
+    expect(
+      await makePlanner({
+        health: { ...health, isInjectionBlocked: async () => true },
+      }),
+    ).toBeNull();
   });
 
   it("drops live price drift above the configured unit budget", async () => {
