@@ -154,12 +154,28 @@ async function loadStepFacts(
   const [counts, ratings] = await Promise.all([
     pool.query<ReceiptCount>(
       `SELECT ob.objective_id,ob.step_index,COUNT(*)::text AS count
-       FROM observations ob JOIN users u ON u.user_id=ob.user_id
+       FROM observations ob
+       JOIN objectives o ON o.objective_id=ob.objective_id AND o.user_id=ob.user_id
+       JOIN plans p ON p.plan_id=o.plan_id
        WHERE ob.objective_id=ANY($1::text[]) AND ob.user_id=$2
-         AND u.vault IS NOT NULL AND lower(ob.vault)=lower(u.vault)
-         AND lower(split_part(ob.envelope_ref,':',3))=lower(u.vault)
+         AND o.envelope_ref IS NOT NULL AND lower(ob.envelope_ref)=lower(o.envelope_ref)
+         AND lower(ob.vault)=lower(split_part(o.envelope_ref,':',3))
          AND ob.settled_at IS NOT NULL AND ob.released_at IS NULL
          AND (ob.rail <> 'erc8183-job' OR ob.job_state='Completed')
+         AND EXISTS (
+           SELECT 1 FROM jsonb_array_elements(coalesce(p.plan->'steps','[]'::jsonb)) step
+           WHERE step->>'stepIndex'=ob.step_index::text
+             AND (ob.rail='erc8183-job' OR (
+               ob.rail IN ('x402-exact','gateway-batched')
+              AND ob.dedup_key ~ (
+                '^(x402-exact|gateway-batched):eip155:[0-9]+:' ||
+                '0x[0-9a-f]{40}:0x[0-9a-f]{40}:0x[0-9a-f]{64}$'
+              )
+               AND split_part(ob.dedup_key,':',1)=ob.rail
+               AND split_part(ob.dedup_key,':',2)||':'||split_part(ob.dedup_key,':',3)=ob.network
+               AND split_part(ob.dedup_key,':',5)=lower(step->>'payee')
+             ))
+         )
        GROUP BY ob.objective_id,ob.step_index`,
       [objectives, userId],
     ),
