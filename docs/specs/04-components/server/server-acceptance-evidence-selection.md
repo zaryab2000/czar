@@ -129,6 +129,8 @@ Response contracts (SCR-119, 2026-10-21). These are internal indexer → server 
 - `dependencyState()`: belongs to T-033, which owns `halt_flags`; it returns the current `halt_flags` rows. T-034 does not serve it.
 - Every query filters and pages in SQL; none loads a whole projection table into memory.
 
+- **`GET /settlements/x402-transfer`** (internal only; SCR-163 §7): verified transfer provenance for a settled `x402-exact` call. It matches `AuthorizationUsed(vault, nonce)` and `Transfer(vault, payTo, amount)` emitted by the canonical USDC in one transaction, and answers `200` / `404` / `409` / `400`.
+
 #### 5.5 Alerts (named parameters)
 
 | Alert | Rule | Parameter (default, reason) | Action |
