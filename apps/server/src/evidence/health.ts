@@ -23,6 +23,7 @@ export type HealthRow = Pick<
 
 export type HealthEvidence =
   | { readonly kind: "retry-exhausted"; readonly obsId: string }
+  | { readonly kind: "resume-past-valid-before"; readonly obsId: string }
   | { readonly kind: "job-history"; readonly obsId: string; readonly submitted: boolean }
   | {
       readonly kind: "job-rejected";
@@ -60,7 +61,12 @@ export function healthFacts(
     const evidence = reports.filter((report) => report.obsId === row.obsId);
     if (row.rail !== "erc8183-job") {
       const exhausted = evidence.some((report) => report.kind === "retry-exhausted");
-      if (row.settledAt && (row.delivered === 0 || (row.delivered === null && exhausted)))
+      const expiredOnResume = evidence.some((report) => report.kind === "resume-past-valid-before");
+      if (
+        row.settledAt &&
+        !expiredOnResume &&
+        (row.delivered === 0 || (row.delivered === null && exhausted))
+      )
         facts.push({ fact: "settled-not-delivered", obsId: row.obsId });
     } else if (row.settledAt) {
       const expiredWithoutSubmission =
@@ -95,7 +101,14 @@ export function healthFacts(
     const latest = group.slice(0, config.consecutiveFailures);
     if (
       latest.length === config.consecutiveFailures &&
-      latest.every((row) => row.releasedAt !== null && row.settledAt === null)
+      latest.every(
+        (row) =>
+          row.releasedAt !== null &&
+          row.settledAt === null &&
+          !reports.some(
+            (report) => report.obsId === row.obsId && report.kind === "resume-past-valid-before",
+          ),
+      )
     )
       facts.push({ fact: "repeated-unsettled-failure", obsId: latest[0]!.obsId });
   }

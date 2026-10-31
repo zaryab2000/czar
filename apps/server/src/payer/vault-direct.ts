@@ -1489,6 +1489,8 @@ async function authorizeAndCall(
     (row) => row.phase === "call.unpaid" && row.payload["index"] === call.index,
   );
   if (priorUnpaid) return { errorCode: String(priorUnpaid.payload["errorCode"] ?? "unpaid") };
+  const expiredBeforeSend =
+    Boolean(savedAuth) && (await dependencies.chain.latestBlockTimestamp()) >= validBefore;
   paymentSignature ??= encodePaymentSignature(payload);
   const headers = { ...call.request.headers, "payment-signature": paymentSignature };
   const requestedAt = dependencies.now();
@@ -1535,7 +1537,7 @@ async function authorizeAndCall(
     if (response.status >= 200 && response.status < 300 && moved) break;
   }
   const response = settledResponse;
-  if (!response) return { errorCode };
+  if (!response) return { errorCode: expiredBeforeSend ? "authorization-expired" : errorCode };
   const settlement = readSettlement(response.headers);
   if (settlement.state !== "settled" && settlement.state !== "pending")
     return { errorCode: "unpaid" };
