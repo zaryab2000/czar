@@ -60,17 +60,20 @@ describe("SCR-163 service version ledger", () => {
     }>("SELECT first_seen_at,last_seen_at FROM service_versions WHERE version_id=$1", [versionA]);
     expect(firstRow.rows).toEqual([{ first_seen_at: first, last_seen_at: second }]);
     expect(
-      (await pool.query("SELECT cleared_at FROM supplier_health WHERE obs_id=$1", [obsId]))
-        .rows[0]?.cleared_at,
+      (await pool.query("SELECT cleared_at FROM supplier_health WHERE obs_id=$1", [obsId])).rows[0]
+        ?.cleared_at,
     ).toBeNull();
     await recordServiceVersion({ pool, network, serviceId, versionId: versionB, now: third });
     expect(
-      (await pool.query("SELECT cleared_at FROM supplier_health WHERE obs_id=$1", [obsId]))
-        .rows[0]?.cleared_at,
+      (await pool.query("SELECT cleared_at FROM supplier_health WHERE obs_id=$1", [obsId])).rows[0]
+        ?.cleared_at,
     ).toEqual(third);
     expect(
-      (await pool.query("SELECT version_id FROM service_versions WHERE service_id=$1", [serviceId]))
-        .rows.map((row) => row.version_id).toSorted(),
+      (
+        await pool.query("SELECT version_id FROM service_versions WHERE service_id=$1", [serviceId])
+      ).rows
+        .map((row) => row.version_id)
+        .toSorted(),
     ).toEqual([versionA, versionB]);
   });
 });
