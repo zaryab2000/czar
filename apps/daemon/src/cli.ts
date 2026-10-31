@@ -22,6 +22,7 @@ import { pairDevice } from "#src/pairing/pair-device";
 import { runManualObjective, runResultCommand } from "#src/objective-command";
 import { objectivePreflight } from "#src/objective-preflight";
 import { pairedDeviceId, savePairedDevice } from "#src/paired-device";
+import { readRatingKey } from "#src/results/rating-key";
 import { SidecarSupervisor } from "#src/sidecar";
 import { loadCommandConfig, readServerOrigin } from "#src/server-origin";
 
@@ -63,14 +64,7 @@ function ratingAsk(argv: readonly string[]): ((line: string) => Promise<string>)
   if (argv.includes("--no-prompt") || !process.stdin.isTTY || !process.stdout.isTTY) {
     return undefined;
   }
-  return async (line) => {
-    const prompt = createInterface({ input: process.stdin, output: process.stdout });
-    try {
-      return await prompt.question(`${line}\n`);
-    } finally {
-      prompt.close();
-    }
-  };
+  return (line) => readRatingKey(process.stdin, process.stdout, line);
 }
 
 function sidecarCommand(): string {

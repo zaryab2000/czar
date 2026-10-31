@@ -14,7 +14,9 @@ function terminal() {
   };
   const output = new PassThrough();
   let printed = "";
-  output.on("data", (chunk: Buffer) => { printed += chunk.toString(); });
+  output.on("data", (chunk: Buffer) => {
+    printed += chunk.toString();
+  });
   return { input, output, rawModes, printed: () => printed };
 }
 
