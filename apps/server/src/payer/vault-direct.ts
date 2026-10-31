@@ -1417,6 +1417,8 @@ async function authorizeAndCall(
   } else if (savedAuth) {
     throw new Error("Stored signed payment payload is invalid.");
   } else {
+    if (call.offer.payTo.toLowerCase() !== input.step.payee?.toLowerCase())
+      return { errorCode: "price-or-payee-drift" };
     paymentId = `pay_${randomUUID().replaceAll("-", "")}`;
     const signed = await dependencies.signer.sign("cz-15", {
       keyId: "K3",
