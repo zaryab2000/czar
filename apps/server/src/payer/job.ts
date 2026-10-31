@@ -759,7 +759,9 @@ async function syncAndReturn(
   });
   if (synced.state === "Expired") await observeSavedFunding(input, dependencies, job, attempt);
   await observeJobState(dependencies, job, synced.state);
-  await observeEscrowRejection(dependencies, job, view);
+  const postSyncView =
+    synced.state === "Expired" ? await dependencies.chain.getJob(job.jobKey) : view;
+  await observeEscrowRejection(dependencies, job, postSyncView);
   return {
     state: synced.state,
     jobKey: job.jobKey,
