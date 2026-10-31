@@ -742,6 +742,12 @@ async function syncAndReturn(
   assertLeaseHeld: () => void,
   budget = view.budget,
 ): Promise<JobExecutionResult> {
+  await observeJobState(dependencies, job, view.vaultState);
+  if (
+    view.vaultState === "Submitted" ||
+    (view.vaultState === "Funded" && view.escrowState === "Submitted")
+  )
+    await setJobState(dependencies.pool, job.observationId, "Submitted");
   const transaction =
     (await priorJobTransaction(dependencies, input, attempt, "job.sync.sent", job.jobKey)) ??
     (await signVaultCall(dependencies, "syncJob", { jobKey: job.jobKey }));
