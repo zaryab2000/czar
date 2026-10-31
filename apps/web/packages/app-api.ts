@@ -28,6 +28,43 @@ const BUNDLERS = ["circle", "pimlico", "alchemy", "zerodev"] as const;
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 let appWalletConfigRequest: Promise<AppWalletConfig> | undefined;
 
+export interface AppResultSupplier {
+  readonly stepIndex: number;
+  readonly merchantLabel: string;
+  readonly merchantIsCzar: boolean;
+  readonly receipts: number;
+  readonly effectiveRating: "good" | "bad" | "none";
+  readonly ratingId?: string;
+  readonly canRate: boolean;
+  readonly canCorrect: boolean;
+}
+
+export interface AppResultCard {
+  readonly objectiveId: string;
+  readonly deliveredAt: string;
+  readonly kind: string;
+  readonly stepCount: number;
+  readonly suppliers: readonly AppResultSupplier[];
+  readonly amountDisplay?: string;
+  readonly windowClosesAt: string;
+}
+
+export interface AppRatingRequest {
+  readonly objectiveId: string;
+  readonly stepIndex: number;
+  readonly value: "good" | "bad";
+  readonly supersedes?: string;
+}
+
+export interface AppRatingAccepted {
+  readonly ratingId: string;
+  readonly objectiveId: string;
+  readonly stepIndex: number;
+  readonly value: "good" | "bad";
+  readonly receipts: number;
+  readonly windowClosesAt: string;
+}
+
 export async function getAppWalletConfig(): Promise<AppWalletConfig> {
   if (!appWalletConfigRequest) appWalletConfigRequest = fetchAppWalletConfig();
   const pendingConfigRequest = appWalletConfigRequest;
@@ -137,11 +174,17 @@ async function requestWithHeaders<T>(
     };
     throw new AppApiError(body.detail ?? response.statusText, response.status, body.czarCode);
   }
-  const data =
-    response.status === 204 || response.status === 202
-      ? (undefined as T)
-      : ((await response.json()) as T);
+  const data = await readResponseBody<T>(response);
   return { data, headers: response.headers };
+}
+
+async function readResponseBody<T>(response: Response): Promise<T> {
+  if (response.status === 204) return undefined as T;
+  if (response.status === 202) {
+    const body = await response.text();
+    return body.length === 0 ? (undefined as T) : (JSON.parse(body) as T);
+  }
+  return (await response.json()) as T;
 }
 
 function idempotencyKey(): string {
@@ -239,6 +282,18 @@ export const appApi = {
     if (cursor) query.set("cursor", cursor);
     return request<AppPage<LedgerReceipt>>(`/v1/ledger/receipts?${query}`);
   },
+  listAppResults: (cursor?: string) => {
+    const query = new URLSearchParams();
+    if (cursor) query.set("cursor", cursor);
+    return request<AppPage<AppResultCard>>(`/v1/app/results?${query}`);
+  },
+  listAllAppResults: () => listAllAppResults(),
+  submitAppRating: (body: AppRatingRequest) =>
+    request<AppRatingAccepted>("/v1/app/ratings", {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey() },
+      body: JSON.stringify(body),
+    }),
   getSoulPointer: () => request<SoulPointer>("/v1/soul/pointer"),
   createPairingCode: () =>
     request<PairingCode>("/v1/devices/pairing-codes", {
@@ -262,6 +317,22 @@ export const appApi = {
       body: JSON.stringify({ action }),
     }),
 };
+
+async function listAllAppResults(): Promise<AppPage<AppResultCard>> {
+  const items: AppResultCard[] = [];
+  const seenCursors = new Set<string>();
+  let cursor: string | undefined;
+  while (true) {
+    const page = await appApi.listAppResults(cursor);
+    items.push(...page.items);
+    if (page.nextCursor === null) return { items, nextCursor: null };
+    if (seenCursors.has(page.nextCursor)) {
+      throw new Error("The server repeated a result pagination cursor.");
+    }
+    seenCursors.add(page.nextCursor);
+    cursor = page.nextCursor;
+  }
+}
 
 async function listAllManualReturns(): Promise<AppPage<ManualReturn>> {
   const items: ManualReturn[] = [];

@@ -5,6 +5,8 @@ import type { LedgerReceipt, Me } from "@czar/schemas";
 import { appApi } from "#src/app-api";
 import { ACCOUNT_REFRESH_EVENT } from "#src/app-shell";
 import { receiptStatusText } from "#src/receipt-status";
+import { ResultCard } from "#src/result-card";
+import { resultsThisWeek, thisWeekHeading } from "#src/result-cards";
 import { useAppData } from "#src/use-app-data";
 import { getStoredPasskey, sendOwnerUserOperation } from "#src/wallet";
 import { formatUsd } from "@czar/web/money-format";
@@ -12,19 +14,22 @@ import { shadowTotalsFixture } from "#src/summary-fixtures";
 
 export default function HomePage() {
   const load = useCallback(async () => {
-    const [me, approvals, receipts, manualReturns] = await Promise.all([
+    const [me, approvals, receipts, manualReturns, results] = await Promise.all([
       appApi.getMe(),
       appApi.listApprovals(),
       appApi.listReceipts(),
       appApi.listAllManualReturns(),
+      appApi.listAllAppResults(),
     ]);
-    return { me, approvals, receipts, manualReturns };
+    return { me, approvals, receipts, manualReturns, results };
   }, []);
   const { data, error, loading, refresh } = useAppData(load);
 
   if (loading && !data) return <p role="status">Loading your Czar account…</p>;
   if (error && !data) return <DataError message={error} refresh={refresh} />;
   if (!data) return <DataError message="Czar could not load current data." refresh={refresh} />;
+
+  const thisWeek = resultsThisWeek(data.results.items, new Date());
 
   return (
     <div className="page-stack">
@@ -39,6 +44,13 @@ export default function HomePage() {
       />
       {data.me.mode === "shadow" && <ShadowSummaryCard />}
       <OwnerControls me={data.me} refresh={refresh} />
+      <section className="page-stack" aria-label="This week">
+        <h2>This week</h2>
+        <p>{thisWeekHeading(thisWeek.length)}</p>
+        {thisWeek.map((card) => (
+          <ResultCard card={card} key={card.objectiveId} />
+        ))}
+      </section>
       <section className="panel">
         <h2>Weekly limits</h2>
         {data.me.limits.length === 0 ? (

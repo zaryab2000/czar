@@ -178,4 +178,17 @@ describe("app results and ratings", () => {
     expect(headers.get("Authorization")).toBe("Bearer test-session");
     expect(headers.get("Idempotency-Key")).toBeTruthy();
   });
+
+  it("preserves empty 202 responses for submission notices", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status: 202 })),
+    );
+    const { appApi } = await import("#src/app-api");
+    await expect(
+      appApi.notifySubmitted("plan_01J00000000000000000000000", {
+        userOpHash: `0x${"11".repeat(32)}`,
+      }),
+    ).resolves.toBeUndefined();
+  });
 });
