@@ -271,7 +271,7 @@ describe("planner fallback", () => {
     ]);
   });
 
-  it("verifies every selected and alternate leaf for seeded plans", async () => {
+  it("commits only the selected payee while alternate attribution is unavailable", async () => {
     let state = 0x41c64e6d;
     for (let iteration = 0; iteration < 100; iteration += 1) {
       state = (Math.imul(state, 1_103_515_245) + 12_345) >>> 0;
@@ -280,7 +280,8 @@ describe("planner fallback", () => {
       expect(built).not.toBeNull();
       const plan = built!.plan;
       const step = plan.steps[0]!;
-      expect(plan.payeeLeaves).toHaveLength(3);
+      expect(step.alternates).toEqual([]);
+      expect(plan.payeeLeaves).toHaveLength(1);
       const leaves = plan.payeeLeaves.map((leaf) => {
         expect(leaf.stepIndex).toBe(step.stepIndex);
         expect(leaf.stepCap).toBe(step.stepCap);
