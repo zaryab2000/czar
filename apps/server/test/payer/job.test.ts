@@ -58,6 +58,10 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
+  await getPool().query(
+    "DELETE FROM observations WHERE objective_id=(SELECT objective_id FROM plans WHERE plan_id=$1)",
+    [PLAN_ID],
+  );
   await getPool().query("DELETE FROM payer_job_deliverables");
   await getPool().query("DELETE FROM payer_job_briefs");
   await getPool().query("DELETE FROM step_executions");
@@ -155,6 +159,17 @@ describe("job brief commitments", () => {
     expect(chain.openJob).not.toHaveBeenCalled();
     expect(chain.fundJob).not.toHaveBeenCalled();
     expect(chain.syncJob).toHaveBeenCalledOnce();
+    const expiredObservation = await getPool().query<{
+      job_state: string;
+      delivered: number | null;
+      settled_at: Date | null;
+    }>(
+      "SELECT job_state,delivered,settled_at FROM observations WHERE objective_id=(SELECT objective_id FROM plans WHERE plan_id=$1)",
+      [PLAN_ID],
+    );
+    expect(expiredObservation.rows).toHaveLength(1);
+    expect(expiredObservation.rows[0]).toMatchObject({ job_state: "Expired", delivered: null });
+    expect(expiredObservation.rows[0]?.settled_at).toBeInstanceOf(Date);
   });
 
   it.each([60, -60])(
@@ -189,8 +204,183 @@ describe("job brief commitments", () => {
       expect(chain.openJob).not.toHaveBeenCalled();
       expect(chain.fundJob).not.toHaveBeenCalled();
       expect(chain.syncJob).toHaveBeenCalledOnce();
+      const observation = await getPool().query<{
+        job_state: string;
+        delivered: number;
+        settled_at: Date;
+        responded_at: Date;
+      }>(
+        "SELECT job_state,delivered,settled_at,responded_at FROM observations WHERE objective_id=(SELECT objective_id FROM plans WHERE plan_id=$1)",
+        [PLAN_ID],
+      );
+      expect(observation.rows).toHaveLength(1);
+      expect(observation.rows[0]).toMatchObject({ job_state: "Completed", delivered: 1 });
+      expect(observation.rows[0]?.settled_at).toBeInstanceOf(Date);
+      expect(observation.rows[0]?.responded_at).toBeInstanceOf(Date);
     },
   );
+
+  it("marks a funded evaluator rejection undelivered after a Submitted vault state", async () => {
+    const current = new Date("2026-10-23T00:00:00Z");
+    const input = recoveryInput(new Date(current.getTime() + 60_000));
+    const key = jobKey(input.jobEscrow, 7n);
+    const chain = {
+      findJob: vi.fn(async () => ({ jobKey: key, jobId: 7n })),
+      getJob: vi.fn(async () => ({
+        vaultState: "Submitted" as const,
+        escrowState: "Rejected" as const,
+        budget: 1_000n,
+        expiredAt: Math.floor(current.getTime() / 1_000) + 60,
+      })),
+      syncJob: vi.fn(async () => ({ state: "Expired" as const, txHash: "sync-tx" })),
+    };
+    await executeJobStep(input, {
+      pool: getPool(),
+      config: loadConfig(),
+      chain: chain as never,
+      signer: { sign: vi.fn(async () => ({ signedTransaction: "0x1234" as const })) },
+      vault: input.vault,
+      now: () => current,
+      randomSalt: () => `0x${"22".repeat(32)}`,
+    });
+    const observation = await getPool().query<{
+      job_state: string;
+      delivered: number | null;
+      settled_at: Date | null;
+    }>(
+      `SELECT job_state,delivered,settled_at FROM observations
+       WHERE objective_id=(SELECT objective_id FROM plans WHERE plan_id=$1)`,
+      [PLAN_ID],
+    );
+    expect(observation.rows).toMatchObject([
+      { job_state: "Expired", delivered: 0, settled_at: expect.any(Date) },
+    ]);
+  });
+
+  it("observes a rejection mined while syncing an already funded Submitted job", async () => {
+    const current = new Date("2026-10-23T00:00:00Z");
+    const input = recoveryInput(new Date(current.getTime() + 60_000));
+    const key = jobKey(input.jobEscrow, 7n);
+    let rejected = false;
+    const chain = {
+      findJob: vi.fn(async () => ({ jobKey: key, jobId: 7n })),
+      getJob: vi.fn(async () => ({
+        vaultState: rejected ? ("Expired" as const) : ("Submitted" as const),
+        escrowState: rejected ? ("Rejected" as const) : ("Submitted" as const),
+        budget: 1_000n,
+        expiredAt: Math.floor(current.getTime() / 1_000) + 60,
+      })),
+      syncJob: vi.fn(async () => {
+        rejected = true;
+        return { state: "Expired" as const, txHash: "sync-tx" };
+      }),
+    };
+    await executeJobStep(input, {
+      pool: getPool(),
+      config: loadConfig(),
+      chain: chain as never,
+      signer: { sign: vi.fn(async () => ({ signedTransaction: "0x1234" as const })) },
+      vault: input.vault,
+      now: () => current,
+      randomSalt: () => `0x${"22".repeat(32)}`,
+    });
+    const observation = await getPool().query<{
+      job_state: string;
+      delivered: number | null;
+      settled_at: Date | null;
+    }>(
+      `SELECT job_state,delivered,settled_at FROM observations
+       WHERE objective_id=(SELECT objective_id FROM plans WHERE plan_id=$1)`,
+      [PLAN_ID],
+    );
+    expect(observation.rows).toMatchObject([
+      { job_state: "Expired", delivered: 0, settled_at: expect.any(Date) },
+    ]);
+  });
+
+  it("keeps delivery unknown when a submitted job expires naturally during sync", async () => {
+    const current = new Date("2026-10-23T00:00:00Z");
+    const input = recoveryInput(new Date(current.getTime() + 60_000));
+    const key = jobKey(input.jobEscrow, 7n);
+    let expired = false;
+    const chain = {
+      findJob: vi.fn(async () => ({ jobKey: key, jobId: 7n })),
+      getJob: vi.fn(async () => ({
+        vaultState: expired ? ("Expired" as const) : ("Funded" as const),
+        escrowState: expired ? ("Expired" as const) : ("Funded" as const),
+        budget: 1_000n,
+        expiredAt: Math.floor(current.getTime() / 1_000) + 60,
+      })),
+      waitForResult: vi.fn(async () => ({
+        vaultState: "Funded" as const,
+        escrowState: "Submitted" as const,
+        budget: 1_000n,
+        expiredAt: Math.floor(current.getTime() / 1_000) + 60,
+      })),
+      syncJob: vi.fn(async () => {
+        expired = true;
+        return { state: "Expired" as const, txHash: "sync-tx" };
+      }),
+    };
+    await executeJobStep(input, {
+      pool: getPool(),
+      config: loadConfig(),
+      chain: chain as never,
+      signer: { sign: vi.fn(async () => ({ signedTransaction: "0x1234" as const })) },
+      vault: input.vault,
+      now: () => current,
+      randomSalt: () => `0x${"22".repeat(32)}`,
+    });
+    const observation = await getPool().query<{
+      job_state: string;
+      delivered: number | null;
+      settled_at: Date | null;
+    }>(
+      `SELECT job_state,delivered,settled_at FROM observations
+       WHERE objective_id=(SELECT objective_id FROM plans WHERE plan_id=$1)`,
+      [PLAN_ID],
+    );
+    expect(observation.rows).toMatchObject([
+      { job_state: "Expired", delivered: null, settled_at: expect.any(Date) },
+    ]);
+  });
+
+  it("keeps delivery unknown when the first escrow view is already Expired", async () => {
+    const current = new Date("2026-10-23T00:00:00Z");
+    const input = recoveryInput(new Date(current.getTime() + 60_000));
+    const key = jobKey(input.jobEscrow, 7n);
+    const chain = {
+      findJob: vi.fn(async () => ({ jobKey: key, jobId: 7n })),
+      getJob: vi.fn(async () => ({
+        vaultState: "Funded" as const,
+        escrowState: "Expired" as const,
+        budget: 1_000n,
+        expiredAt: Math.floor(current.getTime() / 1_000) - 60,
+      })),
+      syncJob: vi.fn(async () => ({ state: "Expired" as const, txHash: "sync-tx" })),
+    };
+    await executeJobStep(input, {
+      pool: getPool(),
+      config: loadConfig(),
+      chain: chain as never,
+      signer: { sign: vi.fn(async () => ({ signedTransaction: "0x1234" as const })) },
+      vault: input.vault,
+      now: () => current,
+      randomSalt: () => `0x${"22".repeat(32)}`,
+    });
+    const observation = await getPool().query<{
+      job_state: string;
+      delivered: number | null;
+      settled_at: Date | null;
+    }>(
+      `SELECT job_state,delivered,settled_at FROM observations
+       WHERE objective_id=(SELECT objective_id FROM plans WHERE plan_id=$1)`,
+      [PLAN_ID],
+    );
+    expect(observation.rows).toMatchObject([
+      { job_state: "Expired", delivered: null, settled_at: expect.any(Date) },
+    ]);
+  });
 
   it("requires each alternate job provider to have its own approved leaf proof", () => {
     const primary = "0x0000000000000000000000000000000000000003";
@@ -489,6 +679,14 @@ describe("job brief commitments", () => {
     expect(chain.waitForBudget).not.toHaveBeenCalled();
     expect(chain.fundJob).not.toHaveBeenCalled();
     expect(chain.syncJob).toHaveBeenCalledOnce();
+    const observation = await getPool().query<{
+      settled_at: Date | null;
+      delivered: number | null;
+    }>(
+      "SELECT settled_at,delivered FROM observations WHERE objective_id=(SELECT objective_id FROM plans WHERE plan_id=$1)",
+      [PLAN_ID],
+    );
+    expect(observation.rows).toMatchObject([{ settled_at: null, delivered: null }]);
   });
 
   it("claims and syncs an expired funded job when no decision is pending", async () => {
@@ -665,12 +863,29 @@ describe("job brief commitments", () => {
     expect(result).toMatchObject({ state: "Funded", alternateProvider: alternate });
     expect(chain.cancelJob).toHaveBeenCalledOnce();
     expect(chain.fundJob).toHaveBeenCalledOnce();
+    const observations = await getPool().query<{
+      job_state: string;
+      released_at: Date | null;
+      settled_at: Date | null;
+    }>(
+      "SELECT job_state,released_at,settled_at FROM observations WHERE objective_id=(SELECT objective_id FROM plans WHERE plan_id=$1) ORDER BY call_index",
+      [PLAN_ID],
+    );
+    expect(observations.rows).toHaveLength(2);
+    expect(observations.rows[0]).toMatchObject({ job_state: "Released", settled_at: null });
+    expect(observations.rows[0]?.released_at).toBeInstanceOf(Date);
+    expect(observations.rows[1]).toMatchObject({ job_state: "Funded", released_at: null });
+    expect(observations.rows[1]?.settled_at).toBeInstanceOf(Date);
   });
 
   it("job_killResume_matrix_rereadsChainStateWithoutOpeningOrFundingTwice", async () => {
     const phases = ["open", "budget-wait", "fund", "submit", "sync"] as const;
     for (const failAt of phases) {
       await getPool().query("DELETE FROM step_executions");
+      await getPool().query(
+        "DELETE FROM observations WHERE objective_id=(SELECT objective_id FROM plans WHERE plan_id=$1)",
+        [PLAN_ID],
+      );
       let exists = failAt === "submit" || failAt === "sync";
       let state: "Opened" | "Funded" | "Submitted" =
         failAt === "submit" || failAt === "sync" ? "Submitted" : "Opened";
@@ -772,6 +987,10 @@ describe("job brief commitments", () => {
       };
       if (failAt !== "submit")
         await expect(executeJobStep(input, dependencies)).rejects.toThrow("executor stopped");
+      const beforeResume = await getPool().query<{ obs_id: string }>(
+        "SELECT obs_id FROM observations WHERE objective_id=(SELECT objective_id FROM plans WHERE plan_id=$1)",
+        [PLAN_ID],
+      );
       const result = await executeJobStep(input, dependencies);
       expect(result.state).toBe(failAt === "submit" || failAt === "sync" ? "Submitted" : "Funded");
       expect(chain.openJob).toHaveBeenCalledTimes(
@@ -780,6 +999,18 @@ describe("job brief commitments", () => {
       expect(chain.fundJob).toHaveBeenCalledTimes(
         failAt === "fund" ? 1 : failAt === "submit" || failAt === "sync" ? 0 : 1,
       );
+      const afterResume = await getPool().query<{
+        obs_id: string;
+        settled_at: Date | null;
+        job_state: string;
+      }>(
+        "SELECT obs_id,settled_at,job_state FROM observations WHERE objective_id=(SELECT objective_id FROM plans WHERE plan_id=$1)",
+        [PLAN_ID],
+      );
+      expect(afterResume.rows).toHaveLength(1);
+      if (beforeResume.rows[0])
+        expect(afterResume.rows[0]?.obs_id).toBe(beforeResume.rows[0].obs_id);
+      expect(afterResume.rows[0]?.settled_at).toBeInstanceOf(Date);
     }
   });
 

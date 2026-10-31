@@ -55,6 +55,7 @@ import {
   type PaymentReceiptDependencies,
 } from "#src/evidence/receipts";
 import { createReceiptInputFromTrace } from "#src/evidence/receipt-input";
+import { fillResponse } from "#src/evidence/observations";
 import { computePromptHash, type ModelClient } from "#src/models/proxy";
 import {
   executeVaultDirectStep,
@@ -1273,6 +1274,9 @@ function createPayerBoundary(
       payTo,
       paymentRefHash: paymentRefHash(paymentRef),
     };
+    const subjectIndex = input.step.callInputs?.find(
+      (call) => call.callIndex === context.index,
+    )?.subjectIndex;
     const profileId = input.step.acceptanceProfileId;
     const outputSchema = await acceptancePorts.outputSchema.forService(serviceId);
     const result = await runBoundary(
@@ -1281,6 +1285,9 @@ function createPayerBoundary(
         statusCode: response.status,
         mimeType,
         stepIndex: input.step.stepIndex,
+        callIndex: context.index,
+        obsId: obsId(dedupKey(paymentRef)),
+        ...(subjectIndex === undefined ? {} : { subjectIndex }),
         source,
         bodyRef: context.bodyRef,
         bodyCommit,
@@ -1324,6 +1331,24 @@ function createPayerBoundary(
         obsId: result.acceptance.report.obs_id,
       },
     });
+    const delivery = result.acceptance.report.checks.find(
+      (check) => check.name === "delivery",
+    )?.result;
+    const delivered = !result.screen.available
+      ? undefined
+      : result.quarantined
+        ? 0
+        : delivery === "pass"
+          ? 1
+          : delivery === "fail"
+            ? 0
+            : undefined;
+    await fillResponse(
+      options.pool,
+      result.acceptance.report.obs_id,
+      options.clock.now(),
+      delivered,
+    );
     return (
       result.result ?? quarantinedStepResult(context, source, bodyCommit, result.acceptance.report)
     );
@@ -1475,9 +1500,15 @@ function quarantinedStepResult(
   bodyCommit: string,
   report: AcceptanceReport,
 ): StepResult {
+  const subjectIndex = context.input.step.callInputs?.find(
+    (call) => call.callIndex === context.index,
+  )?.subjectIndex;
   return {
-    schemaVersion: "1.0",
+    schemaVersion: "1.1",
     stepIndex: context.input.step.stepIndex,
+    callIndex: context.index,
+    obsId: obsId(dedupKey(context.paymentRef)),
+    ...(subjectIndex === undefined ? {} : { subjectIndex }),
     status: "unknown",
     source,
     fields: [],

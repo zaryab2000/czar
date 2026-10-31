@@ -343,8 +343,10 @@ describe("payer dispatcher", () => {
 
 function validStepResult() {
   return {
-    schemaVersion: "1.0" as const,
+    schemaVersion: "1.1" as const,
     stepIndex: 0,
+    callIndex: 0,
+    obsId: `obs_${"a".repeat(32)}`,
     status: "delivered" as const,
     source: {
       origin: "https://merchant.test",
