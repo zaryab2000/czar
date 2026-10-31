@@ -15,6 +15,19 @@ interface RatingRow {
   readonly value: "good" | "bad";
 }
 
+interface AttributedRatingRow extends RatingRow {
+  readonly dedup_key: string;
+  readonly step_payee: string | null;
+}
+
+const PAYMENT_KEY =
+  /^(?:x402-exact|gateway-batched):eip155:(?:0|[1-9]\d*):0x[0-9a-f]{40}:(0x[0-9a-f]{40}):0x[0-9a-f]{64}$/;
+
+function matchesSelectedPayee(row: AttributedRatingRow): boolean {
+  const payTo = PAYMENT_KEY.exec(row.dedup_key)?.[1];
+  return payTo !== undefined && payTo === row.step_payee?.toLowerCase();
+}
+
 export interface RefreshInput {
   readonly pool: Pool;
   readonly network: string;
@@ -110,18 +123,33 @@ export async function refreshSupplierCounts(input: RefreshInput): Promise<boolea
 }
 
 async function writeCounts(client: PoolClient, input: RefreshInput): Promise<void> {
-  const result = await client.query<RatingRow>(
-    `SELECT rating_id,user_id,service_id,version_id,task_class,value
-     FROM ratings_effective WHERE network=$1 ORDER BY service_id,version_id,task_class,rating_id`,
+  const result = await client.query<AttributedRatingRow>(
+    `SELECT r.rating_id,r.user_id,r.service_id,r.version_id,r.task_class,r.value,
+       o.dedup_key,s.step->>'payee' AS step_payee
+     FROM ratings_effective r
+     JOIN rating_receipts rr ON rr.rating_id=r.rating_id
+     JOIN observations o ON o.obs_id=rr.obs_id
+     JOIN objectives obj ON obj.objective_id=r.objective_id
+     JOIN steps s ON s.plan_id=obj.plan_id AND s.step_index=r.step_index
+     WHERE r.network=$1 AND o.settled_at IS NOT NULL
+       AND o.user_id=r.user_id AND o.objective_id=r.objective_id
+       AND o.step_index=r.step_index AND o.network=r.network
+       AND o.service_id=r.service_id AND o.version_id=r.version_id
+       AND o.task_class=r.task_class AND s.step->>'serviceId'=r.service_id
+     ORDER BY r.service_id,r.version_id,r.task_class,r.rating_id`,
     [input.network],
   );
+  const included = new Set<string>();
   const groups = new Map<string, RatingRow[]>();
   for (const row of result.rows) {
+    if (!matchesSelectedPayee(row) || included.has(row.rating_id)) continue;
+    included.add(row.rating_id);
     const key = JSON.stringify([row.service_id, row.version_id, row.task_class]);
     const group = groups.get(key);
     if (group) group.push(row);
     else groups.set(key, [row]);
   }
+  await client.query("DELETE FROM supplier_counts WHERE network=$1", [input.network]);
   for (const rows of groups.values()) {
     const first = rows[0];
     if (!first) continue;

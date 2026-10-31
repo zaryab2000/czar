@@ -41,10 +41,7 @@ async function seedRatedPayment(
      VALUES($1,0,$2::jsonb,'completed')`,
     [planId, JSON.stringify({ payee, serviceId })],
   );
-  await pool.query("UPDATE objectives SET plan_id=$1 WHERE objective_id=$2", [
-    planId,
-    objectiveId,
-  ]);
+  await pool.query("UPDATE objectives SET plan_id=$1 WHERE objective_id=$2", [planId, objectiveId]);
   await pool.query(
     `INSERT INTO observations(obs_id,user_id,vault,network,rail,service_id,version_id,
        task_class,objective_id,envelope_ref,step_index,call_index,payment_ref_hash,
@@ -168,8 +165,8 @@ describe("supplier count snapshots", () => {
       lineage_root: ratingLineageRoot([corrected, ratingTwo]),
     });
     expect(
-      (await pool.query("SELECT settled_at FROM observations WHERE payment_id='payment-3'"))
-        .rows[0]?.settled_at,
+      (await pool.query("SELECT settled_at FROM observations WHERE payment_id='payment-3'")).rows[0]
+        ?.settled_at,
     ).not.toBeNull();
     await pool.query(
       `INSERT INTO executor_leases(envelope_ref,worker_id,expires_at)
