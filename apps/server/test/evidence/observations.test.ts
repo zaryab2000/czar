@@ -167,6 +167,19 @@ describe("payment observations (SCR-160 §14.1–2)", () => {
     expect(await getObservation(getPool(), second)).toMatchObject({ callIndex: 1 });
   });
 
+  it("allocates a new ordinal after a partial paid attempt resets the local index", async () => {
+    const first = await insertAtSign(getPool(), signedInput("aa".repeat(32)));
+    await markSettled(getPool(), first, AT);
+    const retry = signedInput("bb".repeat(32));
+    const second = await insertAtSign(getPool(), {
+      ...retry,
+      paymentRef: { ...retry.paymentRef, reservationId: 10, index: 0 },
+    });
+    expect(first).not.toBe(second);
+    expect(await getObservation(getPool(), first)).toMatchObject({ callIndex: 0 });
+    expect(await getObservation(getPool(), second)).toMatchObject({ callIndex: 1 });
+  });
+
   it("copies the controlled flag at insert and advances a job state", async () => {
     await getPool().query("UPDATE users SET controlled=true WHERE user_id=$1", [TEST_USER_ID]);
     const id = await insertAtSign(getPool(), openedJobInput());
