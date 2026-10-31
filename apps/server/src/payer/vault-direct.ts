@@ -1,3 +1,5 @@
+import { AmbiguousTransferError } from "#src/evidence/indexer-settlement";
+import { taskClassFor } from "#src/selection/task-class";
 import type { Config } from "@czar/config";
 import {
   derivedNonce,
@@ -1737,7 +1739,7 @@ async function authorizeAndCall(
     rail: "x402-exact",
     serviceId,
     versionId: call.versionId ?? "ver_unknown",
-    taskClass: input.step.capability,
+    taskClass: taskClassFor(input.step.capability, dependencies.config),
     envelopeRef: input.envelopeRef,
     stepIndex: input.step.stepIndex,
     paymentRef: signedRef,
@@ -2184,7 +2186,15 @@ async function waitForExactTransfer(
     BigInt(payment.validBefore) +
     BigInt(Number(dependencies.config.get("payer.reconcileGraceSeconds")));
   for (;;) {
-    const transferTx = await dependencies.findExactTransferTx?.(payment);
+    let transferTx: string | null | undefined;
+    try {
+      transferTx = await dependencies.findExactTransferTx?.(payment);
+    } catch (error) {
+      // SCR-163 §7: ambiguity fails closed (no receipt, no H1) and the step moves on; the indexer
+      // raises `indexer_transfer_ambiguous`. Any other lookup error still stops the step.
+      if (error instanceof AmbiguousTransferError) return null;
+      throw error;
+    }
     if (transferTx) return transferTx;
     if ((await dependencies.chain.latestBlockTimestamp()) > until) return null;
     await sleepReconcileInterval(dependencies);

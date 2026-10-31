@@ -1,3 +1,4 @@
+import { taskClassFor } from "#src/selection/task-class";
 import { loadConfig, type Config } from "@czar/config";
 import {
   buildTree,
@@ -807,11 +808,6 @@ function categoryFor(capability: string, config: Config): string {
         : mapping["*"]) ??
     "general"
   );
-}
-
-function taskClassFor(capability: string, config: Config): string {
-  const mapping = config.get("planner.capabilityToTaskClass") as Record<string, string>;
-  return mapping[capability] ?? capability;
 }
 
 function matchedFields(fields: readonly string[], outputs: unknown): string[] {

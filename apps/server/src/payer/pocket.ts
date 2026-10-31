@@ -1,3 +1,4 @@
+import { taskClassFor } from "#src/selection/task-class";
 import type { Config } from "@czar/config";
 import {
   PAYEE_KIND,
@@ -764,7 +765,7 @@ async function sendGatewayCall(
     rail: "gateway-batched",
     serviceId,
     versionId: "ver_unknown",
-    taskClass: step.capability,
+    taskClass: taskClassFor(step.capability, dependencies.config),
     envelopeRef: input.envelopeRef,
     stepIndex: step.stepIndex,
     paymentRef,

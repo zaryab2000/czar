@@ -1,3 +1,4 @@
+import { taskClassFor } from "#src/selection/task-class";
 import {
   descriptionHash,
   briefRequestDigest,
@@ -458,7 +459,7 @@ async function observeOpenedJob(
     rail: "erc8183-job",
     serviceId: serviceId(input.network, provider, input.jobEscrow),
     versionId: "ver_unknown",
-    taskClass: input.capability,
+    taskClass: taskClassFor(input.capability, dependencies.config),
     envelopeRef: input.envelopeRef,
     stepIndex: input.stepIndex,
     paymentRef,
