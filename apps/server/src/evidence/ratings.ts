@@ -93,9 +93,15 @@ export async function submitRating(
   }
 }
 
-/** Placeholder refresh entry point for the Flow 4A-6 debounced ranking worker. */
+let rankingRefreshHandler: (() => void) | null = null;
+
+/** Registers the process-local refresh signal; the periodic worker covers restarts. */
+export function setRankingRefreshHandler(handler: (() => void) | null): void {
+  rankingRefreshHandler = handler;
+}
+
 export function requestRankingRefresh(_accepted: RatingAccepted): void {
-  return;
+  rankingRefreshHandler?.();
 }
 
 async function submitWithinTransaction(
