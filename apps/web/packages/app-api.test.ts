@@ -116,3 +116,66 @@ describe("manual-return pagination", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("app results and ratings", () => {
+  it("collects result cards across pages", async () => {
+    const fetchMock = vi.fn(async (path: string) => {
+      const cursor = path.includes("cursor=second") ? "second" : "first";
+      return new Response(
+        JSON.stringify({
+          items: [{ objectiveId: cursor }],
+          nextCursor: cursor === "first" ? "second" : null,
+        }),
+        { status: 200 },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { appApi } = await import("#src/app-api");
+
+    await expect(appApi.listAllAppResults()).resolves.toMatchObject({
+      items: [{ objectiveId: "first" }, { objectiveId: "second" }],
+      nextCursor: null,
+    });
+    expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
+      "/v1/app/results?",
+      "/v1/app/results?cursor=second",
+    ]);
+  });
+
+  it("returns the 202 rating body and sends the session and idempotency key", async () => {
+    const accepted = {
+      ratingId: "rtg_01J00000000000000000000000",
+      objectiveId: "obj_01J00000000000000000000000",
+      stepIndex: 0,
+      value: "good",
+      receipts: 1,
+      windowClosesAt: "2026-11-01T00:00:00.000Z",
+    };
+    const storage = new Map([
+      ["czar.appSession", "test-session"],
+      ["czar.appSessionExpiresAt", "2099-01-01T00:00:00.000Z"],
+    ]);
+    vi.stubGlobal("sessionStorage", {
+      getItem: (key: string) => storage.get(key) ?? null,
+      removeItem: (key: string) => storage.delete(key),
+    });
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(accepted), { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { appApi } = await import("#src/app-api");
+
+    await expect(
+      appApi.submitAppRating({ objectiveId: accepted.objectiveId, stepIndex: 0, value: "good" }),
+    ).resolves.toEqual(accepted);
+    const [path, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    const headers = new Headers(init.headers);
+    expect(path).toBe("/v1/app/ratings");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body as string)).toEqual({
+      objectiveId: accepted.objectiveId,
+      stepIndex: 0,
+      value: "good",
+    });
+    expect(headers.get("Authorization")).toBe("Bearer test-session");
+    expect(headers.get("Idempotency-Key")).toBeTruthy();
+  });
+});
