@@ -59,6 +59,20 @@ function createOsKeychain() {
   return osKeychain((service, account) => new Entry(service, account));
 }
 
+function ratingAsk(argv: readonly string[]): ((line: string) => Promise<string>) | undefined {
+  if (argv.includes("--no-prompt") || !process.stdin.isTTY || !process.stdout.isTTY) {
+    return undefined;
+  }
+  return async (line) => {
+    const prompt = createInterface({ input: process.stdin, output: process.stdout });
+    try {
+      return await prompt.question(`${line}\n`);
+    } finally {
+      prompt.close();
+    }
+  };
+}
+
 function sidecarCommand(): string {
   const local = fileURLToPath(
     new URL("../../redact-sidecar/.venv/bin/czar-redact", import.meta.url),
@@ -120,7 +134,11 @@ async function runObjective(argv: readonly string[]): Promise<number> {
   const config: Config = commandConfig.config;
   const paths = macosPaths(homedir(), config.get("daemon.socketPath") as string);
   const keychain = createOsKeychain();
-  const preflight = objectivePreflight(argv, keychain, config.get("drives.capabilityTaxonomy"));
+  const preflight = objectivePreflight(
+    argv.filter((arg) => arg !== "--no-prompt"),
+    keychain,
+    config.get("drives.capabilityTaxonomy"),
+  );
   const db = openPairedSettings(paths, keychain);
   const sidecarSocket = join(dirname(paths.socketPath), "czar-redact.sock");
   const supervisor = new SidecarSupervisor({
@@ -131,6 +149,7 @@ async function runObjective(argv: readonly string[]): Promise<number> {
     startTimeoutMs: config.get("redaction.layer2TimeoutMs") as number,
   });
   try {
+    const ask = ratingAsk(argv);
     await runManualObjective(preflight.options, {
       database: db,
       deviceId: pairedDeviceId(db, preflight.token),
@@ -147,6 +166,7 @@ async function runObjective(argv: readonly string[]): Promise<number> {
       }),
       pollSeconds: config.get("daemon.objectivePollSeconds") as number,
       print: (line) => process.stdout.write(`${line}\n`),
+      ...(ask === undefined ? {} : { ratingAsk: ask }),
       confirmFallback: async (goal) => {
         if (!process.stdin.isTTY || !process.stdout.isTTY) return false;
         process.stdout.write(`${goal}\n`);
@@ -166,10 +186,11 @@ async function runObjective(argv: readonly string[]): Promise<number> {
 }
 
 async function runResult(argv: readonly string[]): Promise<number> {
-  const [objectiveId] = argv;
+  const args = argv.filter((arg) => arg !== "--no-prompt");
+  const [objectiveId] = args;
   if (process.platform !== "darwin") throw new Error("Results are supported on macOS only.");
-  if (argv.length !== 1 || objectiveId === undefined) {
-    throw new Error("usage: czar result <objectiveId>");
+  if (args.length !== 1 || objectiveId === undefined) {
+    throw new Error("usage: czar result <objectiveId> [--no-prompt]");
   }
   const commandConfig = await loadCommandConfig(process.env);
   const serverOrigin = readServerOrigin(commandConfig);
@@ -180,6 +201,7 @@ async function runResult(argv: readonly string[]): Promise<number> {
   if (!token) throw new Error("This computer is not paired. Run czar pair <code> first.");
   const db = openPairedSettings(paths, keychain);
   try {
+    const ask = ratingAsk(argv);
     await runResultCommand(objectiveId, {
       database: db,
       deviceToken: token,
@@ -189,6 +211,7 @@ async function runResult(argv: readonly string[]): Promise<number> {
       cwd: process.cwd(),
       pollSeconds: config.get("daemon.objectivePollSeconds") as number,
       print: (line) => process.stdout.write(`${line}\n`),
+      ...(ask === undefined ? {} : { ratingAsk: ask }),
     });
     return 0;
   } finally {

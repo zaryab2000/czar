@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -35,23 +36,36 @@ function server(steps: readonly Record<string, unknown>[]) {
       });
     }
     const request = JSON.parse(String(init.body)) as { value: string; stepIndex: number };
-    return Response.json({
-      ratingId,
-      objectiveId,
-      stepIndex: request.stepIndex,
-      value: request.value,
-      receipts: 2,
-      windowClosesAt: "2026-11-14T00:00:00.000Z",
-    }, { status: 202 });
+    return Response.json(
+      {
+        ratingId,
+        objectiveId,
+        stepIndex: request.stepIndex,
+        value: request.value,
+        receipts: 2,
+        windowClosesAt: "2026-11-14T00:00:00.000Z",
+      },
+      { status: 202 },
+    );
   };
   return { calls, fetcher };
 }
 
+const foreignPrompt = async (): Promise<Response> =>
+  Response.json({
+    objectiveId: "obj_01K7ZT9P4N5Q6R7S8T9V0W1X2Z",
+    deliveredAt: timestamp,
+    windowClosesAt: "2026-11-14T00:00:00.000Z",
+    steps: [step()],
+  });
+
 describe("CLI rating prompt", () => {
   let database: MemoryDatabase;
   beforeEach(() => {
-    database = openMemoryDatabase(join(mkdtempSync(join(tmpdir(), "czar-rating-")), "memory.db"),
-      "0f".repeat(32));
+    database = openMemoryDatabase(
+      join(mkdtempSync(join(tmpdir(), "czar-rating-")), "memory.db"),
+      "0f".repeat(32),
+    );
   });
   afterEach(() => database.close());
 
@@ -82,47 +96,80 @@ describe("CLI rating prompt", () => {
     expect(posts).toHaveLength(1);
     expect(posts[0]?.path).toBe("/v1/ratings");
     expect(JSON.parse(String(posts[0]?.init.body))).toEqual({
-      objectiveId, stepIndex: 0, value: "good",
+      objectiveId,
+      stepIndex: 0,
+      value: "good",
     });
     expect(new Headers(posts[0]?.init.headers).get("Idempotency-Key")).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
     );
-    expect(database.prepare("SELECT kind,destination,bytes,summary_counts_json FROM audit_local")
-      .all()).toEqual([{ kind: "rating", destination: "server",
-      bytes: Buffer.byteLength(String(posts[0]?.init.body)),
-      summary_counts_json: '{"ratings":1}' }]);
+    expect(
+      database.prepare("SELECT kind,destination,bytes,summary_counts_json FROM audit_local").all(),
+    ).toEqual([
+      {
+        kind: "rating",
+        destination: "server",
+        bytes: Buffer.byteLength(String(posts[0]?.init.body)),
+        summary_counts_json: '{"ratings":1}',
+      },
+    ]);
+    const auditHash = database.prepare("SELECT payload_hash FROM audit_local").get() as {
+      payload_hash: Buffer;
+    };
+    expect(auditHash.payload_hash).toEqual(
+      createHash("sha256").update(String(posts[0]?.init.body)).digest(),
+    );
   });
 
   it("posts bad only for b and leaves no audit row for other keys", async () => {
     const api = server([step(), step({ stepIndex: 1 })]);
     const lines: string[] = [];
-    await runRatingPrompt(objectiveId, deps(api.fetcher, ["x", "b"], lines));
+    await runRatingPrompt(objectiveId, deps(api.fetcher, ["G", "b"], lines));
     const posts = api.calls.filter((call) => call.init.method === "POST");
     expect(posts).toHaveLength(1);
     expect(JSON.parse(String(posts[0]?.init.body))).toEqual({
-      objectiveId, stepIndex: 1, value: "bad",
+      objectiveId,
+      stepIndex: 1,
+      value: "bad",
     });
     expect(lines.at(-1)).toBe("Thanks. Czar will rank example.com lower for tasks like this.");
   });
 
   it("offers one correction for an existing rating and sends supersedes", async () => {
-    const api = server([step({ effectiveRating: "good", ratingId, canRate: false,
-      canCorrect: true })]);
+    const api = server([
+      step({ effectiveRating: "good", ratingId, canRate: false, canCorrect: true }),
+    ]);
     const lines: string[] = [];
     await runRatingPrompt(objectiveId, deps(api.fetcher, ["c", "b"], lines));
     expect(lines[0]).toContain("Current rating for example.com: good");
     expect(lines[0]).toContain("[c] change");
     const post = api.calls.find((call) => call.init.method === "POST");
-    expect(JSON.parse(String(post?.init.body))).toEqual({ objectiveId,
-      stepIndex: 0, value: "bad", supersedes: ratingId });
+    expect(JSON.parse(String(post?.init.body))).toEqual({
+      objectiveId,
+      stepIndex: 0,
+      value: "bad",
+      supersedes: ratingId,
+    });
   });
 
   it("shows a closed correction without posting", async () => {
-    const api = server([step({ effectiveRating: "bad", ratingId, canRate: false,
-      canCorrect: false })]);
+    const api = server([
+      step({ effectiveRating: "bad", ratingId, canRate: false, canCorrect: false }),
+    ]);
     const lines: string[] = [];
     await runRatingPrompt(objectiveId, deps(api.fetcher, ["c"], lines));
     expect(lines).toEqual(["Current rating for example.com: bad."]);
     expect(api.calls).toHaveLength(1);
+  });
+
+  it("rejects a prompt for another objective before showing supplier text", async () => {
+    const lines: string[] = [];
+    await expect(runRatingPrompt(objectiveId, deps(foreignPrompt, ["g"], lines))).rejects.toThrow(
+      "Reading the rating prompt failed",
+    );
+    expect(lines).toEqual([]);
+    expect(database.prepare("SELECT count(*) AS count FROM audit_local").get()).toEqual({
+      count: 0,
+    });
   });
 });

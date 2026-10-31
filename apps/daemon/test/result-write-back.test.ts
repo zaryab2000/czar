@@ -42,6 +42,7 @@ function scriptedServer(options: {
   readonly result?: Record<string, unknown>;
   readonly acks?: readonly (number | "network")[];
   readonly onAck?: () => void;
+  readonly ratingPrompt?: Record<string, unknown>;
 }) {
   const calls: Call[] = [];
   let state = 0;
@@ -68,6 +69,23 @@ function scriptedServer(options: {
       ack += 1;
       if (outcome === "network") throw new TypeError("network down");
       return new Response(null, { status: outcome });
+    }
+    if (url.pathname.endsWith("/rating-prompt")) {
+      return Response.json(options.ratingPrompt);
+    }
+    if (url.pathname === "/v1/ratings") {
+      const body = JSON.parse(String(init.body)) as { stepIndex: number; value: string };
+      return Response.json(
+        {
+          ratingId: "rtg_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
+          objectiveId,
+          stepIndex: body.stepIndex,
+          value: body.value,
+          receipts: 1,
+          windowClosesAt: "2026-11-10T10:00:00.000Z",
+        },
+        { status: 202 },
+      );
     }
     if (url.pathname.startsWith("/v1/results/")) {
       return Response.json({ ...options.result, objectiveId: lastObjectiveId });
@@ -283,5 +301,72 @@ describe("result write-back and acknowledgement", () => {
     });
     expect(lines).toEqual([`${objectiveId}: expired`, "No result to write back."]);
     expect(server.calls.filter((call) => call.path.endsWith("/results/ack"))).toHaveLength(0);
+  });
+
+  it("asks for a rating only after result write-back and offers correction on rerun", async () => {
+    const lines: string[] = [];
+    const server = scriptedServer({
+      states: [status("delivered", { resultId })],
+      result: result("text/markdown", "Body"),
+      ratingPrompt: {
+        objectiveId,
+        deliveredAt: createdAt,
+        windowClosesAt: "2026-11-10T10:00:00.000Z",
+        steps: [
+          {
+            stepIndex: 0,
+            merchantLabel: "example.com",
+            merchantIsCzar: false,
+            receipts: 1,
+            effectiveRating: "good",
+            ratingId: "rtg_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
+            canRate: false,
+            canCorrect: true,
+          },
+        ],
+      },
+    });
+    await runResultCommand(objectiveId, {
+      database: db,
+      deviceToken: TEST_DEVICE_TOKEN,
+      pollSeconds: 5,
+      print: (line) => lines.push(line),
+      fetcher: server.fetcher,
+      ratingAsk: async (line) => {
+        lines.push(line);
+        return lines.some((item) => item.includes("[c]")) &&
+          !lines.some((item) => item.includes("[g]"))
+          ? "c"
+          : "b";
+      },
+      ...deps,
+    });
+    const writtenAt = lines.findIndex((line) => line.startsWith("Result written:"));
+    const promptAt = lines.findIndex((line) => line.includes("[c] change"));
+    expect(writtenAt).toBeGreaterThan(-1);
+    expect(promptAt).toBeGreaterThan(writtenAt);
+    expect(server.calls.map((call) => call.path).at(-1)).toBe("/v1/ratings");
+    expect(JSON.parse(server.calls.at(-1)?.body ?? "")).toEqual({
+      objectiveId,
+      stepIndex: 0,
+      value: "bad",
+      supersedes: "rtg_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
+    });
+  });
+
+  it("does not request a rating prompt for a scripted result command", async () => {
+    const server = scriptedServer({
+      states: [status("delivered", { resultId })],
+      result: result("text/markdown", "Body"),
+    });
+    await runResultCommand(objectiveId, {
+      database: db,
+      deviceToken: TEST_DEVICE_TOKEN,
+      pollSeconds: 5,
+      print: () => undefined,
+      fetcher: server.fetcher,
+      ...deps,
+    });
+    expect(server.calls.some((call) => call.path.endsWith("/rating-prompt"))).toBe(false);
   });
 });

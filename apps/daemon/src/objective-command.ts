@@ -17,6 +17,7 @@ import { redactObjectiveInput } from "#src/objective-redaction";
 import { currentSoulVersionHash } from "#src/objective-soul";
 import { buildObjectiveSubmission } from "#src/objective-submission";
 import { saveObjectiveMeta, writeBackResult } from "#src/results/write-back";
+import { runRatingPrompt, type RatingPromptDeps } from "#src/results/rating-prompt";
 
 export interface ResultCommandDeps {
   readonly database: MemoryDatabase;
@@ -29,6 +30,7 @@ export interface ResultCommandDeps {
   readonly print: (line: string) => void;
   readonly fetcher?: ObjectiveFetch;
   readonly sleep?: (milliseconds: number) => Promise<void>;
+  readonly ratingAsk?: RatingPromptDeps["ask"];
 }
 
 export interface ObjectiveCommandDeps extends ResultCommandDeps {
@@ -132,4 +134,14 @@ async function writeBackIfResult(status: ObjectiveStatus, deps: ResultCommandDep
       ...(deps.sleep === undefined ? {} : { sleep: deps.sleep }),
     },
   );
+  if (deps.ratingAsk) {
+    await runRatingPrompt(status.objectiveId, {
+      database: deps.database,
+      deviceToken: deps.deviceToken,
+      serverOrigin: deps.serverOrigin,
+      print: deps.print,
+      ask: deps.ratingAsk,
+      ...(deps.fetcher === undefined ? {} : { fetcher: deps.fetcher }),
+    });
+  }
 }
