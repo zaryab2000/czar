@@ -34,7 +34,7 @@ describe("SCR-160 registered ranking", () => {
       flaky.serviceId,
     ]);
     expect(ordered.unverified).toEqual([
-      { service_id: slow.serviceId, reason: "unrated", n_eff: 0 },
+      { service_id: slow.serviceId, version_id: versionId, reason: "unrated", n_eff: 0 },
     ]);
     const schemabreak = candidate("d", 0, 0);
     const rows: HealthRow[] = Array.from({ length: 3 }, (_, index) => ({
@@ -56,7 +56,7 @@ describe("SCR-160 registered ranking", () => {
       1.959964,
     );
     expect(withH1.unverified).toEqual([
-      { service_id: schemabreak.serviceId, reason: "unrated", n_eff: 0 },
+      { service_id: schemabreak.serviceId, version_id: versionId, reason: "unrated", n_eff: 0 },
     ]);
   });
 
@@ -70,7 +70,7 @@ describe("SCR-160 registered ranking", () => {
       expect.closeTo(0.5958, 4),
       expect.closeTo(0.5655, 4),
     ]);
-    expect(first.unverified).toEqual([{ service_id: m3.serviceId, reason: "unrated", n_eff: 0 }]);
+    expect(first.unverified).toEqual([{ service_id: m3.serviceId, version_id: versionId, reason: "unrated", n_eff: 0 }]);
 
     const corrected = orderCandidates([m1, { ...m2, ...worked.afterCorrection }, m3], 1.959964);
     expect(corrected.ranked.map((row) => row.service_id)).toEqual([m1.serviceId, m2.serviceId]);
@@ -111,7 +111,7 @@ describe("SCR-160 registered ranking", () => {
     const unrated = { ...candidate("a", 0, 0), healthFacts: ["job-failed"] };
     const ordered = orderCandidates([unrated], 1.959964);
     expect(ordered.unverified).toEqual([
-      { service_id: unrated.serviceId, reason: "unrated", n_eff: 0 },
+      { service_id: unrated.serviceId, version_id: versionId, reason: "unrated", n_eff: 0 },
     ]);
     expect(ordered.ranked).toEqual([]);
   });

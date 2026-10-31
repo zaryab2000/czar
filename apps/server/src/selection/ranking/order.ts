@@ -98,6 +98,8 @@ export function orderCandidates(
     })),
     unverified: unrated.map((candidate) => ({
       service_id: candidate.serviceId,
+      // SCR-163 §6: the immutable record of the version an unrated candidate was selected at.
+      version_id: candidate.versionId,
       reason: "unrated" as const,
       n_eff: 0,
     })),

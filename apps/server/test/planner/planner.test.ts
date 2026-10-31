@@ -96,7 +96,7 @@ function makePlanner(
         rank: async (query) => {
           options.rankingQueries?.push(query);
           return {
-            schemaVersion: "1.2",
+            schemaVersion: "1.3",
             query_id: "query-1",
             received_at: "2026-10-21T00:00:00Z",
             policy_version: "test",
@@ -121,7 +121,14 @@ function makePlanner(
               }),
             ),
             unverified: options.unrated
-              ? [{ service_id: fakeService().serviceId, reason: "unrated", n_eff: 0 }]
+              ? [
+                  {
+                    service_id: fakeService().serviceId,
+                    version_id: `ver_${"0".repeat(32)}`,
+                    reason: "unrated",
+                    n_eff: 0,
+                  },
+                ]
               : [],
             missing_dimensions_for_class: [],
             insufficient_evidence: options.unrated ?? false,

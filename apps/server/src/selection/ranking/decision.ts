@@ -34,7 +34,7 @@ export function makeRankingDecision(input: DecisionInput): RankingDecision {
   const explore =
     input.ranked.length === 0 && input.unverifiedWithApproval ? input.unverified[0] : undefined;
   return {
-    schemaVersion: "1.2",
+    schemaVersion: "1.3",
     query_id: input.queryId,
     received_at: input.receivedAt.toISOString(),
     policy_version: input.policyVersion,

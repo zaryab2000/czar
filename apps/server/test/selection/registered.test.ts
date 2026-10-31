@@ -45,7 +45,8 @@ function reconstructEligibility(
     service.capabilities.includes(capability),
   );
   const excluded: Array<{ service_id: string; gate: string; detail: string }> = [];
-  const eligible: Array<{ service_id: string; amount: bigint }> = [];
+  const eligible: Array<{ service_id: string; amount: bigint; version_id: string | undefined }> =
+    [];
   for (const service of candidates) {
     if (service.probe.state === "failed") {
       excluded.push({
@@ -78,9 +79,12 @@ function reconstructEligibility(
       });
       continue;
     }
-    const affordable = payable
-      .map((reducedOffer) => BigInt(String(reducedOffer["amount"])))
-      .filter((amount) => amount <= maxPrice);
+    const affordableOffers = payable.filter(
+      (reducedOffer) => BigInt(String(reducedOffer["amount"])) <= maxPrice,
+    );
+    const affordable = affordableOffers.map((reducedOffer) =>
+      BigInt(String(reducedOffer["amount"])),
+    );
     if (affordable.length === 0) {
       excluded.push({
         service_id: service.serviceId,
@@ -89,9 +93,15 @@ function reconstructEligibility(
       });
       continue;
     }
+    const amount = affordable.reduce((minimum, value) => (value < minimum ? value : minimum));
+    const cheapest = affordableOffers.find(
+      (reducedOffer) => BigInt(String(reducedOffer["amount"])) === amount,
+    );
     eligible.push({
       service_id: service.serviceId,
-      amount: affordable.reduce((minimum, amount) => (amount < minimum ? amount : minimum)),
+      amount,
+      // SCR-163 §6: the snapshot records each offer's probed version, so the decision reproduces.
+      version_id: cheapest?.["versionId"] === null ? undefined : String(cheapest?.["versionId"]),
     });
   }
   eligible.sort((left, right) =>
@@ -372,8 +382,11 @@ describe("registered selection", () => {
     schema = { type: "object", properties: { answer: { type: "number" } } };
     const changed = await setup(fetchImpl, services, () => at).rank.rank(query());
     expect(changed.ranked).toEqual([]);
+    const versionB = changed.unverified[0]?.version_id;
+    expect(versionB).toMatch(/^ver_[0-9a-f]{32}$/);
+    expect(versionB).not.toBe(versionA);
     expect(changed.unverified).toEqual([
-      { service_id: SERVICE_RATED, reason: "unrated", n_eff: 0 },
+      { service_id: SERVICE_RATED, version_id: versionB, reason: "unrated", n_eff: 0 },
     ]);
     expect(
       (await getPool().query("SELECT good FROM supplier_counts WHERE version_id=$1", [versionA]))
@@ -436,7 +449,7 @@ describe("registered selection", () => {
     const body = JSON.parse(saved.rows[0]!.body_jcs) as Record<string, unknown>;
 
     expect(validateSchema("ranking-decision", decision)).toBe(true);
-    expect(decision.schemaVersion).toBe("1.2");
+    expect(decision.schemaVersion).toBe("1.3");
     expect(decision.policy_version).toBe(
       rankingPolicyVersion({ confidenceZ: 1.959964, consecutiveFailures: 3 }),
     );
@@ -560,8 +573,9 @@ describe("registered selection", () => {
       detail: "no-payable-live-offer",
     });
     expect(reconstructed.excluded).toEqual(decision.excluded);
-    const reconstructedUnverified = reconstructed.eligible.map(({ service_id }) => ({
+    const reconstructedUnverified = reconstructed.eligible.map(({ service_id, version_id }) => ({
       service_id,
+      version_id,
       reason: "unrated",
       n_eff: 0,
     }));

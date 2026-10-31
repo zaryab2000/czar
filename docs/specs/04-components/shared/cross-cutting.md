@@ -132,6 +132,7 @@ Local viewer API (`local-openapi.yaml`, D90): `bundle-mismatch` (the confirmed p
 | `job-fees-changed` | `UnexpectedFees` | re-plan |
 | `approval-required` | no open envelope covers the step | after approval |
 | `frozen` / `paused` | vault frozen or guardian pause | after unfreeze |
+| `service-version-drift` | the supplier's live version differs from the selected version, or within one step (SCR-163 §5–§6) | no (re-plan) |
 | `upstream-unavailable` | RPC, Facilitator, Gateway or model down | automatic with backoff |
 | `rate-limited` | `propose_soul_context` over `soulInput.mcpProposalsPerDay` (D90) | next day |
 | `daemon-unavailable` | `propose_soul_context` cannot reach the daemon socket; nothing was sent (D90) | yes |
