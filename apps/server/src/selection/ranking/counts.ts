@@ -16,16 +16,23 @@ interface RatingRow {
 }
 
 interface AttributedRatingRow extends RatingRow {
+  readonly network: string;
+  readonly rail: string;
   readonly dedup_key: string;
   readonly step_payee: string | null;
 }
 
 const PAYMENT_KEY =
-  /^(?:x402-exact|gateway-batched):eip155:(?:0|[1-9]\d*):0x[0-9a-f]{40}:(0x[0-9a-f]{40}):0x[0-9a-f]{64}$/;
+  /^(x402-exact|gateway-batched):(eip155:(?:0|[1-9]\d*)):0x[0-9a-f]{40}:(0x[0-9a-f]{40}):0x[0-9a-f]{64}$/;
 
 function matchesSelectedPayee(row: AttributedRatingRow): boolean {
-  const payTo = PAYMENT_KEY.exec(row.dedup_key)?.[1];
-  return payTo !== undefined && payTo === row.step_payee?.toLowerCase();
+  const key = PAYMENT_KEY.exec(row.dedup_key);
+  return (
+    key !== null &&
+    key[1] === row.rail &&
+    key[2] === row.network &&
+    key[3] === row.step_payee?.toLowerCase()
+  );
 }
 
 export interface RefreshInput {
@@ -125,7 +132,7 @@ export async function refreshSupplierCounts(input: RefreshInput): Promise<boolea
 async function writeCounts(client: PoolClient, input: RefreshInput): Promise<void> {
   const result = await client.query<AttributedRatingRow>(
     `SELECT r.rating_id,r.user_id,r.service_id,r.version_id,r.task_class,r.value,
-       o.dedup_key,s.step->>'payee' AS step_payee
+       o.network,o.rail,o.dedup_key,s.step->>'payee' AS step_payee
      FROM ratings_effective r
      JOIN rating_receipts rr ON rr.rating_id=r.rating_id
      JOIN observations o ON o.obs_id=rr.obs_id

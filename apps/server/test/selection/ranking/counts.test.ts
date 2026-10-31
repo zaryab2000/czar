@@ -104,10 +104,9 @@ beforeAll(async () => {
   await seedRatedPayment(pool, objectives[2]!, ratingAlternate, 3, "x402-exact", alternate);
   await seedRatedPayment(pool, objectives[3]!, ratingJob, 4, "erc8183-job", payee);
   await seedRatedPayment(pool, objectives[4]!, ratingWrongNetwork, 5, "x402-exact", payee);
-  await pool.query(
-    "UPDATE observations SET dedup_key=$1 WHERE payment_id='payment-5'",
-    [`x402-exact:eip155:5042003:${payer}:${payee}:0x${"5".padStart(64, "0")}`],
-  );
+  await pool.query("UPDATE observations SET dedup_key=$1 WHERE payment_id='payment-5'", [
+    `x402-exact:eip155:5042003:${payer}:${payee}:0x${"5".padStart(64, "0")}`,
+  ]);
 });
 
 describe("supplier count snapshots", () => {
