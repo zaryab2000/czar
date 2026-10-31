@@ -58,6 +58,7 @@ const TREE = buildTree([payeeLeaf(PAYEE, PAYEE_KIND.X402_PAY_TO, 0, STEP_CAP)]);
  * - `settled-empty`: settles and returns a 2xx with an empty body.
  * - `silent-settle`: settles on chain, then returns a 5xx with no PAYMENT-RESPONSE.
  * - `no-response`: settles on chain, then the transport fails before any response arrives.
+ * - `response-interrupted`: settles on chain, sends headers, then the body stream resets.
  * - `blocked`: the safe-fetch boundary rejects the target before any merchant request.
  */
 type MerchantMode =
@@ -67,6 +68,7 @@ type MerchantMode =
   | "settled-empty"
   | "silent-settle"
   | "no-response"
+  | "response-interrupted"
   | "dns-failure"
   | "blocked";
 
@@ -245,6 +247,48 @@ describe("vault-direct partial steps (SCR-159 §3)", () => {
       flags: [],
     });
     expect(trace.rows[0]?.payload.bodyRef).toBeUndefined();
+  });
+
+  it("keeps an interrupted HTTP response distinct from no response across crash recovery", async () => {
+    const run = partialRun(["response-interrupted", "ok", "ok"], { crashPaidIndex: 1 });
+    await expect(executeVaultDirectStep(stepInput(), run.dependencies)).rejects.toThrow(
+      "simulated worker crash",
+    );
+    const attemptsBefore = await getPool().query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM step_executions
+       WHERE plan_id=$1 AND phase='call.attempt' AND payload->>'index'='0'`,
+      [PLAN_ID],
+    );
+
+    await expect(executeVaultDirectStep(stepInput(), run.dependencies)).resolves.toMatchObject({
+      state: "done",
+    });
+    const attemptsAfter = await getPool().query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM step_executions
+       WHERE plan_id=$1 AND phase='call.attempt' AND payload->>'index'='0'`,
+      [PLAN_ID],
+    );
+    expect(attemptsAfter.rows[0]?.count).toBe(attemptsBefore.rows[0]?.count);
+    expect(run.settledIndices()).toEqual([0, 1, 2]);
+    expect(run.receiptIndices()).toEqual([1, 2]);
+    expect(await healthFactCount()).toBe(0);
+    const observation = await getPool().query<{
+      delivered: number | null;
+      responded_at: Date | null;
+    }>("SELECT delivered,responded_at FROM observations WHERE objective_id=$1 AND call_index=0", [
+      OBJECTIVE,
+    ]);
+    expect(observation.rows[0]).toMatchObject({
+      delivered: null,
+      responded_at: expect.any(Date),
+    });
+    const phases = await getPool().query<{ phase: string }>(
+      `SELECT phase FROM step_executions WHERE plan_id=$1
+       AND phase IN ('call.response-interrupted','call.no-response')
+       AND payload->>'index'='0' ORDER BY execution_id`,
+      [PLAN_ID],
+    );
+    expect(phases.rows.map((row) => row.phase)).toEqual(["call.response-interrupted"]);
   });
 
   it("keeps DNS failure unattributed after a paid no-response call", async () => {
@@ -470,6 +514,10 @@ function partialRun(
       if (mode === "no-response") {
         used.add(index);
         throw new SafeFetchError("upstream-unavailable", "transport", "connection-reset");
+      }
+      if (mode === "response-interrupted") {
+        used.add(index);
+        throw new SafeFetchError("upstream-unavailable", "transport", "connection-reset", true);
       }
       return merchantResponse(url, mode, () => used.add(index));
     },

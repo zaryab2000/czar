@@ -330,6 +330,33 @@ describe("own interfaces and the local merchant exception", () => {
     expect(new TextDecoder().decode(response.body)).toBe("merchant");
     expect(await blockedRule(() => safeFetch("http://127.0.0.1:4998/v1/balances"))).toBe("scheme");
   });
+
+  it("reports response arrival when the body stream resets after HTTP headers", async () => {
+    const interrupted = createServer((_req, res) => {
+      res.writeHead(200, { "content-type": "text/plain" });
+      res.flushHeaders();
+      res.write("partial");
+      setImmediate(() => res.socket?.destroy());
+    });
+    await new Promise<void>((resolve) => interrupted.listen(0, "127.0.0.1", resolve));
+    const interruptedOrigin = `http://127.0.0.1:${(interrupted.address() as AddressInfo).port}`;
+    const safeFetch = createSafeFetch({
+      localMerchantOrigins: [interruptedOrigin],
+      interfaceAddresses: () => [],
+      version: "0.0.0",
+      maxRedirects: 0,
+      maxBytes: 1024,
+      timeoutMs: 2000,
+    });
+    try {
+      await expect(safeFetch(`${interruptedOrigin}/paid`)).rejects.toMatchObject({
+        code: "upstream-unavailable",
+        responseArrived: true,
+      });
+    } finally {
+      await new Promise<void>((resolve) => interrupted.close(() => resolve()));
+    }
+  });
 });
 
 describe("isBlockedAddress", () => {
