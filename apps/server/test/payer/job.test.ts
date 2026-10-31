@@ -517,6 +517,14 @@ describe("job brief commitments", () => {
     expect(chain.waitForBudget).not.toHaveBeenCalled();
     expect(chain.fundJob).not.toHaveBeenCalled();
     expect(chain.syncJob).toHaveBeenCalledOnce();
+    const observation = await getPool().query<{
+      settled_at: Date | null;
+      delivered: number | null;
+    }>(
+      "SELECT settled_at,delivered FROM observations WHERE objective_id=(SELECT objective_id FROM plans WHERE plan_id=$1)",
+      [PLAN_ID],
+    );
+    expect(observation.rows).toMatchObject([{ settled_at: null, delivered: null }]);
   });
 
   it("claims and syncs an expired funded job when no decision is pending", async () => {

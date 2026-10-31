@@ -14,7 +14,12 @@ import { makeObjectiveSubmission, seedDevice, TEST_USER_ID } from "#test/fixture
 import { loadConfig } from "@czar/config";
 import { buildTree, pocketLeaf } from "@czar/hashing";
 import { KEY_IDS } from "@czar/signer";
-import { buildPaymentRequired, decodeBase64Json, encodePaymentRequired } from "@czar/x402";
+import {
+  buildPaymentRequired,
+  decodeBase64Json,
+  encodePaymentRequired,
+  SafeFetchError,
+} from "@czar/x402";
 
 const getPool = setupDatabase();
 /** A test-only K3 key generated per run; nothing is committed. */
@@ -35,6 +40,59 @@ function signTestTransaction(nonce: number): Promise<`0x${string}`> {
 }
 const PLAN_ID = "pln_01K7ZT9P4N5Q6R7S8T9V0W1X2Y";
 const POCKET = "0x0000000000000000000000000000000000000001";
+
+function gatewayRetryFixture() {
+  const payTo = "0x0000000000000000000000000000000000000003";
+  const challenge = encodePaymentRequired({
+    ...buildPaymentRequired({
+      url: "http://127.0.0.1:4021/data",
+      description: "Gateway fixture",
+      serviceName: "fixture",
+      tags: [],
+      network: "eip155:5042002",
+      amount: "1000",
+      payTo,
+      maxTimeoutSeconds: 30,
+    }),
+    accepts: [
+      {
+        scheme: "exact",
+        network: "eip155:5042002",
+        amount: "1000",
+        asset: "0x3600000000000000000000000000000000000000",
+        payTo,
+        maxTimeoutSeconds: 30,
+        extra: { name: "GatewayWalletBatched" },
+      },
+    ],
+  });
+  return {
+    challenge,
+    input: {
+      planId: PLAN_ID,
+      envelopeRef: "eip155:5042002:0x0000000000000000000000000000000000000002:1",
+      plan: { network: "eip155:5042002" },
+      pocket: POCKET as `0x${string}`,
+      steps: [
+        {
+          stepIndex: 0,
+          stepId: "stp_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
+          kind: "gateway-nano" as const,
+          capability: "lookup",
+          serviceId: "svc_0123456789abcdef0123456789abcdef",
+          payee: payTo,
+          unitAmount: "1000",
+          expectedCalls: 1,
+          stepCap: "1000",
+          routingReason: "below-pocket-threshold",
+          acceptanceProfileId: "prof_00000000000000000000000000000000",
+          resource: { url: "http://127.0.0.1:4021/data", method: "GET" as const },
+          callInputs: [{ callIndex: 0, input: { n: 0 } }],
+        },
+      ],
+    },
+  };
+}
 
 beforeAll(async () => {
   await seedDevice(getPool());
@@ -771,53 +829,7 @@ describe("pocket funding", () => {
   });
 
   it("keeps one signed observation across no-response resume and silent Gateway settlement", async () => {
-    const payTo = "0x0000000000000000000000000000000000000003";
-    const challenge = encodePaymentRequired({
-      ...buildPaymentRequired({
-        url: "http://127.0.0.1:4021/data",
-        description: "Gateway fixture",
-        serviceName: "fixture",
-        tags: [],
-        network: "eip155:5042002",
-        amount: "1000",
-        payTo,
-        maxTimeoutSeconds: 30,
-      }),
-      accepts: [
-        {
-          scheme: "exact",
-          network: "eip155:5042002",
-          amount: "1000",
-          asset: "0x3600000000000000000000000000000000000000",
-          payTo,
-          maxTimeoutSeconds: 30,
-          extra: { name: "GatewayWalletBatched" },
-        },
-      ],
-    });
-    const input = {
-      planId: PLAN_ID,
-      envelopeRef: "eip155:5042002:0x0000000000000000000000000000000000000002:1",
-      plan: { network: "eip155:5042002" },
-      pocket: POCKET as `0x${string}`,
-      steps: [
-        {
-          stepIndex: 0,
-          stepId: "stp_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
-          kind: "gateway-nano" as const,
-          capability: "lookup",
-          serviceId: "svc_0123456789abcdef0123456789abcdef",
-          payee: payTo,
-          unitAmount: "1000",
-          expectedCalls: 1,
-          stepCap: "1000",
-          routingReason: "below-pocket-threshold",
-          acceptanceProfileId: "prof_00000000000000000000000000000000",
-          resource: { url: "http://127.0.0.1:4021/data", method: "GET" as const },
-          callInputs: [{ callIndex: 0, input: { n: 0 } }],
-        },
-      ],
-    };
+    const { challenge, input } = gatewayRetryFixture();
     let requests = 0;
     const signer = {
       sign: vi.fn(async () => ({
@@ -838,7 +850,7 @@ describe("pocket funding", () => {
             headers: { "payment-required": challenge },
             body: new Uint8Array(),
           };
-        throw new Error("simulated no response");
+        throw new SafeFetchError("upstream-unavailable", "transport");
       }),
       now: () => new Date("2026-10-22T00:00:00Z"),
       gatewayStatus: vi.fn(async (): Promise<"completed"> => "completed"),
@@ -870,5 +882,93 @@ describe("pocket funding", () => {
     expect(final.rows[0]?.settled_at).toBeInstanceOf(Date);
     await payGatewaySteps(input, dependencies);
     expect(signer.sign).toHaveBeenCalledOnce();
+  });
+
+  it("propagates a blocked fetch and reconciles the saved nonce on restart", async () => {
+    const { challenge, input } = gatewayRetryFixture();
+    let signedRequests = 0;
+    const dependencies = {
+      pool: getPool(),
+      config: loadConfig(),
+      signer: {
+        sign: vi.fn(async () => ({
+          signature: `0x${"ab".repeat(65)}` as const,
+          digest: `0x${"cd".repeat(32)}` as const,
+        })),
+      },
+      safeFetch: vi.fn(async (_url: string, options?: { headers?: Record<string, string> }) => {
+        if (options?.headers?.["payment-signature"]) {
+          signedRequests += 1;
+          throw new SafeFetchError("fetch-blocked", "url");
+        }
+        return {
+          status: 402,
+          url: "http://127.0.0.1:4021/data",
+          headers: { "payment-required": challenge },
+          body: new Uint8Array(),
+        };
+      }),
+      now: () => new Date("2026-10-22T00:00:00Z"),
+      gatewayStatus: vi.fn(async (): Promise<"completed"> => "completed"),
+    };
+
+    await expect(payGatewaySteps(input, dependencies)).rejects.toThrow("fetch-blocked: url");
+    await payGatewaySteps(input, dependencies);
+    expect(signedRequests).toBe(1);
+    expect(dependencies.signer.sign).toHaveBeenCalledOnce();
+    const row = await getPool().query<{ settled_at: Date | null }>(
+      "SELECT settled_at FROM observations WHERE envelope_ref=$1",
+      [input.envelopeRef],
+    );
+    expect(row.rows[0]?.settled_at).toBeInstanceOf(Date);
+  });
+
+  it("propagates an observation write failure without resending the signed payment", async () => {
+    const { challenge, input } = gatewayRetryFixture();
+    let signedRequests = 0;
+    const dependencies = {
+      pool: getPool(),
+      config: loadConfig(),
+      signer: {
+        sign: vi.fn(async () => ({
+          signature: `0x${"ab".repeat(65)}` as const,
+          digest: `0x${"cd".repeat(32)}` as const,
+        })),
+      },
+      safeFetch: vi.fn(async (_url: string, options?: { headers?: Record<string, string> }) => {
+        if (options?.headers?.["payment-signature"]) {
+          signedRequests += 1;
+          return {
+            status: 200,
+            url: "http://127.0.0.1:4021/data",
+            headers: {},
+            body: new Uint8Array(),
+          };
+        }
+        return {
+          status: 402,
+          url: "http://127.0.0.1:4021/data",
+          headers: { "payment-required": challenge },
+          body: new Uint8Array(),
+        };
+      }),
+      now: () => new Date("2026-10-22T00:00:00Z"),
+      gatewayStatus: vi.fn(async (): Promise<"completed"> => "completed"),
+    };
+    await getPool().query(`CREATE FUNCTION fail_observation_response() RETURNS trigger AS $$
+      BEGIN RAISE EXCEPTION 'observation write failed'; END; $$ LANGUAGE plpgsql`);
+    await getPool().query(`CREATE TRIGGER fail_observation_response BEFORE UPDATE ON observations
+      FOR EACH ROW EXECUTE FUNCTION fail_observation_response()`);
+    try {
+      await expect(payGatewaySteps(input, dependencies)).rejects.toThrow(
+        "observation write failed",
+      );
+    } finally {
+      await getPool().query("DROP TRIGGER fail_observation_response ON observations");
+      await getPool().query("DROP FUNCTION fail_observation_response()");
+    }
+    expect(signedRequests).toBe(1);
+    await payGatewaySteps(input, dependencies);
+    expect(signedRequests).toBe(1);
   });
 });
