@@ -41,6 +41,105 @@ interface SettlementPage {
   readonly nextCursor: string | null;
 }
 
+/** Fetches one exact indexed transfer transaction for a signed x402 authorization. */
+export function createIndexerExactTransferLookup(
+  indexerUrl: string,
+  timeoutMs: number,
+  fetcher: typeof fetch = fetch,
+): (payment: Extract<PaymentRef, { rail: "x402-exact" }>) => Promise<string | null> {
+  const baseUrl = new URL(indexerUrl);
+  if (baseUrl.protocol !== "http:" && baseUrl.protocol !== "https:")
+    throw new TypeError("Indexer URL must use HTTP or HTTPS.");
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1)
+    throw new RangeError("Indexer timeout must be a positive integer.");
+  return async (payment) => {
+    const url = new URL("/settlements/x402-transfer", baseUrl);
+    url.searchParams.set("network", payment.network);
+    url.searchParams.set("vault", payment.payer);
+    url.searchParams.set("nonce", payment.nonce);
+    url.searchParams.set("payTo", payment.payTo);
+    url.searchParams.set("amount", payment.amount);
+    url.searchParams.set("asset", payment.asset);
+    let response: Response;
+    try {
+      response = await fetcher(url, {
+        method: "GET",
+        redirect: "error",
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    } catch {
+      return null;
+    }
+    if (response.status === 404) return null;
+    if (response.status === 409) throw new Error("Indexer exact transfer lookup is ambiguous.");
+    if (response.status >= 500) return null;
+    if (!response.ok)
+      throw new Error(`Indexer exact transfer lookup returned HTTP ${response.status}.`);
+    const value: unknown = await response.json();
+    if (!isRecord(value) || !hash32(value["transferTx"]))
+      throw new TypeError(
+        "Indexer exact transfer lookup returned an invalid transfer transaction.",
+      );
+    if (!validExactTransferProof(value, payment))
+      throw new TypeError("Indexer exact transfer lookup returned an invalid transfer proof.");
+    return value["transferTx"];
+  };
+}
+
+function hash32(value: unknown): value is string {
+  return typeof value === "string" && /^0x[\da-fA-F]{64}$/.test(value);
+}
+
+function canonicalUint(value: unknown): value is string {
+  return typeof value === "string" && /^(0|[1-9][0-9]*)$/.test(value);
+}
+
+function logProof(value: unknown, asset: string): value is Record<string, unknown> {
+  return (
+    isRecord(value) &&
+    Number.isSafeInteger(value["logIndex"]) &&
+    Number(value["logIndex"]) >= 0 &&
+    typeof value["emitter"] === "string" &&
+    value["emitter"].toLowerCase() === asset.toLowerCase()
+  );
+}
+
+function validBlockProof(value: Record<string, unknown>): boolean {
+  return (
+    canonicalUint(value["blockNumber"]) &&
+    hash32(value["blockHash"]) &&
+    canonicalUint(value["indexedHead"]) &&
+    BigInt(value["indexedHead"]) >= BigInt(value["blockNumber"])
+  );
+}
+
+function validTransferLog(
+  value: unknown,
+  payment: Extract<PaymentRef, { rail: "x402-exact" }>,
+): boolean {
+  return (
+    logProof(value, payment.asset) &&
+    typeof value["from"] === "string" &&
+    value["from"].toLowerCase() === payment.payer.toLowerCase() &&
+    typeof value["to"] === "string" &&
+    value["to"].toLowerCase() === payment.payTo.toLowerCase() &&
+    value["value"] === payment.amount
+  );
+}
+
+function validExactTransferProof(
+  value: Record<string, unknown>,
+  payment: Extract<PaymentRef, { rail: "x402-exact" }>,
+): boolean {
+  const authorization = value["authorizationUsed"];
+  const transfer = value["transfer"];
+  return (
+    validBlockProof(value) &&
+    logProof(authorization, payment.asset) &&
+    validTransferLog(transfer, payment)
+  );
+}
+
 export function createIndexerSettlement(
   indexerUrl: string,
   pageLimit: number,

@@ -45,7 +45,7 @@ type Context = Parameters<Parameters<typeof ponder.on>[1]>[0]["context"];
 type Event = {
   args: unknown;
   log: { address: Address; logIndex: number };
-  block: { number: bigint };
+  block: { number: bigint; hash: `0x${string}` };
   transaction: { hash: `0x${string}` };
 };
 type TransferArgs = { from: Address; to: Address; value: bigint };
@@ -127,6 +127,7 @@ async function save(context: Context, event: Event, name: string, payload: unkno
       emitter: event.log.address.toLowerCase(),
       name,
       block: event.block.number,
+      blockHash: event.block.hash.toLowerCase(),
       payload: jsonValue(payload),
     })
     .onConflictDoNothing();

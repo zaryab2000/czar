@@ -1218,8 +1218,6 @@ async function settleAndFinalize(
       const noResponse = signedTrace.findLast(
         (phase) => phase.phase === "call.no-response" && phase.payload["index"] === call.index,
       );
-      if (noResponse?.payload["sellerFailureEvidenced"] === true)
-        await fillResponse(dependencies.pool, id, undefined, 0);
       const settleTx = signedTrace.findLast(
         (phase) =>
           phase.phase === "settle.mined" &&
@@ -1295,9 +1293,15 @@ async function settleAndFinalize(
         phase: "call.result",
         payload: { ...stepResult },
       });
-    const transferTx = await dependencies.findExactTransferTx?.(paymentRef);
+    const transferTx = await waitForExactTransfer(dependencies, paymentRef);
     if (!transferTx) {
-      receiptPending = true;
+      await appendExecutionPhase(dependencies.pool, {
+        planId: input.planId,
+        stepIndex: input.step.stepIndex,
+        attempt,
+        phase: "settlement-unproven",
+        payload: { index },
+      });
       continue;
     }
     const receiptStored = await dependencies.recordReceipt({
@@ -1313,6 +1317,12 @@ async function settleAndFinalize(
       verifiedTransferTx: transferTx,
     });
     if (!receiptStored) receiptPending = true;
+    else if (
+      signedTrace.findLast(
+        (row) => row.phase === "call.no-response" && row.payload["index"] === index,
+      )?.payload["sellerFailureEvidenced"] === true
+    )
+      await fillResponse(dependencies.pool, observationId, undefined, 0);
   }
   // Review M2: an index left unsettled by a reverted settle is booked by finalize; record its receipt now.
   for (const [index, context] of contexts) {
@@ -1971,6 +1981,21 @@ async function waitForAuthorization(
     await sleepReconcileInterval(dependencies);
   }
   return false;
+}
+
+async function waitForExactTransfer(
+  dependencies: VaultDirectDependencies,
+  payment: Extract<PaymentRef, { rail: "x402-exact" }>,
+): Promise<string | null> {
+  const until =
+    BigInt(payment.validBefore) +
+    BigInt(Number(dependencies.config.get("payer.reconcileGraceSeconds")));
+  for (;;) {
+    const transferTx = await dependencies.findExactTransferTx?.(payment);
+    if (transferTx) return transferTx;
+    if ((await dependencies.chain.latestBlockTimestamp()) > until) return null;
+    await sleepReconcileInterval(dependencies);
+  }
 }
 
 function sleepReconcileInterval(dependencies: VaultDirectDependencies): Promise<void> {

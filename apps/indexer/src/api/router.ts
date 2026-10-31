@@ -2,6 +2,7 @@
 // `dependencyState` is served by T-033 with `halt_flags` (SCR-119).
 import { Buffer } from "node:buffer";
 import { loadConfig, type Config } from "@czar/config";
+import { createLogger, type Logger } from "@czar/logging";
 import {
   validateEnvelope,
   validateJobRecord,
@@ -12,6 +13,8 @@ import {
 import { Hono } from "hono";
 import type { Context } from "hono";
 import type { IdCursor, Keyed, QueryStore, ReceiptCursor } from "#src/api/store";
+import { ARC_TESTNET_CHAIN_ID } from "#src/chain";
+import { EXTERNAL_ADDRESSES } from "#src/external-events";
 
 type Validate = (value: unknown) => boolean;
 
@@ -35,6 +38,7 @@ export function createIndexerApi(
   store: QueryStore,
   config: Config = loadConfig(),
   currentBlock: () => Promise<bigint> = () => store.latestIndexedBlock(),
+  logger: Pick<Logger, "error"> = createLogger({ service: "indexer", component: "CZ-19" }),
 ): Hono {
   const app = new Hono();
   const clock = { now: () => Date.now() };
@@ -207,6 +211,41 @@ export function createIndexerApi(
     return context.json({ items, nextCursor });
   });
 
+  app.get("/settlements/x402-transfer", async (context) => {
+    const network = context.req.query("network");
+    const vault = context.req.query("vault")?.toLowerCase();
+    const nonce = context.req.query("nonce")?.toLowerCase();
+    const payTo = context.req.query("payTo")?.toLowerCase();
+    const asset = context.req.query("asset")?.toLowerCase();
+    const amount = context.req.query("amount");
+    if (
+      network !== `eip155:${ARC_TESTNET_CHAIN_ID}` ||
+      !isAddress(vault) ||
+      !isHash32(nonce) ||
+      !isAddress(payTo) ||
+      !isCanonicalUsdc(asset) ||
+      !isAmount6(amount)
+    )
+      return problem(context, 400, "validation");
+    const result = await store.exactX402Transfer({ vault, nonce, payTo, amount, asset });
+    if (result.state === "not-found") return problem(context, 404, "not-found");
+    if (result.state === "ambiguous") {
+      logger.error("indexer_transfer_ambiguous", { vault, hash: nonce });
+      return problem(context, 409, "ambiguous");
+    }
+    const indexedHead = await store.indexedHead(network);
+    if (indexedHead === null || indexedHead < BigInt(result.blockNumber))
+      return problem(context, 503, "indexer-not-ready");
+    return context.json({
+      transferTx: result.transferTx,
+      blockNumber: result.blockNumber,
+      blockHash: result.blockHash,
+      authorizationUsed: result.authorizationUsed,
+      transfer: result.transfer,
+      indexedHead: indexedHead.toString(),
+    });
+  });
+
   app.get("/anchors/latest", async (context) => {
     const publisher = context.req.query("publisher")?.toLowerCase();
     const kind = uintQuery(context.req.query("kind"));
@@ -316,7 +355,23 @@ function uintQuery(value: string | undefined): bigint | null {
   return value !== undefined && UINT.test(value) && value.length <= 20 ? BigInt(value) : null;
 }
 
-function problem(context: Context, status: 400 | 404, czarCode: string): Response {
+function isAddress(value: string | undefined): value is string {
+  return value !== undefined && ADDRESS.test(value);
+}
+
+function isHash32(value: string | undefined): value is string {
+  return value !== undefined && HASH32.test(value);
+}
+
+function isCanonicalUsdc(value: string | undefined): value is string {
+  return isAddress(value) && value === EXTERNAL_ADDRESSES.usdc;
+}
+
+function isAmount6(value: string | undefined): value is string {
+  return value !== undefined && UINT.test(value) && value.length <= 78;
+}
+
+function problem(context: Context, status: 400 | 404 | 409 | 503, czarCode: string): Response {
   return context.json({ czarCode }, status);
 }
 

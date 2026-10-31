@@ -188,7 +188,13 @@ export const externalEvents = onchainTable("external_events", (t) => ({
   emitter: t.text().notNull(),
   name: t.text().notNull(),
   block: t.bigint().notNull(),
+  blockHash: t.text().notNull(),
   payload: t.jsonb().notNull(),
+}));
+
+export const indexerProgress = onchainTable("indexer_progress", (t) => ({
+  network: t.text().primaryKey(),
+  indexedHead: t.bigint().notNull(),
 }));
 
 export const anchors = onchainTable(

@@ -4,6 +4,7 @@ import {
   envelopes,
   authorizations,
   indexedEvents,
+  indexerProgress,
   jobs,
   manualReturns,
   pockets,
@@ -32,6 +33,7 @@ import {
 } from "@czar/indexer/mirrors";
 import { createLagMonitor, isLiveBucket, lagAlert, reserveRateAlert } from "#src/alerts/rules";
 import { createAlertReporter } from "#src/alerts/reporter";
+import { ARC_TESTNET_CHAIN_ID } from "#src/chain";
 
 type Context = Parameters<Parameters<typeof ponder.on>[1]>[0]["context"];
 type Meta = {
@@ -434,6 +436,10 @@ ponder.on("CzarVault:Reserved", async ({ event, context }) => {
 });
 
 ponder.on("IndexerLag:block", async ({ event, context }) => {
+  await context.db
+    .insert(indexerProgress)
+    .values({ network: `eip155:${ARC_TESTNET_CHAIN_ID}`, indexedHead: event.block.number })
+    .onConflictDoUpdate(() => ({ indexedHead: event.block.number }));
   if (!lagMonitor.shouldCheck(Date.now())) return;
   const head = BigInt(await context.client.request({ method: "eth_blockNumber" }));
   const indexed = event.block.number;

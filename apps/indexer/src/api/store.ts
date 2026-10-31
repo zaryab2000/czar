@@ -27,6 +27,8 @@ import {
   pockets,
   pocketBalances,
   indexedEvents,
+  indexerProgress,
+  externalEvents,
   pullbacks,
   reservations,
   vaults,
@@ -85,6 +87,32 @@ export interface ReceiptFact {
   readonly settlementTx: string | null;
   readonly createdAt: string;
 }
+
+export interface ExactX402TransferQuery {
+  readonly vault: string;
+  readonly nonce: string;
+  readonly payTo: string;
+  readonly amount: string;
+  readonly asset: string;
+}
+
+export type ExactX402TransferResult =
+  | {
+      readonly state: "found";
+      readonly transferTx: string;
+      readonly blockNumber: string;
+      readonly blockHash: string;
+      readonly authorizationUsed: { readonly logIndex: number; readonly emitter: string };
+      readonly transfer: {
+        readonly logIndex: number;
+        readonly emitter: string;
+        readonly from: string;
+        readonly to: string;
+        readonly value: string;
+      };
+    }
+  | { readonly state: "not-found" }
+  | { readonly state: "ambiguous" };
 
 export interface AnchorHead {
   readonly root: string;
@@ -148,11 +176,13 @@ export interface QueryStore {
     cursor: ReceiptCursor | null,
     limit: number,
   ): Promise<ReceiptFact[]>;
+  exactX402Transfer(input: ExactX402TransferQuery): Promise<ExactX402TransferResult>;
   latestAnchor(publisher: string, kind: number): Promise<AnchorHead | null>;
   anchorByBatch(root: string): Promise<Row | null>;
   dependencyState(): Promise<HaltFlag[]>;
   pocketBalance(pocket: string): Promise<Record<string, unknown> | null>;
   latestIndexedBlock(): Promise<bigint>;
+  indexedHead(network: string): Promise<bigint | null>;
   fundedPocketsForVault(vault: string): Promise<Record<string, unknown>[]>;
   closedPocketsWithBalance(): Promise<Record<string, unknown>[]>;
   manualReturnsForVault(vault: string): Promise<
@@ -376,6 +406,78 @@ export function createQueryStore(db: QueryDb): QueryStore {
       return [...x402, ...gateway, ...job].toSorted(compareReceipts).slice(0, limit);
     },
 
+    async exactX402Transfer(input) {
+      const authorization = await db
+        .select({
+          id: externalEvents.id,
+          emitter: externalEvents.emitter,
+          block: externalEvents.block,
+          blockHash: externalEvents.blockHash,
+        })
+        .from(externalEvents)
+        .where(
+          and(
+            eq(externalEvents.emitter, input.asset),
+            eq(externalEvents.name, "AuthorizationUsed"),
+            sql`${externalEvents.payload}->>'authorizer' = ${input.vault}`,
+            sql`${externalEvents.payload}->>'nonce' = ${input.nonce}`,
+          ),
+        )
+        .limit(2);
+      if (authorization.length === 0) return { state: "not-found" };
+      if (authorization.length > 1) return { state: "ambiguous" };
+      const txHash = String(authorization[0]!.id).split(":")[0];
+      if (!txHash || !/^0x[0-9a-f]{64}$/i.test(txHash)) return { state: "ambiguous" };
+      const transfers = await db
+        .select({
+          id: externalEvents.id,
+          emitter: externalEvents.emitter,
+          block: externalEvents.block,
+          blockHash: externalEvents.blockHash,
+          payload: externalEvents.payload,
+        })
+        .from(externalEvents)
+        .where(
+          and(
+            eq(externalEvents.emitter, input.asset),
+            eq(externalEvents.name, "Transfer"),
+            sql`${externalEvents.id} LIKE ${`${txHash}:%`}`,
+            sql`${externalEvents.payload}->>'from' = ${input.vault}`,
+            sql`${externalEvents.payload}->>'to' = ${input.payTo}`,
+            sql`${externalEvents.payload}->>'amount' = ${input.amount}`,
+          ),
+        )
+        .limit(2);
+      if (transfers.length === 0) return { state: "not-found" };
+      if (transfers.length > 1) return { state: "ambiguous" };
+      const used = authorization[0]!;
+      const transfer = transfers[0]!;
+      const authLogIndex = eventLogIndex(used.id);
+      const transferLogIndex = eventLogIndex(transfer.id);
+      if (
+        authLogIndex === null ||
+        transferLogIndex === null ||
+        !sameEventBlock(used, transfer) ||
+        !matchingTransferPayload(transfer.payload, input)
+      )
+        return { state: "ambiguous" };
+      const payload = transfer.payload as { from: string; to: string; amount: string };
+      return {
+        state: "found",
+        transferTx: txHash.toLowerCase(),
+        blockNumber: used.block.toString(),
+        blockHash: used.blockHash,
+        authorizationUsed: { logIndex: authLogIndex, emitter: used.emitter },
+        transfer: {
+          logIndex: transferLogIndex,
+          emitter: transfer.emitter,
+          from: payload["from"],
+          to: payload["to"],
+          value: payload["amount"],
+        },
+      };
+    },
+
     async latestAnchor(publisher, kind) {
       const [row] = await db
         .select()
@@ -431,6 +533,15 @@ export function createQueryStore(db: QueryDb): QueryStore {
         .select({ block: sql`max(${indexedEvents.block})` })
         .from(indexedEvents);
       return BigInt(String(row?.block ?? 0));
+    },
+
+    async indexedHead(network) {
+      const [row] = await db
+        .select({ indexedHead: indexerProgress.indexedHead })
+        .from(indexerProgress)
+        .where(eq(indexerProgress.network, network))
+        .limit(1);
+      return row?.indexedHead ?? null;
     },
 
     async fundedPocketsForVault(vault) {
@@ -505,6 +616,34 @@ export function createQueryStore(db: QueryDb): QueryStore {
       );
     },
   };
+}
+
+function eventLogIndex(id: string): number | null {
+  const suffix = id.split(":")[1];
+  if (!suffix || !/^(0|[1-9][0-9]*)$/.test(suffix)) return null;
+  const value = Number(suffix);
+  return Number.isSafeInteger(value) ? value : null;
+}
+
+function sameEventBlock(
+  first: { readonly block: bigint; readonly blockHash: string },
+  second: { readonly block: bigint; readonly blockHash: string },
+): boolean {
+  return (
+    first.block === second.block &&
+    first.blockHash === second.blockHash &&
+    /^0x[0-9a-f]{64}$/i.test(first.blockHash)
+  );
+}
+
+function matchingTransferPayload(value: unknown, input: ExactX402TransferQuery): boolean {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const payload = value as Record<string, unknown>;
+  return (
+    payload["from"] === input.vault &&
+    payload["to"] === input.payTo &&
+    payload["amount"] === input.amount
+  );
 }
 
 function pullbackFact(row: {

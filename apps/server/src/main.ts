@@ -116,6 +116,7 @@ import {
   createIndexerGatewayStatus,
   createIndexerSettlement,
   verifyX402Transfer,
+  createIndexerExactTransferLookup,
 } from "#src/evidence/indexer-settlement";
 
 export interface ServerMainOptions extends PairDependencies {
@@ -422,6 +423,10 @@ function createPayerDependencies(
     objects,
     boundary,
     noResponseBoundary,
+    findExactTransferTx: createIndexerExactTransferLookup(
+      options.appReadOptions.indexerUrl,
+      Number(options.config.get("fetch.timeoutMs")),
+    ),
     recordReceipt,
   };
 }
