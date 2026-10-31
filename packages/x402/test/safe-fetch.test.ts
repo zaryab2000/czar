@@ -216,6 +216,29 @@ describe("limits", () => {
     });
   });
 
+  it("distinguishes a timeout after connection from one before connection", async () => {
+    const connected = fetcherWith({ "api.example.com": [PUBLIC] }, (target) => {
+      target.onConnected?.();
+      return new Promise(() => undefined);
+    }, { timeoutMs: 10 });
+    await expect(connected.safeFetch("https://api.example.com/x")).rejects.toMatchObject({
+      outcome: "connected-timeout",
+    });
+    const before = fetcherWith({ "api.example.com": [PUBLIC] }, slow, { timeoutMs: 10 });
+    await expect(before.safeFetch("https://api.example.com/x")).rejects.toMatchObject({
+      outcome: "timeout-before-connect",
+    });
+  });
+
+  it("classifies a local abort without blaming the seller", async () => {
+    const { safeFetch } = fetcherWith({ "api.example.com": [PUBLIC] }, async () => {
+      throw Object.assign(new Error("local"), { code: "ABORT_ERR" });
+    });
+    await expect(safeFetch("https://api.example.com/x")).rejects.toMatchObject({
+      outcome: "local-abort",
+    });
+  });
+
   it("refuses a body over the caller's byte cap", async () => {
     const { transport } = scripted({
       "api.example.com/big": { status: 200, body: "x".repeat(2048) },

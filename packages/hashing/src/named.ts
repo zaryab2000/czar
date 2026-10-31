@@ -6,6 +6,10 @@ import type { PaymentRef, TaskSpec } from "@czar/schemas";
 import { keccak256 } from "viem";
 
 export const HASH_RULE = "czar-hash-v1";
+/** Explicit commitment for a settled call that produced no HTTP response (SCR-162 §6). */
+export const NO_RESPONSE_COMMIT: Hash32 = keccak256(
+  new TextEncoder().encode("czar:no-response:v1"),
+);
 
 export interface SlRequestInput {
   readonly method: string;

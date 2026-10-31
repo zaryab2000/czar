@@ -20,16 +20,29 @@ export type SafeFetchRule =
   | "timeout"
   | "transport";
 
+/** Redacted transport outcomes used for paid-call attribution; never contains a host or error text. */
+export type SafeFetchOutcome =
+  | "connection-refused"
+  | "connection-reset"
+  | "connected-timeout"
+  | "timeout-before-connect"
+  | "dns-failure"
+  | "network-unreachable"
+  | "local-abort"
+  | "unknown-transport";
+
 /** `fetch-blocked` is not retryable; `upstream-unavailable` is (cross-cutting §5). */
 export class SafeFetchError extends Error {
   readonly code: "fetch-blocked" | "upstream-unavailable";
   readonly rule: SafeFetchRule;
+  readonly outcome: SafeFetchOutcome;
 
-  constructor(code: SafeFetchError["code"], rule: SafeFetchRule) {
+  constructor(code: SafeFetchError["code"], rule: SafeFetchRule, outcome?: SafeFetchOutcome) {
     super(`${code}: ${rule}`);
     this.name = "SafeFetchError";
     this.code = code;
     this.rule = rule;
+    this.outcome = outcome ?? (rule === "dns" ? "dns-failure" : "unknown-transport");
   }
 }
 
@@ -140,6 +153,7 @@ export interface TransportTarget {
   readonly headers: Record<string, string>;
   readonly body?: Uint8Array;
   readonly signal: AbortSignal;
+  readonly onConnected?: () => void;
 }
 
 export interface TransportResponse {
@@ -181,6 +195,7 @@ export const nodeTransport: Transport = (target) =>
           )
         : httpRequest(options, onResponse);
     req.on("error", reject);
+    req.on("socket", (socket) => socket.once("connect", () => target.onConnected?.()));
     req.end(target.body === undefined ? undefined : Buffer.from(target.body));
   });
 
@@ -316,6 +331,7 @@ export function createSafeFetch(deps: SafeFetchDeps) {
       }
       if (body !== undefined) headers["content-length"] = String(body.length);
 
+      let connected = false;
       const pending = transport({
         protocol: url.protocol as "https:" | "http:",
         address,
@@ -327,11 +343,16 @@ export function createSafeFetch(deps: SafeFetchDeps) {
         headers,
         ...(body === undefined ? {} : { body }),
         signal,
+        onConnected: () => { connected = true; },
       });
       const timeout = new Promise<never>((_, reject) =>
         signal.addEventListener(
           "abort",
-          () => reject(new SafeFetchError("upstream-unavailable", "timeout")),
+          () => reject(new SafeFetchError(
+            "upstream-unavailable",
+            "timeout",
+            connected ? "connected-timeout" : "timeout-before-connect",
+          )),
           { once: true },
         ),
       );
@@ -340,7 +361,13 @@ export function createSafeFetch(deps: SafeFetchDeps) {
         response = await Promise.race([pending, timeout]);
       } catch (error) {
         if (error instanceof SafeFetchError) throw error;
-        throw new SafeFetchError("upstream-unavailable", signal.aborted ? "timeout" : "transport");
+        throw new SafeFetchError(
+          "upstream-unavailable",
+          signal.aborted ? "timeout" : "transport",
+          signal.aborted
+            ? connected ? "connected-timeout" : "timeout-before-connect"
+            : classifyTransportError(error),
+        );
       }
 
       const responseHeaders = flattenHeaders(response.headers);
@@ -368,7 +395,11 @@ export function createSafeFetch(deps: SafeFetchDeps) {
         }
       } catch (error) {
         if (error instanceof SafeFetchError) throw error;
-        throw new SafeFetchError("upstream-unavailable", signal.aborted ? "timeout" : "transport");
+        throw new SafeFetchError(
+          "upstream-unavailable",
+          signal.aborted ? "timeout" : "transport",
+          signal.aborted ? "connected-timeout" : classifyTransportError(error),
+        );
       }
       return {
         status: response.status,
@@ -378,6 +409,16 @@ export function createSafeFetch(deps: SafeFetchDeps) {
       };
     }
   };
+}
+
+function classifyTransportError(error: unknown): SafeFetchOutcome {
+  const code = typeof error === "object" && error !== null && "code" in error
+    ? error.code : undefined;
+  if (code === "ECONNREFUSED") return "connection-refused";
+  if (code === "ECONNRESET") return "connection-reset";
+  if (code === "ENETUNREACH" || code === "EHOSTUNREACH") return "network-unreachable";
+  if (code === "ABORT_ERR") return "local-abort";
+  return "unknown-transport";
 }
 
 export type SafeFetch = ReturnType<typeof createSafeFetch>;
