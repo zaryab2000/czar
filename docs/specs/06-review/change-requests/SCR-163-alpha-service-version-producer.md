@@ -57,7 +57,7 @@ CREATE TABLE service_versions (
 - **Probe round trip:** a probe writes `service_versions`, and a second identical probe only moves `last_seen_at`.
 - **Counts:** 3 good ratings on version A, then a schema change to version B → B is unrated, and A's counts are kept but not used.
 - **H4:** an H4 on version A is cleared when version B is first seen; it stays when the same version is re-probed.
-- **Schema:** every `ranked[].version_id` matches `^ver_[0-9a-f]{32}$`.
+- **Schema:** every `ranked[].version_id` matches `^ver_[0-9a-f]{32}$`; every `unverified[]` entry for a probed candidate carries `version_id`; the decision validates as `RankingDecision` 1.3.
 
 ## 5. Version drift inside a step (amendment, 2026-10-31)
 
@@ -70,7 +70,7 @@ CREATE TABLE service_versions (
 ## 6. Selector-to-payer version race (amendment, 2026-10-31)
 
 - **Ruling: stop before payment** (alpha). The owner approved a supplier whose interface and rating were those of version A. Paying version B under A's rating would spend on an unapproved, unrated interface.
-- **Where A comes from:** `Plan` 1.3 commits no version, but `Plan.rankingDecisionIds` points to the stored `RankingDecision`, whose `ranked[]` (or `unverified[]`) entry for the step's `serviceId` carries the version CZ-18 used. That is the expected version. No `Plan` field is added.
+- **Where A comes from:** `Plan` 1.3 commits no version, but `Plan.rankingDecisionIds` points to the stored `RankingDecision`, whose `ranked[].version_id` or, for an unrated candidate, `unverified[].version_id` (`RankingDecision` 1.3: an optional field added by this SCR, written by CZ-18 from the query's probe) for the step's `serviceId` is the version CZ-18 used. That is the expected version. The stored decision row is immutable (`ranking_decisions`), so it is the linked record. No `Plan` field is added. When the entry has no `version_id` (no successful probe), CZ-13 cannot have planned that candidate (it is excluded as `probe-failed`).
 - **Rule:**
   - At the pre-check, CZ-15 compares the live version with the expected version for the step's `serviceId`.
   - When they differ, it stops before reserving or signing, and ends the step `failed` with `StepError {code: "service-version-drift", message: "selection", retryable: false}`. That is a re-plan case (cross-cutting §5.2).

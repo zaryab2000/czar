@@ -26,7 +26,7 @@
 | `demand-proof-leaf.schema.json` | §4.17 version 1, **superseded** by v2 (RV-026); kept for reference |
 | `demand-proof-leaf.v2.schema.json` | §4.17 version 2 (RV-026) |
 | `soul-version-leaf.schema.json` | §4.18 |
-| `ranking-decision.schema.json` | §4.19 (1.2, SCR-160) |
+| `ranking-decision.schema.json` | §4.19 (1.3, SCR-163) |
 | `rating.schema.json` | §4.28 (SCR-160) |
 | `evidence-batch.schema.json` | §4.20 |
 | `job-brief.schema.json` | §4.21 (RV-025) |
