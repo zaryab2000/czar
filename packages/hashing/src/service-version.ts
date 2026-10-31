@@ -1,5 +1,7 @@
 import { keccak256 } from "viem";
 
+const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
+
 /** SCR-163 identity for one live payee, registered resource, and validated Bazaar schema. */
 export function serviceVersionId(input: {
   readonly payTo: string;
@@ -20,7 +22,9 @@ export function serviceVersionId(input: {
 
 function versionJcs(value: unknown): string {
   if (value === null) return "null";
-  if (typeof value === "string" || typeof value === "boolean") return JSON.stringify(value);
+  if (typeof value === "string")
+    return JSON.stringify(ADDRESS.test(value) ? value.toLowerCase() : value);
+  if (typeof value === "boolean") return JSON.stringify(value);
   if (typeof value === "number" && Number.isFinite(value)) return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map(versionJcs).join(",")}]`;
   if (typeof value === "object" && value !== null) {
