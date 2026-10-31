@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  AmbiguousTransferError,
   createIndexerExactTransferLookup,
   createIndexerGatewayStatus,
   createIndexerSettlement,
@@ -67,7 +68,7 @@ describe("indexer settlement lookup", () => {
       Response.json({ czarCode: "ambiguous" }, { status: 409 }),
     );
     await expect(notFound(payment)).resolves.toBeNull();
-    await expect(ambiguous(payment)).rejects.toThrow("ambiguous");
+    await expect(ambiguous(payment)).rejects.toBeInstanceOf(AmbiguousTransferError);
   });
 
   it("treats indexer 5xx and transport outage as missing proof", async () => {

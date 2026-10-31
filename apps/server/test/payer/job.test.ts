@@ -171,6 +171,12 @@ describe("job brief commitments", () => {
     expect(expiredObservation.rows).toHaveLength(1);
     expect(expiredObservation.rows[0]).toMatchObject({ job_state: "Expired", delivered: null });
     expect(expiredObservation.rows[0]?.settled_at).toBeInstanceOf(Date);
+    // SCR-160 §9.1: counts are keyed by the task class selection reads, not the raw capability.
+    const taskClass = await getPool().query<{ task_class: string }>(
+      "SELECT task_class FROM observations WHERE objective_id=(SELECT objective_id FROM plans WHERE plan_id=$1)",
+      [PLAN_ID],
+    );
+    expect(taskClass.rows).toEqual([{ task_class: "data-json.search" }]);
   });
 
   it.each([60, -60])(

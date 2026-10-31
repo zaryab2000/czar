@@ -108,8 +108,9 @@ describe.skipIf(!localChainEnabled)("Flow 4A slice on a local Arc chain (SCR-160
       [FLAKY, 0],
       [STEADY, 0],
     ]);
+    // Counts sit under the task class selection reads (web-search → data-json.search), not the capability.
     const counts = await getPool().query<{ good: number; bad: number }>(
-      "SELECT good,bad FROM supplier_counts WHERE network=$1 AND service_id=$2",
+      "SELECT good,bad FROM supplier_counts WHERE network=$1 AND service_id=$2 AND task_class='data-json.search'",
       [NETWORK, STEADY],
     );
     expect(counts.rows).toEqual([{ good: 0, bad: 1 }]);

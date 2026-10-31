@@ -3,6 +3,7 @@
 // `delivery-failed` (settled on chain, no usable body). A step with zero paid calls ends `failed` / `unpaid`.
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadConfig } from "@czar/config";
+import { AmbiguousTransferError } from "#src/evidence/indexer-settlement";
 import {
   buildTree,
   dedupKey,
@@ -343,16 +344,39 @@ describe("vault-direct partial steps (SCR-159 §3)", () => {
     expect(await healthFactCount()).toBe(1);
   });
 
-  it("does not sign or attribute a paid call when transfer proof is ambiguous", async () => {
+  it("fails closed on ambiguous transfer proof: no receipt, no H1, settlement-unproven, step ends (SCR-163 §7)", async () => {
+    const run = partialRun(["ok", "no-response", "error"]);
+    let lookups = 0;
+    const dependencies = {
+      ...run.dependencies,
+      findExactTransferTx: async () => {
+        lookups += 1;
+        throw new AmbiguousTransferError();
+      },
+    };
+    await expect(executeVaultDirectStep(stepInput(), dependencies)).resolves.toMatchObject({
+      state: "done",
+    });
+    expect(lookups).toBe(1);
+    expect(run.settledIndices()).toEqual([0, 1]);
+    expect(run.receiptIndices()).toEqual([0]);
+    expect(await healthFactCount()).toBe(0);
+    const trace = await getPool().query<{ payload: { index: number } }>(
+      "SELECT payload FROM step_executions WHERE plan_id=$1 AND phase='settlement-unproven'",
+      [PLAN_ID],
+    );
+    expect(trace.rows.map((row) => row.payload.index)).toEqual([1]);
+  });
+
+  it("still stops on an indexer error that is not ambiguity", async () => {
     const run = partialRun(["ok", "no-response", "error"]);
     const dependencies = {
       ...run.dependencies,
       findExactTransferTx: async () => {
-        throw new Error("Indexer exact transfer lookup is ambiguous.");
+        throw new Error("Indexer exact transfer lookup returned HTTP 400.");
       },
     };
-    await expect(executeVaultDirectStep(stepInput(), dependencies)).rejects.toThrow("ambiguous");
-    expect(run.settledIndices()).toEqual([0, 1]);
+    await expect(executeVaultDirectStep(stepInput(), dependencies)).rejects.toThrow("HTTP 400");
     expect(run.receiptIndices()).toEqual([0]);
     expect(await healthFactCount()).toBe(0);
   });
@@ -459,6 +483,16 @@ describe("vault-direct service-version drift (SCR-163 §5–§6)", () => {
     expect(versions).toHaveLength(3);
     expect(new Set(versions).size).toBe(1);
     expect(versions[0]).toMatch(/^ver_[0-9a-f]{32}$/);
+  });
+
+  it("writes the selection task class, not the raw capability, on every observation (SCR-160 §9.1)", async () => {
+    const run = partialRun(["ok", "ok", "ok"]);
+    await executeVaultDirectStep(stepInput(), run.dependencies);
+    const classes = await getPool().query<{ task_class: string }>(
+      "SELECT DISTINCT task_class FROM observations WHERE objective_id=$1",
+      [OBJECTIVE],
+    );
+    expect(classes.rows).toEqual([{ task_class: "data-json.search" }]);
   });
 
   it("stops before reserving when pre-checks within one step produce different versions", async () => {
