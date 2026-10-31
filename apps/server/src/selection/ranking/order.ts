@@ -8,6 +8,7 @@ export interface RankCandidate {
   readonly priceAtomic: string;
   readonly good: number;
   readonly bad: number;
+  readonly lowerBound?: number | null;
   readonly ownersRated: number;
   readonly ownersBad: number;
   readonly computedAt: Date;
@@ -46,7 +47,10 @@ export function orderCandidates(
       unrated.push(candidate);
       continue;
     }
-    const score = wilsonLower(candidate.good, total, confidenceZ);
+    const score =
+      candidate.lowerBound === undefined
+        ? wilsonLower(candidate.good, total, confidenceZ)
+        : candidate.lowerBound;
     if (score === null) throw new Error("Rated candidate has no Wilson lower bound.");
     rated.push({ candidate, score });
   }

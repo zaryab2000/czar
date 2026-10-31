@@ -11,11 +11,13 @@ const versionId = `ver_${"b".repeat(32)}`;
 const ratingOne = "rtg_01K7ZT9P4N5Q6R7S8T9V0W1X2Y";
 const ratingTwo = "rtg_01K7ZT9P4N5Q6R7S8T9V0W1X2X";
 const ratingAlternate = "rtg_01K7ZT9P4N5Q6R7S8T9V0W1X2V";
+const ratingJob = "rtg_01K7ZT9P4N5Q6R7S8T9V0W1X2T";
 const corrected = "rtg_01K7ZT9P4N5Q6R7S8T9V0W1X2W";
 const objectives = [
   "obj_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
   "obj_01K7ZT9P4N5Q6R7S8T9V0W1X2X",
   "obj_01K7ZT9P4N5Q6R7S8T9V0W1X2V",
+  "obj_01K7ZT9P4N5Q6R7S8T9V0W1X2T",
 ];
 const payer = `0x${"1".repeat(40)}`;
 const payee = `0x${"2".repeat(40)}`;
@@ -26,7 +28,7 @@ async function seedRatedPayment(
   objectiveId: string,
   ratingId: string,
   index: number,
-  rail: "x402-exact" | "gateway-batched",
+  rail: "x402-exact" | "gateway-batched" | "erc8183-job",
   actualPayTo: string,
 ): Promise<void> {
   const planId = objectiveId.replace("obj_", "pln_");
@@ -59,7 +61,9 @@ async function seedRatedPayment(
       objectiveId,
       `${network}:${payer}:${index + 1}`,
       `payment-${index}`,
-      `${rail}:${network}:${payer}:${actualPayTo}:0x${index.toString(16).padStart(64, "0")}`,
+      rail === "erc8183-job"
+        ? `erc8183:${network}:${payer}:${index}`
+        : `${rail}:${network}:${payer}:${actualPayTo}:0x${index.toString(16).padStart(64, "0")}`,
     ],
   );
   await pool.query("INSERT INTO rating_receipts(obs_id,rating_id) VALUES($1,$2)", [
@@ -83,6 +87,7 @@ beforeAll(async () => {
     [ratingOne, objectives[0], "good"],
     [ratingTwo, objectives[1], "good"],
     [ratingAlternate, objectives[2], "bad"],
+    [ratingJob, objectives[3], "bad"],
   ]) {
     await pool.query(
       `INSERT INTO ratings(rating_id,user_id,vault,objective_id,step_index,network,
@@ -94,6 +99,7 @@ beforeAll(async () => {
   await seedRatedPayment(pool, objectives[0]!, ratingOne, 1, "x402-exact", payee);
   await seedRatedPayment(pool, objectives[1]!, ratingTwo, 2, "gateway-batched", payee);
   await seedRatedPayment(pool, objectives[2]!, ratingAlternate, 3, "x402-exact", alternate);
+  await seedRatedPayment(pool, objectives[3]!, ratingJob, 4, "erc8183-job", payee);
 });
 
 describe("supplier count snapshots", () => {

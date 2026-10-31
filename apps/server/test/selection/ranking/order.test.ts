@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { orderCandidates } from "#src/selection/ranking/order";
+import { healthFacts, type HealthRow } from "#src/evidence/health";
 
 const versionId = `ver_${"a".repeat(32)}`;
 const worked = JSON.parse(
@@ -23,6 +24,42 @@ const candidate = (letter: string, good: number, bad: number) => ({
 });
 
 describe("SCR-160 registered ranking", () => {
+  it("matches the key-free lab steady, flaky, slow, and schemabreak expectations", () => {
+    const steady = candidate("a", 1, 0);
+    const flaky = candidate("b", 0, 1);
+    const slow = candidate("c", 0, 0);
+    const ordered = orderCandidates([flaky, slow, steady], 1.959964);
+    expect(ordered.ranked.map((row) => row.service_id)).toEqual([
+      steady.serviceId,
+      flaky.serviceId,
+    ]);
+    expect(ordered.unverified).toEqual([
+      { service_id: slow.serviceId, reason: "unrated", n_eff: 0 },
+    ]);
+    const schemabreak = candidate("d", 0, 0);
+    const rows: HealthRow[] = Array.from({ length: 3 }, (_, index) => ({
+      obsId: `obs_${index.toString(16).padStart(32, "0")}`,
+      userId: `usr_${"a".repeat(26)}`,
+      network: "eip155:5042002",
+      serviceId: schemabreak.serviceId,
+      versionId,
+      rail: "x402-exact",
+      settledAt: new Date("2026-10-31T00:00:00Z"),
+      releasedAt: null,
+      delivered: 0,
+      jobState: null,
+    }));
+    const facts = healthFacts(rows, [], { consecutiveFailures: 3 });
+    expect(facts.filter((row) => row.fact === "settled-not-delivered")).toHaveLength(3);
+    const withH1 = orderCandidates(
+      [{ ...schemabreak, healthFacts: [...new Set(facts.map((row) => row.fact))] }],
+      1.959964,
+    );
+    expect(withH1.unverified).toEqual([
+      { service_id: schemabreak.serviceId, reason: "unrated", n_eff: 0 },
+    ]);
+  });
+
   it("reproduces the worked order, correction, H1, and H4 cases", () => {
     const m1 = { ...candidate("a", 5, 0), ...worked.suppliers[0] };
     const m2 = { ...candidate("b", 9, 1), ...worked.suppliers[1] };

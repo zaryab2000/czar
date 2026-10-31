@@ -16,6 +16,9 @@ import { route, routingParamsFromConfig, cVd, pocketWorthIt } from "#src/router/
 import type { PlannerPorts } from "#src/planner/ports";
 import type { PlannerService } from "#src/planner/ports";
 import type { RankingQuery } from "#src/planner/ports";
+import { setupDatabase } from "#test/db";
+
+const getPool = setupDatabase();
 
 const taskSpec = {
   schemaVersion: "1.1" as const,
@@ -534,7 +537,7 @@ describe("planner fallback", () => {
         headers: { "payment-required": encodeBase64Json(challenge) },
         body: Buffer.from(""),
       }),
-      pool: {} as never,
+      pool: getPool(),
     });
     const service = await selection.directory.get(serviceId);
     if (!service) throw new Error("registered service probe failed");
