@@ -3,6 +3,7 @@ import { H, jcsString } from "@czar/hashing";
 import { encodeBase64Json, type SafeFetch } from "@czar/x402";
 import { validateSchema } from "@czar/schemas";
 import { keccak256, toBytes } from "viem";
+import type { Pool } from "pg";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createAcceptancePorts } from "#src/acceptance/ports";
 import type { RankingQuery } from "#src/planner/ports";
@@ -265,6 +266,23 @@ beforeEach(async () => {
 });
 
 describe("registered selection", () => {
+  it("propagates a failed version-ledger write instead of treating it as a merchant probe failure", async () => {
+    const config = loadConfig({
+      envFile: { "selection.czarRegisteredServices": { [SERVICE_B]: registration(RESOURCE) } },
+    });
+    const pool = {
+      connect: async () => {
+        throw new Error("version-ledger-unavailable");
+      },
+    } as unknown as Pool;
+    const selection = createRegisteredSelection({
+      config,
+      safeFetch: async (url) => response("25", "0xaaa", NETWORK, undefined, bareUrl(url)),
+      pool,
+    });
+    await expect(selection.directory.get(SERVICE_B)).rejects.toThrow("version-ledger-unavailable");
+  });
+
   it("ranks only ratings for the current verified probe version", async () => {
     let schema = { type: "object", properties: { answer: { type: "string" } } };
     const fetchImpl = vi.fn<SafeFetch>(async (url) =>
