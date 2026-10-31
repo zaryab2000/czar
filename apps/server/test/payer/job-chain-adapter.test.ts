@@ -1,8 +1,126 @@
 import { describe, expect, it, vi } from "vitest";
 import { loadConfig } from "@czar/config";
 import { createJobChainAdapter } from "#src/payer/job-chain-adapter";
+import { czarVaultAbi } from "@czar/vault-client";
+import { encodeAbiParameters, encodeEventTopics, parseAbi } from "viem";
+
+const VAULT = "0x0000000000000000000000000000000000000001" as const;
+const ESCROW = "0x0000000000000000000000000000000000000002" as const;
+const PROVIDER = "0x0000000000000000000000000000000000000004" as const;
+const KEY = `0x${"1".repeat(64)}` as const;
+const REASON = `0x${"2".repeat(64)}` as const;
+const escrowEvents = parseAbi([
+  "event JobFunded(uint256 indexed jobId,address indexed client,uint256 amount)",
+  "event JobSubmitted(uint256 indexed jobId,address indexed provider,bytes32 deliverable)",
+  "event JobRejected(uint256 indexed jobId,address indexed rejector,bytes32 reason)",
+]);
+
+function openedLog() {
+  return {
+    address: VAULT,
+    topics: encodeEventTopics({
+      abi: czarVaultAbi,
+      eventName: "JobOpened",
+      args: { jobKey: KEY, envelopeId: 1n, provider: PROVIDER },
+    }),
+    data: encodeAbiParameters(
+      [
+        { type: "uint32" },
+        { type: "address" },
+        { type: "uint256" },
+        { type: "address" },
+        { type: "uint256" },
+        { type: "bytes32" },
+      ],
+      [0, ESCROW, 7n, PROVIDER, 1_000n, REASON],
+    ),
+  };
+}
+
+function escrowLog(eventName: "JobFunded" | "JobSubmitted" | "JobRejected") {
+  return {
+    address: ESCROW,
+    topics: encodeEventTopics({
+      abi: escrowEvents,
+      eventName,
+      args: {
+        jobId: 7n,
+        ...(eventName === "JobFunded"
+          ? { client: VAULT }
+          : eventName === "JobSubmitted"
+            ? { provider: PROVIDER }
+            : { rejector: PROVIDER }),
+      },
+    }),
+    data: encodeAbiParameters(
+      [{ type: eventName === "JobFunded" ? "uint256" : "bytes32" }],
+      [eventName === "JobFunded" ? 1_000n : REASON],
+    ),
+  };
+}
 
 describe("job chain adapter", () => {
+  it("reads complete mined history for the exact opened escrow job", async () => {
+    const getLogs = vi.fn(async () => [
+      escrowLog("JobFunded"),
+      escrowLog("JobSubmitted"),
+      escrowLog("JobRejected"),
+    ]);
+    const adapter = createJobChainAdapter({
+      client: {
+        readContract: vi.fn(async ({ functionName }) => {
+          if (functionName === "jobEscrowKind") return 0;
+          if (functionName === "getJob") return { state: 5, jobId: 7n };
+          return [7n, VAULT, PROVIDER, PROVIDER, "", 1_000n, 999n, 5, VAULT];
+        }),
+        getTransactionReceipt: vi.fn(async ({ hash }) => ({
+          status: "success",
+          blockNumber: hash === KEY ? 10n : 12n,
+          logs: hash === KEY ? [openedLog()] : [],
+        })),
+        getLogs,
+      } as never,
+      pool: { query: vi.fn() } as never,
+      config: loadConfig(),
+      vault: VAULT,
+      jobEscrow: ESCROW,
+      usdc: "0x0000000000000000000000000000000000000003",
+      now: () => new Date(0),
+    });
+    await expect(adapter.getJobHistory?.(KEY, KEY, REASON)).resolves.toEqual({
+      submitted: true,
+      rejectionReason: REASON,
+    });
+    expect(getLogs).toHaveBeenCalledWith({ address: ESCROW, fromBlock: 10n, toBlock: 12n });
+  });
+
+  it("leaves job history unknown when a log range cannot be read", async () => {
+    const adapter = createJobChainAdapter({
+      client: {
+        readContract: vi.fn(async ({ functionName }) => {
+          if (functionName === "jobEscrowKind") return 0;
+          if (functionName === "getJob") return { state: 5, jobId: 7n };
+          return [7n, VAULT, PROVIDER, PROVIDER, "", 1_000n, 999n, 5, VAULT];
+        }),
+        getTransactionReceipt: vi.fn(async () => ({
+          status: "success",
+          blockNumber: 10n,
+          logs: [openedLog()],
+        })),
+        getBlockNumber: vi.fn(async () => 12n),
+        getLogs: vi.fn(async () => {
+          throw new Error("RPC range unavailable");
+        }),
+      } as never,
+      pool: { query: vi.fn() } as never,
+      config: loadConfig(),
+      vault: VAULT,
+      jobEscrow: ESCROW,
+      usdc: "0x0000000000000000000000000000000000000003",
+      now: () => new Date(0),
+    });
+    await expect(adapter.getJobHistory?.(KEY, KEY)).resolves.toBeUndefined();
+  });
   it("reads Circle's canonical jobs getter and maps its flat tuple", async () => {
     const readContract = vi.fn(async ({ address, functionName }) => {
       if (functionName === "jobEscrowKind") return 0;

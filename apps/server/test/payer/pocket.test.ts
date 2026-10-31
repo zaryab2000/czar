@@ -119,6 +119,7 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
+  await getPool().query("DELETE FROM supplier_health");
   await getPool().query(
     "DELETE FROM observations WHERE objective_id=(SELECT objective_id FROM plans WHERE plan_id=$1)",
     [PLAN_ID],

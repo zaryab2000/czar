@@ -7,6 +7,8 @@ import type { AcceptanceCheckInput, AcceptanceResult } from "#src/acceptance/typ
 import { completeBoundaryModelCall, type ModelClient } from "#src/models/proxy";
 import type { Logger } from "@czar/logging";
 import type { Pool } from "pg";
+import { getObservation } from "#src/evidence/observations";
+import { healthFacts, writeFacts } from "#src/evidence/health";
 
 export type BoundaryFlag = "injection-suspect" | "pii-suspect";
 export type ScreenLabel = "none" | BoundaryFlag;
@@ -173,6 +175,23 @@ export async function runBoundary(
       ? { available: true, label: labelFor(screen.flags) }
       : { available: false },
   });
+  const observation = await getObservation(dependencies.pool, input.obsId);
+  if (observation)
+    await writeFacts(
+      dependencies.pool,
+      healthFacts(
+        [observation],
+        [
+          {
+            kind: "boundary",
+            obsId: input.obsId,
+            flags: acceptance.report.flags ?? [],
+            limits: acceptance.report.limits,
+          },
+        ],
+        { consecutiveFailures: Number(dependencies.config.get("health.consecutiveFailures")) },
+      ),
+    );
   if (quarantined) return { quarantined: true, screen, acceptance };
   const deliveryResult = acceptance.report.checks.find(
     (check) => check.name === "delivery",

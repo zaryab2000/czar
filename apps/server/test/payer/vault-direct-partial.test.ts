@@ -68,6 +68,7 @@ beforeEach(async () => {
   await getPool().query("DELETE FROM executor_leases");
   await getPool().query("DELETE FROM step_executions");
   await getPool().query("DELETE FROM steps");
+  await getPool().query("DELETE FROM supplier_health");
   await getPool().query("DELETE FROM observations");
   await getPool().query("DELETE FROM plans");
   await getPool().query("DELETE FROM objectives");

@@ -1,6 +1,7 @@
 import { dedupKey, obsId, paymentRefHash } from "@czar/hashing";
 import { validateSchema, type PaymentRef } from "@czar/schemas";
 import type { Pool } from "pg";
+import { clearFacts, healthFacts, writeFacts, type HealthEvidence } from "#src/evidence/health";
 
 export interface ObservationInsert {
   readonly userId: string;
@@ -202,6 +203,7 @@ export async function fillResponse(
     [id, respondedAt ?? null, delivered ?? null],
   );
   await requireObservation(pool, id);
+  await evaluateResponseHealth(pool, id);
 }
 
 /** Settle only after the caller has observed the vault or Gateway settlement fact. */
@@ -222,10 +224,16 @@ export async function markSettled(
   );
   const row = await requireObservation(pool, id);
   if (row.releasedAt) throw new Error(`Cannot settle released observation ${id}.`);
+  await evaluateResponseHealth(pool, id);
 }
 
 /** Release only an authorization proven unused or a failed Gateway row. */
-export async function markReleased(pool: Pool, id: string, at: Date): Promise<void> {
+export async function markReleased(
+  pool: Pool,
+  id: string,
+  at: Date,
+  consecutiveFailures = 3,
+): Promise<void> {
   await pool.query(
     `${EXISTING_ROW}
        SET released_at=COALESCE(observations.released_at,$2)
@@ -234,6 +242,52 @@ export async function markReleased(pool: Pool, id: string, at: Date): Promise<vo
   );
   const row = await requireObservation(pool, id);
   if (row.settledAt) throw new Error(`Cannot release settled observation ${id}.`);
+  if (row.rail !== "erc8183-job") {
+    const recent = await pool.query<{ obs_id: string }>(
+      `SELECT obs_id FROM observations
+       WHERE user_id=$1 AND network=$2 AND service_id=$3 AND rail<>'erc8183-job'
+       ORDER BY created_at DESC,call_index DESC LIMIT $4`,
+      [row.userId, row.network, row.serviceId, consecutiveFailures],
+    );
+    const observations = await Promise.all(
+      recent.rows.map((item) => requireObservation(pool, item.obs_id)),
+    );
+    const evidence = await Promise.all(
+      observations.map((item) => expiredAuthorizationEvidence(pool, item)),
+    );
+    await writeFacts(pool, healthFacts(observations, evidence.flat(), { consecutiveFailures }));
+  }
+}
+
+async function evaluateResponseHealth(pool: Pool, id: string): Promise<void> {
+  const row = await requireObservation(pool, id);
+  if (!row.settledAt) return;
+  if (row.rail !== "erc8183-job") {
+    const evidence = await expiredAuthorizationEvidence(pool, row);
+    await writeFacts(pool, healthFacts([row], evidence, { consecutiveFailures: 3 }));
+  }
+  if (row.delivered === 1) await clearFacts(pool, id);
+}
+
+async function expiredAuthorizationEvidence(
+  pool: Pool,
+  row: ObservationRow,
+): Promise<readonly HealthEvidence[]> {
+  if (row.rail !== "x402-exact") return [];
+  const result = await pool.query(
+    `SELECT 1 FROM plans p
+     JOIN step_executions auth ON auth.plan_id=p.plan_id
+     JOIN step_executions unpaid ON unpaid.plan_id=auth.plan_id
+       AND unpaid.step_index=auth.step_index AND unpaid.attempt=auth.attempt
+       AND unpaid.phase='call.unpaid'
+       AND unpaid.payload->>'index'=auth.payload->>'index'
+     WHERE p.objective_id=$1 AND auth.step_index=$2 AND auth.phase='auth.signed'
+       AND auth.payload->>'paymentId'=$3
+       AND unpaid.payload->>'errorCode'='authorization-expired'
+     LIMIT 1`,
+    [row.objectiveId, row.stepIndex, row.paymentId],
+  );
+  return result.rowCount === 1 ? [{ kind: "resume-past-valid-before", obsId: row.obsId }] : [];
 }
 
 /** Advance the stored escrow state without rolling back a terminal or newer fact. */
@@ -245,7 +299,10 @@ export async function setJobState(
 ): Promise<void> {
   const current = await requireObservation(pool, id);
   if (current.rail !== "erc8183-job") throw new TypeError(`Observation ${id} is not a job.`);
-  if (!mayAdvance(current.jobState, state)) return;
+  if (!mayAdvance(current.jobState, state)) {
+    if (current.jobState === "Completed") await evaluateResponseHealth(pool, id);
+    return;
+  }
   const responded = ["Completed", "Refunded", "Expired"].includes(state) ? at : undefined;
   await pool.query(
     `${EXISTING_ROW}
@@ -261,6 +318,7 @@ export async function setJobState(
          OR observations.job_state='Submitted' AND $2 IN ('Completed','Refunded','Released','Expired'))`,
     [id, state, responded ?? null],
   );
+  if (state === "Completed") await evaluateResponseHealth(pool, id);
 }
 
 function mayAdvance(current: JobState | null, next: JobState): boolean {

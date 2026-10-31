@@ -48,6 +48,10 @@ export interface PlannerPorts {
   readonly pocketKeys: { createPocketKey(planId: string): Promise<string> };
   readonly agentHosts: { hasAgentHost(deviceId: string): Promise<boolean> };
   readonly allowance: { remaining(userId: string, categoryId: string): Promise<string> };
+  readonly health?: {
+    openOwnerFacts(userId: string, network: string, serviceId: string): Promise<readonly string[]>;
+    isInjectionBlocked(network: string, serviceId: string): Promise<boolean>;
+  };
   readonly prober: {
     probe(
       resource: PlannerService["resource"],

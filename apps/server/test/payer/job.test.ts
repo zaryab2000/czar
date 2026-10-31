@@ -21,7 +21,7 @@ import { setupDatabase } from "#test/db";
 import { makeObjectiveSubmission, seedDevice, TEST_USER_ID } from "#test/fixtures";
 import { loadConfig } from "@czar/config";
 import type { SignRequest } from "@czar/signer";
-import { keccak256 } from "viem";
+import { keccak256, stringToHex } from "viem";
 import { generatePrivateKey, privateKeyToAccount, sign } from "viem/accounts";
 
 const getPool = setupDatabase();
@@ -58,6 +58,7 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
+  await getPool().query("DELETE FROM supplier_health");
   await getPool().query(
     "DELETE FROM observations WHERE objective_id=(SELECT objective_id FROM plans WHERE plan_id=$1)",
     [PLAN_ID],
@@ -380,6 +381,54 @@ describe("job brief commitments", () => {
     expect(observation.rows).toMatchObject([
       { job_state: "Expired", delivered: null, settled_at: expect.any(Date) },
     ]);
+  });
+
+  it.each([
+    ["funded expiry", false, undefined, true],
+    ["submitted natural expiry", true, undefined, false],
+    ["verified late rejection", true, keccak256(stringToHex("czar:late")), true],
+    ["unknown history", null, undefined, false],
+  ] as const)("records H3 only for %s", async (_case, submitted, rejectionReason, expected) => {
+    const current = new Date("2026-10-23T00:00:00Z");
+    const input = recoveryInput(new Date(current.getTime() + 60_000));
+    const key = jobKey(input.jobEscrow, 7n);
+    await getPool().query(
+      `INSERT INTO step_executions (plan_id,step_index,attempt,phase,payload)
+       VALUES ($1,0,0,'job.opened',$2::jsonb)`,
+      [PLAN_ID, JSON.stringify({ jobKey: key, txHash: `0x${"a".repeat(64)}` })],
+    );
+    let synced = false;
+    const chain = {
+      findJob: vi.fn(async () => ({ jobKey: key, jobId: 7n })),
+      getJob: vi.fn(async () => ({
+        vaultState: synced ? ("Expired" as const) : ("Funded" as const),
+        escrowState: synced ? ("Expired" as const) : ("Expired" as const),
+        budget: 1_000n,
+        expiredAt: Math.floor(current.getTime() / 1_000) - 60,
+      })),
+      syncJob: vi.fn(async () => {
+        synced = true;
+        return { state: "Expired" as const, txHash: `0x${"b".repeat(64)}` };
+      }),
+      getJobHistory: vi.fn(async () =>
+        submitted === null
+          ? undefined
+          : { submitted, ...(rejectionReason ? { rejectionReason } : {}) },
+      ),
+    };
+    await executeJobStep(input, {
+      pool: getPool(),
+      config: loadConfig(),
+      chain: chain as never,
+      signer: { sign: vi.fn(async () => ({ signedTransaction: "0x1234" as const })) },
+      vault: input.vault,
+      now: () => current,
+      randomSalt: () => `0x${"22".repeat(32)}`,
+    });
+    const facts = await getPool().query<{ fact: string }>(
+      "SELECT fact FROM supplier_health WHERE fact='job-failed'",
+    );
+    expect(facts.rows.length).toBe(expected ? 1 : 0);
   });
 
   it("requires each alternate job provider to have its own approved leaf proof", () => {

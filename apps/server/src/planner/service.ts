@@ -428,11 +428,12 @@ async function persistPlan(
       `Refusing to persist invalid plan: ${JSON.stringify(validationErrors("plan"))}`,
     );
   }
-  const to = result.approvalNeeded
-    ? "awaiting-approval"
-    : options.from === "planning"
-      ? "opening"
-      : "executing";
+  const to =
+    result.approvalNeeded || Boolean(result.plan.approvalReasons?.length)
+      ? "awaiting-approval"
+      : options.from === "planning"
+        ? "opening"
+        : "executing";
   if (!canTransition(options.from, to))
     throw new Error(`Invalid objective transition: ${options.from} -> ${to}`);
   const client = await pool.connect();

@@ -183,6 +183,16 @@ describe("planner persistence", () => {
     expect(row.rows[0]?.state).toBe("opening");
   });
 
+  it("does not open a plan with approval reasons under earned allowance", async () => {
+    await seedObjective();
+    const plan = { ...testPlan(), approvalReasons: ["unrated" as const] };
+    await operations(async () => ({ plan, approvalNeeded: false })).planObjective(OBJECTIVE);
+    const row = await pool().query("SELECT state FROM objectives WHERE objective_id=$1", [
+      OBJECTIVE,
+    ]);
+    expect(row.rows[0]?.state).toBe("awaiting-approval");
+  });
+
   it("claims each received event once when two workers run concurrently", async () => {
     const ids = [OBJECTIVE, "obj_01K7ZT9P4N5Q6R7S8T9V0W1X2Z"];
     for (const id of ids) await seedObjective(id);
