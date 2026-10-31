@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  createIndexerExactTransferLookup,
   createIndexerGatewayStatus,
   createIndexerSettlement,
   verifyX402Transfer,
@@ -20,8 +21,83 @@ const payment = {
   reservationId: 9,
   index: 2,
 };
+const indexedProof = {
+  transferTx: payment.settlementTx,
+  blockNumber: "10",
+  blockHash: `0x${"44".repeat(32)}`,
+  authorizationUsed: { logIndex: 0, emitter: payment.asset },
+  transfer: {
+    logIndex: 1,
+    emitter: payment.asset,
+    from: payment.payer,
+    to: payment.payTo,
+    value: payment.amount,
+  },
+  indexedHead: "11",
+};
 
 describe("indexer settlement lookup", () => {
+  it("looks up an exact indexed transfer without changing the signed PaymentRef", async () => {
+    let requestedUrl = "";
+    const fetcher: typeof fetch = async (input) => {
+      requestedUrl = String(input);
+      return Response.json(indexedProof);
+    };
+    const lookup = createIndexerExactTransferLookup("http://indexer.test", 1_000, fetcher);
+    const { settlementTx: _settlementTx, ...stablePayment } = payment;
+    await expect(lookup(stablePayment)).resolves.toBe(payment.settlementTx);
+    const url = new URL(requestedUrl);
+    expect(url.pathname).toBe("/settlements/x402-transfer");
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      network: payment.network,
+      vault: payment.payer,
+      nonce: payment.nonce,
+      payTo: payment.payTo,
+      amount: payment.amount,
+      asset: payment.asset,
+    });
+    expect(stablePayment).not.toHaveProperty("settlementTx");
+  });
+
+  it("treats absent proof as pending and ambiguous proof as an error", async () => {
+    const notFound = createIndexerExactTransferLookup("http://indexer.test", 1_000, async () =>
+      Response.json({ czarCode: "not-found" }, { status: 404 }),
+    );
+    const ambiguous = createIndexerExactTransferLookup("http://indexer.test", 1_000, async () =>
+      Response.json({ czarCode: "ambiguous" }, { status: 409 }),
+    );
+    await expect(notFound(payment)).resolves.toBeNull();
+    await expect(ambiguous(payment)).rejects.toThrow("ambiguous");
+  });
+
+  it("treats indexer 5xx and transport outage as missing proof", async () => {
+    const unavailable = createIndexerExactTransferLookup("http://indexer.test", 1_000, async () =>
+      Response.json({ czarCode: "unavailable" }, { status: 503 }),
+    );
+    const unreachable = createIndexerExactTransferLookup("http://indexer.test", 1_000, async () => {
+      throw new Error("network details must not escape");
+    });
+    await expect(unavailable(payment)).resolves.toBeNull();
+    await expect(unreachable(payment)).resolves.toBeNull();
+  });
+
+  it("refuses an indexer response with a malformed transaction hash", async () => {
+    const lookup = createIndexerExactTransferLookup("http://indexer.test", 1_000, async () =>
+      Response.json({ ...indexedProof, transferTx: "not-a-transaction" }),
+    );
+    await expect(lookup(payment)).rejects.toThrow("invalid transfer transaction");
+  });
+
+  it("refuses indexer proof with a wrong canonical transfer payee", async () => {
+    const lookup = createIndexerExactTransferLookup("http://indexer.test", 1_000, async () =>
+      Response.json({
+        ...indexedProof,
+        transfer: { ...indexedProof.transfer, to: payment.payer },
+      }),
+    );
+    await expect(lookup(payment)).rejects.toThrow("invalid transfer proof");
+  });
+
   it("matches the full vault authorization facts and requires settled status", async () => {
     let requestedUrl = "";
     const fetcher: typeof fetch = async (input) => {

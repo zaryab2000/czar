@@ -5,7 +5,9 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadConfig } from "@czar/config";
 import {
   buildTree,
+  dedupKey,
   NO_RESPONSE_COMMIT,
+  obsId,
   PAYEE_KIND,
   payeeLeaf,
   paymentRefHash,
@@ -225,6 +227,10 @@ describe("vault-direct partial steps (SCR-159 §3)", () => {
       settled_at: expect.any(Date),
     });
     expect(run.receiptIndices()).toEqual([0, 1]);
+    const noResponseReceipt = run.receiptContexts().find((context) => context.index === 1);
+    expect(noResponseReceipt).toMatchObject({ verifiedTransferTx: HASH });
+    expect(noResponseReceipt?.paymentRef).not.toHaveProperty("settlementTx");
+    expect(noResponseReceipt?.obsId).toBe(obsId(dedupKey(noResponseReceipt!.paymentRef)));
     const trace = await getPool().query<{
       payload: { status: string; bodyCommit: string; bodyRef?: string };
     }>(
@@ -252,14 +258,56 @@ describe("vault-direct partial steps (SCR-159 §3)", () => {
     expect(await healthFactCount()).toBe(0);
   });
 
-  it("keeps the paid step pending until an exact transfer proof is indexed", async () => {
+  it("ends without a receipt or H1 when exact transfer proof misses the reconciliation deadline", async () => {
     const run = partialRun(["ok", "no-response", "error"]);
-    const dependencies = { ...run.dependencies, findExactTransferTx: async () => null };
+    const findExactTransferTx = vi.fn(async () => null);
+    const dependencies = { ...run.dependencies, findExactTransferTx };
     await expect(executeVaultDirectStep(stepInput(), dependencies)).resolves.toMatchObject({
-      state: "pending",
+      state: "done",
     });
     expect(run.settledIndices()).toEqual([0, 1]);
     expect(run.receiptIndices()).toEqual([0]);
+    expect(findExactTransferTx.mock.calls.length).toBeGreaterThan(1);
+    expect(await healthFactCount()).toBe(0);
+    const observation = await getPool().query<{ delivered: number | null }>(
+      "SELECT delivered FROM observations WHERE objective_id=$1 AND call_index=1",
+      [OBJECTIVE],
+    );
+    expect(observation.rows[0]?.delivered).toBeNull();
+    const trace = await getPool().query<{ payload: { index: number } }>(
+      "SELECT payload FROM step_executions WHERE plan_id=$1 AND phase='settlement-unproven'",
+      [PLAN_ID],
+    );
+    expect(trace.rows.map((row) => row.payload.index)).toEqual([1]);
+  });
+
+  it("retries a delayed exact transfer proof before signing and attributing the paid call", async () => {
+    const run = partialRun(["ok", "no-response", "error"]);
+    let lookups = 0;
+    const dependencies = {
+      ...run.dependencies,
+      findExactTransferTx: async () => (++lookups === 1 ? null : HASH),
+    };
+    await expect(executeVaultDirectStep(stepInput(), dependencies)).resolves.toMatchObject({
+      state: "done",
+    });
+    expect(lookups).toBe(2);
+    expect(run.receiptIndices()).toEqual([0, 1]);
+    expect(await healthFactCount()).toBe(1);
+  });
+
+  it("does not sign or attribute a paid call when transfer proof is ambiguous", async () => {
+    const run = partialRun(["ok", "no-response", "error"]);
+    const dependencies = {
+      ...run.dependencies,
+      findExactTransferTx: async () => {
+        throw new Error("Indexer exact transfer lookup is ambiguous.");
+      },
+    };
+    await expect(executeVaultDirectStep(stepInput(), dependencies)).rejects.toThrow("ambiguous");
+    expect(run.settledIndices()).toEqual([0, 1]);
+    expect(run.receiptIndices()).toEqual([0]);
+    expect(await healthFactCount()).toBe(0);
   });
 
   it("attributes an uninterrupted settled connection reset and records each retry outcome", async () => {
@@ -366,6 +414,7 @@ function partialRun(
   let final = false;
   let crashPending = options.crashPaidIndex;
   const receipts: number[] = [];
+  const receiptContexts: SettledReceiptContext[] = [];
   const sign = vi.fn(async (_caller: string, request: SignRequest): Promise<SignResult> => {
     if (request.kind === "usdc-3009")
       return { signature: `0x${"ab".repeat(65)}`, digest: HASH as `0x${string}` };
@@ -428,6 +477,7 @@ function partialRun(
   const boundary = vi.fn(async (context: BoundaryInput) => boundaryResult(context));
   const recordReceipt = vi.fn(async (context: SettledReceiptContext) => {
     receipts.push(context.index);
+    receiptContexts.push(context);
     return options.receiptStored ?? true;
   });
   const dependencies: VaultDirectDependencies = {
@@ -466,6 +516,7 @@ function partialRun(
     finalized: () => final,
     settledIndices: () => [...settled].toSorted((left, right) => left - right),
     receiptIndices: () => [...new Set(receipts)].toSorted((left, right) => left - right),
+    receiptContexts: () => [...receiptContexts],
   };
 }
 
