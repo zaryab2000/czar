@@ -188,4 +188,61 @@ describe("supplier count snapshots", () => {
     );
     expect(await refreshSupplierCounts(options)).toBe(false);
   });
+
+  it("counts one judgement once however many receipts it binds (SCR-160 §14 item 3)", async () => {
+    const pool = getPool();
+    await pool.query("DELETE FROM executor_leases WHERE envelope_ref=$1", [
+      `ranking:supplier-counts:${network}`,
+    ]);
+    const before = await pool.query<{ good: number; bad: number }>(
+      "SELECT good,bad FROM supplier_counts WHERE network=$1 AND service_id=$2",
+      [network, serviceId],
+    );
+    // ratingTwo already binds one receipt; bind 19 more settled receipts of the same step to it.
+    for (let call = 1; call < 20; call += 1) {
+      const obsId = `obs_${(100 + call).toString(16).padStart(32, "0")}`;
+      await pool.query(
+        `INSERT INTO observations(obs_id,user_id,vault,network,rail,service_id,version_id,
+           task_class,objective_id,envelope_ref,step_index,call_index,payment_ref_hash,
+           payment_id,dedup_key,settled_at)
+         VALUES($1,$2,$3,$4,'gateway-batched',$5,$6,'data-json',$7,$8,0,$9,
+           '0x' || repeat('c',64),$10,$11,now())`,
+        [
+          obsId,
+          TEST_USER_ID,
+          payer,
+          network,
+          serviceId,
+          versionId,
+          objectives[1],
+          `${network}:${payer}:3`,
+          call,
+          `payment-extra-${call}`,
+          `gateway-batched:${network}:${payer}:${payee}:0x${(100 + call).toString(16).padStart(64, "0")}`,
+        ],
+      );
+      await pool.query("INSERT INTO rating_receipts(obs_id,rating_id) VALUES($1,$2)", [
+        obsId,
+        ratingTwo,
+      ]);
+    }
+    expect(
+      (await pool.query("SELECT obs_id FROM rating_receipts WHERE rating_id=$1", [ratingTwo]))
+        .rowCount,
+    ).toBe(20);
+    await refreshSupplierCounts({
+      pool,
+      network,
+      policyVersion: `pol_${"a".repeat(16)}`,
+      confidenceZ: 1.959964,
+      workerId: "ranking-test",
+      leaseSeconds: 300,
+      now: new Date("2026-10-31T00:02:00Z"),
+    });
+    const after = await pool.query<{ good: number; bad: number }>(
+      "SELECT good,bad FROM supplier_counts WHERE network=$1 AND service_id=$2",
+      [network, serviceId],
+    );
+    expect(after.rows).toEqual(before.rows);
+  });
 });
