@@ -9,9 +9,9 @@
   "properties": {
     "schemaVersion": {
       "type": "string",
-      "description": "Schema version, major.minor; this file is 1.0.",
+      "description": "Schema version, major.minor; this file is 1.1.",
       "x-privacyClass": "server-only",
-      "const": "1.0"
+      "const": "1.1"
     },
     "stepIndex": {
       "type": "integer",
@@ -19,6 +19,24 @@
       "x-privacyClass": "server-only",
       "minimum": 0,
       "maximum": 63
+    },
+    "callIndex": {
+      "type": "integer",
+      "description": "Authorization index for this paid call; zero for an ERC-8183 job.",
+      "x-privacyClass": "server-only",
+      "minimum": 0,
+      "maximum": 4095
+    },
+    "subjectIndex": {
+      "type": "integer",
+      "description": "TaskSpec subject served by this paid call when known.",
+      "x-privacyClass": "server-only",
+      "minimum": 0
+    },
+    "obsId": {
+      "$ref": "common.schema.json#/$defs/SlObsId",
+      "description": "Observation identity for this paid call.",
+      "x-privacyClass": "server-only"
     },
     "status": {
       "type": "string",
@@ -130,6 +148,8 @@
   "required": [
     "schemaVersion",
     "stepIndex",
+    "callIndex",
+    "obsId",
     "status",
     "source",
     "fields",
