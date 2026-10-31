@@ -48,6 +48,19 @@ describe("SCR-160 health facts", () => {
     ).toEqual([]);
   });
 
+  it("does not count an authorization expired during resume toward H1 or H2", () => {
+    const released = [1, 2, 3].map((index) => row(index, { releasedAt: new Date() }));
+    const excluded = { kind: "resume-past-valid-before" as const, obsId: released[0]!.obsId };
+    expect(healthFacts(released, [excluded], config)).toEqual([]);
+    const settled = {
+      ...released[0]!,
+      releasedAt: null,
+      settledAt: new Date(),
+      delivered: 0 as const,
+    };
+    expect(healthFacts([settled], [excluded], config)).toEqual([]);
+  });
+
   it("H3 requires complete mined history and excludes submitted expiry", () => {
     const expired = row(1, {
       rail: "erc8183-job",

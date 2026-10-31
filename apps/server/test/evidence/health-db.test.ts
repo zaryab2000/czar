@@ -1,7 +1,13 @@
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { setupDatabase } from "#test/db";
 import { makeObjectiveSubmission, seedDevice, TEST_USER_ID } from "#test/fixtures";
-import { fillResponse, insertAtSign, markReleased, markSettled } from "#src/evidence/observations";
+import {
+  fillResponse,
+  insertAtSign,
+  markReleased,
+  markSettled,
+  setJobState,
+} from "#src/evidence/observations";
 import { clearFacts, isInjectionBlocked, openOwnerFacts, writeFacts } from "#src/evidence/health";
 
 const getPool = setupDatabase();
@@ -42,10 +48,39 @@ async function sign(index: number) {
   });
 }
 
+async function openJob(index: number) {
+  return insertAtSign(getPool(), {
+    userId: TEST_USER_ID,
+    vault: VAULT,
+    network: "eip155:5042002",
+    rail: "erc8183-job",
+    serviceId: SERVICE_ID,
+    versionId: "ver_unknown",
+    taskClass: "data-json.extract",
+    objectiveId: OBJECTIVE_ID,
+    envelopeRef: ENVELOPE_REF,
+    stepIndex: 0,
+    paymentRef: {
+      schemaVersion: "1.0",
+      rail: "erc8183-job",
+      network: "eip155:5042002",
+      contract: "0x0000000000000000000000000000000000000004",
+      jobId: String(index),
+      client: VAULT,
+      provider: PAYEE,
+      evaluator: "0x0000000000000000000000000000000000000005",
+      budget: "1000",
+    },
+    paymentId: `pay_${index.toString(16).padStart(32, "0")}`,
+  });
+}
+
 beforeAll(async () => seedDevice(getPool()));
 beforeEach(async () => {
   await getPool().query("DELETE FROM supplier_health");
   await getPool().query("DELETE FROM observations");
+  await getPool().query("DELETE FROM step_executions");
+  await getPool().query("DELETE FROM steps");
   await getPool().query("DELETE FROM plans");
   await getPool().query("DELETE FROM objectives");
   const submission = makeObjectiveSubmission(OBJECTIVE_ID);
@@ -110,6 +145,27 @@ describe("persisted supplier health", () => {
     expect(count.rows[0]?.count).toBe("1");
   });
 
+  it("does not count a traced expired-resume release toward H2", async () => {
+    const first = await sign(1);
+    const second = await sign(2);
+    const third = await sign(3);
+    await getPool().query(
+      "INSERT INTO steps (plan_id,step_index,step,state) VALUES ($1,0,'{}','offered')",
+      [PLAN_ID],
+    );
+    await getPool().query(
+      `INSERT INTO step_executions (plan_id,step_index,attempt,phase,payload)
+       VALUES ($1,0,0,'auth.signed',$2::jsonb),($1,0,0,'call.unpaid',$3::jsonb)`,
+      [
+        PLAN_ID,
+        JSON.stringify({ index: 1, paymentId: `pay_${"1".padStart(32, "0")}` }),
+        JSON.stringify({ index: 1, errorCode: "authorization-expired" }),
+      ],
+    );
+    for (const id of [first, second, third]) await markReleased(getPool(), id, AT);
+    expect(await openOwnerFacts(getPool(), TEST_USER_ID, "eip155:5042002", SERVICE_ID)).toEqual([]);
+  });
+
   it("clears owner facts only with a later explicitly approved delivered settlement", async () => {
     const failed = await sign(1);
     await fillResponse(getPool(), failed, AT, 0);
@@ -124,6 +180,22 @@ describe("persisted supplier health", () => {
       [failed],
     );
     expect(cleared.rows[0]?.cleared_by_obs_id).toBe(success);
+  });
+
+  it("clears H3 after a later approved job completes, in either fact ordering", async () => {
+    const failed = await openJob(1);
+    await writeFacts(getPool(), [{ fact: "job-failed", obsId: failed }]);
+    const firstSuccess = await openJob(2);
+    await markSettled(getPool(), firstSuccess, new Date(AT.getTime() + 1_000));
+    await setJobState(getPool(), firstSuccess, "Completed", AT);
+    expect(await openOwnerFacts(getPool(), TEST_USER_ID, "eip155:5042002", SERVICE_ID)).toEqual([]);
+
+    const laterFailure = await openJob(3);
+    await writeFacts(getPool(), [{ fact: "job-failed", obsId: laterFailure }]);
+    const secondSuccess = await openJob(4);
+    await setJobState(getPool(), secondSuccess, "Completed", AT);
+    await markSettled(getPool(), secondSuccess, new Date(AT.getTime() + 2_000));
+    expect(await openOwnerFacts(getPool(), TEST_USER_ID, "eip155:5042002", SERVICE_ID)).toEqual([]);
   });
 
   it("stores H4 idempotently and excludes the supplier while uncleared", async () => {
