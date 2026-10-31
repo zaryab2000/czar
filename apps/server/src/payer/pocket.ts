@@ -15,6 +15,7 @@ import {
   buildExactPaymentPayload,
   encodePaymentSignature,
   readPaymentRequired,
+  SafeFetchError,
   selectOffer,
   type SanitizedExtensions,
   type SafeFetch,
@@ -40,6 +41,8 @@ import {
   startExecutorLeaseRenewal,
   type ExecutorLeaseGuard,
 } from "#src/payer/executions";
+
+class GatewayMerchantFailure extends Error {}
 
 const BASIS_POINTS = 10_000n;
 const HALT_PULLBACK_ATTEMPTS = 2;
@@ -763,6 +766,27 @@ async function sendGatewayCall(
     paymentId,
   });
   assertLeaseHeld();
+  if (previous) {
+    const state = await dependencies.gatewayStatus({
+      pocket: input.pocket,
+      nonce: payload.payload.authorization.nonce as Hash32,
+    });
+    if (state !== "pending") {
+      await recordGatewayPhase(dependencies, input, step.stepIndex, attempt, "pocket.status", {
+        index,
+        state,
+      });
+      if (state === "completed") {
+        const observation = await getObservation(dependencies.pool, observationId);
+        if (observation?.respondedAt === null)
+          await fillResponse(dependencies.pool, observationId, undefined, 0);
+        await markSettled(dependencies.pool, observationId, dependencies.now());
+      } else {
+        await markReleased(dependencies.pool, observationId, dependencies.now());
+      }
+      return;
+    }
+  }
   const headers = {
     ...request.options.headers,
     "payment-signature": encodePaymentSignature(payload),
@@ -783,6 +807,11 @@ async function sendGatewayCall(
       observationId,
     );
   } catch (error) {
+    if (
+      !(error instanceof GatewayMerchantFailure) &&
+      !(error instanceof SafeFetchError && error.code === "upstream-unavailable")
+    )
+      throw error;
     const observation = await getObservation(dependencies.pool, observationId);
     if (observation?.respondedAt)
       await fillResponse(dependencies.pool, observationId, undefined, 0);
@@ -840,22 +869,29 @@ async function fetchWithPaymentRetry(
       },
     );
     assertLeaseHeld();
+    let response: Awaited<ReturnType<SafeFetch>>;
     try {
-      const response = await dependencies.safeFetch(request.url, {
+      response = await dependencies.safeFetch(request.url, {
         ...request.options,
         headers,
         timeoutMs,
       });
-      await fillResponse(dependencies.pool, observationId, dependencies.now(), undefined);
-      if (response.status >= 200 && response.status < 300) return response;
-      if (response.status === 409) {
-        lastError = new Error(`Gateway rejected authorization index ${callIndex} with HTTP 409.`);
-        break;
-      }
-      lastError = new Error(`Gateway nanopayment failed with HTTP ${response.status}.`);
     } catch (error) {
+      if (!(error instanceof SafeFetchError) || error.code !== "upstream-unavailable") throw error;
       lastError = error;
+      continue;
     }
+    await fillResponse(dependencies.pool, observationId, dependencies.now(), undefined);
+    if (response.status >= 200 && response.status < 300) return response;
+    if (response.status === 409) {
+      lastError = new GatewayMerchantFailure(
+        `Gateway rejected authorization index ${callIndex} with HTTP 409.`,
+      );
+      break;
+    }
+    lastError = new GatewayMerchantFailure(
+      `Gateway nanopayment failed with HTTP ${response.status}.`,
+    );
   }
   if (lastError instanceof Error) throw lastError;
   throw new Error("Gateway nanopayment failed after configured retries.");

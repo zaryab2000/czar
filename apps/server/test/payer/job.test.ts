@@ -164,8 +164,7 @@ describe("job brief commitments", () => {
       delivered: number | null;
       settled_at: Date | null;
     }>(
-      `SELECT job_state,delivered,settled_at FROM observations
-       WHERE objective_id=(SELECT objective_id FROM plans WHERE plan_id=$1)`,
+      "SELECT job_state,delivered,settled_at FROM observations WHERE objective_id=(SELECT objective_id FROM plans WHERE plan_id=$1)",
       [PLAN_ID],
     );
     expect(expiredObservation.rows).toHaveLength(1);
@@ -249,7 +248,8 @@ describe("job brief commitments", () => {
       delivered: number | null;
       settled_at: Date | null;
     }>(
-      "SELECT job_state,delivered,settled_at FROM observations WHERE objective_id=(SELECT objective_id FROM plans WHERE plan_id=$1)",
+      `SELECT job_state,delivered,settled_at FROM observations
+       WHERE objective_id=(SELECT objective_id FROM plans WHERE plan_id=$1)`,
       [PLAN_ID],
     );
     expect(observation.rows).toMatchObject([

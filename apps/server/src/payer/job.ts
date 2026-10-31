@@ -18,6 +18,7 @@ import { randomUUID } from "node:crypto";
 import { czarVaultAbi } from "@czar/vault-client";
 import {
   fillResponse,
+  getObservation,
   insertAtSign,
   markReleased,
   markSettled,
@@ -459,7 +460,7 @@ async function observeJobState(
 ): Promise<void> {
   const id = job.observationId;
   const at = dependencies.now();
-  if (["Funded", "Submitted", "Completed", "Rejected"].includes(state))
+  if (["Funded", "Submitted", "Completed"].includes(state))
     await markSettled(
       dependencies.pool,
       id,
@@ -467,11 +468,23 @@ async function observeJobState(
       transaction && /^0x[0-9a-f]{64}$/.test(transaction) ? transaction : undefined,
     );
   if (state === "Rejected") {
-    await fillResponse(dependencies.pool, id, undefined, 0);
+    const observation = await getObservation(dependencies.pool, id);
+    if (observation?.settledAt) await fillResponse(dependencies.pool, id, undefined, 0);
     return;
   }
   await setJobState(dependencies.pool, id, state as JobState, at);
   if (state === "Released") await markReleased(dependencies.pool, id, at);
+}
+
+async function observeEscrowRejection(
+  dependencies: JobExecutionDependencies,
+  job: OpenedJob,
+  view: JobChainView,
+): Promise<void> {
+  if (view.escrowState !== "Rejected") return;
+  const observation = await getObservation(dependencies.pool, job.observationId);
+  if (observation?.settledAt)
+    await fillResponse(dependencies.pool, job.observationId, undefined, 0);
 }
 
 async function observeSavedFunding(
@@ -509,6 +522,7 @@ async function awaitAndFundJob(
   let view = await dependencies.chain.getJob(job.jobKey);
   if (view.vaultState === "Expired") await observeSavedFunding(input, dependencies, job, attempt);
   await observeJobState(dependencies, job, view.vaultState);
+  await observeEscrowRejection(dependencies, job, view);
   let budget = view.budget;
   if (view.vaultState === "Released") return undefined;
   if (
@@ -745,6 +759,7 @@ async function syncAndReturn(
   });
   if (synced.state === "Expired") await observeSavedFunding(input, dependencies, job, attempt);
   await observeJobState(dependencies, job, synced.state);
+  await observeEscrowRejection(dependencies, job, view);
   return {
     state: synced.state,
     jobKey: job.jobKey,

@@ -680,7 +680,8 @@ describe("pocket funding", () => {
             body: new Uint8Array(),
           };
         signedHeaders.push(header);
-        if (signedHeaders.length === 1) throw new Error("temporary network failure");
+        if (signedHeaders.length === 1)
+          throw new SafeFetchError("upstream-unavailable", "transport");
         return {
           status: 200,
           url: "http://127.0.0.1:4021/data",

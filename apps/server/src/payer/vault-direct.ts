@@ -25,6 +25,7 @@ import {
   encodePaymentSignature,
   readPaymentRequired,
   readSettlement,
+  SafeFetchError,
   selectOffer,
   type PaymentPayload,
   type PaymentRequired,
@@ -1498,14 +1499,21 @@ async function authorizeAndCall(
     // once `block.timestamp ≥ validBefore`.
     if (retry > 0 && (await dependencies.chain.latestBlockTimestamp()) >= validBefore) break;
     dependencies.assertLeaseHeld?.();
-    const response = await dependencies.safeFetch(call.request.url, {
-      ...requestOptions(call.request),
-      headers,
-      timeoutMs: Math.min(
-        Number(dependencies.config.get("payer.callTimeoutMs")),
-        call.offer.maxTimeoutSeconds * 1000,
-      ),
-    });
+    let response: SafeFetchResponse;
+    try {
+      response = await dependencies.safeFetch(call.request.url, {
+        ...requestOptions(call.request),
+        headers,
+        timeoutMs: Math.min(
+          Number(dependencies.config.get("payer.callTimeoutMs")),
+          call.offer.maxTimeoutSeconds * 1000,
+        ),
+      });
+    } catch (error) {
+      if (!(error instanceof SafeFetchError) || error.code !== "upstream-unavailable") throw error;
+      errorCode = "upstream-unavailable";
+      continue;
+    }
     await fillResponse(dependencies.pool, observationId, dependencies.now(), undefined);
     const attemptSettlement = readSettlement(response.headers);
     const moved = attemptSettlement.state === "settled" || attemptSettlement.state === "pending";

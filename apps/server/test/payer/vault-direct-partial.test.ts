@@ -50,6 +50,7 @@ const TREE = buildTree([payeeLeaf(PAYEE, PAYEE_KIND.X402_PAY_TO, 0, STEP_CAP)]);
  * - `settled-empty`: settles and returns a 2xx with an empty body.
  * - `silent-settle`: settles on chain, then returns a 5xx with no PAYMENT-RESPONSE.
  * - `no-response`: settles on chain, then the transport fails before any response arrives.
+ * - `blocked`: the safe-fetch boundary rejects the target before any merchant request.
  */
 type MerchantMode =
   | "ok"
@@ -57,7 +58,8 @@ type MerchantMode =
   | "settled-error"
   | "settled-empty"
   | "silent-settle"
-  | "no-response";
+  | "no-response"
+  | "blocked";
 
 beforeAll(async () => seedDevice(getPool()));
 beforeEach(async () => {
@@ -216,6 +218,15 @@ describe("vault-direct partial steps (SCR-159 §3)", () => {
     });
   });
 
+  it("does not retry a blocked fetch target", async () => {
+    const run = partialRun(["blocked", "ok", "ok"]);
+
+    await expect(executeVaultDirectStep(stepInput(), run.dependencies)).rejects.toThrow(
+      "fetch-blocked: url",
+    );
+    expect(run.settledIndices()).toEqual([]);
+  });
+
   it("stays pending without a terminal state while a paid call's receipt is not yet stored", async () => {
     const run = partialRun(["ok", "error", "ok"], { receiptStored: false });
 
@@ -277,6 +288,7 @@ function partialRun(modes: readonly MerchantMode[], options: { receiptStored?: b
       const index = Number(new URL(url).searchParams.get("q")?.replace("call-", ""));
       const mode = modes[index];
       if (mode === undefined) throw new Error(`No merchant mode for call ${index}.`);
+      if (mode === "blocked") throw new SafeFetchError("fetch-blocked", "url");
       if (mode === "no-response") {
         used.add(index);
         throw new SafeFetchError("upstream-unavailable", "transport");
