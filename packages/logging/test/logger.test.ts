@@ -90,12 +90,20 @@ describe("createLogger", () => {
     logger.info("ratings_posted", { surface: "web", value: "good" });
     expect(last()).toMatchObject({ surface: "web", value: "good" });
     logger.info("ratings_corrected", {
-      surface: "private user text", value: "merchant response", steps: -1,
+      surface: "private user text",
+      value: "merchant response",
+      steps: -1,
+      merchantLabel: "Private seller",
+      resultBody: FORBIDDEN.merchantBody,
+      path: FORBIDDEN.path,
     });
     expect(last()["surface"]).toBeUndefined();
     expect(last()["value"]).toBeUndefined();
     expect(last()["steps"]).toBeUndefined();
-    expect(last()["droppedFields"]).toBe(3);
+    expect(last()["merchantLabel"]).toBeUndefined();
+    expect(last()["resultBody"]).toBeUndefined();
+    expect(last()["path"]).toBeUndefined();
+    expect(last()["droppedFields"]).toBe(6);
   });
 
   it("drops every field outside the allowlist and counts it", () => {

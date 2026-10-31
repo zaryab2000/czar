@@ -41,8 +41,8 @@ export async function postRatingRoute(
     const operationId = surface === "cli" ? "submitRating" : "submitAppRating";
     assertExchange(operationId, body, 202, outcome.accepted);
     if (!outcome.replayed) {
-      deps.logger.info("czar_ratings_posted", { surface, value: body.value, count: 1 });
-      if (outcome.correction) deps.logger.info("czar_ratings_corrections", { surface, count: 1 });
+      deps.logger.info("ratings_posted", { surface, value: body.value });
+      if (outcome.correction) deps.logger.info("ratings_corrected", { surface });
     }
     return context.json(outcome.accepted, 202);
   } catch (error) {
@@ -72,8 +72,8 @@ export async function getRatingPromptRoute(
       "Content-Type": "application/problem+json",
     });
   assertExchange("getRatingPrompt", undefined, 200, prompt);
-  if (prompt.steps.some((step) => step.canRate))
-    deps.logger.info("czar_ratings_prompts_shown", { surface: "cli", count: 1 });
+  const steps = prompt.steps.filter((step) => step.canRate).length;
+  if (steps > 0) deps.logger.info("ratings_prompt_shown", { surface: "cli", steps });
   return context.json(prompt);
 }
 
@@ -95,12 +95,11 @@ export async function listAppResultsRoute(
     new URL(context.req.url),
   );
   assertExchange("listAppResults", undefined, 200, page);
-  const prompts = page.items.reduce(
+  const steps = page.items.reduce(
     (count, card) => count + card.suppliers.filter((step) => step.canRate).length,
     0,
   );
-  if (prompts > 0)
-    deps.logger.info("czar_ratings_prompts_shown", { surface: "web", count: prompts });
+  if (steps > 0) deps.logger.info("ratings_prompt_shown", { surface: "web", steps });
   return context.json(page);
 }
 

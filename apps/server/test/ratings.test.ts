@@ -289,16 +289,31 @@ describe("Flow 4A rating intake", () => {
     const pool = getPool();
     const { app } = createTestContext(pool);
     const wrongEnvelope = await postRating(app, {
-      objectiveId: OTHER_ENVELOPE_OBJECTIVE, stepIndex: 0, value: "good",
+      objectiveId: OTHER_ENVELOPE_OBJECTIVE,
+      stepIndex: 0,
+      value: "good",
     });
     expect(wrongEnvelope.status).toBe(403);
     await expect(wrongEnvelope.json()).resolves.toMatchObject({ czarCode: "not-your-payment" });
+    await replaceDedupPayee(pool, OTHER_ENVELOPE_OBJECTIVE, 0, ALTERNATE_PAYEE);
+    const alternateFromWrongEnvelope = await postRating(app, {
+      objectiveId: OTHER_ENVELOPE_OBJECTIVE,
+      stepIndex: 0,
+      value: "good",
+    });
+    expect(alternateFromWrongEnvelope.status).toBe(403);
+    await expect(alternateFromWrongEnvelope.json()).resolves.toMatchObject({
+      czarCode: "not-your-payment",
+    });
     await pool.query("UPDATE users SET vault=$1 WHERE user_id=$2", [
-      "0x2222222222222222222222222222222222222222", TEST_USER_ID,
+      "0x2222222222222222222222222222222222222222",
+      TEST_USER_ID,
     ]);
     try {
       const historical = await postRating(app, {
-        objectiveId: CHANGED_VAULT_OBJECTIVE, stepIndex: 0, value: "good",
+        objectiveId: CHANGED_VAULT_OBJECTIVE,
+        stepIndex: 0,
+        value: "good",
       });
       expect(historical.status).toBe(202);
     } finally {
@@ -310,18 +325,23 @@ describe("Flow 4A rating intake", () => {
     const pool = getPool();
     const { app } = createTestContext(pool);
     const alternate = await postRating(app, {
-      objectiveId: ALTERNATE_OBJECTIVE, stepIndex: 0, value: "good",
+      objectiveId: ALTERNATE_OBJECTIVE,
+      stepIndex: 0,
+      value: "good",
     });
     expect(alternate.status).toBe(409);
     await expect(alternate.json()).resolves.toMatchObject({ czarCode: "nothing-settled" });
     const mixed = await postRating(app, {
-      objectiveId: MIXED_PAYEE_OBJECTIVE, stepIndex: 0, value: "good",
+      objectiveId: MIXED_PAYEE_OBJECTIVE,
+      stepIndex: 0,
+      value: "good",
     });
     expect(mixed.status).toBe(202);
     await expect(mixed.json()).resolves.toMatchObject({ receipts: 1 });
     const bound = await pool.query<{ obs_id: string }>(
       `SELECT rr.obs_id FROM rating_receipts rr JOIN ratings r ON r.rating_id=rr.rating_id
-       WHERE r.objective_id=$1`, [MIXED_PAYEE_OBJECTIVE],
+       WHERE r.objective_id=$1`,
+      [MIXED_PAYEE_OBJECTIVE],
     );
     expect(bound.rowCount).toBe(1);
     const alternateRow = await pool.query<{ settled_at: Date }>(
@@ -344,18 +364,24 @@ describe("Flow 4A rating intake", () => {
     });
     expect(prompt.status).toBe(200);
     const first = await postRating(app, {
-      objectiveId: LOG_OBJECTIVE, stepIndex: 0, value: "good",
+      objectiveId: LOG_OBJECTIVE,
+      stepIndex: 0,
+      value: "good",
     });
     expect(first.status).toBe(202);
-    const firstBody = await first.json() as { ratingId: string };
+    const firstBody = (await first.json()) as { ratingId: string };
     const second = await postRating(app, {
-      objectiveId: LOG_OBJECTIVE, stepIndex: 0, value: "bad",
+      objectiveId: LOG_OBJECTIVE,
+      stepIndex: 0,
+      value: "bad",
       supersedes: firstBody.ratingId,
     });
     expect(second.status).toBe(202);
-    const ratingEvents = logLines.map((line) => JSON.parse(line) as Record<string, unknown>)
-      .filter((line) => typeof line["event"] === "string" &&
-        String(line["event"]).startsWith("ratings_"));
+    const ratingEvents = logLines
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+      .filter(
+        (line) => typeof line["event"] === "string" && String(line["event"]).startsWith("ratings_"),
+      );
     expect(ratingEvents).toEqual([
       expect.objectContaining({ event: "ratings_prompt_shown", surface: "cli", steps: 1 }),
       expect.objectContaining({ event: "ratings_posted", surface: "cli", value: "good" }),
@@ -470,7 +496,9 @@ async function seedObservations(
     [planId, objectiveId, JSON.stringify({ steps: [{ stepIndex: 0, payee: PAYEE }] })],
   );
   await pool.query("UPDATE objectives SET plan_id=$2,envelope_ref=$3 WHERE objective_id=$1", [
-    objectiveId, planId, envelope,
+    objectiveId,
+    planId,
+    envelope,
   ]);
   for (let index = 0; index < count; index += 1) {
     const obsId = `obs_${(index + offset).toString(16).padStart(32, "0")}`;
@@ -488,9 +516,9 @@ async function seedObservations(
         envelope,
         index,
         `payment-${index + offset}`,
-        `x402-exact:eip155:5042002:${VAULT}:${PAYEE}:0x${
-          (index + offset + 1).toString(16).padStart(64, "0")
-        }`,
+        `x402-exact:eip155:5042002:${VAULT}:${PAYEE}:0x${(index + offset + 1)
+          .toString(16)
+          .padStart(64, "0")}`,
         TEST_NOW,
       ],
     );
@@ -498,7 +526,10 @@ async function seedObservations(
 }
 
 async function replaceDedupPayee(
-  pool: Pool, objectiveId: string, callIndex: number, payee: string,
+  pool: Pool,
+  objectiveId: string,
+  callIndex: number,
+  payee: string,
 ): Promise<void> {
   const row = await pool.query<{ dedup_key: string }>(
     "SELECT dedup_key FROM observations WHERE objective_id=$1 AND call_index=$2",
@@ -506,10 +537,11 @@ async function replaceDedupPayee(
   );
   const key = row.rows[0]?.dedup_key;
   if (!key) throw new Error("Seeded observation is missing its dedup key.");
-  await pool.query(
-    "UPDATE observations SET dedup_key=$3 WHERE objective_id=$1 AND call_index=$2",
-    [objectiveId, callIndex, key.replace(PAYEE, payee)],
-  );
+  await pool.query("UPDATE observations SET dedup_key=$3 WHERE objective_id=$1 AND call_index=$2", [
+    objectiveId,
+    callIndex,
+    key.replace(PAYEE, payee),
+  ]);
 }
 
 function postRating(app: ReturnType<typeof createTestContext>["app"], body: object) {
