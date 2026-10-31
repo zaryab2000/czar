@@ -92,7 +92,7 @@ function makePlanner(
         rank: async (query) => {
           options.rankingQueries?.push(query);
           return {
-            schemaVersion: "1.2",
+            schemaVersion: "1.3",
             query_id: "query-1",
             received_at: "2026-10-21T00:00:00Z",
             policy_version: "test",
