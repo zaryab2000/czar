@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { healthFacts } from "#src/evidence/health";
+import { healthFacts, type HealthRow } from "#src/evidence/health";
 
-const base = {
+const base: HealthRow = {
   obsId: `obs_${"1".repeat(32)}`,
   userId: "usr_owner",
   network: "eip155:5042002",
@@ -14,7 +14,7 @@ const base = {
   jobState: null,
 };
 
-function row(index: number, changes: Partial<typeof base> = {}) {
+function row(index: number, changes: Partial<HealthRow> = {}): HealthRow {
   return { ...base, obsId: `obs_${index.toString(16).padStart(32, "0")}`, ...changes };
 }
 
@@ -50,21 +50,29 @@ describe("SCR-160 health facts", () => {
 
   it("H3 requires complete mined history and excludes submitted expiry", () => {
     const expired = row(1, {
-      rail: "erc8183-job" as never,
+      rail: "erc8183-job",
       settledAt: new Date(),
-      jobState: "Expired" as never,
+      jobState: "Expired",
     });
     expect(healthFacts([expired], [], config)).toEqual([]);
     expect(
-      healthFacts([expired], [{ kind: "job-history", obsId: expired.obsId, submitted: false }], config),
+      healthFacts(
+        [expired],
+        [{ kind: "job-history", obsId: expired.obsId, submitted: false }],
+        config,
+      ),
     ).toEqual([{ fact: "job-failed", obsId: expired.obsId }]);
     expect(
-      healthFacts([expired], [{ kind: "job-history", obsId: expired.obsId, submitted: true }], config),
+      healthFacts(
+        [expired],
+        [{ kind: "job-history", obsId: expired.obsId, submitted: true }],
+        config,
+      ),
     ).toEqual([]);
   });
 
   it("H3 accepts only verified supplier-failure rejection reasons", () => {
-    const job = row(1, { rail: "erc8183-job" as never, settledAt: new Date() });
+    const job = row(1, { rail: "erc8183-job", settledAt: new Date() });
     for (const reason of ["report-fail", "czar:deliverable-missing", "czar:late"] as const) {
       expect(
         healthFacts([job], [{ kind: "job-rejected", obsId: job.obsId, reason }], config),
@@ -83,6 +91,24 @@ describe("SCR-160 health facts", () => {
     }
   });
 
+  it("H3 does not recast an excluded rejection as a funded expiry", () => {
+    const expired = row(1, {
+      rail: "erc8183-job",
+      settledAt: new Date(),
+      jobState: "Expired",
+    });
+    expect(
+      healthFacts(
+        [expired],
+        [
+          { kind: "job-history", obsId: expired.obsId, submitted: false },
+          { kind: "job-rejected", obsId: expired.obsId, reason: "czar:undecided" },
+        ],
+        config,
+      ),
+    ).toEqual([]);
+  });
+
   it("H4 requires an injection quarantine with the screen available", () => {
     const paid = row(1);
     expect(
@@ -95,12 +121,14 @@ describe("SCR-160 health facts", () => {
     expect(
       healthFacts(
         [paid],
-        [{
-          kind: "boundary",
-          obsId: paid.obsId,
-          flags: ["injection-quarantined"],
-          limits: ["screen-unavailable"],
-        }],
+        [
+          {
+            kind: "boundary",
+            obsId: paid.obsId,
+            flags: ["injection-quarantined"],
+            limits: ["screen-unavailable"],
+          },
+        ],
         config,
       ),
     ).toEqual([]);
