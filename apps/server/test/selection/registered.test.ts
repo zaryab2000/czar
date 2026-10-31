@@ -12,6 +12,7 @@ import { setupDatabase } from "#test/db";
 const getPool = setupDatabase();
 const SERVICE_A = `svc_${"a".repeat(32)}`;
 const SERVICE_B = `svc_${"b".repeat(32)}`;
+const SERVICE_VERSION = `svc_${"c".repeat(32)}`;
 const NETWORK = "eip155:5042002";
 const USDC_ASSET = "0x3600000000000000000000000000000000000000";
 const RESOURCE = "https://merchant.example/v1/search";
@@ -252,6 +253,33 @@ beforeEach(async () => {
 });
 
 describe("registered selection", () => {
+  it("records the verified probe version and only advances its last seen time", async () => {
+    let current = new Date("2026-10-25T00:00:00Z");
+    const fetchImpl = vi.fn<SafeFetch>(async (url) =>
+      response("25", "0xaaa", NETWORK, undefined, bareUrl(url)),
+    );
+    const services = { [SERVICE_VERSION]: registration(RESOURCE) };
+    await setup(fetchImpl, services, () => current).directory.get(SERVICE_VERSION);
+    const read = () =>
+      getPool().query<{ version_id: string; first_seen_at: Date; last_seen_at: Date }>(
+        "SELECT version_id,first_seen_at,last_seen_at FROM service_versions WHERE service_id=$1",
+        [SERVICE_VERSION],
+      );
+    const first = await read();
+    expect(first.rows).toEqual([
+      {
+        version_id: expect.stringMatching(/^ver_[0-9a-f]{32}$/),
+        first_seen_at: current,
+        last_seen_at: current,
+      },
+    ]);
+    current = new Date("2026-10-25T00:01:00Z");
+    await setup(fetchImpl, services, () => current).directory.get(SERVICE_VERSION);
+    expect((await read()).rows).toEqual([
+      { ...first.rows[0], last_seen_at: current },
+    ]);
+  });
+
   it("returns an unanchored schema-valid decision and persists exact JCS bytes", async () => {
     const fetchImpl = vi.fn<SafeFetch>(async (url) =>
       response("25", "0xaaa", NETWORK, undefined, bareUrl(url)),
