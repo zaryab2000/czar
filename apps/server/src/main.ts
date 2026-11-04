@@ -44,6 +44,8 @@ import {
 import { startSupplierCountsRefresh } from "#src/selection/ranking/counts";
 import { rankingPolicyVersion } from "#src/selection/ranking/decision";
 import { createPlanner } from "#src/planner/index";
+import { openIncidentsFor } from "#src/social/incidents";
+import { lessonsFor } from "#src/social/lessons";
 import type { PlannerPorts } from "#src/planner/ports";
 import { createSafeProber } from "#src/planner/probe";
 import { createPlannerOperations } from "#src/planner/service";
@@ -367,6 +369,12 @@ function createPlannerOperationsIfConfigured(
   const planner = createPlanner({
     config: options.config,
     ports: createPlannerPorts(options, acceptance, selection, signer),
+    social: {
+      lessonsFor: (userId, network, taskClass) =>
+        lessonsFor(options.pool, userId, network, taskClass, options.clock.now()),
+      openIncidentsFor: (network, serviceIds, taskClass) =>
+        openIncidentsFor(options.pool, network, serviceIds, taskClass),
+    },
   });
   return createPlannerOperations({
     pool: options.pool,
