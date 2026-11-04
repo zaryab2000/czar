@@ -167,15 +167,16 @@ async function systemPost(args: {
   );
 }
 
-async function opened(
-  client: PoolClient,
-  key: IncidentKey,
-  negativeUnits: number,
-  distinctOwners: number,
-  windowStart: Date,
-  now: Date,
-  windowDays: number,
-): Promise<void> {
+async function opened(args: {
+  client: PoolClient;
+  key: IncidentKey;
+  negativeUnits: number;
+  distinctOwners: number;
+  windowStart: Date;
+  now: Date;
+  windowDays: number;
+}): Promise<void> {
+  const { client, key, negativeUnits, distinctOwners, windowStart, now, windowDays } = args;
   const incidentId = id("inc_");
   const threadId = id("thr_");
   const subject = `incident:${key.network}:${key.serviceId}:${key.versionId}:${key.taskClass}`;
@@ -349,7 +350,15 @@ async function evaluateKey(args: {
     return;
   }
   if (!newer && owners >= Number(config.get("social.incidentMinOwners")))
-    await opened(client, key, negatives.length, owners, windowStart, now, windowDays);
+    await opened({
+      client,
+      key,
+      negativeUnits: negatives.length,
+      distinctOwners: owners,
+      windowStart,
+      now,
+      windowDays,
+    });
 }
 
 /** Recompute incident state from settled evidence and corrected effective ratings. */

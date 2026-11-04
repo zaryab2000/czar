@@ -46,12 +46,21 @@ async function seedOwner(index: number): Promise<void> {
 async function observation(
   owner: number,
   ordinal: number,
-  service = SERVICE,
-  version = VERSION,
-  delivered = 0,
-  settledAt = AT,
-  taskClass = "web-search",
+  options: {
+    service?: string;
+    version?: string;
+    delivered?: number;
+    settledAt?: Date;
+    taskClass?: string;
+  } = {},
 ): Promise<string> {
+  const {
+    service = SERVICE,
+    version = VERSION,
+    delivered = 0,
+    settledAt = AT,
+    taskClass = "web-search",
+  } = options;
   const obsId = `obs_${ordinal.toString(16).padStart(32, "0")}`;
   await getPool().query(
     `INSERT INTO observations(obs_id,user_id,vault,network,rail,service_id,version_id,
@@ -135,10 +144,10 @@ describe("SN-4 incident evidence", () => {
     expect(incidents[0]).toMatchObject({ distinctOwners: 3, negativeUnits: 4 });
     const later = new Date(AT.getTime() + 60_000);
     const goodForOne = await Promise.all(
-      [5, 6, 7].map((i) => observation(1, i, SERVICE, VERSION, 1, later)),
+      [5, 6, 7].map((i) => observation(1, i, { delivered: 1, settledAt: later })),
     );
     const goodForTwo = await Promise.all(
-      [8, 9].map((i) => observation(2, i, SERVICE, VERSION, 1, later)),
+      [8, 9].map((i) => observation(2, i, { delivered: 1, settledAt: later })),
     );
     await rateGood(1, 1, goodForOne);
     await rateGood(2, 2, goodForTwo);
@@ -154,14 +163,19 @@ describe("SN-4 incident evidence", () => {
     const unknownService = `svc_${"c".repeat(32)}`;
     await seenVersion(SERVICE, VERSION, new Date(AT.getTime() - 60_000));
     for (const index of [4, 5, 6]) {
-      await observation(index, index + 10, SERVICE, VERSION);
-      await observation(index, index + 20, unknownService, "ver_unknown");
+      await observation(index, index + 10);
+      await observation(index, index + 20, { service: unknownService, version: "ver_unknown" });
     }
     await evaluateIncidents(getPool(), config, AT);
     const later = new Date(AT.getTime() + 60_000);
     await seenVersion(SERVICE, NEXT_VERSION, later);
-    await observation(4, 40, SERVICE, NEXT_VERSION, 1, later);
-    await observation(4, 41, unknownService, NEXT_VERSION, 1, later);
+    await observation(4, 40, { version: NEXT_VERSION, delivered: 1, settledAt: later });
+    await observation(4, 41, {
+      service: unknownService,
+      version: NEXT_VERSION,
+      delivered: 1,
+      settledAt: later,
+    });
     await evaluateIncidents(getPool(), config, later);
     expect(await openIncidentsFor(getPool(), NETWORK, [SERVICE], "web-search")).toHaveLength(0);
     const unknown = await openIncidentsFor(getPool(), NETWORK, [unknownService], "web-search");
@@ -174,10 +188,15 @@ describe("SN-4 incident evidence", () => {
     const older = new Date(AT.getTime() - 120_000);
     await seenVersion(service, NEXT_VERSION, older);
     await seenVersion(service, VERSION, new Date(AT.getTime() - 60_000));
-    await observation(7, 77, service, VERSION, 0, AT);
-    await observation(7, 70, service, NEXT_VERSION, 1, new Date(AT.getTime() + 1_000));
+    await observation(7, 77, { service });
+    await observation(7, 70, {
+      service,
+      version: NEXT_VERSION,
+      delivered: 1,
+      settledAt: new Date(AT.getTime() + 1_000),
+    });
     for (const index of [8, 9])
-      await observation(index, index + 70, service, VERSION, 0, new Date(AT.getTime() + 2_000));
+      await observation(index, index + 70, { service, settledAt: new Date(AT.getTime() + 2_000) });
     await evaluateIncidents(getPool(), config, new Date(AT.getTime() + 3_000));
     const incidents = await openIncidentsFor(getPool(), NETWORK, [service], "web-search");
     expect(incidents).toMatchObject([{ versionId: VERSION, distinctOwners: 3 }]);
@@ -187,7 +206,10 @@ describe("SN-4 incident evidence", () => {
     for (const index of [10, 11, 12]) await seedOwner(index);
     const privateService = `svc_${"e".repeat(32)}`;
     for (const index of [10, 11, 12])
-      await observation(index, index + 90, privateService, VERSION, 0, AT, "obs_private-id");
+      await observation(index, index + 90, {
+        service: privateService,
+        taskClass: "obs_private-id",
+      });
     await evaluateIncidents(getPool(), config, AT);
     expect(
       await openIncidentsFor(getPool(), NETWORK, [privateService], "obs_private-id"),
