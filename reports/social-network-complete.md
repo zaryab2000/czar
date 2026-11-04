@@ -14,9 +14,9 @@ No post, reply count, handle, or model-written note is itself a supplier score.
 | Package | Current evidence | Final state |
 |---|---|---|
 | SN-1 foundation | PR #195 merged at `4c9195d`; public and owner routes, migration and role. | Recheck on final merged head. |
-| SN-2 events and worker | Worker, local seed/replay scripts and controlled fixture merchants are on the integration branch through `719385e`; key-free tests passed. | Final PR/head review, authorized demo and merge pending. |
+| SN-2 events and worker | Worker, local seed/replay scripts and controlled fixture merchants are on the integration branch through `9938e49`; key-free tests passed. | Final PR/head review, authorized demo and merge pending. |
 | SN-3 questions and replies | Implementation and focused tests are on the integration branch. | Final PR/head review and merge pending. |
-| SN-4 buying routes | Incident, lesson and lead changes, plus survivor, version and incident-band regressions, are on the integration branch through `719385e`. | Final PR/head review and merge pending. |
+| SN-4 buying routes | Incident, lesson and lead changes, plus payer version and unpaid lead rejection regressions, are on the integration branch through `9938e49`. | Final PR/head review and merge pending. |
 | SN-5 web | UI, direct template parity and the real-server case-18 browser test are on the integration branch through `f3c6884`. | Final PR/head review and merge pending. |
 | SN-6 controlled demo and report | Controlled fixture, local seed/replay support and this draft report are on the integration branch. | Authorized local-chain demo, final report and merge pending. |
 
@@ -26,7 +26,7 @@ missing, skipped or zero-step hosted jobs are not passing checks.
 
 ## Key-free evidence already collected
 
-| Head and scope | Exact command | Observed result | Limit |
+| Head and scope | Command or tested scope | Observed result | Limit |
 |---|---|---|---|
 | SN-5 `7ec5f93` with SN-2 template dependency `6e4953a` | `fnm exec --using=22.22.0 pnpm --filter @czar/web exec vitest run packages/social-templates.test.ts packages/social-api.test.ts` | 2 files, 11 tests passed | Includes direct web/server summary parity; no browser or server route round trip. |
 | Same local head | `fnm exec --using=22.22.0 pnpm --filter @czar/web typecheck` | Passed | Web package only. |
@@ -49,6 +49,8 @@ missing, skipped or zero-step hosted jobs are not passing checks.
 | Integration `719385e`, reported by the orchestrator | Config package tests; web social template/API Vitest | Config 67/67; web 11/11 passed | Key-free package checks; full package suites pending. |
 | Integration `719385e`, reported by the orchestrator | `fnm exec --using=22.22.0 pnpm typecheck`; `fnm exec --using=22.22.0 pnpm lint`; `python3 -I check-schemas.py` from the schemas directory | Typecheck and lint passed; schema metadata 34 files, 0 problems | Static and metadata checks, not runtime acceptance or full JSON Schema validation. |
 | Integration `719385e`, reported by the orchestrator | Web build with `CZAR_SERVER_URL=http://127.0.0.1:4310`; key-free `playwright.social.config.ts` Chromium spec | Build passed; real-server case 18 passed 1/1 | Only ancillary `/v1/me` was mocked; controlled product demo and screenshots pending. |
+| Integration `9938e49`, reported by the orchestrator | Focused server social/buying/planner/selection plus `test/payer/vault-direct-partial.test.ts` | 22 files, 168/168 passed | Key-free integration slice, not all package suites or merged-head evidence. |
+| Integration `9938e49`, reported by the orchestrator | `fnm exec --using=22.22.0 pnpm typecheck`; `fnm exec --using=22.22.0 pnpm lint` | Both passed | Static checks; final PR-head rerun pending. Config 67/67, web 11/11, schema 34/0, web build and case-18 browser evidence remain the prior snapshots above. |
 
 The orchestrator's exact focused server command for `902f113` was:
 
@@ -63,8 +65,9 @@ The `ff5cc3a` 19-file run added `test/social/run.test.ts`,
 `test/social/service-thread-caps.test.ts`, plus new cases in the existing run and fixture tests;
 its observed result was 131/131 across 21 files. The same 21-file scope passed 135/135 at
 `719385e` after the case 8, 9 and 21 regressions joined. The controlled fixture test validates
-all ten seeded `objective-submission` records against the canonical schema. These are
-integration snapshots, not a final PR or merged `build-v1` head.
+all ten seeded `objective-submission` records against the canonical schema. At `9938e49`, the
+same scope plus `test/payer/vault-direct-partial.test.ts` passed 168/168 across 22 files.
+These are integration snapshots, not a final PR or merged `build-v1` head.
 
 The fixture contains three controlled owners and three supplier descriptors. The local seed now
 probes the two fixture-only `comparison-search` and `lesson-search` endpoints through unpaid
@@ -93,33 +96,32 @@ test or earlier run, not a pass for the full case.
 | 1 | Posts have zero scoring weight; 100 duplicates leave counts, health and decision unchanged | `apps/server/test/selection/registered.test.ts` has the 100-post DB and full stable-decision comparison | Pending final head |
 | 2 | Five `objective.delivered` replays publish one experience per paid step | Integrated `apps/server/test/social/run.test.ts` checks five delivery replays and one final experience | Pending final head |
 | 3 | Rating revision supersedes the old post without duplicate publish | Integrated `social/run.test.ts` checks revision, moved evidence link and event count | Pending final head |
-| 4 | Public strings exclude private subjects, paths, addresses, exact amounts and evidence IDs; public day times and random IDs | `social/denylist.test.ts`, `social/experience-card.test.ts`, `social-routes.test.ts`; random-ID prefix and complete outbound-string assertions need final-head review | Pending |
+| 4 | Public strings exclude private subjects, paths, addresses, exact amounts and evidence IDs; public day times and random IDs | `social/experience-card.test.ts` now checks a published card against private subject, file, address, amount and evidence IDs and verifies UTC-day time; `social/denylist.test.ts` checks random `rep_`/`thr_`/`pst_` IDs do not share a time-ordered prefix; `social-routes.test.ts` covers public projections | Pending final head |
 | 5 | Question routing and caps, while service threads remain open | `social/router.test.ts` tests three recipients and sharing-off; `social/run.test.ts` tests question close at eight; new `social/service-thread-caps.test.ts` tests 9th, 10th and 50th experience plus a third from one owner without closing the service thread | Pending final head |
-| 6 | No-evidence reply abstains without a post | Integrated `social/run.test.ts` asserts `abstain-no-evidence`; scoped no-new-post assertion still needs review | Pending |
+| 6 | No-evidence reply abstains without a post | `social/run.test.ts` now asserts `abstain-no-evidence` and unchanged post count around that run | Pending final head |
 | 7 | Incident open, unit/owner distinction, recovery, no flap, version change, window clear and unknown version | `apps/server/test/social-incidents.test.ts` covers these; local `4105ee0` and `676abe7` add the third-owner expiry and no-reopen boundary (5/5) | Pending final head |
-| 8 | Open incident changes ordering and approval, not score or version guard | `social-buying.test.ts` now asserts the incident overlay keeps both score and `version_id`; `planner/planner.test.ts` checks incident approval, schema 1.4 and stored ranking-decision ID. The payer's exact version-drift guard still needs a linked acceptance check | Partial; final head pending |
+| 8 | Open incident changes ordering and approval, not score or version guard | `social-buying.test.ts` checks score/version preservation; `planner/planner.test.ts` checks incident approval and stored decision ID; `payer/vault-direct-partial.test.ts` now pays only at that incident-ranked version and blocks a changed live version before reserve/sign | Pending final head |
 | 9 | Lessons obey exact margin and survivor/incident bounds | `social-buying.test.ts` checks exact millionth margin and that a preference cannot cross the incident band; `planner/planner.test.ts` now rejects preferred suppliers outside top-three probes or whose live probe fails | Pending final head |
-| 10 | Lead probe and safe-fetch rejection matrix, with no payment | `social-leads.test.ts` covers valid 402, wrong network, 200, unsafe HTTP and DNS failure; `social/controlled-local.test.ts` proves the local fixture probe refuses a cross-origin redirect. Lead path port/private address and duplicate origin still need final test mapping | Pending |
+| 10 | Lead probe and safe-fetch rejection matrix, with no payment | `social-leads.test.ts` now covers valid 402, wrong network, 200, DNS failure, cross-host redirect, forbidden port, private address, redirect loop, oversize body and malformed 402. Duplicate origin-only behavior awaits architect disposition | Partial; final head pending |
 | 11 | Consent change during a run prevents a post | Integrated `social/run.test.ts` covers context-to-commit consent change | Pending final head |
 | 12 | Two workers on one inbox item publish once | `social/run.test.ts` now races two workers on the same inbox row and checks one post and one run; `social/inbox.test.ts` covers lease claim | Pending final head |
 | 13 | Before-commit rollback and after-commit replay each yield one post/run | Integrated `social/run.test.ts` checks a scoped action ID has zero rows after injected insert fault, then one post and one run after replay | Pending final head |
 | 14 | Delete tombstones every revision and supersedes derived lessons | `apps/server/test/social-routes.test.ts` | Pending |
-| 15 | No model usage and every note stays NULL | Integrated `social/run.test.ts` checks one post's NULL note; a suite-wide `model_usage` before/after and all-post NULL assertion are still missing | Pending |
+| 15 | No model usage and every note stays NULL | `social/run.test.ts` now compares `model_usage` before and after its representative-run suite and counts zero non-NULL notes across every post in that suite's DB | Pending final head |
 | 16 | `czar_social` cannot read base tables or write rating/ranking/money tables; concurrent migration succeeds | `apps/server/test/social-migration.test.ts` | Pending |
 | 17 | `planning → no-supplier` event is transactional and unique | Integrated `planner/service.test.ts` checks success and trigger-induced rollback leaves planning state with zero events | Pending final head |
 | 18 | Onboarding, public feed, owner tombstone and lesson dismiss in Playwright against local server | `apps/web/e2e/social-real.spec.ts` passed 1/1 at integration `f3c6884` with real social API and disposable DB; `/v1/me` was the only mocked ancillary read; DB cleanup verified 0 leftovers | Key-free browser slice passed; final PR-head rerun and controlled demo pending |
-| 19 | All package suites, typecheck, lint, schema checker, Arc slice/runs 2/4/5 and Forge | Integration `719385e`: focused server 21 files 135/135, payer 23/23, config 67/67, web 11/11, root typecheck/lint, schema metadata 34/0 and web build passed | Full package suites, Arc/Forge and final PR-head gates pending |
+| 19 | All package suites, typecheck, lint, schema checker, Arc slice/runs 2/4/5 and Forge | Integration `9938e49`: focused server plus payer 22 files 168/168, root typecheck/lint passed; earlier config 67/67, web 11/11, schema 34/0, web build and case-18 browser 1/1 | Full package suites, Arc/Forge and final PR-head gates pending |
 | 20 | A lower-id event that commits late is delivered once | `apps/server/test/social/consumer.test.ts` | Pending |
 | 21 | Sharing-off receives a lesson without publishing; publishing run skips | `social/run.test.ts` checks private lesson creation with no public post and, at `22825d6`, a would-publish inbox item ending `skipped-sharing-off` with unchanged post count and a recorded run | Pending final head |
 
 ### Remaining acceptance evidence gaps
 
-The matrix maps every case to code or a deferred gate. The remaining key-free proof gaps to
-audit on the final PR head are: case 4's random-ID and complete public-string assertions;
-case 6's scoped no-new-post assertion; case 8's payer guard against version drift on the
-incident-selected stored decision; case 10's lead-path port/private address and duplicate
-origin; and case 15's suite-wide `model_usage` and NULL note checks. Cases 5, 9, 12, 13 and
-21 now have focused integration tests but still need final-head evidence.
+The matrix maps every case to code or a deferred gate. New `9938e49` tests close the prior
+key-free case 4, 6, 8 and 15 mapping gaps and the lead rejection branches in case 10. The
+origin-only duplicate-lead outcome in case 10 still needs the architect's binding ruling and
+test. Every case still needs final PR-head evidence, and case 19 still needs the full package
+suites, authorized Arc/Forge slice and controlled demo.
 
 Case 18's focused browser round trip used the standard key-free server fixture, real social
 routes and isolated PostgreSQL. It did not create keys, deploy contracts, seed the product
@@ -233,6 +235,9 @@ to the final report's evidence location and link them here after the run.
   lesson supplier and buyer-relative count or amend the approved wording before these lines
   are presented as verified. Focused expected-red UI regressions exist at `ee61df2`; they are
   not passing acceptance evidence.
+- **Duplicate lead contract:** case 10's repeat origin-only lead behavior remains with the
+  architect for a binding ruling and executable test. The unpaid lead rejection matrix has focused
+  key-free coverage, but that does not establish the duplicate outcome.
 - **Open product items:** model-written notes, agent-suggested ratings, discovery that lets
   probed leads become buyable, and A2A remain outside SCR-164's completed scope.
 - **Remaining gate:** SN-1 through SN-6 merged into `build-v1`, all 21 cases verified on that
