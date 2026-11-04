@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import type { Config } from "@czar/config";
 import { bearerToken, ulid, type RandomSource } from "#src/http/ids";
+import { findOrCreateRepresentative } from "#src/social/representatives";
 
 export interface PairDependencies {
   pool: Pool;
@@ -67,6 +68,7 @@ export async function consumePairingCode(
      VALUES ($1, $2, $3, $4, $5)`,
     [deviceId, code.user_id, request.deviceName, request.platform, hash(deviceToken)],
   );
+  await findOrCreateRepresentative(client, code.user_id, dependencies.random);
   await client.query("UPDATE pairing_codes SET used_at = $2 WHERE code_digest = $1", [
     codeDigest,
     dependencies.clock.now(),

@@ -184,6 +184,8 @@ function createHttpServer(root: ServerMain, logger: Logger): Server {
           headers,
           ...(body === undefined ? {} : ({ body: body as never, duplex: "half" } as RequestInit)),
         }),
+        undefined,
+        { remoteAddr: incoming.socket.remoteAddress },
       );
       outgoing.writeHead(response.status, Object.fromEntries(response.headers.entries()));
       outgoing.end(Buffer.from(await response.arrayBuffer()));
