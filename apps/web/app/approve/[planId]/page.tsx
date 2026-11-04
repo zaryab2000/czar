@@ -295,6 +295,15 @@ function StepsPanel({ plan, newPayees }: { readonly plan: AppPlan; readonly newP
               {alternate.serviceId} not chosen: {alternativeReason(alternate.reason)}
             </p>
           ))}
+          {step.serviceId &&
+            step.why?.lessons?.map((lesson) => (
+              <p key={lesson.lessonId}>
+                Your representative learned from {lesson.handle} that {step.serviceId}{" "}
+                {lesson.proposition === "prefer" ? "did" : "did not"} do this kind of task well; it{" "}
+                {lesson.proposition === "prefer" ? "chose" : "avoided"} it within Czar&apos;s
+                ranking margin.
+              </p>
+            ))}
         </article>
       ))}
     </section>

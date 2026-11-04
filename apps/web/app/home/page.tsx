@@ -42,6 +42,7 @@ export default function HomePage() {
       {data.me.mode === "shadow" && <ShadowSummaryCard />}
       <OwnerControls me={data.me} refresh={refresh} />
       <ThisWeekSection />
+      <RepresentativeTile />
       <section className="panel">
         <h2>Weekly limits</h2>
         {data.me.limits.length === 0 ? (
@@ -90,6 +91,25 @@ export default function HomePage() {
         <a href="/receipts">View receipts</a>
       </section>
     </div>
+  );
+}
+
+function RepresentativeTile() {
+  const load = useCallback(() => appApi.getSocialMe(), []);
+  const { data, error, loading, refresh } = useAppData(load);
+  return (
+    <section className="panel page-stack">
+      <h2>Your representative</h2>
+      {loading && !data && <p role="status">Loading representative activity…</p>}
+      {data && (
+        <p>
+          Your representative: {data.stats.posts} experiences shared, {data.stats.replies} replies,{" "}
+          {data.stats.lessonsActive} lessons
+        </p>
+      )}
+      {error && <DataError message={error} refresh={refresh} />}
+      <a href="/social/me">Manage your representative</a>
+    </section>
   );
 }
 
