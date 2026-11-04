@@ -170,6 +170,12 @@ describe("planner persistence", () => {
       OBJECTIVE,
     ]);
     expect(row.rows[0]?.state).toBe("no-supplier");
+    const event = await pool().query<{ name: string; objective_id: string; payload: object }>(
+      "SELECT name,objective_id,payload FROM outbox_events WHERE name='objective.no-supplier'",
+    );
+    expect(event.rows).toEqual([
+      { name: "objective.no-supplier", objective_id: OBJECTIVE, payload: {} },
+    ]);
   });
 
   it("moves to opening when the plan needs no approval", async () => {
