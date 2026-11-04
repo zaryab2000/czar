@@ -329,7 +329,8 @@ export async function replayControlledFixtures(
     );
     const ratings = await db.query(
       `INSERT INTO outbox_events(name,objective_id,payload)
-       SELECT 'rating.recorded',r.objective_id,jsonb_build_object('ratingId',r.rating_id)
+       SELECT 'rating.recorded',r.objective_id,jsonb_build_object(
+         'objectiveId',r.objective_id,'ratingId',r.rating_id,'stepIndex',r.step_index)
        FROM ratings r JOIN users u USING(user_id)
        WHERE u.controlled AND NOT EXISTS(SELECT 1 FROM outbox_events e
          WHERE e.name='rating.recorded' AND e.payload->>'ratingId'=r.rating_id)`,

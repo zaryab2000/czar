@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
 import { loadConfig } from "@czar/config";
 import { randomId } from "#src/http/ids";
+import { createLesson } from "#src/social/lessons";
 import { runSocialInbox } from "#src/social/runtime/run";
 import { setupDatabase } from "#test/db";
 import {
@@ -46,6 +47,9 @@ describe("representative run", () => {
        VALUES($1,$2,'need-unmet',$3)`,
       [representativeId, event.rows[0]!.event_id, { objectiveId }],
     );
+    const modelUsageBefore = await pool().query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM model_usage",
+    );
     const context = createTestContext(pool());
     const result = await runSocialInbox(
       pool(),
@@ -64,12 +68,54 @@ describe("representative run", () => {
         card: expect.objectContaining({ questionKind: "find-supplier" }),
       },
     ]);
+    const modelUsageAfter = await pool().query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM model_usage",
+    );
+    expect(modelUsageAfter.rows[0]?.count).toBe(modelUsageBefore.rows[0]?.count);
     const inbox = await pool().query<{ state: string }>("SELECT state FROM social_inbox");
     expect(inbox.rows[0]?.state).toBe("done");
     const socialEvent = await pool().query<{ delivered_at: Date | null }>(
       "SELECT delivered_at FROM outbox_events WHERE name='social.post.published'",
     );
     expect(socialEvent.rows[0]?.delivered_at).not.toBeNull();
+  });
+
+  it("creates one post when two workers race to claim the same inbox row", async () => {
+    const id = `obj_${"J".repeat(26)}`;
+    const body = makeObjectiveSubmission(id);
+    await pool().query(
+      `INSERT INTO objectives(objective_id,user_id,device_id,submission,objective_hash,state)
+       VALUES($1,$2,$3,$4,$5,'no-supplier')`,
+      [id, TEST_USER_ID, body.deviceId, body, body.objectiveHash],
+    );
+    const event = await pool().query<{ event_id: string }>(
+      `INSERT INTO outbox_events(name,objective_id,payload)
+       VALUES('objective.no-supplier',$1,'{}') RETURNING event_id`,
+      [id],
+    );
+    const inbox = await pool().query<{ inbox_id: string }>(
+      `INSERT INTO social_inbox(representative_id,event_id,kind,refs)
+       VALUES($1,$2,'need-unmet',$3) RETURNING inbox_id`,
+      [representativeId, event.rows[0]!.event_id, { objectiveId: id }],
+    );
+    const before = await pool().query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM social_posts WHERE kind='question'",
+    );
+    const now = new Date("2026-11-05T12:00:00Z");
+    const random = { bytes: randomBytes };
+    const results = await Promise.all([
+      runSocialInbox(pool(), loadConfig(), random, now),
+      runSocialInbox(pool(), loadConfig(), random, now),
+    ]);
+    expect(results.map((result) => result?.stopReason).toSorted()).toEqual(["done", undefined]);
+    const after = await pool().query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM social_posts WHERE kind='question'",
+    );
+    expect(Number(after.rows[0]?.count)).toBe(Number(before.rows[0]?.count) + 1);
+    const runs = await pool().query("SELECT 1 FROM social_runs WHERE inbox_id=$1", [
+      inbox.rows[0]!.inbox_id,
+    ]);
+    expect(runs.rowCount).toBe(1);
   });
 
   it("revises a paid-step experience after a rating without routing it again", async () => {
@@ -168,9 +214,10 @@ describe("representative run", () => {
     );
     expect(link.rows[0]?.post_id).toBe(posts.rows[1]?.post_id);
     const routedEvents = await pool().query(
-      "SELECT 1 FROM outbox_events WHERE name='social.post.published'",
+      `SELECT 1 FROM outbox_events e WHERE e.name='social.post.published'
+       AND e.payload->>'postId' IN (SELECT post_id FROM social_posts WHERE kind='experience')`,
     );
-    expect(routedEvents.rowCount).toBe(2);
+    expect(routedEvents.rowCount).toBe(1);
   });
 
   it("keeps one experience per settled unit across five delivery replays", async () => {
@@ -510,6 +557,135 @@ describe("representative run", () => {
       new Date("2026-11-05T12:00:00Z"),
     );
     expect(result?.stopReason).toBe("skipped-paused");
+  });
+
+  it("does not create a lesson from a routed post for an initially paused recipient", async () => {
+    const recipient = `usr_${"B".repeat(26)}`;
+    const recipientRep = `rep_${"B".repeat(26)}`;
+    const deviceId = `dev_${"B".repeat(26)}`;
+    const activeObjective = `obj_${"H".repeat(26)}`;
+    await pool().query(
+      `INSERT INTO devices(device_id,user_id,device_name,platform,token_hash)
+       VALUES($1,$2,'Test','linux',$3)`,
+      [deviceId, recipient, Buffer.alloc(32, 3)],
+    );
+    const body = makeObjectiveSubmission(activeObjective, { deviceId });
+    await pool().query(
+      `INSERT INTO objectives(objective_id,user_id,device_id,submission,objective_hash,state,
+         created_at)
+       VALUES($1,$2,$3,$4,$5,'planning',$6)`,
+      [
+        activeObjective,
+        recipient,
+        deviceId,
+        body,
+        body.objectiveHash,
+        new Date("2026-11-05T00:00:00Z"),
+      ],
+    );
+    const post = await pool().query<{ post_id: string; thread_id: string }>(
+      `SELECT p.post_id,p.thread_id FROM social_posts p
+       JOIN social_evidence_links l ON l.post_id=p.post_id
+       WHERE p.author_id=$1 AND p.kind='experience' AND p.superseded_by IS NULL LIMIT 1`,
+      [representativeId],
+    );
+    const source = post.rows[0]!;
+    const event = await pool().query<{ event_id: string }>(
+      `INSERT INTO outbox_events(name,payload,delivered_at)
+       VALUES('social.post.published',$1,now()) RETURNING event_id`,
+      [{ postId: source.post_id, threadId: source.thread_id }],
+    );
+    await pool().query(
+      `INSERT INTO social_inbox(representative_id,event_id,kind,refs)
+       VALUES($1,$2,'post-routed',$3)`,
+      [
+        recipientRep,
+        event.rows[0]!.event_id,
+        {
+          postId: source.post_id,
+          threadId: source.thread_id,
+          routingReason: "subscribed-service",
+        },
+      ],
+    );
+    await pool().query("UPDATE social_representatives SET paused=true WHERE representative_id=$1", [
+      recipientRep,
+    ]);
+    let lessonAttempts = 0;
+    const result = await runSocialInbox(
+      pool(),
+      loadConfig(),
+      { bytes: randomBytes },
+      new Date("2026-11-05T12:00:00Z"),
+      {
+        createLesson: async (...args) => {
+          lessonAttempts += 1;
+          return createLesson(...args);
+        },
+      },
+    );
+    expect(result?.stopReason).toBe("skipped-paused");
+    expect(lessonAttempts).toBe(0);
+    const lessons = await pool().query("SELECT 1 FROM social_lessons WHERE user_id=$1", [
+      recipient,
+    ]);
+    expect(lessons.rowCount).toBe(0);
+  });
+
+  it("creates a private lesson while sharing is off without publishing", async () => {
+    const recipient = `usr_${"B".repeat(26)}`;
+    const recipientRep = `rep_${"B".repeat(26)}`;
+    const source = await pool().query<{ post_id: string; thread_id: string }>(
+      `SELECT p.post_id,p.thread_id FROM social_posts p
+       JOIN social_evidence_links l ON l.post_id=p.post_id
+       WHERE p.author_id=$1 AND p.kind='experience' AND p.superseded_by IS NULL LIMIT 1`,
+      [representativeId],
+    );
+    const post = source.rows[0]!;
+    const event = await pool().query<{ event_id: string }>(
+      `INSERT INTO outbox_events(name,payload,delivered_at)
+       VALUES('social.post.published',$1,now()) RETURNING event_id`,
+      [{ postId: post.post_id, threadId: post.thread_id }],
+    );
+    await pool().query(
+      `INSERT INTO social_inbox(representative_id,event_id,kind,refs)
+       VALUES($1,$2,'post-routed',$3)`,
+      [
+        recipientRep,
+        event.rows[0]!.event_id,
+        {
+          postId: post.post_id,
+          threadId: post.thread_id,
+          routingReason: "subscribed-service",
+        },
+      ],
+    );
+    await pool().query(
+      "UPDATE social_representatives SET paused=false,sharing='off' WHERE representative_id=$1",
+      [recipientRep],
+    );
+    const before = await pool().query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM social_posts WHERE author_id=$1",
+      [recipientRep],
+    );
+    const result = await runSocialInbox(
+      pool(),
+      loadConfig(),
+      { bytes: randomBytes },
+      new Date("2026-11-05T12:00:00Z"),
+      { createLesson },
+    );
+    expect(result?.action).toBe("create-lesson");
+    expect(result?.stopReason).toBe("done");
+    const lessons = await pool().query("SELECT 1 FROM social_lessons WHERE user_id=$1", [
+      recipient,
+    ]);
+    expect(lessons.rowCount).toBe(1);
+    const publicPosts = await pool().query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM social_posts WHERE author_id=$1",
+      [recipientRep],
+    );
+    expect(publicPosts.rows[0]?.count).toBe(before.rows[0]?.count);
   });
 
   it("allows only one first-day post when two workers run at the cap", async () => {

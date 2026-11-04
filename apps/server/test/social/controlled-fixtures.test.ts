@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { beforeAll, describe, expect, it } from "vitest";
 import { validateSchema } from "@czar/schemas";
+import { consumeSocialBatch } from "#src/social/consumer";
 import {
   replayControlledFixtures,
   seedControlledFixtures,
@@ -84,6 +85,16 @@ describe("controlled social fixture", () => {
     expect(events.rows).toEqual([
       { name: "objective.delivered", count: "9" },
       { name: "rating.recorded", count: "9" },
+    ]);
+    expect(await consumeSocialBatch(pool(), 25)).toBe(19);
+    const inbox = await pool().query<{ kind: string; count: string }>(
+      `SELECT kind,count(*)::text AS count FROM social_inbox
+       GROUP BY kind ORDER BY kind`,
+    );
+    expect(inbox.rows).toEqual([
+      { kind: "need-unmet", count: "1" },
+      { kind: "outcome-ready", count: "9" },
+      { kind: "outcome-updated", count: "9" },
     ]);
   });
 });

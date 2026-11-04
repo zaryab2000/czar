@@ -785,7 +785,7 @@ async function executeClaim(
       (current.rows[0]?.paused && !representative.paused)
     ) {
       result = { action: "abstain", stopReason: "rejected-consent-changed", postId: null };
-    } else {
+    } else if (!representative.paused) {
       const routedPostId = item.refs["postId"];
       const lessonCreated =
         item.kind === "post-routed" && typeof routedPostId === "string" && hooks.createLesson

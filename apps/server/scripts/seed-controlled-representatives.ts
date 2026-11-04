@@ -1,13 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { serviceVersionId } from "@czar/hashing";
-import { readPaymentRequired } from "@czar/x402";
-import {
-  seedControlledFixtures,
-  type ControlledFixture,
-  type SupplierFixture,
-} from "#src/social/controlled-fixtures";
-import { controlledLocalContext } from "#src/social/controlled-local";
+import { seedControlledFixtures, type ControlledFixture } from "#src/social/controlled-fixtures";
+import { controlledLocalContext, versionFromBareProbe } from "#src/social/controlled-local";
 
 function argumentsForSeed(args: string[]): { count: number; network: string } {
   const countIndex = args.indexOf("--count");
@@ -21,37 +15,6 @@ function argumentsForSeed(args: string[]): { count: number; network: string } {
     throw new Error("Controlled fixture requires count 3 and a valid network.");
   }
   return { count, network };
-}
-
-async function versionFromBareProbe(
-  supplier: SupplierFixture,
-  network: string,
-  allowedOrigins: readonly string[],
-): Promise<string> {
-  const url = new URL(supplier.resource.url);
-  if (!allowedOrigins.includes(url.origin) || url.hostname !== "127.0.0.1") {
-    throw new Error(`Controlled supplier ${supplier.key} is outside the local allowlist.`);
-  }
-  for (const [key, value] of Object.entries(supplier.probeInput?.query ?? {})) {
-    url.searchParams.set(key, value);
-  }
-  const response = await fetch(url, { method: "GET", signal: AbortSignal.timeout(5_000) });
-  const result = readPaymentRequired({
-    status: response.status,
-    headers: Object.fromEntries(response.headers),
-    body: await response.text(),
-  });
-  const offers = result.ok
-    ? result.paymentRequired.accepts.filter((offer) => offer.network === network)
-    : [];
-  if (!result.ok || offers.length !== 1 || result.resource.url !== supplier.resource.url) {
-    throw new Error(`Controlled supplier ${supplier.key} did not return one valid bare 402.`);
-  }
-  return serviceVersionId({
-    payTo: offers[0]!.payTo.toLowerCase(),
-    resource: supplier.resource,
-    schema: result.extensions.bazaar?.schema ?? null,
-  });
 }
 
 /** Seed only after local overlay, loopback DB, and unpaid 402 preflight pass. */
