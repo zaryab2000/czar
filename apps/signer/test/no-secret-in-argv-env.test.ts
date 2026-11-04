@@ -68,3 +68,72 @@ describe("no secret in argv or env (T-105)", () => {
     expect(await proc.done).not.toBe(0);
   }, 30_000);
 });
+
+// PM-017: the same rule for the cloud entry point. It holds no keystore and no passphrase, but it must
+// still refuse to start when its arguments or environment could be carrying a secret (D70, D78), and it
+// must never put one there itself.
+const CLOUD_MAIN = resolve(import.meta.dirname, "../src/cloud-main.ts");
+
+function runCloudMain(env: NodeJS.ProcessEnv) {
+  const child = spawn(
+    process.execPath,
+    ["--experimental-strip-types", "--disable-warning=ExperimentalWarning", CLOUD_MAIN],
+    { env, stdio: ["ignore", "pipe", "pipe"] },
+  );
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
+  child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
+  const snapshot = () => {
+    const pid = String(child.pid);
+    let argsLine = "";
+    let environ = "";
+    try {
+      argsLine = execFileSync("ps", ["-o", "args=", "-p", pid]).toString();
+    } catch {
+      // The process already exited; the startup check below still covers the refusal.
+    }
+    try {
+      environ = readFileSync(`/proc/${pid}/environ`, "utf8").replaceAll("\0", "\n");
+    } catch {
+      // macOS has no /proc.
+    }
+    return { argsLine, environ };
+  };
+  const done = new Promise<number>((ok) => child.on("exit", (code) => ok(code ?? -1)));
+  return { snapshot, done, output: () => ({ stdout, stderr }) };
+}
+
+describe("no secret in argv or env: the signer cloud entry (PM-017)", () => {
+  it("carries no secret-looking argument or variable while it runs", async () => {
+    const proc = runCloudMain({ ...cleanEnv(), CZAR_CLOUD_CONFIG: "/nonexistent/cloud.toml" });
+    const { argsLine, environ } = proc.snapshot();
+    await proc.done;
+    if (argsLine !== "") {
+      expect(argsLine).toContain("cloud-main.ts");
+      expect(argsLine).not.toMatch(SECRETISH);
+    }
+    for (const line of environ.split("\n")) {
+      const name = line.split("=")[0] ?? "";
+      expect(name).not.toMatch(/PASSPHRASE|MNEMONIC/i);
+      expect(name.startsWith("CZAR_") && SECRETISH.test(name)).toBe(false);
+    }
+  }, 30_000);
+
+  it("refuses to start when the environment carries a CZAR_SIGNER_PASSPHRASE-style variable", async () => {
+    const proc = runCloudMain({
+      ...cleanEnv(),
+      CZAR_CLOUD_CONFIG: "/nonexistent/cloud.toml",
+      CZAR_SIGNER_PASSPHRASE: "not-a-real-value",
+    });
+    expect(await proc.done).not.toBe(0);
+    expect(proc.output().stderr).toMatch(/looks like a secret/);
+    expect(proc.output().stderr).not.toContain("not-a-real-value");
+  }, 30_000);
+
+  it("refuses to start without its config pointer, naming the pointer only", async () => {
+    const proc = runCloudMain(cleanEnv());
+    expect(await proc.done).not.toBe(0);
+    expect(proc.output().stderr).toContain("CZAR_CLOUD_CONFIG");
+  }, 30_000);
+});

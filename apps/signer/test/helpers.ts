@@ -88,6 +88,20 @@ export const testPassphrase = () => {
 
 export const FAST_KDF = { N: 1024, r: 8, p: 1 };
 
+/** Opens the backend `harness()` should hand to `createSigner`. */
+export type HarnessBackendFactory = () => Promise<SignerBackend>;
+
+let harnessBackendFactory: HarnessBackendFactory | undefined;
+
+/**
+ * Replaces the harness's local keystore for every later `harness()` call, so the existing decision
+ * cases can be re-run against another backend (PM-017, `service-kms.test.ts`). Unset — the default —
+ * keeps the local keystore, so every existing test runs exactly as before.
+ */
+export function setHarnessBackendFactory(factory: HarnessBackendFactory | undefined): void {
+  harnessBackendFactory = factory;
+}
+
 export interface State {
   frozen: boolean;
   guardianPaused: boolean;
@@ -341,16 +355,22 @@ export async function harness(
     withoutAlert?: boolean;
     /** Milliseconds; replaces the fixed test clock (and `advance`), e.g. with chain time. */
     nowMs?: () => number;
+    /** Another backend in place of the local keystore (PM-017). */
+    openBackend?: HarnessBackendFactory;
   } = {},
 ) {
   const fs = memoryFs();
-  const inner = await openLocalKeystore({
-    path: "/keystore",
-    passphrase: testPassphrase(),
-    fs,
-    git: async () => undefined,
-    kdf: FAST_KDF,
-  });
+  const openBackend = options.openBackend ?? harnessBackendFactory;
+  const inner =
+    openBackend === undefined
+      ? await openLocalKeystore({
+          path: "/keystore",
+          passphrase: testPassphrase(),
+          fs,
+          git: async () => undefined,
+          kdf: FAST_KDF,
+        })
+      : await openBackend();
   for (const id of ["K3", "K5", "K6", "K7", "K8", "K20", "relayer"] as const)
     await inner.createKey(id);
   await inner.createKey("K10", "czar-search");

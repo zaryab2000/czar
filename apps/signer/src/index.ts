@@ -1,5 +1,8 @@
 export * from "./abi.ts";
 export type { BackendName, MerchantServiceId, SignerBackend } from "./backend.ts";
+export * from "./file-identity.ts";
+export * from "./gcp-auth.ts";
+export * from "./gcp-kms-backend.ts";
 export * from "./kinds.ts";
 export * from "./local-backend.ts";
 export * from "./passphrase.ts";
