@@ -19,7 +19,7 @@ import type { Plan, RankingDecision, Step, TaskSpec } from "@czar/schemas";
 import { validateSchema, validationErrors } from "@czar/schemas";
 import { ulid, type RandomSource } from "#src/http/ids";
 import { chooseWithLessons, type PersonalLesson } from "#src/social/lessons";
-import type { OpenIncident } from "#src/social/incidents";
+import { incidentForSelection, type OpenIncident } from "#src/social/incidents";
 
 export interface PlannerRequest {
   readonly objectiveId: string;
@@ -516,17 +516,10 @@ async function selectCandidate(
   const selected = chosen && {
     ...chosen,
     incidentOpen:
-      Boolean(
-        decision.ranked.find(
-          (row) =>
-            row.service_id === chosen.service.serviceId && row.badges.includes("incident-open"),
-        ),
-      ) ||
-      incident.some(
-        (item) =>
-          item.versionId === "ver_unknown" ||
-          item.versionId ===
-            decision.ranked.find((row) => row.service_id === chosen.service.serviceId)?.version_id,
+      Boolean(incidentForSelection(decision, chosen.service.serviceId, incident)) ||
+      decision.ranked.some(
+        (row) =>
+          row.service_id === chosen.service.serviceId && row.badges.includes("incident-open"),
       ),
     ...(choice?.used.length ? { lessons: choice.used } : {}),
   };

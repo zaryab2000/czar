@@ -143,7 +143,11 @@ export async function createLesson(
     )
   )
     return false;
-  const strength = (row.rating === "none" ? 0.3 : 1) * (row.controlled ? 0.5 : 1);
+  const baseStrength =
+    row.rating === "none"
+      ? Number(config.get("social.lessonStrengthFactOnly"))
+      : Number(config.get("social.lessonStrengthRated"));
+  const strength = baseStrength * (row.controlled ? 0.5 : 1);
   const lessonId = randomId("les_", { bytes: randomBytes });
   const expiresAt = new Date(
     input.now.getTime() + Number(config.get("social.lessonTtlDays")) * 86400000,

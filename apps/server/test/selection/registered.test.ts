@@ -276,6 +276,96 @@ beforeEach(async () => {
 });
 
 describe("registered selection", () => {
+  it("keeps evidence counts, health and every decision field stable after 100 social posts", async () => {
+    const serviceId = `svc_${"f".repeat(32)}`;
+    const now = new Date("2026-11-05T00:00:00Z");
+    const fetchImpl = vi.fn<SafeFetch>(async (url) =>
+      response("25", "0xaaa", NETWORK, undefined, bareUrl(url)),
+    );
+    const services = { [serviceId]: registration(RESOURCE) };
+    const selection = setup(fetchImpl, services, () => now);
+    await selection.rank.rank(query());
+    const version = (
+      await getPool().query<{ version_id: string }>(
+        "SELECT version_id FROM service_versions WHERE service_id=$1",
+        [serviceId],
+      )
+    ).rows[0]!.version_id;
+    await getPool().query(
+      `INSERT INTO supplier_counts(network,service_id,version_id,task_class,good,bad,
+         owners_rated,owners_bad,lower_bound,lineage_root,policy_version,computed_at)
+       VALUES($1,$2,$3,'data-json',3,0,1,0,0.4385,'0x' || repeat('a',64),$4,$5)`,
+      [
+        NETWORK,
+        serviceId,
+        version,
+        rankingPolicyVersion({ confidenceZ: 1.959964, consecutiveFailures: 3 }),
+        now,
+      ],
+    );
+    const first = await setup(fetchImpl, services, () => now).rank.rank(query());
+    const countBefore = (
+      await getPool().query(
+        "SELECT row_to_json(s)::text AS body FROM supplier_counts s ORDER BY service_id",
+      )
+    ).rows;
+    const healthBefore = (
+      await getPool().query(
+        "SELECT row_to_json(h)::text AS body FROM supplier_health h ORDER BY obs_id",
+      )
+    ).rows;
+    const userId = `usr_${"9".repeat(26)}`;
+    const repId = `rep_${"9".repeat(26)}`;
+    const threadId = `thr_${"9".repeat(26)}`;
+    await getPool().query("INSERT INTO users(user_id) VALUES($1)", [userId]);
+    await getPool().query(
+      `INSERT INTO social_representatives(representative_id,user_id,handle)
+       VALUES($1,$2,'Rep-9999')`,
+      [repId, userId],
+    );
+    await getPool().query(
+      `INSERT INTO social_threads(thread_id,kind,network,service_id,subject_key)
+       VALUES($1,'service',$2,$3,$4)`,
+      [threadId, NETWORK, serviceId, `service:${NETWORK}:${serviceId}`],
+    );
+    for (let index = 0; index < 100; index += 1)
+      await getPool().query(
+        `INSERT INTO social_posts(post_id,thread_id,author_id,kind,card,action_id)
+         VALUES($1,$2,$3,$4,'{}'::jsonb,$5)`,
+        [
+          `pst_${String(index).padStart(26, "0")}`,
+          threadId,
+          repId,
+          index % 2 ? "reply" : "experience",
+          `zero-weight:${index}`,
+        ],
+      );
+    const second = await setup(fetchImpl, services, () => now).rank.rank(query());
+    const omitGenerated = (decision: typeof first) => {
+      const { query_id, received_at, snapshot_id, snapshot_anchor_tx, ...stable } = decision;
+      void query_id;
+      void received_at;
+      void snapshot_id;
+      void snapshot_anchor_tx;
+      return stable;
+    };
+    expect(omitGenerated(second)).toEqual(omitGenerated(first));
+    expect(
+      (
+        await getPool().query(
+          "SELECT row_to_json(s)::text AS body FROM supplier_counts s ORDER BY service_id",
+        )
+      ).rows,
+    ).toEqual(countBefore);
+    expect(
+      (
+        await getPool().query(
+          "SELECT row_to_json(h)::text AS body FROM supplier_health h ORDER BY obs_id",
+        )
+      ).rows,
+    ).toEqual(healthBefore);
+  });
+
   it("propagates a failed version-ledger write instead of treating it as a merchant probe failure", async () => {
     const config = loadConfig({
       envFile: { "selection.czarRegisteredServices": { [SERVICE_B]: registration(RESOURCE) } },

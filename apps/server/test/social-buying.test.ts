@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { overlayIncidents } from "#src/social/incidents";
+import { incidentForSelection, overlayIncidents } from "#src/social/incidents";
 import { chooseWithLessons } from "#src/social/lessons";
 import { loadConfig } from "@czar/config";
 
@@ -50,6 +50,25 @@ describe("SN-4 routes into buying", () => {
       negative_units: 4,
       opened_at: incidents[0]?.openedAt,
     });
+  });
+
+  it("matches an exploration pick against its stored verified version", () => {
+    const incident = {
+      incidentId: "inc_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
+      serviceId: A,
+      versionId: VERSION,
+      distinctOwners: 3,
+      negativeUnits: 3,
+      openedAt: "2026-11-04T00:00:00.000Z",
+    };
+    const choice = {
+      ranked: [],
+      unverified: [{ service_id: A, version_id: VERSION, reason: "unrated" as const, n_eff: 0 }],
+    };
+    expect(incidentForSelection(choice, A, [incident])).toEqual(incident);
+    expect(
+      incidentForSelection(choice, A, [{ ...incident, versionId: `ver_${"b".repeat(32)}` }]),
+    ).toBeNull();
   });
 
   it("applies lessons only within the exact millionth margin and after incident ordering", () => {

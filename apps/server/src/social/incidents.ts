@@ -77,6 +77,24 @@ export function overlayIncidents(
   return [...clean, ...flagged].map((row, index) => ({ ...row, rank: index + 1 }));
 }
 
+/** Match the chosen supplier to its immutable ranked or unverified decision version. */
+export function incidentForSelection(
+  decision: Pick<RankingDecision, "ranked" | "unverified">,
+  serviceId: string,
+  incidents: readonly OpenIncident[],
+): OpenIncident | null {
+  const versionId =
+    decision.ranked.find((row) => row.service_id === serviceId)?.version_id ??
+    decision.unverified.find((row) => row.service_id === serviceId)?.version_id;
+  return (
+    incidents.find(
+      (incident) =>
+        incident.serviceId === serviceId &&
+        (incident.versionId === "ver_unknown" || incident.versionId === versionId),
+    ) ?? null
+  );
+}
+
 interface ObservationRow {
   network: string;
   service_id: string;
@@ -94,6 +112,13 @@ interface StoredIncident extends IncidentRow {
   state: "open" | "closed";
   closed_at: Date | null;
   thread_id: string | null;
+}
+
+interface VersionRow {
+  network: string;
+  service_id: string;
+  version_id: string;
+  first_seen_at: Date;
 }
 
 interface IncidentKey {
@@ -236,14 +261,16 @@ function keyText(key: IncidentKey): string {
   return JSON.stringify([key.network, key.serviceId, key.versionId, key.taskClass]);
 }
 
-async function evaluateKey(
-  client: PoolClient,
-  key: IncidentKey,
-  observations: readonly ObservationRow[],
-  incidents: readonly StoredIncident[],
-  config: Config,
-  now: Date,
-): Promise<void> {
+async function evaluateKey(args: {
+  client: PoolClient;
+  key: IncidentKey;
+  observations: readonly ObservationRow[];
+  incidents: readonly StoredIncident[];
+  versions: readonly VersionRow[];
+  config: Config;
+  now: Date;
+}): Promise<void> {
+  const { client, key, observations, incidents, versions, config, now } = args;
   const windowDays = Number(config.get("social.incidentWindowDays"));
   const windowStart = new Date(now.getTime() - windowDays * 86400000);
   const prior = incidents.filter((item) => sameKey(item, key));
@@ -260,16 +287,26 @@ async function evaluateKey(
       (item.delivered === 0 || item.rating === "bad"),
   );
   const owners = new Set(negatives.map((item) => item.user_id)).size;
+  const current = versions.find(
+    (item) =>
+      item.network === key.network &&
+      item.service_id === key.serviceId &&
+      item.version_id === key.versionId,
+  );
   const newer =
-    key.versionId !== "ver_unknown" &&
-    observations.some(
-      (item) =>
-        item.network === key.network &&
-        item.service_id === key.serviceId &&
-        item.task_class === key.taskClass &&
-        item.version_id !== key.versionId &&
-        item.version_id !== "ver_unknown" &&
-        item.settled_at > (rows[0]?.settled_at ?? now),
+    current !== undefined &&
+    versions.some(
+      (version) =>
+        version.network === key.network &&
+        version.service_id === key.serviceId &&
+        version.version_id !== key.versionId &&
+        version.first_seen_at > current.first_seen_at &&
+        observations.some(
+          (item) =>
+            item.network === key.network &&
+            item.service_id === key.serviceId &&
+            item.version_id === version.version_id,
+        ),
     );
   const lastNegative = negatives.reduce<Date | null>(
     (last, item) => (!last || item.settled_at > last ? item.settled_at : last),
@@ -320,13 +357,24 @@ export async function evaluateIncidents(pool: Pool, config: Config, now: Date): 
       [Boolean(config.get("social.incidentsCountControlled"))],
     );
     const history = await client.query<StoredIncident>("SELECT * FROM social_incidents");
+    const versions = await client.query<VersionRow>(
+      "SELECT network,service_id,version_id,first_seen_at FROM service_versions",
+    );
     const keys = new Map<string, IncidentKey>();
     for (const row of [...rows.rows, ...history.rows]) {
       const key = keyFor(row);
       keys.set(keyText(key), key);
     }
     for (const key of keys.values())
-      await evaluateKey(client, key, rows.rows, history.rows, config, now);
+      await evaluateKey({
+        client,
+        key,
+        observations: rows.rows,
+        incidents: history.rows,
+        versions: versions.rows,
+        config,
+        now,
+      });
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK");

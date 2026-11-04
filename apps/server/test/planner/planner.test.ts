@@ -7,6 +7,7 @@ import {
   computeObjectiveGatewayVolume,
   createPlanner,
   recomputePlanHash,
+  type PlannerDependencies,
 } from "#src/planner/index";
 import { createSafeProber } from "#src/planner/probe";
 import { createRegisteredSelection } from "#src/selection/registered/index";
@@ -76,6 +77,7 @@ function makePlanner(
     readonly health?: PlannerPorts["health"];
     readonly remaining?: string;
     readonly unrated?: boolean;
+    readonly social?: PlannerDependencies["social"];
   } = {},
 ) {
   const spec = {
@@ -91,6 +93,7 @@ function makePlanner(
   });
   const planner = createPlanner({
     config,
+    ...(options.social ? { social: options.social } : {}),
     ports: {
       ranking: {
         rank: async (query) => {
@@ -354,6 +357,45 @@ describe("planner fallback", () => {
     const built = await makePlanner({ remaining: "999999999" });
     expect(built?.plan.approvalReasons).toBeUndefined();
     expect(built?.approvalNeeded).toBe(false);
+  });
+
+  it("holds earned allowance for a ranked supplier with an open incident", async () => {
+    const social: NonNullable<PlannerDependencies["social"]> = {
+      lessonsFor: async () => [],
+      openIncidentsFor: async () => [
+        {
+          incidentId: "inc_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
+          serviceId,
+          versionId: "svcver_1",
+          distinctOwners: 3,
+          negativeUnits: 3,
+          openedAt: "2026-10-20T00:00:00.000Z",
+        },
+      ],
+    };
+    const built = await makePlanner({ remaining: "999999999", social });
+    expect(built?.plan.schemaVersion).toBe("1.4");
+    expect(built?.plan.approvalReasons).toEqual(["incident-open"]);
+    expect(built?.approvalNeeded).toBe(true);
+  });
+
+  it("holds an exploration supplier on its stored unverified version", async () => {
+    const social: NonNullable<PlannerDependencies["social"]> = {
+      lessonsFor: async () => [],
+      openIncidentsFor: async () => [
+        {
+          incidentId: "inc_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
+          serviceId,
+          versionId: `ver_${"0".repeat(32)}`,
+          distinctOwners: 3,
+          negativeUnits: 3,
+          openedAt: "2026-10-20T00:00:00.000Z",
+        },
+      ],
+    };
+    const built = await makePlanner({ remaining: "999999999", unrated: true, social });
+    expect(built?.plan.approvalReasons).toContain("incident-open");
+    expect(built?.approvalNeeded).toBe(true);
   });
 
   it("adds a health reason for the owner and excludes H4-blocked suppliers", async () => {
