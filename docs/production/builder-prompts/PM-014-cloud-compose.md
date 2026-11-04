@@ -70,19 +70,20 @@
 ### Before you write code
 
 - Read `CLAUDE.md` in full. Every rule in it binds you.
-- Read `docs/specs/06-review/change-requests/SCR-170-public-alpha-cloud-deployment.md` in full. §7 holds the parallel-window rules.
-- Read `docs/production/2026-11-05-parallel-production-plan.md` §1 and your task's row in §2.2.
+- Read `docs/specs/06-review/change-requests/SCR-170-public-alpha-cloud-deployment.md` in full. §7 holds the parallel-window rules. It is accepted by the merge of PR #191; build against it exactly as written there.
+- Read `docs/production/2026-11-05-parallel-production-plan.md` §1 and your task's row in §2.2. Stop and ask Zaryab for nothing except the §5.3 items; the chief architect answers everything else.
 - Check that your task's "Depends on" items are merged into `prod/integration`. If one is not, stop and say so in your report.
 
 ### The work running in parallel with you
 
-- **The agent social network** is being built on `social/integration`.
+- **The agent social network** is being built by the Codex Lane Orchestrator as packages SN-1 to SN-6 (SCR-164, merged into `build-v1` as PR #192). Each package is one branch `social/sn-<n>-<slug>` and one PR straight into `build-v1`. There is no `social/integration` branch.
 - **Never edit these paths:**
   - `apps/server/src/social/**`, `apps/server/test/social/**`, `apps/server/scripts/seed-controlled-representatives.ts`
   - migrations `0023`–`0029`
   - `apps/server/src/selection/registered/index.ts`, `apps/server/src/selection/ranking/*`
   - `apps/server/src/planner/index.ts`, `apps/server/src/planner/service.ts`
   - `apps/server/src/objectives/completion.ts`, `apps/server/src/devices/pair.ts`, `apps/server/src/app.ts`
+  - `apps/server/src/local-main.ts` (SN-1 passes the client address to the public social routes), `apps/server/src/http/ids.ts` (SN-1 adds `randomId`)
   - `apps/web/app/social/**`, `apps/web/app/onboarding/**`, `apps/web/app/approve/**`, `apps/web/app/home/**`
   - `docs/specs/02-data-and-protocol/**`, `docs/specs/04-components/shared/cross-cutting.md`, `docs/specs/05-build-plan/phase-1-tasks.md`
   - the generated `@czar/schemas` and `@czar/api-contract`
@@ -92,14 +93,15 @@
 - **Overlap check before you open your PR.** Run:
 
   ```sh
-  git ls-remote origin refs/heads/social/integration
-  # if it exists:
-  git fetch origin social/integration
-  git diff --name-only origin/build-v1...origin/social/integration > /tmp/social-files
+  git ls-remote --heads origin 'refs/heads/social/*'
+  # for each ref it prints, as <ref>:
+  git fetch -q origin "+refs/heads/<ref>:refs/remotes/origin/<ref>"
+  git diff --name-only origin/build-v1...origin/<ref> > /tmp/social-files
   git diff --name-only origin/prod/integration...HEAD | grep -Fxf /tmp/social-files
   ```
 
   - Any output means: stop, and report the overlapping files.
+  - With no `social/*` branch pushed yet, the never-edit list above is the check.
 
 ### Shared files
 
@@ -167,7 +169,7 @@
 ### Branch and PR
 
 - Branch from `prod/integration`: `prod/<PM-id>-<slug>` (given below).
-- One PR into `prod/integration`. Never push to `build-v1`.
+- One PR into `prod/integration`. Never push to `build-v1`, never merge your own PR: the chief architect reviews it and merges it.
 
 ### Task report (the PR body)
 

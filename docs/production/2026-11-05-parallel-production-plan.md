@@ -1,15 +1,17 @@
-# Czar parallel production plan: the 6 November start
+# Czar parallel production plan: the public-alpha production build
 
-- **From:** chief architect, for Zaryab, the production manager and the Codex Lane Orchestrator
+- **From:** chief architect, for Zaryab and the production manager
 - **Answers:** "Request to the senior architect: the parallel production plan" (4 November 2026)
-- **Delivered:** with SCR-170 (`docs/specs/06-review/change-requests/SCR-170-public-alpha-cloud-deployment.md`) and 20 builder prompts (`docs/production/builder-prompts/`)
-- **Builders start:** 6 November 2026, 12:00 IST, once Zaryab merges this PR at the 10:00 review
+- **Delivered:** with SCR-170 (`docs/specs/06-review/change-requests/SCR-170-public-alpha-cloud-deployment.md`) and 20 task specs (`docs/production/builder-prompts/`)
+- **Who builds it (Zaryab, 4 November, 23:54 IST):** the **chief architect**, with its own builder agents, start to finish. There is no collaborator and no delegation. The Codex Lane Orchestrator builds the agent social network (SCR-164) in parallel and has nothing to do with this plan.
+- **Zaryab's involvement:** none until the end. He merges PRs, and he is asked only for the accounts, keys, funds and deployment approvals in §5, which are deliberately held to the last stage.
+- **Started:** 5 November 2026, on his go-ahead, against SCR-170 as written in this PR.
 
 ---
 
 ## Summary
 
-- **20 builder tasks (21 tracker items) can start on 6 November in five lanes,** without touching any file the agent social network reserves, any contract, the payer, the planner or selection.
+- **20 tasks (21 tracker items) start now, in five lanes,** without touching any file the agent social network reserves, any contract, the payer, the planner or selection.
 - **The candidate list was wrong in five material places:**
   1. The signer read model is already built.
   2. There is no testnet deployment recorded in the repository.
@@ -21,38 +23,31 @@
   - secrets only as files
   - new entry files, so the local launchers stay untouched
   - the shared-file rules for the parallel window
-- **What you must do by 6 November, 10:00 IST:**
-  - merge this PR, which accepts SCR-170 and records PM-001
-  - send the testnet deployment record (§5)
-  - ask the collaborator to push `social/integration` so overlap checks can run
+- **What Zaryab must do:**
+  - merge this PR, which accepts SCR-170 and records PM-001 (the build has started against it in parallel; anything he changes is reworked)
+  - send the testnet deployment record when convenient (§5); PM-010 is the only start-list task that waits on it
+  - nothing else until the end-stage list in §5
 
 ---
 
 ## Section 1: verification summary
 
-### 1.1 Heads read (4 November 2026, about 15:00 IST)
+### 1.1 Heads read (4 November 2026, 23:00 IST)
 
 | Branch | Head | Note |
 |---|---|---|
-| `build-v1` | `d9fb168` (merge of #188, Flow 4A completion report) | unchanged since 31 October |
-| `social/integration` | **does not exist on `origin`** | no fork exists either; the collaborator works locally or has not pushed |
-| `docs/social-network-handoff` (PR #190) | `7579fcf`, **open, not merged** | the collaborator's brief, and its two delegations, are not yet recorded on `build-v1` |
+| `build-v1` | `c70d25c` (merge of #192, SCR-164 and the social orchestrator brief) | was `d9fb168` when this plan was first written |
+| `docs/scr-164-social-network` (PR #192) | `8b7dc68`, **merged** | the social network specification is now accepted; building starts from it |
+| `social/sn-*` | **none pushed yet** | the orchestrator starts from `docs/production/social-network-orchestrator-brief.md` |
+| `docs/social-network-handoff` (PR #190) | **closed by Zaryab** | there is no collaborator and no delegation |
 
-### 1.2 What the social work has touched
+### 1.2 What the social work will touch
 
-- **Nothing visible.** No branch, PR or fork exists on GitHub.
-- **Consequence:** this plan protects every path in your §3.1, plus spec-change numbers SCR-164 to SCR-169 and migrations `0023` to `0029` (SCR-170 §7).
-- **Check rule:** before merging any production PR into `prod/integration`, the orchestrator runs:
-
-  ```sh
-  git ls-remote origin refs/heads/social/integration
-  # if it exists:
-  git fetch origin social/integration
-  git diff --name-only origin/build-v1...origin/social/integration > /tmp/social-files
-  git diff --name-only origin/prod/integration...HEAD | grep -Fxf /tmp/social-files
-  ```
-
-  - Any output means stop: that PR moves to "wait".
+- **Its shape:** six package branches `social/sn-<n>-<slug>`, each a PR straight into `build-v1` (SCR-164 §4). There is no `social/integration` branch.
+- **Its paths** are the reserved list in SCR-170 §7, which now also holds `apps/server/src/local-main.ts` (SN-1 passes the client address to the public social routes) and `apps/server/src/http/ids.ts` (SN-1 adds `randomId`).
+- **Its numbers:** spec changes SCR-164 to SCR-169, migrations `0023` to `0029`.
+- **Check rule:** before merging any production PR into `prod/integration`, run the overlap check in SCR-170 §7: list every `social/*` branch and open SN pull request, diff each against `build-v1`, and intersect with this PR's files. Any output means that production PR waits for the social package it overlaps, then rebases.
+- **No production task in the start list touches a reserved path.** The check is a safety net, not a dependency.
 
 ### 1.3 Corrections to the facts in your §2
 
@@ -96,7 +91,7 @@
     - PM-021's request mapping was wrong
 - **Not verified by the reviewer:** the server's 606-test baseline (no Postgres in its sandbox; I measured 606 on `ca106fd`; `d9fb168` adds only a report and a change to an excluded chain test), and the model id `claude-haiku-5-5` (needs a live call).
 
-## Section 2: the start list for 6 November, 12:00 IST
+## Section 2: the start list (building from 5 November)
 
 ### 2.1 Lanes at a glance
 
@@ -106,7 +101,9 @@
 | **B** | Signer | PM-017, then PM-058, then PM-024 |
 | **C** | Server (non-reserved files only) | PM-016 ∥ PM-021, then PM-059 |
 | **D** | Daemon and host checks | PM-037 ∥ PM-060, then PM-035, then PM-034 |
-| **E** | House supply (`apps/merchants`) | PM-042, then PM-043; PM-046 in parallel with a second builder |
+| **E** | House supply (`apps/merchants`) | PM-042, then PM-043; PM-046 in parallel |
+
+- **The architect runs all five lanes,** dispatching one builder agent per task from the task specs in §6 and reviewing every result itself. The lanes are how the work is parallelised, not who does it.
 
 - **PM-061 merges first.**
   - It is half a day of work, with no behaviour change.
@@ -114,6 +111,8 @@
   - Until it merges, the other lanes write tests and code that need no new keys.
 
 ### 2.2 Task rows
+
+- **"SCR-170 merged" as a dependency** now reads "SCR-170 as written in this PR". Zaryab's merge of this PR is its acceptance; the build runs in parallel with that merge on his instruction.
 
 | ID | Title | Lane | Scope | Files and folders | Shared-file touches | Conflict risk | Depends on | Acceptance tests | Done when | Days |
 |---|---|---|---|---|---|---|---|---|---|---|
@@ -208,33 +207,51 @@
 
 ---
 
-## Section 5: Zaryab's approvals and inputs
+## Section 5: what Zaryab is asked for, and when
 
-| # | What | Latest date | Blocks |
-|---|---|---|---|
-| 1 | Merge this PR (accepts SCR-170, which is PM-001) | **6 Nov, 10:00 IST** | every start-list task |
-| 2 | Send the testnet deployment record: `contracts/broadcast/Deploy.s.sol/5042002/run-latest.json` from the machine that deployed, or the addresses plus the deploy commit | **6 Nov, 12:00 IST** | PM-010 |
-| 3 | Ask the collaborator to push `social/integration` (no merge needed) | **6 Nov, 12:00 IST** | the overlap check in §1.2 |
-| 4 | Merge PR #190 (the social brief) or confirm its two delegations in writing | 6 Nov | the collaborator's spec and merge authority |
-| 5 | PM-005: browser "New task" in alpha scope (recommended: yes) | 7 Nov | SCR-176 |
-| 6 | PM-003: macOS and Linux now, Windows later | 8 Nov | PM-035 merge into `build-v1` |
-| 7 | PM-002: robot-key fix choice, after reading SCR-171 | 10 Nov | PM-023 |
-| 8 | PM-006: buy the domain | 10 Nov | Caddy certificates, passkeys on the real RP ID |
-| 9 | PM-007: Google Cloud account and project (card for the credit) | 10 Nov | VM, KMS, Secret Manager, Storage |
-| 10 | PM-008: Circle Developer Console account | 12 Nov | PM-019 |
-| 11 | PM-009 + PM-004: Anthropic account, separate projects, hard monthly limit | 12 Nov | live model wiring |
-| 12 | An npm account or organisation for the daemon package | 14 Nov | publishing PM-034 |
-| 13 | Key creation in Cloud KMS (PM-018) | 13 Nov | registering keys |
-| 14 | Testnet funds for K3, K7, K8, relayer, K10 per service, K21a/K21b | 14 Nov | first testnet run |
-| 15 | First deployment to the VM (`create.sh --apply`, then compose up) | 14 Nov | PM-020, PM-022 |
-| 16 | Connecting the model provider live (`models.provider = anthropic`) | 15 Nov | AI merchants, boundary screen, planner prompts |
-| 17 | Contract redeploy on testnet for SCR-171/173 | 18 Nov | PM-023, PM-029 |
+- **The principle he set (4 November):** he is not involved until the last stage. Everything that needs him is an account, a key, money, a domain or a deployment approval, and all of it is held to the end. Nothing in the start list waits on him except the one record in item 2.
+
+### 5.1 Now
+
+| # | What | Blocks |
+|---|---|---|
+| 1 | Merge this PR (accepts SCR-170, which is PM-001) | nothing: the build is running against it in parallel, and anything he changes is reworked |
+| 2 | Send the testnet deployment record: `contracts/broadcast/Deploy.s.sol/5042002/run-latest.json` from the machine that deployed, or the addresses plus the deploy commit | PM-010 only |
+
+### 5.2 Decisions he has already made (recorded here; no further input needed)
+
+| Item | Decision |
+|---|---|
+| **PM-005** | Browser "New task" is **in** alpha scope (SCR-176). |
+| **PM-003** | **macOS and Linux now**, Windows later. PM-035 ships on both. |
+| **PM-002** | **One agent signer per vault**, plus a **testnet redeploy** (SCR-171). PM-023 builds to that. |
+| Claude Code plugin | **Not in the alpha.** PM-032 and T-062 stay on the wait list (SCR-179). |
+
+### 5.3 The end stage: accounts, keys, money, deployment
+
+- **Asked for as one batch** when the code is built, reviewed and green, not before. Each line is one action by him.
+
+| # | What | Needed for |
+|---|---|---|
+| 1 | Buy the domain (PM-006) | Caddy certificates, passkeys on the real RP ID |
+| 2 | Google Cloud account and project, with a card for the credit (PM-007) | the VM, KMS, Secret Manager, Storage |
+| 3 | Key creation in Cloud KMS (PM-018) | registering keys |
+| 4 | Testnet funds for K3, K7, K8, the relayer, K10 per service, K21a and K21b | the first testnet run |
+| 5 | First deployment to the VM (`create.sh --apply`, then compose up) | PM-020, PM-022 |
+| 6 | Circle Developer Console account (PM-008) | PM-019 |
+| 7 | Anthropic account, separate projects, a hard monthly limit (PM-009, PM-004) | live model wiring |
+| 8 | Connecting the model provider live (`models.provider = anthropic`) | the AI merchants, the boundary screen, planner prompts |
+| 9 | Contract redeploy on testnet for SCR-171 and SCR-173 | PM-023, PM-029 |
+| 10 | An npm account or organisation for the daemon package | publishing PM-034 |
+
+- **Until then** every one of those is stubbed, faked or dry-run in tests, and nothing in this plan touches testnet, a real account or a key.
 
 ---
 
-## Section 6: builder prompts
+## Section 6: task specs
 
-- One file per approved task in `docs/production/builder-prompts/`. Each file is complete: common rules, scope, files, keys, tests first, acceptance, branch and report.
+- One file per approved task in `docs/production/builder-prompts/`, with `_common.md` holding the rules every task obeys. Each file is complete: scope, files, keys, tests first, acceptance, branch and report.
+- **How they are used:** the architect dispatches one builder agent per task, giving it `_common.md` plus that task's file, and reviews the result against the file before merging into `prod/integration`. The files are the task specification, whoever or whatever executes them.
 
 | File | Task |
 |---|---|
@@ -259,15 +276,16 @@
 | `PM-043-test-merchant-lab.md` | PM-043 |
 | `PM-046-job-test-provider.md` | PM-046 |
 
-### 6.1 Branches and merging (for the orchestrator)
+### 6.1 Branches and merging
 
-- Cut `prod/integration` from `build-v1` at `d9fb168` or later.
+- Cut `prod/integration` from `build-v1` at `c70d25c` or later.
 - Each task works on `prod/<PM-id>-<slug>` and opens a PR into `prod/integration`.
-- The orchestrator merges a task PR when its acceptance tests and the existing suites pass and the §1.2 overlap check is empty.
-- Keep `prod/integration` current by **merging** `build-v1` into it, never rebasing.
-- **Weekly batch PR** `prod/integration` → `build-v1`; Zaryab merges. The first batch targets 12 November.
-  - Whichever of the social PR and a batch lands second merges `build-v1` in and re-runs every suite.
+- **The architect merges a task PR into `prod/integration`** when its acceptance tests and the existing suites pass and the §1.2 overlap check is empty. `prod/integration` is an integration branch, not `build-v1`, so no approval is needed for it.
+- Keep `prod/integration` current by **merging** `build-v1` into it, never rebasing. Merge `build-v1` in after every social package lands.
+- **Weekly batch PR** `prod/integration` → `build-v1`; **Zaryab merges each one**, and he alone. The first batch targets 12 November.
+  - A social package PR and a production batch never wait on each other; whichever lands second merges `build-v1` in and re-runs every suite.
 - Never push to or force-push `build-v1`.
+- **Every batch PR body carries:** the tasks in it, every acceptance test with its command and result, the full-suite results, the overlap check output, the decisions taken, and anything found and not fixed.
 
 ---
 
@@ -275,34 +293,34 @@
 
 | ID | Change | New status / phase | Owner | Note |
 |---|---|---|---|---|
-| PM-001 | Recorded as SCR-170; approve by merging this PR | todo → in-progress | Zaryab | approval at 6 Nov 10:00 |
-| PM-010 | Stays start-now; depends on Zaryab sending the broadcast record; adds bytecode verification | start now | Builder (lane A) + Zaryab input | |
-| PM-011, PM-012 | Merged into one prompt; code only, no deploy | start now | Builder (lane A) | |
-| PM-013 | Images live in `ops/cloud/docker/` | start now | Builder (lane A) | |
-| PM-014 | Depends on PM-059 and PM-017 | start now (after deps) | Builder (lane A) | |
+| PM-001 | Recorded as SCR-170; approved by merging this PR | todo → in-progress | Zaryab | the build runs in parallel with the merge |
+| PM-010 | Stays start-now; depends on Zaryab sending the broadcast record; adds bytecode verification | start now | Architect (lane A) + Zaryab input | |
+| PM-011, PM-012 | Merged into one prompt; code only, no deploy | start now | Architect (lane A) | |
+| PM-013 | Images live in `ops/cloud/docker/` | start now | Architect (lane A) | |
+| PM-014 | Depends on PM-059 and PM-017 | start now (after deps) | Architect (lane A) | |
 | PM-015 | **Closed: not needed** (loopback + Caddy) | done (closed) | Architect | SCR-170 §1 |
-| PM-016 | Moved from "needs check" to start now; no new key, no `app.ts` edit | start now | Builder (lane C) | |
-| PM-017 | Start now; includes signer cloud entry and gas-low log alert | start now | Builder (lane B) | |
-| PM-021 | Start now; adapter only, not wired | start now | Builder (lane C) | wiring is PM-059 + approval |
-| PM-024 | **Re-scoped:** the projection exists; half-day cloud audit | Phase 2 → start now | Builder (lane B) | |
+| PM-016 | Moved from "needs check" to start now; no new key, no `app.ts` edit | start now | Architect (lane C) | |
+| PM-017 | Start now; includes signer cloud entry and gas-low log alert | start now | Architect (lane B) | |
+| PM-021 | Start now; adapter only, not wired | start now | Architect (lane C) | wiring is PM-059 + approval |
+| PM-024 | **Re-scoped:** the projection exists; half-day cloud audit | Phase 2 → start now | Architect (lane B) | |
 | PM-030 | Design-only (SCR-174); copy changes wait | wait | Architect | due 7 Nov |
-| PM-032 | **Moved to wait:** observation chain unbuilt; host checks first | wait | Builder | SCR-179 |
-| PM-033 | **Moved to wait:** needs T-071 routes in `app.ts` (reserved) | wait | Builder | after the social merge |
-| PM-034 | Build and pack only; publish needs an npm account | start now | Builder (lane D) | |
-| PM-035 | Start now; shipping on Linux needs PM-003 | start now | Builder (lane D) | |
-| PM-037 | Start now | start now | Builder (lane D) | |
+| PM-032 | **Moved to wait:** observation chain unbuilt; host checks first. Zaryab has also ruled the Claude Code plugin out of the alpha (§5.2) | wait | Architect | SCR-179 |
+| PM-033 | **Moved to wait:** needs T-071 routes in `app.ts` (reserved) | wait | Architect | after the social merge |
+| PM-034 | Build and pack only; publish needs an npm account | start now | Architect (lane D) | |
+| PM-035 | Start now; shipping on Linux needs PM-003 | start now | Architect (lane D) | |
+| PM-037 | Start now | start now | Architect (lane D) | |
 | PM-041 | **Ruled in this plan** (§2.3) | done | Architect | |
-| PM-042 | **Re-scoped** to T-051 part A: `czar-spot`, `czar-extract` | start now | Builder (lane E) | Page Reader = `czar-extract`; Chain Data = `czar-spot`; Vulnerability Lookup → SCR-178 |
-| PM-043 | **Split:** T-106 lab (six profiles, no AI) starts now; AI Explainer merchants wait for SCR-178 + model | start now (lab) / wait (AI) | Builder (lane E) | the lab is the "bad merchant" set |
-| PM-046 | **Re-scoped** to T-108 without testnet; placeholder work mode | start now | Builder (lane E, second builder) | |
+| PM-042 | **Re-scoped** to T-051 part A: `czar-spot`, `czar-extract` | start now | Architect (lane E) | Page Reader = `czar-extract`; Chain Data = `czar-spot`; Vulnerability Lookup → SCR-178 |
+| PM-043 | **Split:** T-106 lab (six profiles, no AI) starts now; AI Explainer merchants wait for SCR-178 + model | start now (lab) / wait (AI) | Architect (lane E) | the lab is the "bad merchant" set |
+| PM-046 | **Re-scoped** to T-108 without testnet; placeholder work mode | start now | Architect (lane E) | |
 | PM-047 | **Moved to design-only** (SCR-177) | wait | Architect | money path |
-| PM-051, PM-052 | Start now, code only | start now | Builder (lane A) | |
+| PM-051, PM-052 | Start now, code only | start now | Architect (lane A) | |
 | PM-053 | Draft after PM-034/PM-039 settle | wait | Architect | 12 Nov |
 | PM-054 | Draft after SCR-174 | wait | Architect | 8 Nov |
 | **PM-057** | **New, Phase 6:** apply the production SCRs' spec edits in one docs PR after the social merge | new, wait | Architect | |
-| **PM-058** | **New, Phase 4:** signer K21a/K21b and `provider-call` policy | new, start now | Builder (lane B) | |
-| **PM-059** | **New, Phase 1:** production entry points for server, merchants, indexer | new, start now | Builder (lane C) | |
-| **PM-060** | **New, Phase 3:** host checks G0-11 and G0-17 | new, start now | Builder (lane D) | |
-| **PM-061** | **New, Phase 1:** config foundations (`registry-production.ts`, `validateCloudConfig`) | new, start now (first) | Builder (lane A) | |
-| **PM-062** | **New, Phase 3:** observation chain T-063 → T-066 → T-068 → T-069 as a feature track | new, wait | Architect + Builder | SCR-179 |
-| **PM-063** | **New, Phase 4:** T-051 part B: Gateway routes, sweeps, Czar-service refunds | new, wait | Builder | SCR-177 |
+| **PM-058** | **New, Phase 4:** signer K21a/K21b and `provider-call` policy | new, start now | Architect (lane B) | |
+| **PM-059** | **New, Phase 1:** production entry points for server, merchants, indexer | new, start now | Architect (lane C) | |
+| **PM-060** | **New, Phase 3:** host checks G0-11 and G0-17 | new, start now | Architect (lane D) | |
+| **PM-061** | **New, Phase 1:** config foundations (`registry-production.ts`, `validateCloudConfig`) | new, start now (first) | Architect (lane A) | |
+| **PM-062** | **New, Phase 3:** observation chain T-063 → T-066 → T-068 → T-069 as a feature track | new, wait | Architect | SCR-179 |
+| **PM-063** | **New, Phase 4:** T-051 part B: Gateway routes, sweeps, Czar-service refunds | new, wait | Architect | SCR-177 |

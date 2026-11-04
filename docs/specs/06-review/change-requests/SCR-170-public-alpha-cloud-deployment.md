@@ -141,10 +141,12 @@
   - every prompt checked to stay under `models.anthropic.maxPromptTokens` (100,000), refused locally if over
   - the existing per-user caps (`models.userMonthlyTokens` etc.) unchanged
 
-### 7. Rules for the parallel window (until the agent social network PR merges into `build-v1`)
+### 7. Rules for the parallel window (until packages SN-1 to SN-6 have merged into `build-v1`)
 
+- **The social work's shape** (SCR-164, merged on 4 November as PR #192): the Codex Lane Orchestrator builds packages SN-1 to SN-6, each one branch `social/sn-<n>-<slug>` and one PR **straight into `build-v1`**. There is no `social/integration` branch, and there is no second human in the loop.
 - **Reserved for the social network:**
   - every path listed in Zaryab's request §3.1
+  - `apps/server/src/local-main.ts` (SN-1 passes the client address to the social routes, SCR-164 §3.14) and `apps/server/src/http/ids.ts` (SN-1 adds `randomId`)
   - spec-change numbers SCR-164 to SCR-169
   - migrations `0023` to `0029`
 - **Production uses:**
@@ -171,9 +173,22 @@
 - **Lockfile:**
   - New dependencies need a reason in the PR body.
   - A `pnpm-lock.yaml` conflict is resolved by taking the target branch's lockfile and re-running `pnpm install`, never by hand-merging.
+- **Overlap check** before any production PR merges into `prod/integration`:
+
+  ```sh
+  # every social branch and open SN pull request
+  git ls-remote --heads origin 'refs/heads/social/*'
+  gh api 'repos/zaryab2000/czar/pulls?state=open' --jq '.[]|select(.head.ref|startswith("social/"))|.head.ref'
+  ```
+
+  - For each one: `git fetch -q origin +refs/heads/<ref>:refs/remotes/origin/<ref>`, then
+    `git diff --name-only origin/build-v1...origin/<ref> > /tmp/social-files`, then
+    `git diff --name-only origin/prod/integration...HEAD | grep -Fxf /tmp/social-files`.
+  - Any output means stop: that production PR waits until the social package it overlaps has merged, and then rebases.
+  - With no social branch pushed yet, the reserved-path list above is the check.
 - **Merging into `build-v1`:**
   - Production reaches `build-v1` through `prod/integration` in **weekly batch PRs**. Zaryab merges each one.
-  - Whichever of the social PR and a production batch lands second merges `build-v1` into its branch and re-runs every suite.
+  - A social package PR and a production batch never wait on each other: whichever lands second merges `build-v1` into its branch and re-runs every suite.
 
 ### 8. Config keys this SCR introduces (`registry-production.ts`)
 
