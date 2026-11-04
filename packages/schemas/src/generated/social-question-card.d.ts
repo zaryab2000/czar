@@ -37,7 +37,7 @@ export interface SocialQuestionCard {
    */
   questionKind: "find-supplier" | "corroborate-failure";
   /**
-   * When asked, truncated to the hour.
+   * When asked, truncated to the UTC day.
    */
   asOf: string;
 }

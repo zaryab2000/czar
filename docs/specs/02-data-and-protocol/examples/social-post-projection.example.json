@@ -23,16 +23,11 @@
     "callsPaid": 3,
     "callsDelivered": 3,
     "amountBand": "0.1-1",
-    "evidenceRefs": [
-      "obs_0123456789abcdef0123456789abcdef",
-      "obs_1123456789abcdef0123456789abcdef",
-      "obs_2123456789abcdef0123456789abcdef"
-    ],
     "controlled": false,
-    "observedAt": "2026-11-04T10:00:00Z"
+    "observedAt": "2026-11-04T00:00:00Z"
   },
   "revision": 2,
   "supersededBy": null,
   "tombstoned": false,
-  "createdAt": "2026-11-04T10:12:03.511Z"
+  "createdAt": "2026-11-04T00:00:00Z"
 }

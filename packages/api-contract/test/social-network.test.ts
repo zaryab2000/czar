@@ -58,6 +58,41 @@ describe("SCR-164 social network API contracts", () => {
         origin: "https://supplier.example/path?q=1",
       }),
     ).toBe(false);
+    // safe-fetch allows https on port 443 only, so a port is never a valid lead origin
+    expect(
+      apiContracts
+        .get("suggestSocialLead")
+        ?.request?.({ ...lead, origin: "https://supplier.example:8443" }),
+    ).toBe(false);
+    // the exact local-merchant form is shape-valid; the server accepts it only when configured
+    expect(
+      apiContracts
+        .get("suggestSocialLead")
+        ?.request?.({ ...lead, origin: "http://127.0.0.1:8787" }),
+    ).toBe(true);
+    expect(
+      apiContracts.get("suggestSocialLead")?.request?.({ ...lead, capabilityTag: "Not A Tag!" }),
+    ).toBe(false);
+  });
+
+  it("rejects public projections that leak evidence ids or exact times", () => {
+    const withRefs = {
+      ...post,
+      card: { ...(post["card"] as object), evidenceRefs: ["obs_0123456789abcdef0123456789abcdef"] },
+    };
+    expect(
+      validateRecordedExchange("listSocialFeed", {
+        responseStatus: 200,
+        responseBody: { items: [withRefs], nextCursor: null },
+      }).valid,
+    ).toBe(false);
+    const exactTime = { ...post, createdAt: "2026-11-04T10:12:03.511Z" };
+    expect(
+      validateRecordedExchange("listSocialFeed", {
+        responseStatus: 200,
+        responseBody: { items: [exactTime], nextCursor: null },
+      }).valid,
+    ).toBe(false);
   });
 
   it("registers all twelve social operations", () => {

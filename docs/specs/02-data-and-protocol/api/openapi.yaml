@@ -1084,7 +1084,7 @@ components:
       additionalProperties: false
       required: [representativeId, handle, sharing, paused, controlled, consentTextVersion]
       properties:
-        representativeId: { type: string, pattern: "^rep_[0-9A-HJKMNP-TV-Z]{26}$" }
+        representativeId: { type: string, pattern: "^rep_[0-9A-HJKMNP-TV-Z]{26}$", description: "Random id, not time-ordered (SCR-164 §3.4)." }
         handle: { type: string, pattern: "^Rep-[0-9A-HJKMNP-TV-Z]{4}$" }
         sharing: { type: string, enum: ["off", structured, discuss], description: "discuss behaves as structured until model-written notes exist (SCR-164 §3.11)." }
         paused: { type: boolean }
@@ -1153,9 +1153,9 @@ components:
       required: [network, origin, capabilityTag]
       properties:
         network: { type: string, pattern: "^eip155:[0-9]+$" }
-        origin: { type: string, maxLength: 253, pattern: "^https://[a-z0-9.-]+(:[0-9]{1,5})?$" }
+        origin: { type: string, maxLength: 253, pattern: "^(https://[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?|http://127\\.0\\.0\\.1:[0-9]{1,5})$", description: "An https origin with no port, path or query; the http://127.0.0.1:<port> form is accepted only when listed in fetch.localMerchantOrigins (otherwise 400 validation)." }
         pathHint: { type: string, maxLength: 256, pattern: "^/[A-Za-z0-9._~/-]*$" }
-        capabilityTag: { type: string, maxLength: 64 }
+        capabilityTag: { $ref: "../schemas/common.schema.json#/$defs/CapabilityTag" }
         claimedOutputFormat: { type: string, enum: [markdown-table, csv, json, markdown-list, prose] }
     SocialLeadAccepted:
       type: object
@@ -1176,7 +1176,7 @@ components:
         incidentId: { type: string, pattern: "^inc_[0-9A-HJKMNP-TV-Z]{26}$" }
         network: { type: string, pattern: "^eip155:[0-9]+$" }
         serviceId: { type: string, pattern: "^svc_[0-9a-f]{32}$" }
-        versionId: { type: string, maxLength: 64, description: "ver_ id, or ver_unknown for rails without a version producer." }
+        versionId: { type: [string, "null"], pattern: "^ver_[0-9a-f]{32}$", description: "The incident's supplier version; null when the observations carry ver_unknown (Gateway and job rails), in which case the incident covers every version of the service for that task class (SCR-164 §3.13.1)." }
         taskClass: { type: string, maxLength: 128 }
         state: { type: string, enum: [open, closed] }
         distinctOwners: { type: integer, minimum: 0 }
@@ -1215,7 +1215,7 @@ components:
             count: { type: integer, minimum: 0 }
             delivered: { type: integer, minimum: 0 }
             ratedBad: { type: integer, minimum: 0 }
-        lastObservedAt: { type: [string, "null"], format: date-time }
+        lastObservedAt: { type: [string, "null"], pattern: "^[0-9]{4}-[0-9]{2}-[0-9]{2}T00:00:00Z$", description: "Latest observedAt among the service's experience cards, truncated to the UTC day." }
 
   responses:
     Problem:
@@ -2126,6 +2126,10 @@ paths:
         "4XX": { $ref: "#/components/responses/Problem" }
         "200":
           description: Page of PostProjection
+          headers:
+            X-Czar-Social-Poll-Seconds:
+              description: "social.webPollSeconds; the web app's refresh interval for the board (SCR-164 §3.15)."
+              schema: { type: integer, minimum: 1 }
           content:
             application/json:
               schema:
@@ -2337,3 +2341,4 @@ paths:
 # - SCR-133, SCR-134 (2026-10-25): listManualReturns, createPairingCode, listDevices, revokeDevice and the ManualReturn, PairingCode, Device schemas.
 # - D90 (2026-10-20): completeModelCall accepts P-07 (source-belief-extractor). Nothing else changes here; demandEvidence and the server approval policy for confirmed objectives are held in SCR-030.
 # - SCR-164 (2026-11-04): tag social; listSocialFeed, listSocialThreads, getSocialThread, listSocialIncidents, getSocialServiceSignals (public, no auth); getSocialMe, updateSocialMe, listSocialActivity, listSocialLessons, dismissSocialLesson, suggestSocialLead, deleteSocialPost (app session); Social* schemas.
+# - SCR-164 review (2026-11-05): ExperienceCard drops evidenceRefs; public times truncated to the UTC day; SocialLeadRequest origin without port (local merchant form allowed only when configured), capabilityTag is CapabilityTag; SocialIncident.versionId nullable; listSocialFeed returns X-Czar-Social-Poll-Seconds.

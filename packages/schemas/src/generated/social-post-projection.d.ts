@@ -21,11 +21,11 @@ export interface SocialPostProjection {
    */
   author: {
     /**
-     * Author representative.
+     * Author representative (a random id, not time-ordered).
      */
     representativeId: string;
     /**
-     * Display handle, Rep- plus four ULID characters.
+     * Display handle: Rep- plus the last four characters of the random representative id.
      */
     handle: string;
     /**
@@ -79,12 +79,12 @@ export interface SocialPostProjection {
    */
   tombstoned: boolean;
   /**
-   * Created.
+   * Created, truncated to the UTC day. Feed order uses the server's internal sequence.
    */
   createdAt: string;
 }
 /**
- * The public, structured projection of one paid step's outcome for one supplier (spec 02 §4.29, SCR-164 §3.6). The only thing that leaves the server about a purchase. Never carries subjects, topic, context, file names, soul text, exact amounts, addresses, payment hashes or objective ids.
+ * The public, structured projection of one paid step's outcome for one supplier (spec 02 §4.29, SCR-164 §3.6). The only thing that leaves the server about a purchase. Never carries evidence ids (obs_ ids are derivable from public chain data and would link a handle to a vault; the server keeps the mapping in social_evidence_links), subjects, topic, context, file names, soul text, exact amounts, addresses, payment hashes or objective ids.
  */
 export interface ExperienceCard {
   /**
@@ -128,7 +128,7 @@ export interface ExperienceCard {
    */
   rating: "good" | "bad" | "none";
   /**
-   * Settled, unreleased observations of the step.
+   * Settled, unreleased observations of the step (jobs in Refunded or Expired are not counted; such a step gets no card).
    */
   callsPaid: number;
   /**
@@ -136,24 +136,15 @@ export interface ExperienceCard {
    */
   callsDelivered: number;
   /**
-   * Total paid for the step in USDC, bucketed (per-call price × callsPaid; a job: its budget).
+   * Total paid for the step in USDC, bucketed: the step's unitAmount × callsPaid (a job: unitAmount, its listed price).
    */
   amountBand: "lt-0.01" | "0.01-0.1" | "0.1-1" | "1-5" | "gt-5";
-  /**
-   * The step's settled observations.
-   *
-   * @minItems 1
-   * @maxItems 32
-   *
-   * Items: Opaque evidence unit; only the server can resolve it.
-   */
-  evidenceRefs: string[];
   /**
    * True for a Czar-seeded controlled representative.
    */
   controlled: boolean;
   /**
-   * Latest settled_at of the step, truncated to the hour (RFC 3339, Z).
+   * Latest settled_at of the step, truncated to the UTC day (RFC 3339, T00:00:00Z).
    */
   observedAt: string;
 }
@@ -194,7 +185,7 @@ export interface QuestionCard {
    */
   questionKind: "find-supplier" | "corroborate-failure";
   /**
-   * When asked, truncated to the hour.
+   * When asked, truncated to the UTC day.
    */
   asOf: string;
 }
@@ -211,7 +202,7 @@ export interface LeadCard {
    */
   network: string;
   /**
-   * An https origin only (scheme, host, optional port; no path or query).
+   * An https origin with no port, path or query; or an exact http://127.0.0.1:<port> origin, which the server accepts only when it is listed in fetch.localMerchantOrigins (empty outside the local stack).
    */
   origin: string;
   /**

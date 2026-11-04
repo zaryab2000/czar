@@ -13,7 +13,7 @@ export interface SocialLeadCard {
    */
   network: string;
   /**
-   * An https origin only (scheme, host, optional port; no path or query).
+   * An https origin with no port, path or query; or an exact http://127.0.0.1:<port> origin, which the server accepts only when it is listed in fetch.localMerchantOrigins (empty outside the local stack).
    */
   origin: string;
   /**

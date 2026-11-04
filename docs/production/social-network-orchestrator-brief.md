@@ -63,11 +63,11 @@
 
 | Pkg | Title | Lane | Starts when | Main paths |
 |---|---|---|---|---|
-| SN-1 | Foundation | Lane 1 | now | `apps/server/migrations/0023-social.sql`; `apps/server/src/social/{representatives,threads,posts,routes}.ts`; `apps/server/src/devices/pair.ts` (representative creation only); route mounting in `apps/server/src/app.ts`; `packages/config/src/registry.ts` (`social.*` keys) |
+| SN-1 | Foundation | Lane 1 | now | `apps/server/migrations/0023-social.sql`; `randomId` in `apps/server/src/http/ids.ts`; `apps/server/src/social/{representatives,threads,posts,routes}.ts`; `apps/server/src/devices/pair.ts` (representative creation only); `apps/server/src/local-main.ts` (`remoteAddr` only); route mounting in `apps/server/src/app.ts`; `packages/config/src/registry.ts` (`social.*` keys) |
 | SN-2 | Events and worker | Lane 2 | SN-1 merged | `apps/server/src/social/{consumer,inbox,worker-main}.ts`, `runtime/*`, `projection/*`; `objective.no-supplier` in `apps/server/src/planner/service.ts`; `ops/local/process-compose.yaml` (worker); `apps/server/scripts/seed-controlled-representatives.ts` and the replay script |
 | SN-3 | Questions, replies, routing | Lane 2 | SN-2 merged | `apps/server/src/social/router.ts`, subscriptions, the question, reply and attach actions, expiry |
 | SN-4 | Routes into buying | Lane 3 | SN-3 merged | `apps/server/src/social/{incidents,lessons,leads}.ts`; call sites in `apps/server/src/selection/registered/index.ts` and the planner; Plan 1.4 emitters |
-| SN-5 | Web | Lane 5 | SN-1 merged; final round trip after SN-4 | `apps/web/app/social/**`, `apps/web/app/onboarding/representative`, the approve-screen lines, the Home tile |
+| SN-5 | Web | Lane 5 | SN-1 merged; final round trip after SN-4 | `apps/web/app/social/**`, `apps/web/app/onboarding/representative`, the approve-screen lines, the Home tile, `apps/web/packages/social-templates.ts` |
 | SN-6 | Demo and completion report | Lane 4 | SN-4 and SN-5 merged | the SCR-164 §3.19 demo, full verification, `reports/social-network-complete.md` |
 
 - **Critical path:** SN-1 → SN-2 → SN-3 → SN-4 → SN-6.
@@ -82,6 +82,7 @@
     - migrations `0023`–`0029`
     - spec-change numbers SCR-165–SCR-169, if the architect ever issues any
   - **Never edit** `registry-production.ts` or anything under `ops/cloud/`.
+  - The production work, in turn, never edits this build's paths (SCR-170 §7), now including `apps/server/src/local-main.ts`.
   - If a `pnpm-lock.yaml` or config-snapshot conflict appears with production work, regenerate it (`pnpm install`, `vitest -u`). Never hand-merge it.
 - **Branches:** each package is one branch `social/sn-<n>-<slug>` from `build-v1` and one PR into `build-v1` (SCR-164 §4). There is no `social/integration` branch; production checks overlap against SCR-170 §7's reserved paths.
 
@@ -91,34 +92,41 @@
 
 ### SN-1 Foundation (Lane 1)
 
-- **Migration `0023-social.sql`:** the DDL of SCR-164 §3.4 verbatim, plus the views and the role block of §3.17.
-  - Create the role inside the `IF NOT EXISTS` block. Roles are cluster-wide, and the test helper creates one database per suite.
-- **Check before writing the views:** read the real JSON keys of `steps.step` (Plan `Step`: `capability`, `kind`, `serviceId`, `unitAmount`) and of `objectives.submission` (`taskSpec.output.format`). Adapt the view, not the social code.
+- **Migration `0023-social.sql`:** the SQL of SCR-164 §3.4 verbatim (the `outbox_events.txid` column, the tables, the four projection views, the subject-label function), then the role block and grants of §3.17.
+  - Create the role with the `EXCEPTION WHEN duplicate_object OR unique_violation` block, never `IF NOT EXISTS`: test suites migrate fresh databases on one cluster in parallel, and `IF NOT EXISTS` races.
+  - The architect applied this SQL on top of migrations 0001–0022 on PostgreSQL 16 and checked the grants as `czar_social`. It applies cleanly.
+- **Public ids:** `rep_`, `thr_` and `pst_` ids come from the new `randomId(prefix)`, never the ULID generator (SCR-164 §3.4). Public times are truncated to the UTC day.
 - **Representative creation** goes inside the pairing transaction in `devices/pair.ts`, and lazily in `getSocialMe`. Nothing else in `pair.ts` changes.
-- **Public routes** use `security: []` and `social.publicReadRateLimitPerMinute` per socket remote address (SCR-164 §3.14). No forwarded-for header is trusted.
+- **Public routes** use `security: []` and `social.publicReadRateLimitPerMinute` per socket remote address (SCR-164 §3.14).
+  - Pass `incoming.socket.remoteAddress` into Hono from `createHttpServer` in `local-main.ts`; nothing else in that file changes.
+  - No forwarded-for header is ever read.
 - **Owner routes** use the existing app-session verifier, rate limit and `Idempotency-Key` helper, as `apps/server/src/app/results.ts` does.
 - **Tests:**
-  - acceptance 14 (tombstone, the parts that exist in SN-1) and 16 (permissions: as `czar_social`, writes to `observations`, `ratings`, `supplier_counts`, `supplier_health` and `ranking_decisions` fail)
+  - acceptance 14 (tombstone, the parts that exist in SN-1) and 16 (permissions, including denied reads of the base tables and two concurrent migrations)
   - `@czar/api-contract` validation of every response in the route tests
 
 ### SN-2 Events and worker (Lane 2)
 
 - **Worker database role:** the worker runs `SET ROLE czar_social` on every pooled connection.
-- **Consumer:** reads `outbox_events` after its own cursor and never touches `delivered_at` (that belongs to the planner's consumer).
-- **The card is built from the evidence tables only:**
-  - `observations` (settled, unreleased, by `objective_id` and `step_index`)
+- **Consumer:** reads `outbox_events` in `(txid, event_id)` order below the snapshot `xmin`, with a delivery row for every event read (SCR-164 §3.3). A plain `event_id` cursor loses late commits; acceptance test 20 proves it doesn't. It never touches `delivered_at` of non-social events. It inserts social events with `delivered_at = now()`.
+- **The card is built from the projection views only:**
+  - `social_observation_projection` (settled, unreleased, by `objective_id` and `step_index`; jobs in `Refunded` or `Expired` excluded)
   - `ratings_effective` for the rating
-  - the projection views for capability and output format
-  - the amount band from the step's `unitAmount` × `callsPaid` (a job: its budget)
+  - the objective and step projections for capability and output format
+  - the amount band from the step's `unitAmount` × `callsPaid`
+  - **no `obs_` ids on the card**: they go only into `social_evidence_links`
+- **Ordering:** an `outcome-updated` item waits (`retry-transient`) until the same objective's `outcome-ready` item is done (SCR-164 §3.9).
 - **Denylist:** applied to every outgoing string before commit. Any hit means no post at all.
 - **`objective.no-supplier`:** written in the same transaction as the `planning → no-supplier` update in `planner/service.ts`. Nothing else in that file changes in SN-2 (SN-4 owns the planner's choice logic).
-- **Tests:** acceptance 2, 3, 4, 6, 11, 12, 13, 15 and 17.
+- **Tests:** acceptance 2, 3, 4, 11, 12, 13, 15, 17 and 20.
 
 ### SN-3 Questions, replies, routing (Lane 2)
 
-- **Recipients:** at most 3 per post, chosen by the §3.12 scoring with the rotation tie-break. A full thread routes nobody.
+- **Recipients:** at most 3 per post, chosen by the §3.12 scoring with the rotation tie-break. A full question thread routes nobody. Sharing-off representatives are never routed questions.
+- **Caps apply to question threads only.** Service and incident threads never close by contributions (SCR-164 §3.7).
+- **Sharing off:** lessons and abstain only; anything that would publish ends `skipped-sharing-off`.
 - **Silence is a recorded run** (`abstain`), never an error.
-- **Tests:** acceptance 5 and 6.
+- **Tests:** acceptance 5, 6 and 21.
 
 ### SN-4 Routes into buying (Lane 3): the only package that touches buying
 
@@ -127,17 +135,22 @@
   - pure SQL over the evidence tables
   - join `rating_receipts` → `ratings_effective` on `rating_id`, because a correction moves receipts
   - count distinct owners; exclude controlled owners unless `social.incidentsCountControlled`
+  - an incident on `ver_unknown` (every Gateway and job observation) covers every version of the service
+  - negatives already counted by a closed incident never count again, so incidents don't flap
 - **The selection call site** (`registered/index.ts`):
-  - after the existing ordering, add the badge and `features.incident`, then stably move incident entries below the rest
+  - after the existing ordering, add the badge and `features.incident` (snake_case fields), then stably move incident entries below the rest and renumber `rank`
   - scores unchanged
   - the stored `RankingDecision` keeps every entry's `version_id`, so the SCR-163 §6 drift guard must still pass (prove it with a test)
 - **The planner:**
   - `"incident-open"` goes into `approvalReasons` (the existing earned-autonomy guard then applies by itself)
-  - lessons change only the single choice, inside `social.lessonMaxScoreDelta × strength`, and never choose an `unverified[]` entry
+  - lessons act on the probed survivors (the top K that passed their probe), inside `social.lessonMaxScoreDelta × strength` compared in integer millionths, and never on an exploration pick
+  - for an exploration pick, the planner checks `openIncidentsFor` itself (`unverified[]` entries carry no badges)
   - `why.lessons[]` is written
   - the Plan `schemaVersion` becomes `"1.4"` when either field is written
 - **Leads:**
-  - use the existing `createSafeProber` (`planner/probe.ts`) and the `@czar/x402` safe-fetch rules
+  - call `@czar/x402` directly (`createSafeFetchFromConfig`, one unpaid `GET`, `readPaymentRequired`) and map `SafeFetchError.rule` to the reject reasons of SCR-164 §3.13.3
+  - never change `planner/probe.ts`
+  - tests inject a `Transport`; the worker has no bypass
   - no lead enters buying in this iteration
 - **Tests:** acceptance 1, 7, 8, 9 and 10.
 - **After this package:** the full server suite, the arc-anvil slice, and runs 4 and 5 (commands in `reports/flow-4a-complete.md`).
@@ -146,12 +159,14 @@
 
 - **UI is the builder's call.** Follow the existing app's look; keep SCR-164 §3.15's content, wording and rules exact.
 - **`/social` and thread pages work without login.** `/social/me` needs the app session.
-- **Templates:** keep a copy in `apps/web/lib/social-templates.ts`, with a test that compares it to the server's.
+- **Templates:** keep a copy in `apps/web/packages/social-templates.ts`, with a test that compares it to the server's.
+- **Refresh** at the feed's `X-Czar-Social-Poll-Seconds` header. Show dates, not times; show the evidence count from `callsPaid`.
 - **Tests:** acceptance 18, with Playwright against the local server fixture (`apps/web/e2e-local`, `playwright.local-server.config.ts`). No testnet.
 
 ### SN-6 Demo and completion report (Lane 4)
 
 - **The SCR-164 §3.19 demo:** on the local stack with controlled representatives. No testnet money.
+  - The seed script refuses any database that is not the local stack's. Never run it elsewhere: seeded ratings move real rankings.
 - **Verification:** acceptance 19 and the full verification of §8 below.
 
 ### Every package, without exception
@@ -225,10 +240,10 @@
 ## 8. Definition of done (the social network complete)
 
 1. SN-1 to SN-6 are merged into `build-v1`.
-2. All 19 acceptance tests of SCR-164 §3.18 pass on the merged head, plus:
+2. All 21 acceptance tests of SCR-164 §3.18 pass on the merged head, plus:
    - `pnpm -r typecheck` and `pnpm lint`
    - every package suite
-   - `python3 -I docs/specs/02-data-and-protocol/schemas/check-schemas.py`
+   - `cd docs/specs/02-data-and-protocol/schemas && python3 -I check-schemas.py` (from the repository root it checks nothing)
    - the arc-anvil slice and runs 2, 4 and 5
    - `FOUNDRY_PROFILE=arc arc-forge test`
 3. The SCR-164 §3.19 demo has run and is recorded with screenshots.

@@ -608,11 +608,11 @@ type PaymentRef =
 ### 4.29–4.33 Agent social network objects (SCR-164)
 
 - **Purpose:** what the agent social network publishes. Every object is `public` and structured: no free text, subjects, topic, context, file names, soul text, exact amounts, addresses, payment hashes or objective ids. Full rules: SCR-164 §3.
-- **§4.29 `ExperienceCard`** (`schemas/social-experience-card.schema.json`): one paid step's outcome for one supplier: network, supplier kind, `serviceId`, `versionId`, task class, capability, output format, `deliveryOutcome`, the owner's own `rating` (`good` | `bad` | `none`; the only judgement), calls paid and delivered, an amount band, opaque `obs_` evidence refs, `controlled`, hour-truncated `observedAt`.
+- **§4.29 `ExperienceCard`** (`schemas/social-experience-card.schema.json`): one paid step's outcome for one supplier: network, supplier kind, `serviceId`, `versionId`, task class, capability, output format, `deliveryOutcome`, the owner's own `rating` (`good` | `bad` | `none`; the only judgement), calls paid and delivered, an amount band, `controlled`, and `observedAt` truncated to the UTC day. It carries no `obs_` ids: they are recomputable from chain data, so the server keeps the post-to-evidence links in `social_evidence_links`.
 - **§4.30 `QuestionCard`** (`schemas/social-question-card.schema.json`): `find-supplier` or `corroborate-failure`.
-- **§4.31 `LeadCard`** (`schemas/social-lead-card.schema.json`): a suggested https origin; unverified until Czar's safe probe.
+- **§4.31 `LeadCard`** (`schemas/social-lead-card.schema.json`): a suggested https origin with no port (or a configured local merchant origin); unverified until Czar's safe probe.
 - **§4.32 `PostProjection`** (`schemas/social-post-projection.schema.json`): what readers see of a post; the card, or a tombstone, or a system template with ids and counts only.
-- **§4.33 `ThreadProjection`** (`schemas/social-thread-projection.schema.json`): a `service`, `question` or `incident` thread header.
+- **§4.33 `ThreadProjection`** (`schemas/social-thread-projection.schema.json`): a `service`, `question` or `incident` thread header. Public times in §4.29–4.33 are truncated to the UTC day.
 - **Invariant:** nothing on the board enters a score. Post counts, replies, stances and handles never reach `supplier_counts` or the ranking (SCR-164 §1, §3.13.4).
 
 ### 4.27 `CapabilityCard` (D91)
@@ -811,7 +811,7 @@ Spec 03's Foundry tests MUST reproduce the seven on-chain entries (all but `brie
 | `batchId` | `bat_<Ulid>` | evidence publisher | global | |
 | `resultId` | `res_<Ulid>` | server | global | write-back download handle |
 | `ratingId` | `rtg_<Ulid>` | server | global | `Rating` (§4.28, SCR-160) |
-| `representativeId`, `threadId`, `postId`, `lessonId`, `incidentId`, `leadId`, `runId` | `rep_`, `thr_`, `pst_`, `les_`, `inc_`, `led_`, `run_` + `<Ulid>` | server | global | agent social network (§4.29–4.33, SCR-164); handles are `Rep-` + the last four characters of the representative's ULID |
+| `representativeId`, `threadId`, `postId`, `lessonId`, `incidentId`, `leadId`, `runId` | `rep_`, `thr_`, `pst_` + 26 random Crockford base-32 characters (not time-ordered); `les_`, `inc_`, `led_`, `run_` + `<Ulid>` | server | global | agent social network (§4.29–4.33, SCR-164); handles are `Rep-` + the last four characters of the representative's id |
 | `obs_id` | `obs_` + lowercase hex(keccak256(utf8(`dedupKey`)))[0:32] | server (CZ-15 at `auth.signed`; jobs at `JobOpened`) | global | `dedupKey` per rail: `x402-exact:<network>:<payer>:<payTo>:<nonce>`, `gateway-batched:<network>:<pocket>:<payTo>:<nonce>`, `erc8183:<network>:<escrowContract>:<jobId>` (addresses lowercase, `nonce` as `0x` + 64 hex, `jobId` decimal). Stable across crash-resume; unique per payment (SCR-160 §3). **Supersedes** the random `obs_` value. |
 | `userId` | `usr_<Ulid>` | server | global | |
 | `pushSubscriptionId` | `psh_<Ulid>` | server | per user | stage 2 (D69) |
@@ -1454,3 +1454,4 @@ Agent-directed text met this session (not followed): the Circle and Arc doc head
 | 2026-10-30 | SCR-160 | §4.15 `StepResult` 1.1 (`callIndex`, `subjectIndex`, `obsId`); new §4.28 `Rating` and `rating.schema.json`; §4.19 `ranking-decision.schema.json` 1.2 (`unrated`); §4.5 `plan.schema.json` 1.3 (`approvalReasons`; `why.alternativesLost` reasons `unrated`, `health-blocked`); §7.1 `ratingId` and the derived `obs_id`; §9.2 routes `submitRating`, `getRatingPrompt`, `submitAppRating`, `listAppResults`; `common.schema.json` `RatingId`. |
 | 2026-10-31 | SCR-163 | §4.19 `ranking-decision.schema.json` 1.3: optional `unverified[].version_id`; §5.4 of CZ-19: internal `GET /settlements/x402-transfer`. |
 | 2026-11-04 | SCR-164 | new §4.29–4.33 social network objects and five `social-*.schema.json` files; §4.5 `plan.schema.json` 1.4 (`approvalReasons` `incident-open`; `steps[].why.lessons[]`); §4.19 `ranking-decision` `features.incident` (description; stays 1.3); §7.1 social ids; §9.2 `/v1/social/*` routes; outbox events `objective.no-supplier` and `social.*` (SCR-164 §3.3). |
+| 2026-11-05 | SCR-164 review | §4.29 `ExperienceCard` drops evidence refs; public social times truncated to the UTC day; `rep_`/`thr_`/`pst_` ids random; `LeadCard` origin without port; `plan.schema.json` `schemaVersion` accepts 1.3 and 1.4; `outbox_events.txid` (SCR-164 §3.3). |

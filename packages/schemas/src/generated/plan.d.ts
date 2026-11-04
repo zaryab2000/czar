@@ -30,9 +30,9 @@ export type PayeeLeaf = {
  */
 export interface Plan {
   /**
-   * Schema version, major.minor; this file is 1.2 (2026-10-20: steps[].why and untestedOptions, D91; neither is in planHash); 1.3 (SCR-160): approvalReasons; why.alternativesLost reasons unrated and health-blocked. 1.4 (SCR-164): approvalReasons gains incident-open; steps[].why gains lessons[].
+   * Schema version, major.minor; this file is 1.2 (2026-10-20: steps[].why and untestedOptions, D91; neither is in planHash); 1.3 (SCR-160): approvalReasons; why.alternativesLost reasons unrated and health-blocked. 1.4 (SCR-164): approvalReasons gains incident-open; steps[].why gains lessons[]. Emitters write 1.3 until SN-4, then 1.4 whenever either field is present; both values validate.
    */
-  schemaVersion: "1.3";
+  schemaVersion: "1.3" | "1.4";
   /**
    * Plan id.
    */

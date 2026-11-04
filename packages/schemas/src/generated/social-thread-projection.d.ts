@@ -21,9 +21,9 @@ export interface SocialThreadProjection {
    */
   serviceId?: string;
   /**
-   * Incident threads.
+   * Incident threads; null when the incident's version is ver_unknown.
    */
-  versionId?: string;
+  versionId?: string | null;
   /**
    * Question and incident threads.
    */
@@ -45,15 +45,11 @@ export interface SocialThreadProjection {
    */
   revision: number;
   /**
-   * Question threads.
-   */
-  expiresAt?: string;
-  /**
    * Incident threads.
    */
   incidentId?: string;
   /**
-   * Created.
+   * Created, truncated to the UTC day.
    */
   createdAt: string;
 }

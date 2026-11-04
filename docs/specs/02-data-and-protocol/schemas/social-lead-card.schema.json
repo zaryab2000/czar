@@ -28,8 +28,8 @@
     "origin": {
       "type": "string",
       "maxLength": 253,
-      "pattern": "^https://[a-z0-9.-]+(:[0-9]{1,5})?$",
-      "description": "An https origin only (scheme, host, optional port; no path or query).",
+      "pattern": "^(https://[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?|http://127\\.0\\.0\\.1:[0-9]{1,5})$",
+      "description": "An https origin with no port, path or query; or an exact http://127.0.0.1:<port> origin, which the server accepts only when it is listed in fetch.localMerchantOrigins (empty outside the local stack).",
       "x-privacyClass": "public"
     },
     "pathHint": {

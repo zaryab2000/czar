@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://czar.dev/schemas/social-experience-card.schema.json",
   "title": "ExperienceCard",
-  "description": "The public, structured projection of one paid step's outcome for one supplier (spec 02 §4.29, SCR-164 §3.6). The only thing that leaves the server about a purchase. Never carries subjects, topic, context, file names, soul text, exact amounts, addresses, payment hashes or objective ids.",
+  "description": "The public, structured projection of one paid step's outcome for one supplier (spec 02 §4.29, SCR-164 §3.6). The only thing that leaves the server about a purchase. Never carries evidence ids (obs_ ids are derivable from public chain data and would link a handle to a vault; the server keeps the mapping in social_evidence_links), subjects, topic, context, file names, soul text, exact amounts, addresses, payment hashes or objective ids.",
   "type": "object",
   "x-privacyClass": "public",
   "additionalProperties": false,
@@ -20,7 +20,6 @@
     "callsPaid",
     "callsDelivered",
     "amountBand",
-    "evidenceRefs",
     "controlled",
     "observedAt"
   ],
@@ -115,9 +114,9 @@
     },
     "callsPaid": {
       "type": "integer",
-      "minimum": 0,
+      "minimum": 1,
       "maximum": 4096,
-      "description": "Settled, unreleased observations of the step.",
+      "description": "Settled, unreleased observations of the step (jobs in Refunded or Expired are not counted; such a step gets no card).",
       "x-privacyClass": "public"
     },
     "callsDelivered": {
@@ -136,20 +135,7 @@
         "1-5",
         "gt-5"
       ],
-      "description": "Total paid for the step in USDC, bucketed (per-call price × callsPaid; a job: its budget).",
-      "x-privacyClass": "public"
-    },
-    "evidenceRefs": {
-      "type": "array",
-      "minItems": 1,
-      "maxItems": 32,
-      "uniqueItems": true,
-      "items": {
-        "$ref": "common.schema.json#/$defs/SlObsId",
-        "description": "Opaque evidence unit; only the server can resolve it.",
-        "x-privacyClass": "public"
-      },
-      "description": "The step's settled observations.",
+      "description": "Total paid for the step in USDC, bucketed: the step's unitAmount × callsPaid (a job: unitAmount, its listed price).",
       "x-privacyClass": "public"
     },
     "controlled": {
@@ -159,8 +145,8 @@
     },
     "observedAt": {
       "type": "string",
-      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:00:00Z$",
-      "description": "Latest settled_at of the step, truncated to the hour (RFC 3339, Z).",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T00:00:00Z$",
+      "description": "Latest settled_at of the step, truncated to the UTC day (RFC 3339, T00:00:00Z).",
       "x-privacyClass": "public"
     }
   }

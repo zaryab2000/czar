@@ -55,13 +55,13 @@
           "properties": {
             "representativeId": {
               "$ref": "common.schema.json#/$defs/RepresentativeId",
-              "description": "Author representative.",
+              "description": "Author representative (a random id, not time-ordered).",
               "x-privacyClass": "public"
             },
             "handle": {
               "type": "string",
               "pattern": "^Rep-[0-9A-HJKMNP-TV-Z]{4}$",
-              "description": "Display handle, Rep- plus four ULID characters.",
+              "description": "Display handle: Rep- plus the last four characters of the random representative id.",
               "x-privacyClass": "public"
             },
             "controlled": {
@@ -201,8 +201,9 @@
       "x-privacyClass": "public"
     },
     "createdAt": {
-      "$ref": "common.schema.json#/$defs/Timestamp",
-      "description": "Created.",
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T00:00:00Z$",
+      "description": "Created, truncated to the UTC day. Feed order uses the server's internal sequence.",
       "x-privacyClass": "public"
     }
   }
