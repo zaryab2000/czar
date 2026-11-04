@@ -338,32 +338,38 @@ async function ownEvidence(
     post.version_id ?? (typeof post.card["versionId"] === "string" ? post.card["versionId"] : null);
   const taskClass =
     post.task_class ?? (typeof post.card["taskClass"] === "string" ? post.card["taskClass"] : null);
-  const found = await context.db.query<{ objective_id: string; step_index: number }>(
-    `SELECT DISTINCT o.objective_id,o.step_index,max(o.settled_at) AS latest
+  const findSupplier = post.kind === "question" && post.card["questionKind"] === "find-supplier";
+  for (let offset = 0; ; offset += 20) {
+    const found = await context.db.query<{ objective_id: string; step_index: number }>(
+      `SELECT o.objective_id,o.step_index,max(o.settled_at) AS latest
      FROM social_observation_projection o
+     LEFT JOIN ratings_effective r ON r.objective_id=o.objective_id
+       AND r.step_index=o.step_index
      WHERE o.user_id=$1 AND o.network=$2 AND o.settled_at IS NOT NULL
        AND o.released_at IS NULL AND o.objective_id IS NOT NULL
        AND o.step_index IS NOT NULL
        AND ($3::text IS NULL OR o.service_id=$3)
        AND ($4::text IS NULL OR o.version_id=$4)
        AND ($5::text IS NULL OR o.task_class=$5)
-     GROUP BY o.objective_id,o.step_index ORDER BY latest DESC LIMIT 20`,
-    [context.representative.user_id, post.network, serviceId, versionId, taskClass],
-  );
-  const projections = await Promise.all(
-    found.rows.map((row) => buildExperienceCard(context.db, row.objective_id, row.step_index)),
-  );
-  const usable = projections.filter((projection) => projection !== null);
-  if (post.kind === "question" && post.card["questionKind"] === "find-supplier") {
-    return (
-      usable
-        .filter((projection) => isGood(projection.card))
-        .toSorted(
-          (a, b) => Number(b.card.rating === "good") - Number(a.card.rating === "good"),
-        )[0] ?? null
+     GROUP BY o.objective_id,o.step_index,r.value
+     ORDER BY CASE WHEN $6::boolean AND r.value='good' THEN 1 ELSE 0 END DESC,
+       latest DESC LIMIT 20 OFFSET $7`,
+      [
+        context.representative.user_id,
+        post.network,
+        serviceId,
+        versionId,
+        taskClass,
+        findSupplier,
+        offset,
+      ],
     );
+    for (const row of found.rows) {
+      const projection = await buildExperienceCard(context.db, row.objective_id, row.step_index);
+      if (projection && (!findSupplier || isGood(projection.card))) return projection;
+    }
+    if (found.rows.length < 20) return null;
   }
-  return usable[0] ?? null;
 }
 
 async function planRouted(context: RunContext): Promise<PlannedPost[]> {
@@ -581,6 +587,11 @@ class SocialStop extends Error {
 
 async function postBudget(context: RunContext, threadId: string): Promise<void> {
   const limit = Number(context.config.get("social.repDailyPostCap"));
+  await context.db.query(
+    `INSERT INTO social_budgets(representative_id,day,posts)
+     VALUES($1,$2::date,0) ON CONFLICT(representative_id,day) DO NOTHING`,
+    [context.representative.representative_id, context.now],
+  );
   const used = await context.db.query<{ posts: number }>(
     `SELECT posts FROM social_budgets WHERE representative_id=$1 AND day=$2::date FOR UPDATE`,
     [context.representative.representative_id, context.now],
@@ -771,7 +782,7 @@ async function executeClaim(
     }
     if (
       current.rows[0]?.sharing_version !== representative.sharing_version ||
-      current.rows[0]?.paused
+      (current.rows[0]?.paused && !representative.paused)
     ) {
       result = { action: "abstain", stopReason: "rejected-consent-changed", postId: null };
     } else {

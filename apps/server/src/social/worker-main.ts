@@ -9,6 +9,9 @@ import {
 } from "@czar/config";
 import { Pool } from "pg";
 import { consumeSocialBatch } from "#src/social/consumer";
+import { evaluateIncidents } from "#src/social/incidents";
+import { probeLeads } from "#src/social/leads";
+import { createLesson } from "#src/social/lessons";
 import { runSocialInbox, type RunHooks } from "#src/social/runtime/run";
 import { expireQuestions, refreshSubscriptions } from "#src/social/router";
 
@@ -16,6 +19,12 @@ export interface SocialHousekeepingHooks extends RunHooks {
   evaluateIncidents?(pool: Pool, config: Config, now: Date): Promise<void>;
   probeLeads?(pool: Pool, config: Config, now: Date): Promise<void>;
 }
+
+export const socialWorkerHooks: SocialHousekeepingHooks = {
+  createLesson,
+  evaluateIncidents,
+  probeLeads,
+};
 
 /** Open a worker pool whose every connection assumes only the social database role. */
 export function createSocialPool(databaseUrl: string, maxConnections: number): Pool {
@@ -70,7 +79,9 @@ export async function socialHousekeepingPass(
 }
 
 /** Start the local-only worker after configuration and migration preflight. */
-export async function startSocialWorker(hooks: SocialHousekeepingHooks = {}): Promise<void> {
+export async function startSocialWorker(
+  hooks: SocialHousekeepingHooks = socialWorkerHooks,
+): Promise<void> {
   const configPath = process.env["CZAR_LOCAL_CONFIG"] ?? "../../env/local.toml";
   const databaseUrl = process.env["CZAR_DATABASE_URL"];
   if (!databaseUrl) throw new Error("CZAR_DATABASE_URL is required for the social worker.");

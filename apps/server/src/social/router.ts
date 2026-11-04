@@ -190,7 +190,7 @@ export async function refreshSubscriptions(
   await db.query(
     `INSERT INTO social_subscriptions(representative_id,subject_key,source,expires_at)
      SELECT DISTINCT r.representative_id,'service:'||o.network||':'||o.service_id,
-       'purchase',$1 FROM social_observation_projection o
+       'purchase',$1::timestamptz FROM social_observation_projection o
      JOIN social_representatives r ON r.user_id=o.user_id
      WHERE o.settled_at>=$2 AND o.released_at IS NULL
      ON CONFLICT(representative_id,subject_key) DO UPDATE SET expires_at=EXCLUDED.expires_at`,

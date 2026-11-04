@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { createSocialPool } from "#src/social/worker-main";
+import { loadConfig } from "@czar/config";
+import { evaluateIncidents } from "#src/social/incidents";
+import { probeLeads } from "#src/social/leads";
+import { createLesson } from "#src/social/lessons";
+import {
+  createSocialPool,
+  socialHousekeepingPass,
+  socialWorkerHooks,
+} from "#src/social/worker-main";
 import { setupDatabaseConnection } from "#test/db";
 
 const database = setupDatabaseConnection();
@@ -22,5 +30,17 @@ describe("social worker database role", () => {
     } finally {
       await pool.end();
     }
+  });
+
+  it("wires the incident, lead, and lesson handlers into the local worker", async () => {
+    expect(socialWorkerHooks).toMatchObject({ createLesson, evaluateIncidents, probeLeads });
+    await expect(
+      socialHousekeepingPass(
+        database.getPool(),
+        loadConfig(),
+        new Date("2026-11-05T12:00:00Z"),
+        socialWorkerHooks,
+      ),
+    ).resolves.toBeUndefined();
   });
 });
