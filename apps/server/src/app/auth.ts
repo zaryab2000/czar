@@ -19,8 +19,8 @@ import { bearerToken, ulid } from "#src/http/ids";
 import { digest } from "#src/http/auth";
 import { problem } from "#src/http/problem";
 import { parseIdempotencyKey } from "#src/http/validate";
+import { webauthnRpId } from "#src/app/wallet-config";
 
-const RP_ID = "localhost";
 const { decodeFirstSync } = cbor;
 const MAX_CHALLENGE_BYTES = 32;
 const ATTESTED_DATA_FLAG = 0x40;
@@ -71,7 +71,8 @@ export async function registerPasskeyRoute(
   const request = await readJson<PasskeyRegistration>(context);
   if (!request || !validRegistrationShape(request))
     return problemResponse(context, 400, "validation");
-  const key = await registrationKey(request, dependencies.origin);
+  const rpId = webauthnRpId(dependencies.config);
+  const key = await registrationKey(request, dependencies.origin, rpId);
   if (!key) return problemResponse(context, 422, "validation");
   const client = await dependencies.pool.connect();
   try {
@@ -91,6 +92,7 @@ export async function registerPasskeyRoute(
       key.qx,
       key.qy,
       dependencies.rpcUrl,
+      rpId,
     );
     if (actualMsca.toLowerCase() !== request.msca.toLowerCase()) {
       await client.query("ROLLBACK");
@@ -114,7 +116,7 @@ export async function registerPasskeyRoute(
     await client.query(
       `INSERT INTO passkey_credentials (credential_id,user_id,qx,qy,sign_count,rp_id)
        VALUES ($1,$2,$3,$4,$5,$6)`,
-      [request.credentialId, userId, key.qx, key.qy, key.signCount, RP_ID],
+      [request.credentialId, userId, key.qx, key.qy, key.signCount, rpId],
     );
     await client.query("UPDATE auth_challenges SET used_at=$2 WHERE challenge_id=$1", [
       request.challengeId,
@@ -144,7 +146,8 @@ export async function createSessionRoute(
   parseIdempotencyKey(context.req.header("Idempotency-Key"));
   const request = await readJson<SessionRequest>(context);
   if (!request || !validSessionShape(request)) return problemResponse(context, 400, "validation");
-  const assertion = await sessionAssertion(request, dependencies.origin);
+  const rpId = webauthnRpId(dependencies.config);
+  const assertion = await sessionAssertion(request, dependencies.origin, rpId);
   if (!assertion) return problemResponse(context, 401, "validation");
   const client = await dependencies.pool.connect();
   try {
@@ -164,12 +167,19 @@ export async function createSessionRoute(
       qx: Buffer;
       qy: Buffer;
       sign_count: string;
+      rp_id: string;
     }>(
-      "SELECT user_id,qx,qy,sign_count FROM passkey_credentials WHERE credential_id=$1 FOR UPDATE",
+      `SELECT user_id,qx,qy,sign_count,rp_id FROM passkey_credentials
+       WHERE credential_id=$1 FOR UPDATE`,
       [request.credentialId],
     );
     const credential = found.rows[0];
-    if (!credential || !verifyAssertion(assertion, credential.qx, credential.qy)) {
+    // A credential registered under another RP ID is refused like an unknown one (GC-9).
+    if (
+      !credential ||
+      credential.rp_id !== rpId ||
+      !verifyAssertion(assertion, credential.qx, credential.qy)
+    ) {
       await client.query("ROLLBACK");
       return problemResponse(context, 401, "validation");
     }
@@ -228,6 +238,7 @@ interface SessionAssertion extends VerifiedClientData {
 async function registrationKey(
   request: PasskeyRegistration,
   origin: string,
+  rpId: string,
 ): Promise<RegistrationKey | null> {
   const clientData = verifyClientData(request.clientDataJSON, "webauthn.create", origin);
   const attestation = decodeBytes(request.attestationObject, 8192);
@@ -236,7 +247,7 @@ async function registrationKey(
     const decoded = decodeFirstSync(attestation) as Record<string, unknown>;
     const authData = asBuffer(decoded["authData"]);
     if (!authData || authData.length < 55) return null;
-    const parsed = parseAuthenticatorData(authData);
+    const parsed = parseAuthenticatorData(authData, rpId);
     if (!parsed || (parsed.flags & ATTESTED_DATA_FLAG) === 0) return null;
     const credentialLength = authData.readUInt16BE(53);
     const credentialStart = 55;
@@ -258,12 +269,13 @@ async function registrationKey(
 async function sessionAssertion(
   request: SessionRequest,
   origin: string,
+  rpId: string,
 ): Promise<SessionAssertion | null> {
   const clientData = verifyClientData(request.clientDataJSON, "webauthn.get", origin);
   const authenticatorData = decodeBytes(request.authenticatorData, 4096);
   const signature = decodeBytes(request.signature, 1024);
   if (!clientData || !authenticatorData || !signature) return null;
-  const parsed = parseAuthenticatorData(authenticatorData);
+  const parsed = parseAuthenticatorData(authenticatorData, rpId);
   if (!parsed) return null;
   return { ...clientData, authenticatorData, signature, signCount: parsed.signCount };
 }
@@ -292,9 +304,12 @@ function verifyClientData(
   }
 }
 
-function parseAuthenticatorData(bytes: Buffer): { flags: number; signCount: number } | null {
+function parseAuthenticatorData(
+  bytes: Buffer,
+  rpId: string,
+): { flags: number; signCount: number } | null {
   if (bytes.length < 37) return null;
-  if (!safeEqual(bytes.subarray(0, 32), sha256(Buffer.from(RP_ID, "utf8")))) return null;
+  if (!safeEqual(bytes.subarray(0, 32), sha256(Buffer.from(rpId, "utf8")))) return null;
   const flags = bytes[32] ?? 0;
   if ((flags & USER_PRESENT_FLAG) === 0) return null;
   return { flags, signCount: bytes.readUInt32BE(33) };
@@ -320,6 +335,7 @@ async function circleMscaAddress(
   qx: Buffer,
   qy: Buffer,
   rpcUrl: string,
+  rpId: string,
 ): Promise<string> {
   const chain = defineChain({
     id: 5042002,
@@ -333,7 +349,7 @@ async function circleMscaAddress(
       id: credentialId,
       publicKey: `0x04${qx.toString("hex")}${qy.toString("hex")}`,
     },
-    rpId: RP_ID,
+    rpId,
   });
   const account = await toCircleSmartAccount({
     client: client as unknown as Parameters<typeof toCircleSmartAccount>[0]["client"],

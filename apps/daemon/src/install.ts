@@ -1,6 +1,11 @@
 // `czar install | update | uninstall` on macOS (CZ-02 §3; D67). Uses the injected file system,
 // launchctl and keychain so every step is testable without touching the machine.
-import { KEYCHAIN_ACCOUNTS, rotateHookToken, type Keychain } from "./keychain.ts";
+import {
+  KEYCHAIN_ACCOUNTS,
+  rotateHookToken,
+  type Keychain,
+  type KeychainAccount,
+} from "./keychain.ts";
 import { Launchctl, renderLaunchAgentPlist } from "./launchd.ts";
 import type { DaemonPaths } from "./paths.ts";
 
@@ -69,16 +74,34 @@ export async function update(deps: InstallDeps): Promise<void> {
 }
 
 export interface UninstallOptions {
-  /** Delete ~/Library/Application Support/Czar (memory and soul). Off unless the person chooses it. */
+  /**
+   * Delete ~/Library/Application Support/Czar (memory and soul) and the memory key K14 with it.
+   * Off unless the person chooses it.
+   */
   readonly deleteMemory: boolean;
 }
 
-/** `bootout`, remove the plist and the keychain items; the memory folder only on request. */
+/**
+ * The keychain items an uninstall always removes: the device token K15 and the hook token K16.
+ * Both are re-made on the next install and pairing. The memory key K14 is not here: it is the only
+ * way to open kept memory, so it goes only with the memory itself (PM-037).
+ */
+const UNINSTALL_KEYCHAIN_ACCOUNTS: readonly KeychainAccount[] = [
+  KEYCHAIN_ACCOUNTS.deviceToken,
+  KEYCHAIN_ACCOUNTS.hookToken,
+];
+
+/**
+ * `bootout`, remove the plist, and remove K15 and K16. The memory folder and its key K14 go
+ * together, and only on request, so memory kept through an uninstall still opens after a reinstall.
+ */
 export async function uninstall(deps: InstallDeps, options: UninstallOptions): Promise<void> {
   requireMacos(deps.platform);
   if (await deps.launchctl.isLoaded()) await deps.launchctl.bootout();
   if (deps.fs.exists(deps.paths.launchAgentPlist)) deps.fs.removeFile(deps.paths.launchAgentPlist);
-  for (const account of Object.values(KEYCHAIN_ACCOUNTS)) deps.keychain.delete(account);
-  if (options.deleteMemory && deps.fs.exists(deps.paths.supportDir))
-    deps.fs.removeDir(deps.paths.supportDir);
+  for (const account of UNINSTALL_KEYCHAIN_ACCOUNTS) deps.keychain.delete(account);
+  if (options.deleteMemory) {
+    deps.keychain.delete(KEYCHAIN_ACCOUNTS.memoryDbKey);
+    if (deps.fs.exists(deps.paths.supportDir)) deps.fs.removeDir(deps.paths.supportDir);
+  }
 }
