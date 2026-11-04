@@ -12,6 +12,8 @@ import {
   update,
   UnsupportedPlatformError,
 } from "@czar/daemon";
+import { openMemoryDatabase } from "#src/database";
+import { loadOrCreateDbKey } from "#src/keychain";
 import { fakeLaunchctl, memoryKeychain, tempDir } from "./support.ts";
 
 function setup(platform: NodeJS.Platform = "darwin") {
@@ -79,7 +81,7 @@ describe("install / update / uninstall on macOS (mocked launchctl and keychain)"
     expect(verbs.filter((verb) => verb === "bootstrap")).toHaveLength(2);
   });
 
-  it("uninstall removes the agent and the keychain items, and keeps memory unless asked", async () => {
+  it("uninstall removes the agent, keeps memory and its key unless asked (PM-037)", async () => {
     const { paths, keychain, deps } = setup();
     await install(deps);
     keychain.set(KEYCHAIN_ACCOUNTS.memoryDbKey, "a".repeat(64));
@@ -88,10 +90,36 @@ describe("install / update / uninstall on macOS (mocked launchctl and keychain)"
     await uninstall(deps, { deleteMemory: false });
     expect(await deps.launchctl.isLoaded()).toBe(false);
     expect(existsSync(paths.launchAgentPlist)).toBe(false);
-    expect(keychain.items.size).toBe(0);
+    // K14 stays, or the kept memory could never be opened again; K15 and K16 go.
+    expect(keychain.items.get(KEYCHAIN_ACCOUNTS.memoryDbKey)).toBe("a".repeat(64));
+    expect(keychain.items.has(KEYCHAIN_ACCOUNTS.deviceToken)).toBe(false);
+    expect(keychain.items.has(KEYCHAIN_ACCOUNTS.hookToken)).toBe(false);
+    expect(keychain.items.size).toBe(1);
     expect(existsSync(join(paths.supportDir, "memory.db"))).toBe(true);
     await uninstall(deps, { deleteMemory: true });
+    expect(keychain.items.size).toBe(0);
     expect(existsSync(paths.supportDir)).toBe(false);
+  });
+
+  it("memory kept through an uninstall still opens after reinstall (PM-037)", async () => {
+    const { paths, keychain, deps } = setup();
+    await install(deps);
+    const key = loadOrCreateDbKey(keychain);
+    const before = openMemoryDatabase(paths.databasePath, key);
+    before.prepare("INSERT INTO settings (key, value_json) VALUES ('paused', 'false')").run();
+    before.close();
+
+    await uninstall(deps, { deleteMemory: false });
+    await install(deps);
+
+    const stored = keychain.items.get(KEYCHAIN_ACCOUNTS.memoryDbKey);
+    expect(stored).toBe(key);
+    expect(loadOrCreateDbKey(keychain)).toBe(key);
+    const after = openMemoryDatabase(paths.databasePath, stored as string);
+    expect(after.prepare("SELECT value_json FROM settings WHERE key = 'paused'").get()).toEqual({
+      value_json: "false",
+    });
+    after.close();
   });
 
   it("refuses to install on other platforms (D67)", async () => {
