@@ -34,9 +34,7 @@
           "q": "czar probe"
         }
       },
-      "capabilities": [
-        "web-search"
-      ]
+      "capabilities": ["web-search"]
     },
     {
       "key": "comparison-search",
@@ -54,9 +52,7 @@
           "q": "czar probe"
         }
       },
-      "capabilities": [
-        "web-search"
-      ]
+      "capabilities": ["web-search"]
     },
     {
       "key": "lesson-search",
@@ -74,9 +70,7 @@
           "q": "czar probe"
         }
       },
-      "capabilities": [
-        "web-search"
-      ]
+      "capabilities": ["web-search"]
     }
   ],
   "experiences": [
@@ -100,9 +94,7 @@
         },
         "schemaVersion": "1.1",
         "topic": "Controlled search fixture",
-        "fields": [
-          "Result"
-        ],
+        "fields": ["Result"],
         "sourceTrust": "user-file"
       },
       "step": {
@@ -141,9 +133,7 @@
             "label": "Synthetic example"
           }
         ],
-        "fields": [
-          "Result"
-        ],
+        "fields": ["Result"],
         "sourceTrust": "user-prompt"
       },
       "step": {
@@ -182,9 +172,7 @@
             "label": "Synthetic example"
           }
         ],
-        "fields": [
-          "Result"
-        ],
+        "fields": ["Result"],
         "sourceTrust": "user-prompt"
       },
       "step": {
@@ -223,9 +211,7 @@
             "label": "Synthetic example"
           }
         ],
-        "fields": [
-          "Result"
-        ],
+        "fields": ["Result"],
         "sourceTrust": "user-prompt"
       },
       "step": {
@@ -274,9 +260,7 @@
             "label": "Synthetic example"
           }
         ],
-        "fields": [
-          "Result"
-        ],
+        "fields": ["Result"],
         "sourceTrust": "user-prompt"
       },
       "step": {
@@ -320,9 +304,7 @@
             "label": "Synthetic example"
           }
         ],
-        "fields": [
-          "Result"
-        ],
+        "fields": ["Result"],
         "sourceTrust": "user-prompt"
       },
       "step": {
@@ -371,9 +353,7 @@
             "label": "Synthetic example"
           }
         ],
-        "fields": [
-          "Result"
-        ],
+        "fields": ["Result"],
         "sourceTrust": "user-prompt"
       },
       "step": {
@@ -417,9 +397,7 @@
             "label": "Synthetic example"
           }
         ],
-        "fields": [
-          "Result"
-        ],
+        "fields": ["Result"],
         "sourceTrust": "user-prompt"
       },
       "step": {
@@ -468,9 +446,7 @@
             "label": "Synthetic example"
           }
         ],
-        "fields": [
-          "Result"
-        ],
+        "fields": ["Result"],
         "sourceTrust": "user-prompt"
       },
       "step": {
@@ -514,9 +490,7 @@
           "label": "Synthetic example"
         }
       ],
-      "fields": [
-        "Result"
-      ],
+      "fields": ["Result"],
       "sourceTrust": "user-prompt"
     },
     "lead": {
