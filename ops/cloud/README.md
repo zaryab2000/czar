@@ -37,8 +37,12 @@ Caddy on the host as the only public listener, and every credential a file on a 
    cloud-init status --long          # must say status: done
    sudo journalctl -u cloud-final --no-pager | grep -iE 'error|failed'
    systemctl is-active czar-metadata-guard.service run-czar-secrets.mount caddy.service
-   sudo iptables -C OUTPUT -d 169.254.169.254 -m owner \
-     ! --uid-owner 0 ! --uid-owner 10002 -j REJECT && echo "guard in place"
+   # All three guard rules must be present, and the reject must be the last of them.
+   sudo iptables -C OUTPUT -d 169.254.169.254 -m owner --uid-owner 0 -j ACCEPT &&
+     sudo iptables -C OUTPUT -d 169.254.169.254 -m owner --uid-owner 10002 -j ACCEPT &&
+     sudo iptables -C OUTPUT -d 169.254.169.254 -j REJECT &&
+     echo "guard in place"
+   sudo iptables -L OUTPUT -n --line-numbers | grep 169.254.169.254   # reject must be last
    sudo systemd-analyze verify czar-metadata-guard.service czar-secrets.service
    ```
 
@@ -78,16 +82,39 @@ skipping every policy the signer enforces, or read every credential out of Secre
 So `czar-metadata-guard.service` runs before `docker.service` at every boot and applies:
 
 ```
-iptables -A OUTPUT -d 169.254.169.254 -m owner ! --uid-owner 0 ! --uid-owner 10002 -j REJECT
+iptables -A OUTPUT -d 169.254.169.254 -m owner --uid-owner 0     -j ACCEPT
+iptables -A OUTPUT -d 169.254.169.254 -m owner --uid-owner 10002 -j ACCEPT
+iptables -A OUTPUT -d 169.254.169.254                            -j REJECT
 ```
 
-plus the `ip6tables` equivalent for `fd00:ec2::254` when IPv6 is on. Root keeps access because
+plus the `ip6tables` equivalents for `fd00:ec2::254` when IPv6 is on. Root keeps access because
 `czar-secrets.service`, the backup timer and the Ops Agent need it. The signer (UID 10002) keeps
-it because signing is its job. Nothing else does. The guard is idempotent — it asks `iptables`
-with `-C` before adding — and it fails the boot rather than letting Docker start unguarded.
+it because signing is its job. Nothing else does.
+
+**Why three rules and not the one SCR-170 §4 writes.** The spec gives the guard as a single
+negated rule, `-m owner ! --uid-owner 0 ! --uid-owner 10002 -j REJECT`. **iptables refuses it**:
+one `-m owner` match takes `--uid-owner` only once.
+
+```
+$ iptables -C OUTPUT -d 169.254.169.254 -m owner ! --uid-owner 0 ! --uid-owner 10002 -j REJECT
+iptables v1.8.10 (nf_tables): owner: option "--uid-owner" can only be used once.   # exit 2
+```
+
+Exit 2 is a parse error; a valid-but-absent rule exits 1 with `Bad rule`. The three rules above
+are semantically identical and do parse. See the spec-change request in the PR body.
+
+**Order is load-bearing.** The `REJECT` must be last. Appended first it would shadow both
+`ACCEPT`s and lock root and the signer out of the metadata server, breaking
+`czar-secrets.service`, the backups, the Ops Agent and all signing. The guard therefore never
+appends into a partial state: if any of the three is missing it removes whichever are present
+and appends all three in order. It is idempotent — it asks `iptables` with `-C` first — and a
+`-C` exit other than 0 or 1 ends the script, so a rule iptables will not accept can never again
+be mistaken for a missing one.
 
 **Do not weaken this for convenience.** `ops/cloud/test/metadata-guard.test.ts` fails if a third
-UID is ever named, if the rule is widened, or if a failure is swallowed.
+UID is ever named, if the reject stops being last or becomes conditional, if a failure is
+swallowed, or — via `iptables-translate`, which parses a rule without touching the host
+firewall — if any rule the guard builds is one iptables would reject.
 
 ## Credentials
 
