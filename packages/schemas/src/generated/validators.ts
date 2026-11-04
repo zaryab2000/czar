@@ -1,6 +1,6 @@
 // Generated from docs/specs/02-data-and-protocol/schemas. Do not edit.
 import { validateSchema } from "#src/validator";
-import type { AcceptanceReport, ActivityEvent, CapabilityCard, DemandProofLeaf, DemandProofLeafV2, Envelope, EvidenceBatch, InterviewSubmission, JobBrief, JobRecord, MarketView, ObjectiveSubmission, Objective, PaymentRef, Plan, PocketRecord, ProposedBelief, RankingDecision, Rating, Receipt, Reservation, SoulVersionLeaf, Soul, SourceReceipt, SourceScan, StepError, StepResult, TaskSpec } from "./types.ts";
+import type { AcceptanceReport, ActivityEvent, CapabilityCard, DemandProofLeaf, DemandProofLeafV2, Envelope, EvidenceBatch, InterviewSubmission, JobBrief, JobRecord, MarketView, ObjectiveSubmission, Objective, PaymentRef, Plan, PocketRecord, ProposedBelief, RankingDecision, Rating, Receipt, Reservation, SocialExperienceCard, SocialLeadCard, SocialPostProjection, SocialQuestionCard, SocialThreadProjection, SoulVersionLeaf, Soul, SourceReceipt, SourceScan, StepError, StepResult, TaskSpec } from "./types.ts";
 
 export function validateAcceptanceReport(value: unknown): value is AcceptanceReport {
   return validateSchema("acceptance-report", value);
@@ -84,6 +84,26 @@ export function validateReceipt(value: unknown): value is Receipt {
 
 export function validateReservation(value: unknown): value is Reservation {
   return validateSchema("reservation", value);
+}
+
+export function validateSocialExperienceCard(value: unknown): value is SocialExperienceCard {
+  return validateSchema("social-experience-card", value);
+}
+
+export function validateSocialLeadCard(value: unknown): value is SocialLeadCard {
+  return validateSchema("social-lead-card", value);
+}
+
+export function validateSocialPostProjection(value: unknown): value is SocialPostProjection {
+  return validateSchema("social-post-projection", value);
+}
+
+export function validateSocialQuestionCard(value: unknown): value is SocialQuestionCard {
+  return validateSchema("social-question-card", value);
+}
+
+export function validateSocialThreadProjection(value: unknown): value is SocialThreadProjection {
+  return validateSchema("social-thread-projection", value);
 }
 
 export function validateSoulVersionLeaf(value: unknown): value is SoulVersionLeaf {

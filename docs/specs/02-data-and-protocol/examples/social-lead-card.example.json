@@ -1,0 +1,9 @@
+{
+  "cardVersion": "1",
+  "network": "eip155:5042002",
+  "origin": "https://supplier.example",
+  "pathHint": "/v1/extract",
+  "capabilityTag": "page-extract",
+  "claimedOutputFormat": "json",
+  "source": "owner-suggested"
+}

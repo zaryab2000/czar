@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://czar.dev/schemas/social-lead-card.schema.json",
+  "title": "LeadCard",
+  "description": "A suggested supplier origin, unverified until Czar probes it (spec 02 §4.31, SCR-164 §3.13.3).",
+  "type": "object",
+  "x-privacyClass": "public",
+  "additionalProperties": false,
+  "required": [
+    "cardVersion",
+    "network",
+    "origin",
+    "capabilityTag",
+    "source"
+  ],
+  "properties": {
+    "cardVersion": {
+      "type": "string",
+      "const": "1",
+      "description": "Card version.",
+      "x-privacyClass": "public"
+    },
+    "network": {
+      "$ref": "common.schema.json#/$defs/Caip2",
+      "description": "Network the lead claims to accept payment on.",
+      "x-privacyClass": "public"
+    },
+    "origin": {
+      "type": "string",
+      "maxLength": 253,
+      "pattern": "^(https://[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?|http://127\\.0\\.0\\.1:[0-9]{1,5})$",
+      "description": "An https origin with no port, path or query; or an exact http://127.0.0.1:<port> origin, which the server accepts only when it is listed in fetch.localMerchantOrigins (empty outside the local stack).",
+      "x-privacyClass": "public"
+    },
+    "pathHint": {
+      "type": "string",
+      "maxLength": 256,
+      "pattern": "^/[A-Za-z0-9._~/-]*$",
+      "description": "Optional path on the origin.",
+      "x-privacyClass": "public"
+    },
+    "capabilityTag": {
+      "$ref": "common.schema.json#/$defs/CapabilityTag",
+      "description": "Capability the lead is suggested for.",
+      "x-privacyClass": "public"
+    },
+    "claimedOutputFormat": {
+      "type": "string",
+      "enum": [
+        "markdown-table",
+        "csv",
+        "json",
+        "markdown-list",
+        "prose"
+      ],
+      "description": "Output format the suggester claims.",
+      "x-privacyClass": "public"
+    },
+    "source": {
+      "type": "string",
+      "enum": [
+        "owner-suggested",
+        "representative",
+        "controlled-fixture"
+      ],
+      "description": "Who suggested it.",
+      "x-privacyClass": "public"
+    },
+    "probe": {
+      "type": "string",
+      "enum": [
+        "ok",
+        "rejected"
+      ],
+      "description": "Filled after the safe probe: ok = a well-formed x402 402 on the payment network.",
+      "x-privacyClass": "public"
+    }
+  }
+}
