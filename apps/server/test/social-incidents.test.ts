@@ -161,22 +161,33 @@ describe("SN-4 incident evidence", () => {
   it("closes when the incident window loses its third owner and does not reopen", async () => {
     const service = `svc_${"f".repeat(32)}`;
     const windowDays = Number(config.get("social.incidentWindowDays"));
+    const oneDayLater = new Date(AT.getTime() + 86_400_000);
     for (const index of [13, 14, 15]) {
       await seedOwner(index);
-      await observation(index, index + 100, { service });
+      await observation(index, index + 100, {
+        service,
+        settledAt: index === 15 ? AT : oneDayLater,
+      });
     }
-    await evaluateIncidents(getPool(), config, AT);
+    await evaluateIncidents(getPool(), config, oneDayLater);
     expect(await openIncidentsFor(getPool(), NETWORK, [service], "web-search")).toHaveLength(1);
 
     const afterWindow = new Date(AT.getTime() + windowDays * 86_400_000 + 1);
     await evaluateIncidents(getPool(), config, afterWindow);
     expect(await openIncidentsFor(getPool(), NETWORK, [service], "web-search")).toHaveLength(0);
     await evaluateIncidents(getPool(), config, afterWindow);
-    const history = await getPool().query<{ state: string; close_reason: string }>(
-      "SELECT state,close_reason FROM social_incidents WHERE service_id=$1",
+    const history = await getPool().query<{
+      state: string;
+      close_reason: string;
+      distinct_owners: number;
+      negative_units: number;
+    }>(
+      "SELECT state,close_reason,distinct_owners,negative_units FROM social_incidents WHERE service_id=$1",
       [service],
     );
-    expect(history.rows).toEqual([{ state: "closed", close_reason: "window-cleared" }]);
+    expect(history.rows).toEqual([
+      { state: "closed", close_reason: "window-cleared", distinct_owners: 2, negative_units: 2 },
+    ]);
   });
 
   it("closes a known version on use of a new one but keeps ver_unknown open", async () => {
