@@ -32,8 +32,8 @@ missing, skipped or zero-step hosted jobs are not passing checks.
 | Same local head | `fnm exec --using=22.22.0 pnpm --filter @czar/web typecheck` | Passed | Web package only. |
 | Same local head | `fnm exec --using=22.22.0 pnpm lint` | Passed | Repository lint, not functional acceptance. |
 | Same local head | `fnm exec --using=22.22.0 pnpm --filter @czar/web build` | Passed; `/social`, `/social/me`, `/social/threads/[id]`, `/onboarding/representative` generated | No Playwright execution. |
-| Shared integration snapshot `f5a7167`, reported by the orchestrator | Combined server/web typecheck; root lint; `cd docs/specs/02-data-and-protocol/schemas && python3 -I check-schemas.py` | Typecheck and lint passed; schema checker reported 34 files, 0 problems | Later SN-4 privacy tests are intentionally red pending a cross-lane fix; this is not current-head green full-suite evidence. |
-| Earlier shared integration snapshot, reported by the orchestrator | Focused server social tests; web social Vitest | Server social 16/16 and web social 11/11 passed before the intentional red tests | Must rerun on final merged head. |
+| Shared integration snapshot `f5a7167`, reported by the orchestrator | Exact command log pending; reported server/web typecheck, root lint, and schema checker from its required directory | Typecheck and lint passed; schema checker reported 34 files, 0 problems | Later SN-4 privacy tests are intentionally red pending a cross-lane fix; this is not current-head green full-suite evidence. |
+| Earlier shared integration snapshot, reported by the orchestrator | Exact command log pending for focused server social tests and web social Vitest | Server social 16/16 and web social 11/11 passed before the intentional red tests | Must rerun on final merged head. |
 
 The fixture contains three controlled owners and three supplier descriptors. It marks only the
 `incident-search` supplier as locally registered. The
