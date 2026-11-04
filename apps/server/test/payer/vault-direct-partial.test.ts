@@ -538,6 +538,41 @@ describe("vault-direct service-version drift (SCR-163 §5–§6)", () => {
     ]);
   });
 
+  it("pays a ranked incident-badged selection only at its stored version", async () => {
+    schemaLabels = { 0: "a", 1: "a", 2: "a" };
+    const selected = await storeSelection("a", true);
+    const run = partialRun(["ok", "ok", "ok"]);
+    const result = await executeVaultDirectStep(
+      incidentStepInput(selected.queryId),
+      run.dependencies,
+    );
+    expect(result.state).toBe("done");
+    expect(run.chain.reserve).toHaveBeenCalledTimes(1);
+    expect(await observationVersions()).toEqual([
+      selected.versionId,
+      selected.versionId,
+      selected.versionId,
+    ]);
+  });
+
+  it("blocks a ranked incident-badged selection if the live version changed", async () => {
+    schemaLabels = { 0: "b", 1: "b", 2: "b" };
+    const selected = await storeSelection("a", true);
+    const run = partialRun(["ok", "ok", "ok"]);
+    const result = await executeVaultDirectStep(
+      incidentStepInput(selected.queryId),
+      run.dependencies,
+    );
+    expect(result).toMatchObject({ state: "failed", errorCode: "service-version-drift" });
+    expect(run.chain.reserve).not.toHaveBeenCalled();
+    expect(run.signedAuthorizations()).toBe(0);
+    expect(await driftEvidence()).toMatchObject({
+      reason: "selection",
+      selectionVersionId: selected.versionId,
+      rankingDecisionId: selected.queryId,
+    });
+  });
+
   it("does not stop for a plan without a stored selection and records a null selection version", async () => {
     schemaLabels = { 0: "a", 1: "a", 2: "a" };
     const run = partialRun(["ok", "ok", "ok"]);
@@ -585,8 +620,11 @@ async function driftEvidence(): Promise<Record<string, unknown> | undefined> {
   return result.rows[0]?.payload;
 }
 
-/** Stores a RankingDecision whose unverified entry selected this step's service at the label's version. */
-async function storeSelection(label: string): Promise<{ queryId: string; versionId: string }> {
+/** Store a selected version in the ranked or unverified decision entry. */
+async function storeSelection(
+  label: string,
+  incidentRanked = false,
+): Promise<{ queryId: string; versionId: string }> {
   const versionId = serviceVersionId({
     payTo: PAYEE,
     resource: { url: MERCHANT_URL, method: "GET" },
@@ -609,19 +647,51 @@ async function storeSelection(label: string): Promise<{ queryId: string; version
       queryId,
       snapshotId,
       JSON.stringify({
-        unverified: [
-          {
-            service_id: "svc_11111111111111111111111111111111",
-            version_id: versionId,
-            reason: "unrated",
-            n_eff: 0,
-          },
-        ],
-        ranked: [],
+        unverified: incidentRanked
+          ? []
+          : [
+              {
+                service_id: "svc_11111111111111111111111111111111",
+                version_id: versionId,
+                reason: "unrated",
+                n_eff: 0,
+              },
+            ],
+        ranked: incidentRanked
+          ? [
+              {
+                rank: 1,
+                service_id: "svc_11111111111111111111111111111111",
+                version_id: versionId,
+                score: 0.8,
+                features: {
+                  incident: {
+                    incident_id: "inc_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
+                    distinct_owners: 3,
+                    negative_units: 3,
+                    opened_at: "2026-10-20T00:00:00Z",
+                  },
+                },
+                evidence_refs: [],
+                evidence_age_days: 0,
+                missing: [],
+                badges: ["incident-open"],
+                explanation: "ranked with open incident",
+              },
+            ]
+          : [],
       }),
     ],
   );
   return { queryId, versionId };
+}
+
+function incidentStepInput(rankingDecisionId: string): VaultDirectInput {
+  const input = stepInput({ rankingDecisionIds: [rankingDecisionId] });
+  return {
+    ...input,
+    plan: { ...input.plan, schemaVersion: "1.4", approvalReasons: ["incident-open"] },
+  };
 }
 
 function partialRun(
