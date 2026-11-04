@@ -179,6 +179,219 @@ describe("app passkey challenge", () => {
   });
 });
 
+describe("passkey RP ID from app.origin (PM-016, SCR-170 §2)", () => {
+  const CLOUD_ORIGIN = "https://app.example.com";
+  const CLOUD_RP_ID = "app.example.com";
+
+  let cloud: ReturnType<typeof createTestContext> | undefined;
+  let local: ReturnType<typeof createTestContext> | undefined;
+
+  /** One context per origin: `createTestContext` seeds a deterministic random source. */
+  function cloudContext() {
+    cloud ??= createTestContext(getPool(), {
+      config: testAppConfig({ "app.origin": CLOUD_ORIGIN }),
+    });
+    return cloud;
+  }
+
+  function localContext() {
+    local ??= createTestContext(getPool());
+    return local;
+  }
+
+  it("advertises the host of app.origin as the RP ID the challenge is built for", async () => {
+    const body = (await (await cloudContext().app.request("/v1/app/wallet-config")).json()) as {
+      webauthnRpId?: string;
+    };
+    expect(body.webauthnRpId).toBe(CLOUD_RP_ID);
+  });
+
+  it("registers under the derived RP ID, stores it, and refuses localhost authenticator data", async () => {
+    const pool = getPool();
+    const context = cloudContext();
+    const stale = passkeyParty(31);
+    const refused = await registerParty(context, stale, {
+      origin: CLOUD_ORIGIN,
+      rpId: CLOUD_RP_ID,
+      authenticatorRpId: "localhost",
+    });
+    expect(refused.status).toBe(422);
+    expect(
+      (
+        await pool.query("SELECT 1 FROM passkey_credentials WHERE credential_id=$1", [
+          stale.credentialId,
+        ])
+      ).rowCount,
+    ).toBe(0);
+
+    const party = passkeyParty(32);
+    const registered = await registerParty(context, party, {
+      origin: CLOUD_ORIGIN,
+      rpId: CLOUD_RP_ID,
+    });
+    expect(registered.status, await registered.clone().text()).toBe(201);
+    const saved = await pool.query<{ rp_id: string }>(
+      "SELECT rp_id FROM passkey_credentials WHERE credential_id=$1",
+      [party.credentialId],
+    );
+    expect(saved.rows[0]?.rp_id).toBe(CLOUD_RP_ID);
+  });
+
+  it("accepts an assertion hashing the derived RP ID and refuses one hashing localhost", async () => {
+    const context = cloudContext();
+    const party = passkeyParty(33);
+    expect(
+      (await registerParty(context, party, { origin: CLOUD_ORIGIN, rpId: CLOUD_RP_ID })).status,
+    ).toBe(201);
+
+    const wrongRpId = await assertSession(context, party, {
+      origin: CLOUD_ORIGIN,
+      rpId: "localhost",
+      signCount: 1,
+    });
+    expect(wrongRpId.status).toBe(401);
+    expect(wrongRpId.headers.get("Content-Type")).toContain("application/problem+json");
+
+    const accepted = await assertSession(context, party, {
+      origin: CLOUD_ORIGIN,
+      rpId: CLOUD_RP_ID,
+      signCount: 1,
+    });
+    expect(accepted.status, await accepted.clone().text()).toBe(201);
+  });
+
+  it("stores localhost with the default app.origin, exactly as today", async () => {
+    const pool = getPool();
+    const context = localContext();
+    const party = passkeyParty(34);
+    expect(
+      (await registerParty(context, party, { origin: "http://localhost", rpId: "localhost" }))
+        .status,
+    ).toBe(201);
+    const saved = await pool.query<{ rp_id: string }>(
+      "SELECT rp_id FROM passkey_credentials WHERE credential_id=$1",
+      [party.credentialId],
+    );
+    expect(saved.rows[0]?.rp_id).toBe("localhost");
+  });
+
+  it("refuses a credential stored under localhost once app.origin moves (GC-9)", async () => {
+    const pool = getPool();
+    const party = passkeyParty(35);
+    expect(
+      (
+        await registerParty(localContext(), party, {
+          origin: "http://localhost",
+          rpId: "localhost",
+        })
+      ).status,
+    ).toBe(201);
+
+    const moved = await assertSession(cloudContext(), party, {
+      origin: CLOUD_ORIGIN,
+      rpId: CLOUD_RP_ID,
+      signCount: 1,
+    });
+    expect(moved.status).toBe(401);
+    expect(moved.headers.get("Content-Type")).toContain("application/problem+json");
+    const unchanged = await pool.query<{ sign_count: string }>(
+      "SELECT sign_count FROM passkey_credentials WHERE credential_id=$1",
+      [party.credentialId],
+    );
+    expect(unchanged.rows[0]?.sign_count).toBe("0");
+  });
+});
+
+interface PasskeyParty {
+  readonly privateKey: Buffer;
+  readonly publicKey: Uint8Array;
+  readonly credentialId: string;
+}
+
+function passkeyParty(seed: number): PasskeyParty {
+  const privateKey = Buffer.alloc(32);
+  privateKey[31] = seed;
+  return {
+    privateKey,
+    publicKey: p256.getPublicKey(privateKey, false),
+    credentialId: Buffer.from(`rp-id-credential-${seed}`).toString("base64url"),
+  };
+}
+
+let idempotencyCounter = 0;
+
+function nextIdempotencyKey(): string {
+  idempotencyCounter += 1;
+  return `${idempotencyCounter.toString(16).padStart(8, "0")}-0000-4000-8000-000000000000`;
+}
+
+async function registerParty(
+  context: ReturnType<typeof createTestContext>,
+  party: PasskeyParty,
+  options: { origin: string; rpId: string; authenticatorRpId?: string },
+): Promise<Response> {
+  const authenticatorRpId = options.authenticatorRpId ?? options.rpId;
+  const challenge = await createChallenge(context.app, "register");
+  const authData = createAuthenticatorData(
+    party.publicKey,
+    party.credentialId,
+    0,
+    true,
+    authenticatorRpId,
+  );
+  return context.app.request("/v1/auth/passkey", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Idempotency-Key": nextIdempotencyKey(),
+    },
+    body: JSON.stringify({
+      challengeId: challenge.challengeId,
+      credentialId: party.credentialId,
+      clientDataJSON: createClientData("webauthn.create", challenge.challenge, options.origin),
+      attestationObject: cbor.encode({ fmt: "none", authData, attStmt: {} }).toString("base64url"),
+      msca: await counterfactualMsca(party.credentialId, party.publicKey, options.rpId),
+    }),
+  });
+}
+
+async function assertSession(
+  context: ReturnType<typeof createTestContext>,
+  party: PasskeyParty,
+  options: { origin: string; rpId: string; signCount: number },
+): Promise<Response> {
+  const challenge = await createChallenge(context.app, "session");
+  const authenticatorData = createAuthenticatorData(
+    party.publicKey,
+    party.credentialId,
+    options.signCount,
+    false,
+    options.rpId,
+  );
+  const clientDataJSON = createClientData("webauthn.get", challenge.challenge, options.origin);
+  const signedData = Buffer.concat([
+    authenticatorData,
+    createHash("sha256").update(Buffer.from(clientDataJSON, "base64url")).digest(),
+  ]);
+  const signature = Buffer.from(
+    p256.sign(createHash("sha256").update(signedData).digest(), party.privateKey).toDERRawBytes(),
+  ).toString("base64url");
+  return context.app.request("/v1/auth/session", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Idempotency-Key": nextIdempotencyKey(),
+    },
+    body: JSON.stringify({
+      challengeId: challenge.challengeId,
+      credentialId: party.credentialId,
+      authenticatorData: authenticatorData.toString("base64url"),
+      clientDataJSON,
+      signature,
+    }),
+  });
+}
+
 async function createChallenge(
   app: ReturnType<typeof createTestContext>["app"],
   purpose: "register" | "session",
@@ -197,11 +410,12 @@ function createAuthenticatorData(
   credentialId: string,
   signCount: number,
   registration: boolean,
+  rpId = "localhost",
 ): Buffer {
   const counter = Buffer.alloc(4);
   counter.writeUInt32BE(signCount);
   const prefix = Buffer.concat([
-    createHash("sha256").update("localhost").digest(),
+    createHash("sha256").update(rpId).digest(),
     Buffer.from([registration ? 0x41 : 0x01]),
     counter,
   ]);
@@ -252,7 +466,11 @@ function createClientData(type: string, challenge: string, origin = "http://loca
   return Buffer.from(JSON.stringify({ type, challenge, origin })).toString("base64url");
 }
 
-async function counterfactualMsca(credentialId: string, publicKey: Uint8Array): Promise<string> {
+async function counterfactualMsca(
+  credentialId: string,
+  publicKey: Uint8Array,
+  rpId = "localhost",
+): Promise<string> {
   const chain = defineChain({
     id: 5042002,
     name: "Arc Testnet",
@@ -262,7 +480,7 @@ async function counterfactualMsca(credentialId: string, publicKey: Uint8Array): 
   const client = createPublicClient({ chain, transport: http("http://127.0.0.1:8549") });
   const owner = toWebAuthnAccount({
     credential: { id: credentialId, publicKey: `0x${Buffer.from(publicKey).toString("hex")}` },
-    rpId: "localhost",
+    rpId,
   });
   const account = await toCircleSmartAccount({
     client: client as unknown as Parameters<typeof toCircleSmartAccount>[0]["client"],
