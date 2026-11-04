@@ -733,4 +733,52 @@ describe("representative run", () => {
     );
     expect(posts.rows[0]?.count).toBe("1");
   });
+
+  it("skips a would-publish item when the representative turns sharing off", async () => {
+    const id = `obj_${"Z".repeat(26)}`;
+    const body = makeObjectiveSubmission(id);
+    await pool().query(
+      `INSERT INTO objectives(objective_id,user_id,device_id,submission,objective_hash,state)
+       VALUES($1,$2,$3,$4,$5,'no-supplier')`,
+      [id, TEST_USER_ID, body.deviceId, body, body.objectiveHash],
+    );
+    const event = await pool().query<{ event_id: string }>(
+      `INSERT INTO outbox_events(name,objective_id,payload)
+       VALUES('objective.no-supplier',$1,'{}') RETURNING event_id`,
+      [id],
+    );
+    const inbox = await pool().query<{ inbox_id: string }>(
+      `INSERT INTO social_inbox(representative_id,event_id,kind,refs)
+       VALUES($1,$2,'need-unmet',$3) RETURNING inbox_id`,
+      [representativeId, event.rows[0]!.event_id, { objectiveId: id }],
+    );
+    await pool().query("UPDATE social_inbox SET state='done' WHERE inbox_id<>$1", [
+      inbox.rows[0]!.inbox_id,
+    ]);
+    await pool().query(
+      "UPDATE social_representatives SET sharing='off' WHERE representative_id=$1",
+      [representativeId],
+    );
+    const before = await pool().query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM social_posts WHERE author_id=$1",
+      [representativeId],
+    );
+    const result = await runSocialInbox(
+      pool(),
+      loadConfig(),
+      { bytes: randomBytes },
+      new Date("2026-11-07T12:00:00Z"),
+    );
+    expect(result).toEqual({ action: "abstain", stopReason: "skipped-sharing-off", postId: null });
+    const after = await pool().query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM social_posts WHERE author_id=$1",
+      [representativeId],
+    );
+    expect(after.rows[0]?.count).toBe(before.rows[0]?.count);
+    const run = await pool().query<{ stop_reason: string }>(
+      "SELECT stop_reason FROM social_runs WHERE inbox_id=$1",
+      [inbox.rows[0]!.inbox_id],
+    );
+    expect(run.rows).toEqual([{ stop_reason: "skipped-sharing-off" }]);
+  });
 });
