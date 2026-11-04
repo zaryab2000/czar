@@ -2,6 +2,14 @@
 *.key
 *.key.json
 *.pem
+# Key manifests written by local runs, whatever directory they land in. The patterns below
+# listed single file names (deployments/local-keys.json, .vault-client-test*, .run6-*), so a
+# run that chose a new name wrote an unignored key file: PM-017's aborted run 2 left
+# deployments/.signer-run2-<hex>-keys.json, which nothing ignored and nothing flagged.
+*-keys.json
+keys.json
+!*-keys.example.json
+!keys.example.json
 .env
 .env.*
 !.env.example
