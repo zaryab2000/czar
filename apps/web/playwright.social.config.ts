@@ -1,5 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
 
+if (process.env["CZAR_SOCIAL_E2E_FIXTURE"] !== "1") {
+  throw new Error("Set CZAR_SOCIAL_E2E_FIXTURE=1 to run the isolated social Playwright test.");
+}
+
 const chromiumPath = process.env["CZAR_CHROMIUM_PATH"];
 
 // The social round trip uses a disposable database and no wallet, bundler, or Arc process.
