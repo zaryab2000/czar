@@ -1,7 +1,15 @@
-// `czar status` (CZ-02 §12): installed state from launchd plus the running daemon's state over the socket.
+// `czar status` (CZ-02 §12): installed state from the OS service manager plus the running daemon's
+// state over the socket.
 import { connect } from "node:net";
-import type { Launchctl } from "./launchd.ts";
 import type { StatusSnapshot } from "./daemon.ts";
+
+/**
+ * What `czar status` needs from the OS service manager: `Launchctl` on macOS (`launchctl print`),
+ * `Systemctl` on Linux (`systemctl --user is-active`).
+ */
+export interface ServiceManager {
+  isLoaded(): Promise<boolean>;
+}
 
 /** Wording from CZ-02 §12. The not-installed and not-running lines are not in the spec table (see task notes). */
 export const STATUS_TEXT = {
@@ -63,8 +71,8 @@ export function describe(installed: boolean, daemon: StatusSnapshot | null): str
   return STATUS_TEXT.observing(0);
 }
 
-export async function readStatus(launchctl: Launchctl, socketPath: string): Promise<CliStatus> {
-  const installed = await launchctl.isLoaded();
+export async function readStatus(service: ServiceManager, socketPath: string): Promise<CliStatus> {
+  const installed = await service.isLoaded();
   let daemon: StatusSnapshot | null = null;
   if (installed) {
     try {
