@@ -66,6 +66,12 @@ describe("controlled social fixture", () => {
       ratings: "9",
       receipts: "18",
     });
+    const submissions = await pool().query<{ submission: unknown }>(
+      `SELECT o.submission FROM objectives o JOIN users u USING(user_id) WHERE u.controlled`,
+    );
+    expect(
+      submissions.rows.every((row) => validateSchema("objective-submission", row.submission)),
+    ).toBe(true);
     const handles = await pool().query<{ handle: string }>(
       "SELECT handle FROM social_representatives WHERE controlled ORDER BY handle",
     );
