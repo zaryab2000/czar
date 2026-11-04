@@ -17,6 +17,7 @@ import { makeRankingDecision, rankingPolicyVersion } from "#src/selection/rankin
 import { saveRankingDecision } from "#src/selection/ranking/decision-store";
 import { orderCandidates } from "#src/selection/ranking/order";
 import { recordServiceVersion } from "#src/selection/service-versions";
+import { openIncidentsFor, overlayIncidents } from "#src/social/incidents";
 
 interface ProbeInput {
   readonly query?: Readonly<Record<string, string>>;
@@ -468,10 +469,16 @@ async function createDecision(args: {
     }),
   );
   const ordered = orderCandidates(candidates, confidenceZ, now(), consecutiveFailures);
+  const incidents = await openIncidentsFor(
+    args.pool,
+    descriptor.network,
+    ordered.ranked.map((row) => row.service_id),
+    query.taskClass,
+  );
   const decision = makeRankingDecision({
     query,
     candidatesConsidered: eligibility.candidatesConsidered,
-    ranked: ordered.ranked,
+    ranked: overlayIncidents(ordered.ranked, incidents),
     unverified: ordered.unverified,
     excluded: [...eligibility.excluded, ...ordered.excluded],
     policyVersion: activePolicyVersion,

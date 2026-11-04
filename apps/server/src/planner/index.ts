@@ -18,6 +18,8 @@ import type { PlannerPorts, PlannerService } from "#src/planner/ports";
 import type { Plan, RankingDecision, Step, TaskSpec } from "@czar/schemas";
 import { validateSchema, validationErrors } from "@czar/schemas";
 import { ulid, type RandomSource } from "#src/http/ids";
+import { chooseWithLessons, type PersonalLesson } from "#src/social/lessons";
+import type { OpenIncident } from "#src/social/incidents";
 
 export interface PlannerRequest {
   readonly objectiveId: string;
@@ -38,6 +40,14 @@ export interface PlannerRequest {
 export interface PlannerDependencies {
   readonly config?: Config;
   readonly ports: Omit<PlannerPorts, "prober"> & Partial<Pick<PlannerPorts, "prober">>;
+  readonly social?: {
+    lessonsFor(userId: string, network: string, taskClass: string): Promise<PersonalLesson[]>;
+    openIncidentsFor(
+      network: string,
+      serviceIds: readonly string[],
+      taskClass: string,
+    ): Promise<OpenIncident[]>;
+  };
 }
 
 export interface PlannerBuild {
@@ -54,6 +64,8 @@ interface Candidate {
   readonly fromExploration: boolean;
   readonly unprobed?: boolean;
   readonly jobProvider?: boolean;
+  readonly incidentOpen?: boolean;
+  readonly lessons?: readonly PersonalLesson[];
 }
 
 interface PaidStepDraft {
@@ -94,7 +106,7 @@ export function createPlanner(dependencies: PlannerDependencies) {
   };
   return {
     async build(input: PlannerRequest): Promise<PlannerBuild | null> {
-      return buildPlan(input, config, ports);
+      return buildPlan(input, config, ports, dependencies.social);
     },
   };
 }
@@ -103,13 +115,14 @@ async function buildPlan(
   input: PlannerRequest,
   config: Config,
   ports: PlannerPorts,
+  social?: PlannerDependencies["social"],
 ): Promise<PlannerBuild | null> {
   const planId = ulid("pln_", input.now, input.random);
   const network = String(config.get("selection.paymentNetwork"));
   const category = categoryFor(input.capabilities[0] ?? "general", config);
   const categoryId = keccak256(stringToHex(category));
   const hasAgent = await ports.agentHosts.hasAgentHost(input.deviceId);
-  const collected = await collectSteps({ input, config, ports, network, hasAgent });
+  const collected = await collectSteps({ input, config, ports, network, hasAgent, social });
   const { leaves, droppedSteps } = collected;
   const healthByStep = await Promise.all(
     collected.steps.map(async (step) =>
@@ -132,6 +145,7 @@ async function buildPlan(
   if (collected.unratedStepIndices.size > 0) approvalReasons.push("unrated");
   if (healthByStep.some((facts) => facts.length > 0)) approvalReasons.push("health-fact");
   if (collected.hasExploration) approvalReasons.push("exploration-slot");
+  if (collected.incidentStepIndices.size > 0) approvalReasons.push("incident-open");
   if (steps.length === 0 && droppedSteps.length === 0) return null;
   const hasPocket = steps.some((step) => step.kind === "gateway-nano");
   const pocket = hasPocket ? await ports.pocketKeys.createPocketKey(planId) : undefined;
@@ -152,7 +166,11 @@ async function buildPlan(
   );
   const expiresAt = expiry(input.now, collected.jobExpiresMs, config);
   const partial = {
-    schemaVersion: "1.3" as const,
+    schemaVersion:
+      collected.incidentStepIndices.size > 0 ||
+      steps.some((step) => (step.why?.lessons?.length ?? 0) > 0)
+        ? ("1.4" as const)
+        : ("1.3" as const),
     planId,
     objectiveId: input.objectiveId,
     objectiveHash: input.objectiveHash,
@@ -195,6 +213,7 @@ interface StepCollection {
   readonly rankingIds: string[];
   readonly hasExploration: boolean;
   readonly unratedStepIndices: ReadonlySet<number>;
+  readonly incidentStepIndices: ReadonlySet<number>;
   readonly jobExpiresMs: number;
 }
 
@@ -204,8 +223,9 @@ async function collectSteps(args: {
   readonly ports: PlannerPorts;
   readonly network: string;
   readonly hasAgent: boolean;
+  readonly social?: PlannerDependencies["social"];
 }): Promise<StepCollection> {
-  const { input, config, ports, network, hasAgent } = args;
+  const { input, config, ports, network, hasAgent, social } = args;
   const entries: CollectedEntry[] = [];
   const droppedSteps: NonNullable<Plan["droppedSteps"]> = [];
   const rankingIds: string[] = [];
@@ -227,7 +247,7 @@ async function collectSteps(args: {
       droppedSteps.push({ capability, reason: unpaid.drop });
       continue;
     }
-    const result = await selectCandidate(capability, input, config, ports, network);
+    const result = await selectCandidate(capability, input, config, ports, network, social);
     rankingIds.push(result.decision.query_id);
     if (!result.selected) {
       if (capability !== "web-search" && capability !== "page-extract")
@@ -277,7 +297,12 @@ async function completeCollectedSteps(args: {
 }): Promise<
   Pick<
     StepCollection,
-    "steps" | "leaves" | "hasExploration" | "unratedStepIndices" | "jobExpiresMs"
+    | "steps"
+    | "leaves"
+    | "hasExploration"
+    | "unratedStepIndices"
+    | "incidentStepIndices"
+    | "jobExpiresMs"
   >
 > {
   const { entries, input, config, ports, network, gatewayVolumeAtomic } = args;
@@ -285,6 +310,7 @@ async function completeCollectedSteps(args: {
   const leaves: Plan["payeeLeaves"] = [];
   let hasExploration = false;
   const unratedStepIndices = new Set<number>();
+  const incidentStepIndices = new Set<number>();
   let jobExpiresMs = input.now.getTime();
   for (const entry of entries) {
     if (entry.kind === "unpaid") {
@@ -304,11 +330,12 @@ async function completeCollectedSteps(args: {
     if (!planStep) continue;
     steps.push(planStep.step);
     if (entry.candidate.fromExploration) unratedStepIndices.add(planStep.step.stepIndex);
+    if (entry.candidate.incidentOpen) incidentStepIndices.add(planStep.step.stepIndex);
     leaves.push(...planStep.leaves);
     hasExploration ||= entry.candidate.fromExploration;
     if (planStep.jobExpiresMs) jobExpiresMs = Math.max(jobExpiresMs, planStep.jobExpiresMs);
   }
-  return { steps, leaves, hasExploration, unratedStepIndices, jobExpiresMs };
+  return { steps, leaves, hasExploration, unratedStepIndices, incidentStepIndices, jobExpiresMs };
 }
 
 function preparePaidStep(
@@ -413,6 +440,7 @@ async function selectCandidate(
   config: Config,
   ports: PlannerPorts,
   network: string,
+  social?: PlannerDependencies["social"],
 ): Promise<{ decision: RankingDecision; selected?: Candidate }> {
   const defaultMax = BigInt(Number(config.get("planner.defaultMaxUnitAtomic")));
   const max =
@@ -462,7 +490,46 @@ async function selectCandidate(
         })
       : candidates;
   probed.sort((a, b) => a.rank - b.rank);
-  const selected = probed[0];
+  const survivors = probed.filter((candidate) => !candidate.fromExploration);
+  const taskClass = taskClassFor(capability, config);
+  const lessons =
+    survivors.length && social ? await social.lessonsFor(input.userId, network, taskClass) : [];
+  const rankedSurvivors = survivors.flatMap((candidate) => {
+    const row = decision.ranked.find((item) => item.service_id === candidate.service.serviceId);
+    return row ? [row] : [];
+  });
+  const choice =
+    rankedSurvivors.length && lessons.length
+      ? chooseWithLessons(
+          rankedSurvivors,
+          lessons,
+          Number(config.get("social.lessonMaxScoreDelta")),
+        )
+      : null;
+  const chosen = choice
+    ? survivors.find((candidate) => candidate.service.serviceId === choice.selected.service_id)
+    : probed[0];
+  const incident =
+    chosen && social
+      ? await social.openIncidentsFor(network, [chosen.service.serviceId], taskClass)
+      : [];
+  const selected = chosen && {
+    ...chosen,
+    incidentOpen:
+      Boolean(
+        decision.ranked.find(
+          (row) =>
+            row.service_id === chosen.service.serviceId && row.badges.includes("incident-open"),
+        ),
+      ) ||
+      incident.some(
+        (item) =>
+          item.versionId === "ver_unknown" ||
+          item.versionId ===
+            decision.ranked.find((row) => row.service_id === chosen.service.serviceId)?.version_id,
+      ),
+    ...(choice?.used.length ? { lessons: choice.used } : {}),
+  };
   return {
     decision,
     ...(selected ? { selected } : {}),
@@ -652,6 +719,16 @@ async function makePaidStep(args: {
       ),
       summary: stepWhy(candidate.service.extensions.czar.evidence, expectedCalls, baseAmount),
       alternativesLost: [],
+      ...(candidate.lessons?.length
+        ? {
+            lessons: candidate.lessons.map((lesson) => ({
+              lessonId: lesson.lessonId,
+              handle: lesson.handle,
+              proposition: lesson.proposition,
+              taskClass: lesson.taskClass,
+            })),
+          }
+        : {}),
     },
   };
   const jobExpiresMs = job ? jobExpiry(candidate.service, input.now, config) : undefined;
