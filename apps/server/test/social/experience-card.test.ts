@@ -1,5 +1,8 @@
+import { randomBytes } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
+import { loadConfig } from "@czar/config";
 import { buildExperienceCard } from "#src/social/projection/experience-card";
+import { runSocialInbox } from "#src/social/runtime/run";
 import { setupDatabase } from "#test/db";
 import { makeObjectiveSubmission, seedDevice, TEST_USER_ID } from "#test/fixtures";
 
@@ -13,7 +16,10 @@ const vault = `0x${"0".repeat(40)}`;
 describe("social experience projection", () => {
   beforeAll(async () => {
     await seedDevice(pool());
-    const submission = makeObjectiveSubmission(objectiveId, { subject: "Acme Corp" });
+    const submission = makeObjectiveSubmission(objectiveId, {
+      subject: "Acme Corp",
+      goal: "Read pricing.md for Acme Corp",
+    });
     await pool().query(
       `INSERT INTO objectives(objective_id,user_id,device_id,submission,objective_hash,state)
        VALUES($1,$2,$3,$4,$5,'delivered')`,
@@ -79,6 +85,46 @@ describe("social experience projection", () => {
       observedAt: "2026-11-05T00:00:00Z",
     });
     expect(result?.observationIds).toHaveLength(2);
-    expect(JSON.stringify(result?.card)).not.toMatch(/Acme|obs_|pricing|0x/);
+    expect(JSON.stringify(result?.card)).not.toMatch(/Acme|obs_|pricing|0x|15000/);
+  });
+
+  it("publishes only day-truncated, private-id-free strings to the public card", async () => {
+    const representativeId = `rep_${"C".repeat(26)}`;
+    await pool().query(
+      `INSERT INTO social_representatives(representative_id,user_id,handle,sharing)
+       VALUES($1,$2,'Rep-CCCC','structured')`,
+      [representativeId, TEST_USER_ID],
+    );
+    const event = await pool().query<{ event_id: string }>(
+      `INSERT INTO outbox_events(name,objective_id,payload)
+       VALUES('objective.delivered',$1,'{}') RETURNING event_id`,
+      [objectiveId],
+    );
+    await pool().query(
+      `INSERT INTO social_inbox(representative_id,event_id,kind,refs)
+       VALUES($1,$2,'outcome-ready',$3)`,
+      [representativeId, event.rows[0]!.event_id, { objectiveId }],
+    );
+    expect(
+      (
+        await runSocialInbox(
+          pool(),
+          loadConfig(),
+          { bytes: randomBytes },
+          new Date("2026-11-05T15:00:00Z"),
+        )
+      )?.action,
+    ).toBe("publish-experience");
+    const publicPosts = await pool().query<{ card: object; note: string | null }>(
+      "SELECT card,note FROM social_posts WHERE author_id=$1 AND kind='experience'",
+      [representativeId],
+    );
+    expect(publicPosts.rows).toHaveLength(1);
+    expect(publicPosts.rows[0]?.note).toBeNull();
+    const publicText = JSON.stringify(publicPosts.rows[0]?.card);
+    expect(publicText).not.toMatch(/Acme|pricing|0x[0-9a-f]{40}|15000|obs_|usr_|dev_|obj_|pln_|@/i);
+    for (const match of publicText.matchAll(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z/g)) {
+      expect(match[0]).toMatch(/^\d{4}-\d{2}-\d{2}T00:00:00Z$/);
+    }
   });
 });

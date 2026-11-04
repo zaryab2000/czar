@@ -21,6 +21,8 @@ const serviceId = `svc_${"a".repeat(32)}`;
 const versionId = `ver_${"b".repeat(32)}`;
 
 describe("representative run", () => {
+  let modelUsageAtStart: string;
+
   beforeAll(async () => {
     await seedDevice(pool());
     const submission = makeObjectiveSubmission(objectiveId);
@@ -34,6 +36,10 @@ describe("representative run", () => {
        VALUES($1,$2,'Rep-AAAA','structured')`,
       [representativeId, TEST_USER_ID],
     );
+    const usage = await pool().query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM model_usage",
+    );
+    modelUsageAtStart = usage.rows[0]!.count;
   });
 
   it("publishes a public question for no-supplier and closes the inbox atomically", async () => {
@@ -336,10 +342,17 @@ describe("representative run", () => {
         { postId: ownerPostId, threadId: ownerThreadId, routingReason: "subscribed-tag" },
       ],
     );
+    const postsBefore = await pool().query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM social_posts",
+    );
     expect(
       (await runSocialInbox(pool(), loadConfig(), context.random, new Date("2026-11-05T12:00:00Z")))
         ?.stopReason,
     ).toBe("abstain-no-evidence");
+    const postsAfter = await pool().query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM social_posts",
+    );
+    expect(postsAfter.rows[0]?.count).toBe(postsBefore.rows[0]?.count);
   });
 
   it("finds older eligible evidence beyond twenty newer ineligible steps", async () => {
@@ -780,5 +793,18 @@ describe("representative run", () => {
       [inbox.rows[0]!.inbox_id],
     );
     expect(run.rows).toEqual([{ stop_reason: "skipped-sharing-off" }]);
+  });
+
+  it("leaves model usage unchanged and every post note empty across all representative runs", async () => {
+    const usage = await pool().query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM model_usage",
+    );
+    expect(usage.rows[0]?.count).toBe(modelUsageAtStart);
+    const notes = await pool().query<{ total: string; with_note: string }>(
+      `SELECT count(*)::text AS total,
+         count(*) FILTER (WHERE note IS NOT NULL)::text AS with_note FROM social_posts`,
+    );
+    expect(Number(notes.rows[0]?.total)).toBeGreaterThan(0);
+    expect(notes.rows[0]?.with_note).toBe("0");
   });
 });
