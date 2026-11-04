@@ -9,6 +9,28 @@ const getPool = setupDatabase();
 const config = loadConfig();
 
 describe("device pairing", () => {
+  it("creates one sharing-off representative on first pairing", async () => {
+    const pool = getPool();
+    const context = createTestContext(pool);
+    await seedPairingCode(pool, "00000027");
+    const response = await context.app.request("/v1/devices/pair", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": "00000000-0000-4000-8000-000000000027",
+      },
+      body: JSON.stringify({ pairingCode: "00000027", deviceName: "First", platform: "linux" }),
+    });
+    expect(response.status).toBe(201);
+    const result = await pool.query(
+      "SELECT representative_id, handle, sharing FROM social_representatives WHERE user_id=$1",
+      [TEST_USER_ID],
+    );
+    expect(result.rowCount).toBe(1);
+    expect(result.rows[0]).toMatchObject({ sharing: "off" });
+    expect(result.rows[0]?.representative_id).toMatch(/^rep_[0-9A-HJKMNP-TV-Z]{26}$/);
+    expect(result.rows[0]?.handle).toBe(`Rep-${result.rows[0]?.representative_id.slice(-4)}`);
+  });
   it("pairCode_isSingleUse_andOnlyDigestIsStored", async () => {
     const pool = getPool();
     const context = createTestContext(pool);

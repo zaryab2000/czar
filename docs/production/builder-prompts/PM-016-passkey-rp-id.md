@@ -26,7 +26,7 @@
   - the challenge, registration (stored with the credential) and assertion verification all use the derived value
 - A stored credential whose `rp_id` differs from the current derived RP ID is refused with the same problem response an unknown credential gets. Moving to a new domain means re-registering, per GC-9.
 - **Migration `apps/server/migrations/0030-passkey-rp-id-host.sql`** (the production range in SCR-170 §7):
-  - `app_passkeys.rp_id` today has `CHECK (rp_id = 'localhost')` (`0007-app-passkeys.sql:21`), so registering under a cloud host fails without it.
+  - `passkey_credentials.rp_id` today has `CHECK (rp_id = 'localhost')` (`0007-app-passkeys.sql:21`), so registering under a cloud host fails without it.
   - Drop that constraint (read its real name from the database in the migration test) and add `CHECK (rp_id ~ '^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$')`.
   - Existing `localhost` rows stay valid.
 - **`circleMscaAddress`** (used at `auth.ts:336`) works out the Circle smart-account address during registration. It sits next to the onboarding wallet flow. With default config its input is identical to today; state this in your report and do not change it.
