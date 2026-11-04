@@ -26,6 +26,8 @@ const shippedList = readFileSync(new URL("systemd/secrets.list", cloudRoot), "ut
 
 const FAKE_TOKEN = "fake-access-token-for-the-test-only";
 const FAKE_PROJECT = "czar-test-project";
+/** Marker value: make the fake Secret Manager answer 200 with no `payload` at all. */
+const EMPTY_PAYLOAD = "__no_payload__";
 
 type Fake = {
   metadataOrigin: string;
@@ -98,6 +100,13 @@ async function fakes(values: Record<string, string | number>): Promise<Fake> {
     }
     if (typeof value === "number") {
       response.writeHead(value).end("fault");
+      return;
+    }
+    // A 200 that carries no payload at all, to prove the script does not write garbage.
+    if (value === EMPTY_PAYLOAD) {
+      response
+        .writeHead(200, { "content-type": "application/json" })
+        .end(JSON.stringify({ name: `projects/${FAKE_PROJECT}/secrets/${matched[2]}/versions/1` }));
       return;
     }
     response.writeHead(200, { "content-type": "application/json" }).end(
@@ -286,6 +295,20 @@ test("a non-404 Secret Manager failure fails the unit even for an optional crede
     `czar-alpha-anthropic-api-key server anthropic-api-key ${uid} optional\n`,
   );
   assert.notEqual(run.status, 0, "a 500 must not be read as 'not configured'");
+});
+
+test("a 200 with no payload fails the unit instead of writing garbage", async () => {
+  // `jq -r '.payload.data'` prints the literal "null" here, and `base64 --decode` turns that
+  // into three bytes and exits 0. Without a check, the service would get a corrupt credential
+  // and fail much later, somewhere unrelated.
+  const fake = await fakes({ "czar-alpha-db-password-server": EMPTY_PAYLOAD });
+  const run = await runFetch(
+    fake,
+    `czar-alpha-db-password-server server db-password ${uid} required\n`,
+  );
+  assert.notEqual(run.status, 0, "a payload-less 200 must fail the unit");
+  assert.equal(existsSync(join(run.dir, "server", "db-password")), false, "garbage was written");
+  assert.match(run.stderr, /no payload/);
 });
 
 test("nothing is ever written outside deploy.credentialFilesDir", async () => {

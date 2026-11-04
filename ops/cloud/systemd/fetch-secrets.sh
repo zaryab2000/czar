@@ -199,9 +199,19 @@ fetch_one() {
       ;;
   esac
 
-  partial="$dest.partial"
-  jq -r '.payload.data' "$body" | base64 --decode >"$partial"
+  # The payload is extracted and checked BEFORE it is decoded. `jq -r '.payload.data'` prints
+  # the literal `null` when a 200 carries no payload, and `base64 --decode` turns "null" into
+  # three bytes of garbage and exits 0 — which would write a corrupt credential file instead of
+  # failing. `jq -e` plus the type check exits non-zero instead.
+  local payload="$work/payload.b64"
+  jq -e -r '.payload.data | select(type == "string" and length > 0)' "$body" >"$payload" ||
+    fail "$name: Secret Manager returned a version with no payload"
   rm -f -- "$body"
+
+  partial="$dest.partial"
+  base64 --decode <"$payload" >"$partial" ||
+    fail "$name: the payload was not valid base64"
+  rm -f -- "$payload"
   chown "$uid" "$partial"
   chmod "$CREDENTIAL_FILE_MODE" "$partial"
   # Same tmpfs, so this is a rename: the file is never briefly world-readable at its real name.
