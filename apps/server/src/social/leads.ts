@@ -8,6 +8,7 @@ import {
 } from "@czar/x402";
 import type { Pool, PoolClient } from "pg";
 import { randomId } from "#src/http/ids";
+import { isPublicContentSafe } from "#src/social/projection/denylist";
 
 type LeadState = "probed-ok" | "rejected";
 type RejectReason = "not-402" | "wrong-network" | "unsafe-origin" | "probe-failed";
@@ -125,21 +126,23 @@ async function saveResult(
           probeResult: outcome.reason ?? outcome.state,
         },
       };
-      await client.query(
-        `INSERT INTO social_posts(post_id,thread_id,author_id,kind,card,action_id,created_at)
-         VALUES($1,$2,NULL,'system',$3::jsonb,$4,$5)
-         ON CONFLICT(action_id) DO NOTHING`,
-        [postId, lead.thread_id, JSON.stringify(card), `${lead.lead_id}:probed`, now],
-      );
-      await client.query(
-        "UPDATE social_threads SET contributions=contributions+1,revision=revision+1 WHERE thread_id=$1",
-        [lead.thread_id],
-      );
-      await client.query(
-        `INSERT INTO outbox_events(name,payload,delivered_at)
-         VALUES('social.post.published',$1::jsonb,now())`,
-        [JSON.stringify({ postId, threadId: lead.thread_id })],
-      );
+      if (isPublicContentSafe(card, [], lead.origin)) {
+        await client.query(
+          `INSERT INTO social_posts(post_id,thread_id,author_id,kind,card,action_id,created_at)
+           VALUES($1,$2,NULL,'system',$3::jsonb,$4,$5)
+           ON CONFLICT(action_id) DO NOTHING`,
+          [postId, lead.thread_id, JSON.stringify(card), `${lead.lead_id}:probed`, now],
+        );
+        await client.query(
+          "UPDATE social_threads SET contributions=contributions+1,revision=revision+1 WHERE thread_id=$1",
+          [lead.thread_id],
+        );
+        await client.query(
+          `INSERT INTO outbox_events(name,payload,delivered_at)
+           VALUES('social.post.published',$1::jsonb,now())`,
+          [JSON.stringify({ postId, threadId: lead.thread_id })],
+        );
+      }
     }
     await client.query("COMMIT");
   } catch (error) {

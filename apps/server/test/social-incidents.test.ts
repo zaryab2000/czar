@@ -1,6 +1,7 @@
 import { loadConfig } from "@czar/config";
 import { describe, expect, it } from "vitest";
 import { evaluateIncidents, openIncidentsFor } from "#src/social/incidents";
+import { getIncident, getThread, listIncidents, listThreads } from "#src/social/threads";
 import { setupDatabase } from "#test/db";
 
 const getPool = setupDatabase();
@@ -179,6 +180,19 @@ describe("SN-4 incident evidence", () => {
     expect(
       await openIncidentsFor(getPool(), NETWORK, [privateService], "obs_private-id"),
     ).toHaveLength(1);
+    const incident = await getPool().query<{ incident_id: string; thread_id: string }>(
+      "SELECT incident_id,thread_id FROM social_incidents WHERE service_id=$1",
+      [privateService],
+    );
+    const ids = incident.rows[0];
+    expect(ids).toBeDefined();
+    if (!ids) return;
+    expect(await getIncident(getPool(), ids.incident_id)).toBeNull();
+    expect(await getThread(getPool(), ids.thread_id)).toBeNull();
+    const incidents = await listIncidents(getPool(), { limit: 100 });
+    const threads = await listThreads(getPool(), { limit: 100 });
+    expect(incidents.items.some((item) => item["incidentId"] === ids.incident_id)).toBe(false);
+    expect(threads.items.some((item) => item.threadId === ids.thread_id)).toBe(false);
     const posts = await getPool().query<{ card: Record<string, unknown> }>(
       "SELECT card FROM social_posts WHERE kind='system'",
     );

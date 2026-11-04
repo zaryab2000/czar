@@ -1,6 +1,7 @@
 import type { Pool } from "pg";
 import { validateSocialThreadProjection, type SocialThreadProjection } from "@czar/schemas";
 import { day } from "#src/social/posts";
+import { isPublicContentSafe } from "#src/social/projection/denylist";
 
 interface ThreadRow {
   thread_id: string;
@@ -45,7 +46,10 @@ export async function getThread(
   const result = await pool.query<ThreadRow>("SELECT * FROM social_threads WHERE thread_id=$1", [
     threadId,
   ]);
-  return result.rows[0] ? projectThread(result.rows[0]) : null;
+  const row = result.rows[0];
+  if (!row) return null;
+  const thread = projectThread(row);
+  return isPublicContentSafe(thread, []) ? thread : null;
 }
 
 export async function listThreads(
@@ -74,7 +78,7 @@ export async function listThreads(
   );
   const rows = result.rows.slice(0, options.limit);
   return {
-    items: rows.map(projectThread),
+    items: rows.map(projectThread).filter((thread) => isPublicContentSafe(thread, [])),
     nextCursor: result.rows.length > options.limit ? (rows.at(-1)?.thread_id ?? null) : null,
   };
 }
@@ -133,7 +137,7 @@ export async function listIncidents(
   );
   const rows = result.rows.slice(0, options.limit);
   return {
-    items: rows.map(projectIncident),
+    items: rows.map(projectIncident).filter((incident) => isPublicContentSafe(incident, [])),
     nextCursor: result.rows.length > options.limit ? (rows.at(-1)?.incident_id ?? null) : null,
   };
 }
@@ -146,5 +150,8 @@ export async function getIncident(
     "SELECT * FROM social_incidents WHERE incident_id=$1 AND thread_id IS NOT NULL",
     [incidentId],
   );
-  return result.rows[0] ? projectIncident(result.rows[0]) : null;
+  const row = result.rows[0];
+  if (!row) return null;
+  const incident = projectIncident(row);
+  return isPublicContentSafe(incident, []) ? incident : null;
 }

@@ -23,12 +23,13 @@ export function isPublicContentSafe(
   allowedOrigin?: string,
 ): boolean {
   if (typeof value === "string") return !unsafeString(value, subjectLabels, false);
-  if (Array.isArray(value)) return value.every((item) => isPublicContentSafe(item, subjectLabels));
+  if (Array.isArray(value))
+    return value.every((item) => isPublicContentSafe(item, subjectLabels, allowedOrigin));
   if (!value || typeof value !== "object") return true;
   return Object.entries(value).every(([key, item]) => {
     if (key === "origin" && item === allowedOrigin && typeof item === "string") {
       return !unsafeString(item, subjectLabels, true);
     }
-    return isPublicContentSafe(item, subjectLabels);
+    return isPublicContentSafe(item, subjectLabels, allowedOrigin);
   });
 }

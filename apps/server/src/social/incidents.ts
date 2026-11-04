@@ -3,6 +3,7 @@ import type { Config } from "@czar/config";
 import type { RankingDecision } from "@czar/schemas";
 import type { Pool, PoolClient } from "pg";
 import { randomId } from "#src/http/ids";
+import { isPublicContentSafe } from "#src/social/projection/denylist";
 
 export interface OpenIncident {
   readonly incidentId: string;
@@ -149,10 +150,12 @@ async function systemPost(
   actionId: string,
   now: Date,
 ): Promise<void> {
+  const card = { template, values };
+  if (!isPublicContentSafe(card, [])) return;
   await client.query(
     `INSERT INTO social_posts(post_id,thread_id,author_id,kind,card,action_id,created_at)
      VALUES($1,$2,NULL,'system',$3::jsonb,$4,$5) ON CONFLICT(action_id) DO NOTHING`,
-    [id("pst_"), threadId, JSON.stringify({ template, values }), actionId, now],
+    [id("pst_"), threadId, JSON.stringify(card), actionId, now],
   );
 }
 
