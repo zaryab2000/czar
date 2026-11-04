@@ -51,6 +51,7 @@ missing, skipped or zero-step hosted jobs are not passing checks.
 | Integration `719385e`, reported by the orchestrator | Web build with `CZAR_SERVER_URL=http://127.0.0.1:4310`; key-free `playwright.social.config.ts` Chromium spec | Build passed; real-server case 18 passed 1/1 | Only ancillary `/v1/me` was mocked; controlled product demo and screenshots pending. |
 | Integration `9938e49`, reported by the orchestrator | Focused server social/buying/planner/selection plus `test/payer/vault-direct-partial.test.ts` | 22 files, 168/168 passed | Key-free integration slice, not all package suites or merged-head evidence. |
 | Integration `9938e49`, reported by the orchestrator | `fnm exec --using=22.22.0 pnpm typecheck`; `fnm exec --using=22.22.0 pnpm lint` | Both passed | Static checks; final PR-head rerun pending. Config 67/67, web 11/11, schema 34/0, web build and case-18 browser evidence remain the prior snapshots above. |
+| Integration `b12c5dc`, reported by the orchestrator | Key-free package suites listed below | Eight additional package suites passed | Does not include the signer, daemon, indexer, vault-client or full server suites. |
 
 The orchestrator's exact focused server command for `902f113` was:
 
@@ -68,6 +69,25 @@ its observed result was 131/131 across 21 files. The same 21-file scope passed 1
 all ten seeded `objective-submission` records against the canonical schema. At `9938e49`, the
 same scope plus `test/payer/vault-direct-partial.test.ts` passed 168/168 across 22 files.
 These are integration snapshots, not a final PR or merged `build-v1` head.
+
+The orchestrator also ran these key-free package suites on integration `b12c5dc`:
+
+| Package | Result |
+|---|---|
+| `@czar/api-contract` | 20/20 passed |
+| `@czar/schemas` | 38/38 passed |
+| `@czar/logging` | 14/14 passed |
+| `@czar/redaction` | 473/473 passed |
+| `@czar/hashing` | 54/54 passed |
+| `@czar/x402` | 93/93 passed |
+| `@czar/web` | 81/81 passed |
+| `@czar/merchants` | 31/31 passed |
+
+The first sandbox attempts for redaction and x402 could not bind loopback; their escalated
+key-free reruns passed at the counts above. Config passed 67/67 on an earlier integration head.
+The signer, daemon, indexer, vault-client and full server suites still need source review for
+key-producing harnesses and an authorized run where required. The focused 22-file server slice
+at `9938e49` is not a substitute for the full server suite.
 
 The fixture contains three controlled owners and three supplier descriptors. The local seed now
 probes the two fixture-only `comparison-search` and `lesson-search` endpoints through unpaid
@@ -111,7 +131,7 @@ test or earlier run, not a pass for the full case.
 | 16 | `czar_social` cannot read base tables or write rating/ranking/money tables; concurrent migration succeeds | `apps/server/test/social-migration.test.ts` | Pending |
 | 17 | `planning → no-supplier` event is transactional and unique | Integrated `planner/service.test.ts` checks success and trigger-induced rollback leaves planning state with zero events | Pending final head |
 | 18 | Onboarding, public feed, owner tombstone and lesson dismiss in Playwright against local server | `apps/web/e2e/social-real.spec.ts` passed 1/1 at integration `f3c6884` with real social API and disposable DB; `/v1/me` was the only mocked ancillary read; DB cleanup verified 0 leftovers | Key-free browser slice passed; final PR-head rerun and controlled demo pending |
-| 19 | All package suites, typecheck, lint, schema checker, Arc slice/runs 2/4/5 and Forge | Integration `9938e49`: focused server plus payer 22 files 168/168, root typecheck/lint passed; earlier config 67/67, web 11/11, schema 34/0, web build and case-18 browser 1/1 | Full package suites, Arc/Forge and final PR-head gates pending |
+| 19 | All package suites, typecheck, lint, schema checker, Arc slice/runs 2/4/5 and Forge | Integration `9938e49`: focused server plus payer 22 files 168/168 and root typecheck/lint; `b12c5dc`: eight key-free package suites above; earlier config 67/67, schema 34/0, web build and case-18 browser 1/1 | Signer/daemon/indexer/vault-client/full server suites, Arc/Forge and final PR-head gates pending |
 | 20 | A lower-id event that commits late is delivered once | `apps/server/test/social/consumer.test.ts` | Pending |
 | 21 | Sharing-off receives a lesson without publishing; publishing run skips | `social/run.test.ts` checks private lesson creation with no public post and, at `22825d6`, a would-publish inbox item ending `skipped-sharing-off` with unchanged post count and a recorded run | Pending final head |
 
@@ -120,8 +140,9 @@ test or earlier run, not a pass for the full case.
 The matrix maps every case to code or a deferred gate. New `9938e49` tests close the prior
 key-free case 4, 6, 8 and 15 mapping gaps and the lead rejection branches in case 10. The
 origin-only duplicate-lead outcome in case 10 still needs the architect's binding ruling and
-test. Every case still needs final PR-head evidence, and case 19 still needs the full package
-suites, authorized Arc/Forge slice and controlled demo.
+test. Every case still needs final PR-head evidence. Case 19 still needs the signer, daemon,
+indexer, vault-client and full server suites after source review and any required authorization,
+plus the authorized Arc/Forge slice and controlled demo.
 
 Case 18's focused browser round trip used the standard key-free server fixture, real social
 routes and isolated PostgreSQL. It did not create keys, deploy contracts, seed the product
