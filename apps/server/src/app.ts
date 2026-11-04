@@ -55,6 +55,7 @@ import {
 import { getAppWalletConfigRoute, resolveAppWalletConfig } from "#src/app/wallet-config";
 import { acknowledgeResult, getResult } from "#src/results/service";
 import { getRatingPromptRoute, listAppResultsRoute, postRatingRoute } from "#src/ratings-routes";
+import { socialRoutes } from "#src/social/routes";
 
 export interface AppDependencies extends PairDependencies {
   logger: Logger;
@@ -344,6 +345,7 @@ export function createApp(dependencies: AppDependencies): Hono {
     (context, next) => appRateLimit(context, next, dependencies),
     (context) => soulPointerRoute(context),
   );
+  app.route("/v1/social", socialRoutes(dependencies));
   return app;
 }
 

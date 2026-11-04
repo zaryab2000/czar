@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { bearerToken, ulid } from "#src/http/ids";
+import { bearerToken, randomId, ulid } from "#src/http/ids";
 
 describe("server identifiers", () => {
+  it("public ids use all 130 random bits without embedding time", () => {
+    const zero = { bytes: (length: number) => Buffer.alloc(length) };
+    const high = { bytes: (length: number) => Buffer.alloc(length, 0xff) };
+    expect(randomId("rep_", zero)).toBe("rep_00000000000000000000000000");
+    expect(randomId("thr_", high)).toBe("thr_ZZZZZZZZZZZZZZZZZZZZZZZZZZ");
+  });
   it("ulid_hasPrefixLengthAlphabetAndTimestampBoundary", () => {
     const random = { bytes: (length: number) => Buffer.alloc(length) };
     const id = ulid("obj_", new Date(2 ** 48 - 1), random);
