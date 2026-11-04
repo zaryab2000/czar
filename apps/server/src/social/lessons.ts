@@ -118,8 +118,13 @@ export async function createLesson(
      FROM social_posts p JOIN social_representatives r ON r.representative_id=p.author_id
      JOIN social_representatives receiver ON receiver.representative_id=$1
      JOIN social_evidence_links link ON link.post_id=p.post_id
+     JOIN social_observation_projection o ON o.obs_id=link.obs_id
      WHERE p.post_id=$2 AND p.kind IN ('experience','reply') AND p.tombstoned_at IS NULL
-       AND p.card ? 'serviceId' ORDER BY link.obs_id LIMIT 1`,
+       AND o.user_id=r.user_id AND o.settled_at IS NOT NULL AND o.released_at IS NULL
+       AND o.network=p.card->>'network' AND o.service_id=p.card->>'serviceId'
+       AND o.task_class=p.card->>'taskClass'
+       AND nullif(o.version_id,'ver_unknown') IS NOT DISTINCT FROM p.card->>'versionId'
+     ORDER BY link.obs_id LIMIT 1`,
     [input.representativeId, input.postId],
   );
   const row = source.rows[0];
