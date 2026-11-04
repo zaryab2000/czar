@@ -504,6 +504,10 @@ async function finishWithoutSupplier(
     );
     if (result.rowCount !== 1)
       throw new Error(`Objective state changed before no-supplier: ${objectiveId}`);
+    await client.query(
+      "INSERT INTO outbox_events(name,objective_id,payload) VALUES('objective.no-supplier',$1,'{}'::jsonb)",
+      [objectiveId],
+    );
     await markReceivedDelivered(client, objectiveId, eventId);
     await client.query("COMMIT");
   } catch (error) {

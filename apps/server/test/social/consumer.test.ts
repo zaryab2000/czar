@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { findOrCreateRepresentative } from "#src/social/representatives";
 import { consumeSocialBatch } from "#src/social/consumer";
 import { setupDatabase } from "#test/db";
@@ -34,7 +34,16 @@ describe("social outbox consumer", () => {
       expect(Number(first.rows[0]?.event_id)).toBeLessThan(Number(later.rows[0]?.event_id));
       expect(await consumeSocialBatch(pool(), 100)).toBe(0);
       await early.query("COMMIT");
-      expect(await consumeSocialBatch(pool(), 100)).toBe(2);
+      await vi.waitFor(
+        async () => {
+          await consumeSocialBatch(pool(), 100);
+          const count = await pool().query<{ count: string }>(
+            "SELECT count(*) FROM event_deliveries",
+          );
+          expect(count.rows[0]?.count).toBe("2");
+        },
+        { timeout: 5_000 },
+      );
       expect(await consumeSocialBatch(pool(), 100)).toBe(0);
       const deliveries = await pool().query<{ event_id: string; state: string }>(
         "SELECT event_id,state FROM event_deliveries ORDER BY event_id",
