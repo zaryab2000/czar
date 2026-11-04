@@ -30,12 +30,24 @@ Caddy on the host as the only public listener, and every credential a file on a 
    change to it shows up as a diff in review.
 2. **Confirm the pinned versions** (below). None of them could be checked when this was written.
 3. **Zaryab approves, then applies.** `… --project <id> --domain <domain> --apply`.
-4. **Point DNS** `app.<domain>` and `merchants.<domain>` at the VM's address. Caddy cannot get
+4. **Check the boot.** `cloud-init` does **not** abort `runcmd` on a failed step, so a step that
+   failed is only visible in the log. On the VM, after the reboot at the end of `cloud-init`:
+
+   ```sh
+   cloud-init status --long          # must say status: done
+   sudo journalctl -u cloud-final --no-pager | grep -iE 'error|failed'
+   systemctl is-active czar-metadata-guard.service run-czar-secrets.mount caddy.service
+   sudo iptables -C OUTPUT -d 169.254.169.254 -m owner \
+     ! --uid-owner 0 ! --uid-owner 10002 -j REJECT && echo "guard in place"
+   sudo systemd-analyze verify czar-metadata-guard.service czar-secrets.service
+   ```
+
+5. **Point DNS** `app.<domain>` and `merchants.<domain>` at the VM's address. Caddy cannot get
    a certificate before this, and will keep retrying until it can.
-5. **Add the Secret Manager versions.** `create.sh` creates every secret **empty**; putting a
+6. **Add the Secret Manager versions.** `create.sh` creates every secret **empty**; putting a
    value in one is Zaryab's step and never this script's. Then, on the VM:
    `sudo systemctl start czar-secrets.service`.
-6. **Images and compose are PM-013 and PM-014.** Until they land, Caddy answers 502: it is
+7. **Images and compose are PM-013 and PM-014.** Until they land, Caddy answers 502: it is
    enabled with nothing behind it. That is the intended end state of PM-011/PM-012.
 
 ## Confirm before `--apply`
