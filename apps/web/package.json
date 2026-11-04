@@ -6,7 +6,8 @@
   "imports": {
     "#src/*": "./packages/*.ts",
     "#src/app-shell": "./packages/app-shell.tsx",
-    "#src/result-card": "./packages/result-card.tsx"
+    "#src/result-card": "./packages/result-card.tsx",
+    "#src/social-post": "./packages/social-post.tsx"
   },
   "exports": {
     "./money-format": "./packages/money-format/src/index.ts"
