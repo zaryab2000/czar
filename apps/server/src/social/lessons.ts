@@ -71,7 +71,7 @@ export async function lessonsFor(
      JOIN social_representatives r ON r.representative_id=p.author_id
      WHERE l.user_id=$1 AND l.network=$2 AND l.task_class=$3 AND l.state='active'
        AND l.expires_at>$4 AND p.tombstoned_at IS NULL
-     ORDER BY l.created_at DESC,l.lesson_id DESC LIMIT 4`,
+     ORDER BY l.created_at DESC,l.lesson_id DESC`,
     [userId, network, taskClass, now],
   );
   return result.rows.map((row) => ({

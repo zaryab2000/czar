@@ -1,6 +1,6 @@
 import { loadConfig } from "@czar/config";
 import { beforeEach, describe, expect, it } from "vitest";
-import { createLesson, lessonsFor } from "#src/social/lessons";
+import { chooseWithLessons, createLesson, lessonsFor } from "#src/social/lessons";
 import { setupDatabase } from "#test/db";
 
 const getPool = setupDatabase();
@@ -132,5 +132,51 @@ describe("SN-4 private lessons", () => {
       client.release();
     }
     expect(await lessonsFor(getPool(), RECIPIENT, NETWORK, TASK_CLASS, AT)).toEqual([]);
+  });
+
+  it("keeps an older relevant lesson visible after four newer unrelated lessons", async () => {
+    await seed();
+    for (let index = 0; index < 5; index += 1) {
+      const postId = `pst_${String(index + 3).repeat(26)}`;
+      const lessonId = `les_${String(index + 3).repeat(26)}`;
+      const service = index === 0 ? SERVICE : `svc_${String.fromCharCode(99 + index).repeat(32)}`;
+      await getPool().query(
+        `INSERT INTO social_posts(post_id,thread_id,author_id,kind,card,action_id)
+         VALUES($1,$2,$3,'experience','{}'::jsonb,$4)`,
+        [postId, `thr_${"1".repeat(26)}`, SOURCE_REP, `lesson:${index}`],
+      );
+      await getPool().query(
+        `INSERT INTO social_lessons(lesson_id,user_id,network,service_id,task_class,
+          proposition,strength,source_post_id,source_obs_id,expires_at,created_at)
+         VALUES($1,$2,$3,$4,$5,'avoid',1,$6,$7,$8,$9)`,
+        [
+          lessonId,
+          RECIPIENT,
+          NETWORK,
+          service,
+          TASK_CLASS,
+          postId,
+          `source_${index}`,
+          new Date(AT.getTime() + 86_400_000),
+          new Date(AT.getTime() + index * 1_000),
+        ],
+      );
+    }
+    const ranked = [SERVICE, `svc_${"b".repeat(32)}`].map((serviceId, index) => ({
+      rank: index + 1,
+      service_id: serviceId,
+      version_id: VERSION,
+      score: index === 0 ? 0.9 : 0.88,
+      features: {},
+      evidence_refs: [],
+      evidence_age_days: 0,
+      missing: [],
+      badges: [],
+      explanation: "rated",
+    }));
+    const lessons = await lessonsFor(getPool(), RECIPIENT, NETWORK, TASK_CLASS, AT);
+    expect(chooseWithLessons(ranked, lessons, 0.05).selected.service_id).toBe(
+      `svc_${"b".repeat(32)}`,
+    );
   });
 });
