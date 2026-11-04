@@ -6,6 +6,7 @@ import { apiContracts, validateRecordedExchange } from "@czar/api-contract";
 import type { Config } from "@czar/config";
 import { jcsString } from "@czar/hashing";
 import { validateSocialLeadCard } from "@czar/schemas";
+import { regexScreen } from "#src/boundary/index";
 import { appSessionVerifier, digest } from "#src/http/auth";
 import { findOrCreateIdempotency, fingerprintRequest } from "#src/http/idempotency";
 import { randomId, ulid, type RandomSource } from "#src/http/ids";
@@ -545,16 +546,25 @@ function validateLeadOrigin(origin: string, config: Config): void {
   }
 }
 
+function validateLeadText(body: Record<string, unknown>): void {
+  for (const [field, value] of Object.entries(body)) {
+    if (typeof value !== "string") continue;
+    if (
+      (field !== "origin" && /https?:\/\//i.test(value)) ||
+      /(?:obs_|usr_|dev_|obj_|pln_|prq_|pay_)[0-9A-Za-z_]+/.test(value) ||
+      /0x(?:[0-9a-fA-F]{64}|[0-9a-fA-F]{40})(?![0-9a-fA-F])/.test(value) ||
+      /\.(?:md|csv|xlsx?|docx?|json|txt)\b/i.test(value) ||
+      regexScreen(value).some((flag) => flag !== "none")
+    ) {
+      throw new SocialError(400, "validation");
+    }
+  }
+}
+
 async function suggestLead(context: ServerContext, deps: Dependencies): Promise<Response> {
   const { body, raw } = await jsonRequest(context, "suggestSocialLead");
   validateLeadOrigin(body.origin, deps.config);
-  if (
-    body.pathHint &&
-    (/(?:obs_|usr_|dev_|obj_|pln_|prq_|pay_)[0-9A-Za-z_]+/.test(body.pathHint) ||
-      /0x(?:[0-9a-fA-F]{64}|[0-9a-fA-F]{40})(?![0-9a-fA-F])/.test(body.pathHint) ||
-      /\.(?:md|csv|xlsx?|docx?|json|txt)\b/i.test(body.pathHint))
-  )
-    throw new SocialError(400, "validation");
+  validateLeadText(body);
   if (body.network !== deps.config.get("selection.paymentNetwork")) {
     throw new SocialError(400, "validation");
   }
@@ -638,7 +648,7 @@ async function suggestLead(context: ServerContext, deps: Dependencies): Promise<
       [leadId, postId, body.network, body.origin, pathHint, body.capabilityTag],
     );
     await client.query(
-      "INSERT INTO outbox_events(name,payload) VALUES('social.post.published',$1)",
+      "INSERT INTO outbox_events(name,payload,delivered_at) VALUES('social.post.published',$1,now())",
       [JSON.stringify({ postId, threadId })],
     );
     return { status: 202, body: { leadId, postId } };

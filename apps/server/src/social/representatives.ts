@@ -42,10 +42,12 @@ export async function updateRepresentative(
   const result = await db.query<RepresentativeRow>(
     `UPDATE social_representatives SET
        sharing=COALESCE($2,sharing), paused=COALESCE($3,paused),
-       sharing_version=sharing_version + CASE WHEN $2 IS DISTINCT FROM sharing THEN 1 ELSE 0 END,
-       consent_text_version=CASE WHEN $2 IS DISTINCT FROM sharing THEN $4
+       sharing_version=sharing_version + CASE WHEN $2 IS NOT NULL AND $2 IS DISTINCT FROM sharing
+         THEN 1 ELSE 0 END,
+       consent_text_version=CASE WHEN $2 IS NOT NULL AND $2 IS DISTINCT FROM sharing THEN $4
          ELSE consent_text_version END,
-       consented_at=CASE WHEN $2 IS DISTINCT FROM sharing THEN $5 ELSE consented_at END,
+       consented_at=CASE WHEN $2 IS NOT NULL AND $2 IS DISTINCT FROM sharing
+         THEN $5 ELSE consented_at END,
        updated_at=$5
      WHERE user_id=$1
      RETURNING representative_id,user_id,handle,sharing,sharing_version,paused,

@@ -81,6 +81,35 @@ describe("SN-1 social routes", () => {
         responseBody: await enabled.clone().json(),
       }).valid,
     ).toBe(true);
+    const beforePause = await getPool().query<{
+      sharing_version: number;
+      consent_text_version: string | null;
+      consented_at: Date | null;
+    }>(
+      "SELECT sharing_version,consent_text_version,consented_at FROM social_representatives WHERE user_id=$1",
+      [TEST_USER_ID],
+    );
+    const paused = await app.request("/v1/social/me", {
+      method: "PUT",
+      headers: { ...auth, "Content-Type": "application/json", "Idempotency-Key": randomUUID() },
+      body: JSON.stringify({ paused: true }),
+    });
+    expect(paused.status).toBe(200);
+    const afterPause = await getPool().query<{
+      sharing_version: number;
+      consent_text_version: string | null;
+      consented_at: Date | null;
+    }>(
+      "SELECT sharing_version,consent_text_version,consented_at FROM social_representatives WHERE user_id=$1",
+      [TEST_USER_ID],
+    );
+    expect(afterPause.rows[0]).toEqual(beforePause.rows[0]);
+    const resumed = await app.request("/v1/social/me", {
+      method: "PUT",
+      headers: { ...auth, "Content-Type": "application/json", "Idempotency-Key": randomUUID() },
+      body: JSON.stringify({ paused: false }),
+    });
+    expect(resumed.status).toBe(200);
     const staleOff = await update("off", "stale-client-version");
     expect(staleOff.status).toBe(422);
     const off = await update("off", "2026-11-05");
@@ -152,6 +181,13 @@ describe("SN-1 social routes", () => {
         }).valid,
       ).toBe(true);
       posted.push(body.postId);
+      const event = await getPool().query<{ delivered_at: Date | null }>(
+        `SELECT delivered_at FROM outbox_events
+         WHERE name='social.post.published' AND payload->>'postId'=$1`,
+        [body.postId],
+      );
+      expect(event.rows).toHaveLength(1);
+      expect(event.rows[0]?.delivered_at).not.toBeNull();
     }
     const feedFirst = await app.request("/v1/social/feed?limit=2", undefined, {
       remoteAddr: "192.0.2.3",
@@ -403,6 +439,14 @@ describe("SN-1 social routes", () => {
           capabilityTag: "web-search",
           pathHint,
         }),
+      });
+      expect(response.status).toBe(400);
+    }
+    for (const origin of [`https://0x${"a".repeat(40)}.example`, "https://private-report.json"]) {
+      const response = await app.request("/v1/social/leads", {
+        method: "POST",
+        headers: { ...auth, "Content-Type": "application/json", "Idempotency-Key": randomUUID() },
+        body: JSON.stringify({ network: "eip155:5042002", origin, capabilityTag: "web-search" }),
       });
       expect(response.status).toBe(400);
     }
