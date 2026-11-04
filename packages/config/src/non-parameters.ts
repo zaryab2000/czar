@@ -10,6 +10,10 @@ export const NON_PARAMETERS: readonly { readonly token: string; readonly reason:
     "selection.wLatency",
   ].map((token) => ({ token, reason: "superseded by SCR-160 §12" })),
   {
+    token: "deploy.sh",
+    reason: "a script file name, not a parameter",
+  },
+  {
     token: "memory.db.corrupt-<ts>",
     reason: "file name of a moved-aside corrupt database",
   },

@@ -1,0 +1,48 @@
+# Cloud parameters for the public alpha (SCR-170). Copy to env/cloud.toml on the VM and edit.
+#
+# This file holds NO SECRETS. Every credential is a file under deploy.credentialFilesDir, named
+# by a key below; the file's contents never appear here, in an environment variable or on a
+# command line (CLAUDE.md, D70, D78). A key whose name contains passphrase, secret, private,
+# mnemonic or seed is refused by the loader, so none can exist.
+#
+# Runtime ports, the database URL without its password, and CZAR_CLOUD_CONFIG are pointers set by
+# the deployment units, not parameters.
+
+# ── Deployment ────────────────────────────────────────────────────────────────
+# Cloud entry points refuse to start unless this is exactly "cloud-testnet".
+"deploy.environment" = "cloud-testnet"
+# Arc testnet only. Every RPC URL a cloud process uses must have a host in this list.
+"deploy.allowedRpcHosts" = ["rpc.testnet.arc.io"]
+# tmpfs folder holding one file per credential, each 0400 and owned by the process that reads it.
+"deploy.credentialFilesDir" = "/run/czar/secrets"
+"deploy.backupRetentionDays" = 14
+"deploy.deploymentFile" = "deployments/arc-testnet.json"
+"deploy.objectStorePath" = "/var/lib/czar/objects"
+"deploy.indexerUrl" = "http://127.0.0.1:42069"
+
+# ── Public origins (https only in the cloud) ──────────────────────────────────
+# Replace both with the real host names once the domain is bought (tracker PM-006).
+"app.origin" = "https://app.example.com"
+"merchants.publicOrigin" = "https://merchants.example.com"
+
+# ── Signer: Cloud KMS ─────────────────────────────────────────────────────────
+"signer.backend" = "gcp-kms"
+"signer.kms.projectId" = "czar-alpha-000000"
+"signer.kms.location" = "asia-south1"
+"signer.kms.keyRing" = "czar-alpha"
+"signer.kms.pocketKeyRing" = "czar-alpha-pockets"
+# Key reference → full cryptoKeyVersions/N resource name. Filled after key creation (PM-018).
+# "signer.kms.keyVersions" = { K3 = "projects/.../cryptoKeyVersions/1" }
+# Group that may open the signer socket. Leave unset for today's owner-only socket.
+# "signer.socketGroupGid" = 10010
+
+# ── Model provider: off until it is connected deliberately ────────────────────
+"models.provider" = "none"
+# "models.anthropic.model" = "claude-haiku-5-5"
+# File NAME under deploy.credentialFilesDir, never the key itself.
+# "models.anthropic.apiKeyFile" = "anthropic-api-key"
+
+# ── Local-only keys that must stay out of this file ───────────────────────────
+# fetch.localStandinOrigins, merchants.facilitatorBaseUrl, chain.gatewayApiBaseUrl,
+# app.circleClientUrl and app.arcRpcUrl are local-stack values. validateCloudConfig refuses to
+# start if fetch.localStandinOrigins is non-empty here.

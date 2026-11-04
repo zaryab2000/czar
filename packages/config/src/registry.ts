@@ -2,9 +2,11 @@
 // One entry per parameter named in docs/specs/04-components, with the spec's default, unit and reason.
 // `source` cites the defining line. Entries with `noDefault` have no default in the specs and must be
 // set by an environment file or variable before use (SCR-103). Values are data; edit only to follow a spec change.
+import { PRODUCTION_PARAMETERS } from "./registry-production.ts";
 import type { ParameterSpec } from "./types.ts";
 
 export const PARAMETERS = [
+  ...PRODUCTION_PARAMETERS,
   {
     key: "acceptance.checkRetries",
     type: "integer",
