@@ -326,6 +326,38 @@ describe("SN-1 social routes", () => {
           new Date(`2026-11-05T09:14:${String(index).padStart(2, "0")}Z`),
         ],
       );
+      const objectiveId = `obj_${digit.repeat(25)}Q`;
+      await pool.query(
+        `INSERT INTO objectives(objective_id,user_id,device_id,submission,objective_hash,state)
+         VALUES($1,$2,$3,$4,$5,'planning')`,
+        [
+          objectiveId,
+          TEST_USER_ID,
+          TEST_DEVICE_ID,
+          JSON.stringify({ capabilities: ["web-search"], taskSpec: { kind: "table-fill" } }),
+          `0x${"a".repeat(64)}`,
+        ],
+      );
+      await pool.query(
+        `INSERT INTO observations(obs_id,user_id,vault,network,rail,service_id,version_id,
+          task_class,objective_id,envelope_ref,step_index,call_index,payment_ref_hash,
+          payment_id,dedup_key,delivered,settled_at)
+         VALUES($1,$2,$3,'eip155:5042002','x402-exact',$4,'ver_unknown',$5,$6,$7,0,$8,$9,$10,$11,0,$12)`,
+        [
+          `obs_${(index + 101).toString(16).padStart(32, "0")}`,
+          TEST_USER_ID,
+          `0x${"1".repeat(40)}`,
+          `svc_${"a".repeat(32)}`,
+          `task-${index}`,
+          objectiveId,
+          `eip155:5042002:0x${"1".repeat(40)}:1`,
+          index,
+          `0x${String(index + 1).padStart(64, "0")}`,
+          `pay_${digit.repeat(26)}`,
+          `dedup_${digit.repeat(26)}`,
+          new Date("2026-11-05T00:00:00Z"),
+        ],
+      );
     }
     const first = await app.request("/v1/social/incidents?limit=2");
     const firstBody = (await first.json()) as {
