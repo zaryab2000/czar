@@ -20,16 +20,17 @@
 - **`ops/cloud/compose.yaml`:**
   - services `postgres`, `indexer`, `signer`, `server`, `merchants`, `web`
   - `network_mode: host`
-  - `depends_on` with `condition: service_healthy`, in the local file's order: postgres → indexer → signer → server → merchants; web after server
+  - `depends_on` with `condition: service_healthy`, in the local file's order: postgres → indexer → server → signer → merchants; web after server (in `ops/local/process-compose.yaml` the signer depends on the server)
   - each mounts `/run/czar/secrets/<service>` read-only at `/run/czar/secrets/<service>`
   - `env/cloud.toml` mounted read-only
   - pointer variables only (`CZAR_CLOUD_CONFIG`, a database URL without password)
-  - restart `unless-stopped`; log driver `gcplogs` (Ops Agent)
-- **The signer socket** (`signer.socketPath`) lives in a named volume shared only with server and merchants.
+  - restart `unless-stopped`; the default `json-file` log driver. The Ops Agent (PM-051) collects and parses those JSON lines. Do not use `gcplogs`.
+- **The signer socket** (`signer.socketPath`) lives in the host folder `/run/czar/signer` (owner 10002:10010, mode 0750, created by PM-011's cloud-init), bind-mounted into signer, server and merchants. Not a named volume: its mount point would be owned by root, and the signer refuses a folder it does not own.
+- **The signer** runs with `signer.socketGroupGid = 10010` set in `env/cloud.toml`.
 - **Postgres:**
   - the image digest pinned in `ops/local/compose.yaml`
   - `listen_addresses=127.0.0.1`, scram, data on `/var/lib/czar/postgres`
-  - an init script that creates the per-service roles from their password files
+  - an init script that creates the roles `czar_api`, `czar_signer`, `czar_indexer`, `czar_merchants` and `czar_backup` (read-only) from their password files, grants each what PM-024's grants list says, and keeps every table in schema `public` (SCR-170 §5)
 - **`ops/cloud/compose.smoke.yaml`:**
   - an override that runs on a developer machine: postgres + a pinned `arc-anvil` container or host binary + server + signer with a test KMS fake
   - It proves the start order and health checks without any cloud account.
@@ -50,12 +51,15 @@
   - every service is host-networked
   - no `environment:` value matches a secret pattern
   - each secrets mount is read-only and per service
-  - the start order matches `ops/local/process-compose.yaml`
+  - the start order is postgres → indexer → server → signer → merchants, matching `ops/local/process-compose.yaml`
+  - no service uses the `gcplogs` driver
 
 ## Acceptance tests
 
 - Compose tests green.
-- `docker compose -f ops/cloud/compose.yaml -f ops/cloud/compose.smoke.yaml up --wait` brings postgres, signer and server healthy locally, and `curl http://127.0.0.1:3000/health` answers. Paste the output.
+- `docker compose -f ops/cloud/compose.yaml -f ops/cloud/compose.smoke.yaml up --wait` brings postgres, server and signer healthy, and `/health` answers.
+  - Run it on a Linux host, or on OrbStack, where host networking reaches the host's loopback. Docker Desktop on macOS does not.
+  - Run the `curl` from a container on the host network (`docker run --rm --network host curlimages/curl:<pinned> http://127.0.0.1:3000/health`). Paste the output.
 
 ## Done when
 
@@ -103,7 +107,10 @@
   - New keys go only in `packages/config/src/registry-production.ts`, in your lane's section (A, B, C, D or E).
   - Every key needs a type, a default (or `noDefault: true`), a unit, a reason and a `source` that cites SCR-170 or the spec section that names the key.
   - Never edit `registry.ts`. PM-061 owns its single two-line change.
+  - Every `source` has the form `docs/specs/<path>.md:<line>` (enforced by `loader.test.ts`).
+  - No key name may contain `passphrase`, `secret`, `private`, `mnemonic` or `seed` (enforced by `packages/config/src/names.ts` and `loader.test.ts`).
   - Regenerate `packages/config/test/__snapshots__/loader.test.ts.snap` with `pnpm --filter @czar/config exec vitest run -u`. Never edit it by hand.
+  - A merge conflict in the snapshot, or in a lane section of `registry-production.ts`, is resolved by keeping both sides' entries and regenerating the snapshot.
 - **Migrations:** none of the start-list tasks needs one. If yours does, stop and say so. The production range is `0030`–`0049`.
 - **Specs:**
   - Do not edit `docs/specs/**`. The one exception is new files under `docs/specs/05-build-plan/gate-0-results/` (PM-060 only).

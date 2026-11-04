@@ -70,16 +70,16 @@
 | App | New entry | What it does | Must not |
 |---|---|---|---|
 | server | `apps/server/src/cloud-main.ts` | Loads `env/cloud.toml` (path from pointer `CZAR_CLOUD_CONFIG`), runs `validateCloudConfig`, builds the same `createServerMain(...)` that `local-main.ts` builds with real service URLs from config, injects a `ModelClient` only when `models.provider ≠ none`, and listens on `127.0.0.1:<port>` | edit `local-main.ts`, `main.ts`, `app.ts` or any route file |
-| signer | `apps/signer/src/cloud-main.ts` | The same service, socket and audit as `local-main.ts`, with `signer.backend = gcp-kms` | read a keystore or keychain |
-| merchants | `apps/merchants/src/cloud-main.ts` | The same runtime as `local-main.ts`, with real facilitator and indexer URLs | change payment or seller code |
-| indexer | no new entry file | `ponder start` with `env/cloud.toml` and a testnet deployment file. `ponder.config.ts` gains one additive branch: when `deploy.environment = cloud-testnet` it sets `database: {kind: "postgres", connectionString}`, built from config plus the `db-password` file read at config load, so no password is ever in `DATABASE_URL` | edit handlers or `ponder.schema.ts`; change local behaviour |
+| signer | `apps/signer/src/cloud-main.ts` | Composes `createSigner`, `startSignerSocket` and `startGasRefillJob` itself (`startSignerProcess` refuses any backend but `local-keystore`), with `signer.backend = gcp-kms`, `fileSignerIdentity` (§4), and a `merchantServices` list naming every merchant service the cloud runs | read a keystore or keychain; edit `main.ts` or `local-main.ts` |
+| merchants | `apps/merchants/src/cloud-main.ts` | The same runtime as `local-main.ts`, with real facilitator and indexer URLs. The new services (spot, extract, the lab) are registered only by this entry and by tests, through a composition function the supply tasks add, so the local merchant process is unchanged even though `merchants.lab.enabled` defaults to `true`. The job test provider is a separate worker process, not a merchant route | change payment or seller code; change what `local-main.ts` starts |
+| indexer | no new entry file | `ponder start --schema public` (the same schema `ponder dev` uses locally, so every reader's unqualified table names keep working) with `env/cloud.toml` and the testnet deployment file. Two additive branches, each taken only when the pointer `CZAR_CLOUD_CONFIG` is set: (a) `ponder.config.ts` loads the cloud config and sets `database: {kind: "postgres", connectionString}` built from config plus the `db-password` file, so no password is ever in `DATABASE_URL`; (b) `src/register-external-events.ts` loads the cloud config and runs `validateCloudConfig(…, {role: "indexer"})` in place of `validateLocalOnlyConfig` | change any handler logic or `ponder.schema.ts`; change behaviour when `CZAR_CLOUD_CONFIG` is unset |
 
-- **`validateCloudConfig`** lives in a new file, `packages/config/src/cloud-only.ts`, exported from `index.ts` with one added line. It refuses to start unless all of these hold:
+- **`validateCloudConfig(config, {role, chainId, rpcUrls})`** lives in a new file, `packages/config/src/cloud-only.ts`, exported from `index.ts` with one added line. The registry has no chain-id key, and some RPC URLs arrive as pointers, so the entry passes `chainId` (from the deployment file, confirmed by `eth_chainId`) and every RPC URL it will use. It refuses to start unless all of these hold:
   - `deploy.environment = "cloud-testnet"`
-  - the chain id is `5042002`
-  - every RPC URL host is in `deploy.allowedRpcHosts`
+  - `chainId` is `5042002`
+  - every URL in `rpcUrls` has a host in `deploy.allowedRpcHosts`
   - `app.origin` and `merchants.publicOrigin` are `https`
-  - `fetch.localStandinOrigins` is empty
+  - `fetch.localStandinOrigins` is absent or empty (it has no default, so the check uses `config.has()` before `get()`)
   - `signer.backend = gcp-kms` (signer only)
   - `merchants.lab.enabled` is false on any mainnet chain id (already a CZ-20 rule)
 - **Pointers versus secrets:** pointers such as `CZAR_CLOUD_CONFIG` and a database URL without a password may come from the environment, as in the local launchers. Secrets never do (§4).
@@ -88,7 +88,7 @@
 
 - **Secrets are files, never environment variables, command-line arguments, image layers, compose files or config values.**
 - **Location and permissions:**
-  - Each service reads its secrets from `deploy.secretsDir` (`/run/czar/secrets`), a host `tmpfs`.
+  - Each service reads its secrets from `deploy.credentialFilesDir` (`/run/czar/secrets`), a host `tmpfs`. The key name avoids the word "secret", which the config loader refuses in any key name (`packages/config/src/names.ts`).
   - Each service sees only its own subfolder, mounted read-only.
   - Files are mode `0400` and owned by the container's user.
 - **How they get there:**
@@ -97,25 +97,41 @@
 - **Config holds file names only,** for example `models.anthropic.apiKeyFile = "anthropic-api-key"`, resolved under the service's secrets folder.
 - **Database:** each service connects as its own role with a password.
   - The connection URL carries no password.
-  - The cloud entry point builds its `pg.Pool` with `password: () => readFile(<secretsDir>/<service>/db-password)`. This is node-postgres's supported password function; its `pgpass` fallback is deprecated in pg 8 and removed in pg 9.
+  - The cloud entry point builds its `pg.Pool` with `password: async () => (await readFile(<credentialFilesDir>/<service>/db-password, "utf8")).trim()`, node-postgres's supported password function. Its `pgpass` fallback is deprecated in pg 8.
 - **Google APIs** (Cloud KMS, Secret Manager, Cloud Storage) authenticate with short-lived access tokens from the VM metadata server (`http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token`). There are no service-account key files anywhere.
-- **Signing keys live in Cloud KMS** (secp256k1, `EC_SIGN_SECP256K1_SHA256`, software protection level). The VM service account has only `cloudkms.signerVerifier` and `cloudkms.viewer` on the Czar key ring.
-  - The pocket keys (K4) are created at runtime. `cloudkms.admin`-level rights for creating them are given only to the signer's service account, and only on the key ring `czar-alpha-pockets`.
+- **Signing keys live in Cloud KMS** (secp256k1, `EC_SIGN_SECP256K1_SHA256`, software protection level).
+  - The VM has one service account, `czar-alpha-vm`, created with access scope `cloud-platform` (without it, KMS and Secret Manager calls fail for insufficient scopes).
+  - Its roles: `cloudkms.signerVerifier` and `cloudkms.viewer` on key ring `czar-alpha`; `cloudkms.admin` on key ring `czar-alpha-pockets` only (runtime K4 creation); Secret Manager accessor on the `czar-alpha-*` secrets; object admin on the backup bucket.
+- **Only the signer and root may reach the metadata server.** With host networking every container shares the host's network, so without this rule any compromised container could get a token and call `asymmetricSign` on K3, K7, K8 or K10 directly, skipping the signer's policy, or read every secret.
+  - The signer image runs as UID `10002`. Every other Czar image runs as UID `10001`. Postgres runs as its image's own user.
+  - `cloud-init` installs, and `czar-metadata-guard.service` re-applies at every boot before Docker starts: `iptables -A OUTPUT -d 169.254.169.254 -m owner ! --uid-owner 0 ! --uid-owner 10002 -j REJECT` (and the same for `ip6tables` with `fd00:ec2::254`, if IPv6 is enabled).
+  - Root uses the metadata server for `czar-secrets.service`, the backup timer and the Ops Agent.
+- **Signer socket across users:** clients (UID `10001`) connect to the signer (UID `10002`).
+  - New signer key `signer.socketGroupGid`, default `null`. With `null`, the socket stays as today: owner-only, mode 0600 in a 0700 folder, so local behaviour is unchanged.
+  - When set (cloud: GID `10010`, group `czar-signer-clients`, which UID `10001` joins), the folder becomes 0750 and the socket 0660 with that group. The owner checks still require the signer's own UID.
+  - Clients still authenticate with per-service tokens (next bullet), so file access alone grants nothing.
+- **Signer socket tokens are files in the cloud,** not keychain items.
+  - Each client reads its token from `<credentialFilesDir>/<service>/signer-token`.
+  - The signer reads the expected tokens from `<credentialFilesDir>/signer/client-tokens/<service>`.
+  - A new `fileSignerIdentity` implements the existing `SignerSocketIdentity` (`apps/signer/src/socket.ts`). Cloud entries pass it as `identity` to `createSignerClient` and to the signer socket. The keychain identity stays the local default.
 
 ### 5. Database
 
 - **Engine and network:** Postgres 16.15 (the image digest pinned in `ops/local/compose.yaml`), listening on `127.0.0.1:5432` only, with `password_encryption = scram-sha-256`.
-- **Roles:** one per service (`czar_api`, `czar_signer`, `czar_indexer`, `czar_merchants`, and `czar_social` when the social network lands). Each has its own `db-password` secret file.
+- **Roles:** one per service (`czar_api`, `czar_signer`, `czar_indexer`, `czar_merchants`, `czar_backup` read-only, and `czar_social` when the social network lands). Each has its own `db-password` secret file.
+- **Schema:** everything, including the indexer's tables, lives in schema `public`, as in the local stack. The signer projection and the server read indexer tables unqualified (`apps/signer/src/postgres-projection.ts`).
 - **Data** lives on the persistent disk.
 - **Backups:**
-  - a nightly `pg_dump --format=custom` to a Cloud Storage bucket
+  - a nightly `pg_dump --format=custom --snapshot=<exported snapshot>` to a Cloud Storage bucket; the drill compares restored row counts with counts taken in that same exported snapshot, so live writes cannot cause false mismatches
   - objects deleted after `deploy.backupRetentionDays` (14)
   - a restore drill recorded before sign-ups open (tracker PM-052)
 
 ### 6. Model provider
 
 - **`models.provider`:** `none` (default) or `anthropic`. The adapter is `apps/server/src/models/anthropic.ts` (tracker PM-021).
-  - It implements the existing `ModelClient` interface with `fetch` against the Messages API.
+  - It implements the existing `ModelClient` interface (`apps/server/src/models/proxy.ts`: request `{prompt, promptHash, input, schema}`, completion `{output, usage}`) with `fetch` against the Messages API.
+  - The system text is the prompt file `models/<prompt>.md`, the same file `computePromptHash` reads. The user message is `input`, JSON-encoded and labelled as `docs/specs/04-components/shared/ai-prompts.md` requires. The output must be an object matching `schema`.
+  - Every failure throws, including a prompt over the size limit; the existing proxy maps any throw to `503 upstream-unavailable`.
   - There is no SDK dependency.
 - **The adapter is wired only in `cloud-main.ts`, and only when `models.provider = anthropic`.**
   - Wiring it switches on the existing boundary screen (P-01/P-02) and the model proxy route. That is a behaviour change on the payment path.
@@ -133,7 +149,7 @@
   - migrations `0023` to `0029`
 - **Production uses:**
   - spec-change numbers **SCR-170 to SCR-189**
-  - migrations **`0030` to `0049`**
+  - migrations **`0030` to `0049`**. `0030` is taken by PM-016: `app_passkeys.rp_id` has `CHECK (rp_id = 'localhost')` (`0007-app-passkeys.sql:21`), which `0030` replaces with a check that the value is a lower-case host name.
   - Production migrations never reference social tables.
 - **Config keys:**
   - Every new key added in this window goes in a new file, `packages/config/src/registry-production.ts`, as `export const PRODUCTION_PARAMETERS = [...] as const satisfies readonly ParameterSpec[]`.
@@ -141,7 +157,9 @@
   - Inside the file, entries are grouped by lane in the order A, B, C, D, E, with a comment line per lane.
   - Keys follow the spec's namespace when the spec names one (`merchants.lab.<service>.*`, `merchants.provider.*`, `signer.*`, `models.*`). Otherwise they use `deploy.*`.
   - Each `source` cites this SCR, or the SCR that defines the key.
-  - The dump snapshot `packages/config/test/__snapshots__/loader.test.ts.snap` is regenerated with `vitest -u` in the same PR, never edited by hand.
+  - The dump snapshot `packages/config/test/__snapshots__/loader.test.ts.snap` is regenerated with `vitest -u` in the same PR, never edited by hand. A merge conflict in it, or in a lane section of `registry-production.ts`, is resolved by keeping both sides' entries and regenerating the snapshot.
+  - Every `source` must have the form `docs/specs/<path>.md:<line>` (enforced by `loader.test.ts`). Cite this file's line for each key.
+  - Adding the top-level section `deploy` makes the spec-coverage test treat `` `deploy.sh` `` in `docs/specs/04-components/app/app-and-notifications.md` as a parameter name. PM-061 adds `deploy.sh` to `NON_PARAMETERS` (`packages/config/src/non-parameters.ts`), with reason "a script file name, not a parameter".
 - **Specs:**
   - In this window, production rulings live only in their SCR files.
   - The edits those rulings order to `docs/specs/02-…`, `04-…` and `05-…` are applied in one docs PR after the social PR merges.
@@ -163,9 +181,13 @@
 |---|---|---|---|
 | `deploy.environment` | string | `"local"` | `local` or `cloud-testnet`; cloud entry points refuse to start unless `cloud-testnet` |
 | `deploy.allowedRpcHosts` | string[] | `["rpc.testnet.arc.io"]` | the only RPC hosts a cloud process may use (CLAUDE.md: Arc testnet only) |
-| `deploy.secretsDir` | string | `"/run/czar/secrets"` | secrets are files under a tmpfs folder (§4) |
+| `deploy.credentialFilesDir` | string | `"/run/czar/secrets"` | secrets are files under a tmpfs folder (§4) |
 | `deploy.backupRetentionDays` | integer | 14 | nightly dump retention (§5) |
 | `deploy.metadataTokenUrl` | string | `"http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token"` | access tokens for Google APIs without key files (§4) |
+| `deploy.deploymentFile` | string | `"deployments/arc-testnet.json"` | the recorded testnet deployment (tracker PM-010) |
+| `deploy.objectStorePath` | string | `"/var/lib/czar/objects"` | server object store on the persistent disk |
+| `deploy.indexerUrl` | string | `"http://127.0.0.1:42069"` | the indexer's loopback HTTP origin, read by the server and merchants cloud entries |
+| `signer.socketGroupGid` | integer | `null` (no default) | group allowed to open the signer socket across users (§4); unset keeps today's owner-only socket |
 | `signer.kms.apiBaseUrl` | string | `"https://cloudkms.googleapis.com"` | Cloud KMS REST endpoint |
 | `signer.kms.projectId` | string | no default | set in `env/cloud.toml` |
 | `signer.kms.location` | string | `"asia-south1"` | key ring location (§1) |

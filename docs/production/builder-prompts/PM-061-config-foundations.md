@@ -26,10 +26,12 @@
   - add `import { PRODUCTION_PARAMETERS } from "./registry-production.ts";` after the existing type import
   - add `...PRODUCTION_PARAMETERS,` as the first element of `PARAMETERS`
   - Confirm that `ParameterKey` (`loader.ts:8`) still includes the new keys as literal types.
-- **Create `packages/config/src/cloud-only.ts`** with `validateCloudConfig(config: Config): void`.
+- **Create `packages/config/src/cloud-only.ts`** with `validateCloudConfig(config: Config, options: {role: "server" | "signer" | "merchants" | "indexer"; chainId: number; rpcUrls: readonly string[]}): void`.
   - It throws `ConfigError` (`errors.ts`) with a plain message when any rule in SCR-170 §3 fails.
-  - The signer-only rule takes an option `{ role: "server" | "signer" | "merchants" | "indexer" }`.
+  - The registry has no chain-id key, and some RPC URLs arrive as pointers, so the caller passes both.
+  - `fetch.localStandinOrigins` has no default: check `config.has()` before `get()`.
   - Export it from `index.ts` with one line.
+- **Add `deploy.sh` to `NON_PARAMETERS`** in `packages/config/src/non-parameters.ts`, reason "a script file name, not a parameter". The new top-level section `deploy` otherwise makes `spec-coverage.test.ts` treat `` `deploy.sh` `` in `docs/specs/04-components/app/app-and-notifications.md` as an unknown parameter.
 - **Create `env/cloud.example.toml`:**
   - every key the cloud entry points need, with placeholder values
   - a header comment saying it holds no secrets, only file names and public values
@@ -41,14 +43,17 @@
 
 ## Config keys
 
-- Exactly the SCR-170 §8 table, with those defaults and reasons.
+- Exactly the SCR-170 §8 table, with those defaults and reasons, including `deploy.deploymentFile`, `deploy.objectStorePath`, `deploy.indexerUrl` and `signer.socketGroupGid`.
+- No key name may contain `passphrase`, `secret`, `private`, `mnemonic` or `seed` (`packages/config/src/names.ts`; `loader.test.ts` enforces it).
+- Every `source` must have the form `docs/specs/<path>.md:<line>` (`loader.test.ts` enforces it). Cite the SCR-170 line that names the key.
 
 ## Tests to write first
 
 - `packages/config/test/cloud-only.test.ts`: one failing case per refusal rule, plus one passing cloud config:
   - `deploy.environment ≠ cloud-testnet`
-  - wrong chain id
-  - an RPC host not in `deploy.allowedRpcHosts`
+  - `chainId ≠ 5042002`
+  - a URL in `rpcUrls` whose host is not in `deploy.allowedRpcHosts`
+  - `fetch.localStandinOrigins` unset (accepted) versus non-empty (refused)
   - an `http:` `app.origin`
   - an `http:` `merchants.publicOrigin`
   - a non-empty `fetch.localStandinOrigins`
@@ -63,7 +68,8 @@
 
 ## Done when
 
-- Every SCR-170 key loads with its default, `validateCloudConfig` refuses each bad case, and no other file in the repository changed.
+- Every SCR-170 key loads with its default and `validateCloudConfig` refuses each bad case.
+- The only files changed are the four new files, `registry.ts` (two lines), `index.ts` (one line), `non-parameters.ts` (one entry) and the regenerated snapshot.
 
 ## Common rules for every production task (read before you start)
 
@@ -107,7 +113,10 @@
   - New keys go only in `packages/config/src/registry-production.ts`, in your lane's section (A, B, C, D or E).
   - Every key needs a type, a default (or `noDefault: true`), a unit, a reason and a `source` that cites SCR-170 or the spec section that names the key.
   - Never edit `registry.ts`. PM-061 owns its single two-line change.
+  - Every `source` has the form `docs/specs/<path>.md:<line>` (enforced by `loader.test.ts`).
+  - No key name may contain `passphrase`, `secret`, `private`, `mnemonic` or `seed` (enforced by `packages/config/src/names.ts` and `loader.test.ts`).
   - Regenerate `packages/config/test/__snapshots__/loader.test.ts.snap` with `pnpm --filter @czar/config exec vitest run -u`. Never edit it by hand.
+  - A merge conflict in the snapshot, or in a lane section of `registry-production.ts`, is resolved by keeping both sides' entries and regenerating the snapshot.
 - **Migrations:** none of the start-list tasks needs one. If yours does, stop and say so. The production range is `0030`–`0049`.
 - **Specs:**
   - Do not edit `docs/specs/**`. The one exception is new files under `docs/specs/05-build-plan/gate-0-results/` (PM-060 only).

@@ -34,7 +34,12 @@
   - untrusted input handled per §5.7
   - price `merchants.extractPriceAtomic`
 - **Registration:** register both in the merchants runtime the same way `czar-search` is, with their index entries (§5.8) validated against 02 §12.2.
-- **`payTo`** comes from the signer, `keyAddress("K10:czar-spot")` / `"K10:czar-extract"`, as for search. In tests use the existing signer test double.
+- **`payTo`** comes from the signer, `keyAddress("cz-20", "K10:czar-spot")` / `keyAddress("cz-20", "K10:czar-extract")`, as `runtime.ts:32` does for search. In tests use the existing signer test double.
+- **Composition, without changing local behaviour.** Today `createMerchantServer` (`runtime.ts`) serves one route with one facilitator and one `payTo`, looked up at startup (`runtime.ts:31-35`).
+  - Generalise `runtime.ts` to take a list of services, each with its own route, price, handler and `K10:<service>` address.
+  - Add a composition function, `createAlphaMerchantServer(deps)` in a new file `apps/merchants/src/alpha-services.ts`, that lists `czar-search`, `czar-spot` and `czar-extract`.
+  - Called by: PM-059's merchants cloud entry and tests. **Not** called by `local-main.ts`, which keeps calling `createMerchantServer` with `czar-search` only, exactly as today. The local signer knows only `czar-search` (`apps/signer/src/local-main.ts:58`), so the local process would otherwise fail at startup.
+  - You own `runtime.ts` in this window. PM-043 builds on your function; PM-046 and PM-059 do not edit `runtime.ts`.
 - **Not in the local stack yet:** the local stack would need new K10 entries in `ops/local` (reserved). Record this in the report as a follow-up for after the social merge.
 
 ## Out of scope
@@ -72,7 +77,7 @@
 
 ## Done when
 
-- Both services sell correctly behind x402 in the merchant test suite.
+- Both services sell correctly behind x402 in the merchant test suite, and `local-main.ts` starts exactly the same single service as before (a test asserts the local route list is unchanged).
 
 ## Common rules for every production task (read before you start)
 
@@ -116,7 +121,10 @@
   - New keys go only in `packages/config/src/registry-production.ts`, in your lane's section (A, B, C, D or E).
   - Every key needs a type, a default (or `noDefault: true`), a unit, a reason and a `source` that cites SCR-170 or the spec section that names the key.
   - Never edit `registry.ts`. PM-061 owns its single two-line change.
+  - Every `source` has the form `docs/specs/<path>.md:<line>` (enforced by `loader.test.ts`).
+  - No key name may contain `passphrase`, `secret`, `private`, `mnemonic` or `seed` (enforced by `packages/config/src/names.ts` and `loader.test.ts`).
   - Regenerate `packages/config/test/__snapshots__/loader.test.ts.snap` with `pnpm --filter @czar/config exec vitest run -u`. Never edit it by hand.
+  - A merge conflict in the snapshot, or in a lane section of `registry-production.ts`, is resolved by keeping both sides' entries and regenerating the snapshot.
 - **Migrations:** none of the start-list tasks needs one. If yours does, stop and say so. The production range is `0030`–`0049`.
 - **Specs:**
   - Do not edit `docs/specs/**`. The one exception is new files under `docs/specs/05-build-plan/gate-0-results/` (PM-060 only).

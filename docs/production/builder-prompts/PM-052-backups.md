@@ -18,14 +18,14 @@
 ## Scope
 
 - **`ops/cloud/backup/pg-backup.sh`:**
-  - `pg_dump --format=custom` of the czar database, run inside the postgres container as a backup role whose password comes from its secrets file
+  - `pg_dump --format=custom --snapshot=<id>` of the czar database, run inside the postgres container as `czar_backup` (read-only; password from its file). The script opens a `REPEATABLE READ` transaction, calls `pg_export_snapshot()`, records `count(*)` for every table in every non-system schema inside that snapshot, then dumps with that snapshot id
   - upload to `gs://<bucket>/czar/<UTC date>.dump` through the Storage JSON API with a metadata-server token
   - prints sizes only
 - **`ops/cloud/backup/czar-backup.service` + `czar-backup.timer`:** daily at 02:30 UTC, `Persistent=true`.
 - **`ops/cloud/backup/pg-restore-drill.sh`:**
   - downloads a named dump
   - restores into a new database `czar_drill_<date>`
-  - compares `count(*)` for every table in `public` against the live database, and prints a table
+  - compares `count(*)` for every table in every non-system schema against the counts recorded at dump time (stored beside the dump as `<date>.counts.json`), and prints a table
   - drops the drill database
 
 ## Out of scope
@@ -98,7 +98,10 @@
   - New keys go only in `packages/config/src/registry-production.ts`, in your lane's section (A, B, C, D or E).
   - Every key needs a type, a default (or `noDefault: true`), a unit, a reason and a `source` that cites SCR-170 or the spec section that names the key.
   - Never edit `registry.ts`. PM-061 owns its single two-line change.
+  - Every `source` has the form `docs/specs/<path>.md:<line>` (enforced by `loader.test.ts`).
+  - No key name may contain `passphrase`, `secret`, `private`, `mnemonic` or `seed` (enforced by `packages/config/src/names.ts` and `loader.test.ts`).
   - Regenerate `packages/config/test/__snapshots__/loader.test.ts.snap` with `pnpm --filter @czar/config exec vitest run -u`. Never edit it by hand.
+  - A merge conflict in the snapshot, or in a lane section of `registry-production.ts`, is resolved by keeping both sides' entries and regenerating the snapshot.
 - **Migrations:** none of the start-list tasks needs one. If yours does, stop and say so. The production range is `0030`–`0049`.
 - **Specs:**
   - Do not edit `docs/specs/**`. The one exception is new files under `docs/specs/05-build-plan/gate-0-results/` (PM-060 only).

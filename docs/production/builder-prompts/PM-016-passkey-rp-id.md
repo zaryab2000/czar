@@ -25,6 +25,11 @@
   - replace the constant with `rpIdFrom(dependencies.config)` at each use
   - the challenge, registration (stored with the credential) and assertion verification all use the derived value
 - A stored credential whose `rp_id` differs from the current derived RP ID is refused with the same problem response an unknown credential gets. Moving to a new domain means re-registering, per GC-9.
+- **Migration `apps/server/migrations/0030-passkey-rp-id-host.sql`** (the production range in SCR-170 §7):
+  - `app_passkeys.rp_id` today has `CHECK (rp_id = 'localhost')` (`0007-app-passkeys.sql:21`), so registering under a cloud host fails without it.
+  - Drop that constraint (read its real name from the database in the migration test) and add `CHECK (rp_id ~ '^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$')`.
+  - Existing `localhost` rows stay valid.
+- **`circleMscaAddress`** (used at `auth.ts:336`) works out the Circle smart-account address during registration. It sits next to the onboarding wallet flow. With default config its input is identical to today; state this in your report and do not change it.
 
 ## Out of scope
 
@@ -35,6 +40,7 @@
 ## Config keys
 
 - None new (`app.origin` exists).
+- Migration `0030` is the one shared-file touch.
 
 ## Tests to write first
 
@@ -45,11 +51,13 @@
   - one hashing `app.example.com` is accepted
 - With default config, every existing case passes unchanged.
 - A credential stored under `localhost` is refused after the origin changes.
+- `apps/server/test/migrate.test.ts`: `0030` applies on a database that has `localhost` rows; afterwards `app.example.com` inserts, and `Bad Host!` is refused.
 
 ## Acceptance tests
 
 - Server suite: 82 files, 606+ passed, 0 failed.
-- `pnpm --filter @czar/web run e2e:local-server`: 4/4.
+- Web unit suite green.
+- The web passkey end-to-end test (`apps/web/e2e/passkey.spec.ts`) needs an external chain on `127.0.0.1:8549` (an M8 item) and is not part of this task. `e2e:local-server` covers manual returns, not passkeys.
 
 ## Done when
 
@@ -97,7 +105,10 @@
   - New keys go only in `packages/config/src/registry-production.ts`, in your lane's section (A, B, C, D or E).
   - Every key needs a type, a default (or `noDefault: true`), a unit, a reason and a `source` that cites SCR-170 or the spec section that names the key.
   - Never edit `registry.ts`. PM-061 owns its single two-line change.
+  - Every `source` has the form `docs/specs/<path>.md:<line>` (enforced by `loader.test.ts`).
+  - No key name may contain `passphrase`, `secret`, `private`, `mnemonic` or `seed` (enforced by `packages/config/src/names.ts` and `loader.test.ts`).
   - Regenerate `packages/config/test/__snapshots__/loader.test.ts.snap` with `pnpm --filter @czar/config exec vitest run -u`. Never edit it by hand.
+  - A merge conflict in the snapshot, or in a lane section of `registry-production.ts`, is resolved by keeping both sides' entries and regenerating the snapshot.
 - **Migrations:** none of the start-list tasks needs one. If yours does, stop and say so. The production range is `0030`–`0049`.
 - **Specs:**
   - Do not edit `docs/specs/**`. The one exception is new files under `docs/specs/05-build-plan/gate-0-results/` (PM-060 only).

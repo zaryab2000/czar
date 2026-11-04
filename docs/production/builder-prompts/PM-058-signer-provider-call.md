@@ -26,7 +26,8 @@
   - `submit` only with a `contentHash` already accepted by `uploadJobDeliverable`. Read how the server records accepted uploads; add a read to the projection only through the existing `serverProjection` SQL pattern.
   - never for a job whose evaluator is not K7
   - testnet chain only
-- **Rate limit:** add `kms.maxSignaturesPerMin.K21` (default 60, reason "two test providers, one job at a time each") in PM-061's lane B section.
+- **Rate limit:** `rateLimitFor` builds `kms.maxSignaturesPerMin.${keyId}` (`service.ts:134-138`), so add two keys, `kms.maxSignaturesPerMin.K21a` and `kms.maxSignaturesPerMin.K21b` (default 60 each, reason "one test provider, one job at a time"), in lane B's section of `registry-production.ts`.
+- **Logging:** the allowlist accepts `keyId` only for `K[0-9]{1,2}` or `relayer` (`packages/logging/src/allowlist.ts:117`). Widen that pattern to `^(K[0-9]{1,2}[ab]?|relayer)$`, with a test. The matching spec line (cross-cutting §4) is folded into the post-social spec PR (PM-057); record this in your report.
 
 ## Out of scope
 
@@ -36,7 +37,7 @@
 
 ## Config keys
 
-- `kms.maxSignaturesPerMin.K21`, as above.
+- `kms.maxSignaturesPerMin.K21a`, `kms.maxSignaturesPerMin.K21b`, as above.
 
 ## Tests to write first
 
@@ -103,7 +104,10 @@
   - New keys go only in `packages/config/src/registry-production.ts`, in your lane's section (A, B, C, D or E).
   - Every key needs a type, a default (or `noDefault: true`), a unit, a reason and a `source` that cites SCR-170 or the spec section that names the key.
   - Never edit `registry.ts`. PM-061 owns its single two-line change.
+  - Every `source` has the form `docs/specs/<path>.md:<line>` (enforced by `loader.test.ts`).
+  - No key name may contain `passphrase`, `secret`, `private`, `mnemonic` or `seed` (enforced by `packages/config/src/names.ts` and `loader.test.ts`).
   - Regenerate `packages/config/test/__snapshots__/loader.test.ts.snap` with `pnpm --filter @czar/config exec vitest run -u`. Never edit it by hand.
+  - A merge conflict in the snapshot, or in a lane section of `registry-production.ts`, is resolved by keeping both sides' entries and regenerating the snapshot.
 - **Migrations:** none of the start-list tasks needs one. If yours does, stop and say so. The production range is `0030`–`0049`.
 - **Specs:**
   - Do not edit `docs/specs/**`. The one exception is new files under `docs/specs/05-build-plan/gate-0-results/` (PM-060 only).

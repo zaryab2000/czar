@@ -3,7 +3,7 @@
 - **Lane:** C (parallel with PM-016)
 - **Branch:** `prod/PM-021-anthropic-model-client`
 - **Estimate:** 1.5 builder-days
-- **Depends on:** PM-061 (`models.provider`, `models.anthropic.*`, `deploy.secretsDir`)
+- **Depends on:** PM-061 (`models.provider`, `models.anthropic.*`, `deploy.credentialFilesDir`)
 
 ## Goal
 
@@ -22,18 +22,18 @@
 - **`apps/server/src/models/anthropic.ts`:**
   - `createAnthropicModelClient({config, readSecretFile, fetchFn})` returns a `ModelClient`
 - **Key handling:**
-  - reads the key once from `<deploy.secretsDir>/server/<models.anthropic.apiKeyFile>` through the injected reader
+  - reads the key once from `<deploy.credentialFilesDir>/server/<models.anthropic.apiKeyFile>` through the injected reader
   - throws a plain error if missing
   - never logs the key or the prompt text
-- **Request mapping:**
-  - map the existing request to the Messages API body (system, messages, `max_tokens` = the caller's `maxTotalTokens` budget minus the estimated prompt size)
-  - `model` = `models.anthropic.model`
-- **Prompt-size guard:** before any request, estimate the prompt tokens conservatively (UTF-8 bytes ÷ 3, rounded up). If the estimate exceeds `models.anthropic.maxPromptTokens`, refuse locally with the existing "too large" outcome and make no request.
+- **Request mapping.** The real request is `ModelCallRequest = {prompt, promptHash, input, schema}` (`apps/server/src/models/proxy.ts:17-22`), with no system or messages field:
+  - **system:** the prompt file `models/<prompt>.md`, the same file `computePromptHash` reads. Confirm its hash equals `promptHash` before calling; a mismatch throws.
+  - **user message:** `input`, JSON-encoded and wrapped as `docs/specs/04-components/shared/ai-prompts.md` requires for untrusted data (read its labelling rule)
+  - **output:** ask for a JSON object matching `schema`, then validate the reply against `schema`. Invalid or non-JSON → throw.
+  - `model` = `models.anthropic.model`; `max_tokens` = the caller's `maxTotalTokens` minus the estimated prompt size
+- **Prompt-size guard:** before any request, estimate the prompt tokens conservatively (UTF-8 bytes ÷ 3, rounded up, over system + user). If the estimate exceeds `models.anthropic.maxPromptTokens`, **throw** and make no request.
+- **Errors:** the proxy has no "too large" outcome, and maps any error the client throws to `503 upstream-unavailable` (`proxy.ts:157-169`). So every failure (HTTP status, timeout, abort, bad JSON, schema mismatch, oversize) throws an `Error` whose message carries the status or reason only, never the prompt or reply text.
 - **Timeouts:** honour `timeoutMs` and `signal`.
-- **Error mapping:**
-  - 429 and 5xx → the existing `upstream-unavailable` path
-  - 4xx → a validation-style error with the status only
-- **Usage:** map `usage.input_tokens` / `usage.output_tokens` to `ModelCompletion` counts.
+- **Return:** `ModelCompletion` `{output, usage}`, with `usage` mapped from `usage.input_tokens` / `usage.output_tokens`.
 
 ## Out of scope
 
@@ -47,8 +47,10 @@
 ## Tests to write first
 
 - `apps/server/test/models/anthropic.test.ts`, against a fake HTTP server on loopback:
-  - success maps text and usage
-  - 400, 401, 429, 500 and timeout map as above
+  - success returns `{output, usage}` with `output` validated against the request's `schema`
+  - a reply that is not JSON, or does not match `schema`, throws
+  - a `promptHash` that does not match the prompt file throws before any request
+  - 400, 401, 429, 500 and timeout throw (status only in the message)
   - abort cancels
   - an oversize prompt is refused with zero requests made
   - a missing key file throws before any request
@@ -107,7 +109,10 @@
   - New keys go only in `packages/config/src/registry-production.ts`, in your lane's section (A, B, C, D or E).
   - Every key needs a type, a default (or `noDefault: true`), a unit, a reason and a `source` that cites SCR-170 or the spec section that names the key.
   - Never edit `registry.ts`. PM-061 owns its single two-line change.
+  - Every `source` has the form `docs/specs/<path>.md:<line>` (enforced by `loader.test.ts`).
+  - No key name may contain `passphrase`, `secret`, `private`, `mnemonic` or `seed` (enforced by `packages/config/src/names.ts` and `loader.test.ts`).
   - Regenerate `packages/config/test/__snapshots__/loader.test.ts.snap` with `pnpm --filter @czar/config exec vitest run -u`. Never edit it by hand.
+  - A merge conflict in the snapshot, or in a lane section of `registry-production.ts`, is resolved by keeping both sides' entries and regenerating the snapshot.
 - **Migrations:** none of the start-list tasks needs one. If yours does, stop and say so. The production range is `0030`–`0049`.
 - **Specs:**
   - Do not edit `docs/specs/**`. The one exception is new files under `docs/specs/05-build-plan/gate-0-results/` (PM-060 only).

@@ -3,7 +3,7 @@
 - **Lane:** C (after PM-016 and PM-021)
 - **Branch:** `prod/PM-059-cloud-entry-points`
 - **Estimate:** 3 builder-days
-- **Depends on:** PM-061, PM-016, PM-021
+- **Depends on:** PM-061, PM-016, PM-021, PM-017 (`fileSignerIdentity`), PM-042 (the merchants composition function)
 
 ## Goal
 
@@ -21,18 +21,26 @@
 ## Scope
 
 - **`apps/server/src/cloud-main.ts`:**
-  - load `CZAR_CLOUD_CONFIG`; `validateCloudConfig(config, {role: "server"})`
-  - `pg.Pool` with `password: () => readFile(<secretsDir>/server/db-password)`
+  - load `CZAR_CLOUD_CONFIG`; read `deploy.deploymentFile`; confirm `eth_chainId`; `validateCloudConfig(config, {role: "server", chainId, rpcUrls: [config.get("app.arcRpcUrl")]})`
+  - the signer client is `createSignerClient({..., identity: fileSignerIdentity(<credentialFilesDir>/server)})`; the option exists (`apps/signer/src/socket.ts:87`)
+  - `pg.Pool` with `password: () => readFile(<credentialFilesDir>/server/db-password)`
   - the same `createServerMain(...)` composition as `local-main.ts`, with these real values from config:
     - `app.arcRpcUrl`, the factory address from `deployments/arc-testnet.json` (path in config)
-    - the indexer URL `http://127.0.0.1:42069`
+    - the indexer URL `deploy.indexerUrl`
     - the Facilitator and Gateway base URLs
     - the object store path on the persistent disk
   - **`ModelClient`:** inject `createAnthropicModelClient` only when `models.provider = anthropic`; otherwise leave it out exactly as `local-main.ts` does
   - listen on `127.0.0.1:<port>`; graceful stop on SIGTERM as in `local-main.ts`
   - **If the composition needs a change in `main.ts` or any reserved file:** stop, write the needed change in the report, and keep the entry file compiling against today's `main.ts`.
-- **`apps/merchants/src/cloud-main.ts`:** the same pattern, with role `merchants`. K10 addresses from the signer socket exactly as today; `merchants.publicOrigin` https.
-- **`apps/indexer/ponder.config.ts`:** one additive branch for `deploy.environment = cloud-testnet` that sets `database: {kind: "postgres", connectionString}`, built from config plus the indexer's `db-password` file. Local behaviour is unchanged (the branch is not taken).
+- **`apps/merchants/src/cloud-main.ts`:**
+  - the same pattern, with role `merchants`
+  - composes the merchant server through PM-042's composition function, so the cloud runs `czar-search`, `czar-spot`, `czar-extract` and (after PM-043) the lab
+  - signer client with `fileSignerIdentity(<credentialFilesDir>/merchants)`; K10 addresses from the signer socket exactly as today; `merchants.publicOrigin` https
+- **Indexer:** two additive branches, each taken only when the pointer `CZAR_CLOUD_CONFIG` is set (SCR-170 §3):
+  - `apps/indexer/ponder.config.ts` loads the cloud config and sets `database: {kind: "postgres", connectionString}`, built from config plus the indexer's `db-password` file
+  - `apps/indexer/src/register-external-events.ts:64-75` today always loads `CZAR_LOCAL_CONFIG` and runs `validateLocalOnlyConfig`, which refuses an https `app.origin`. Add a branch that loads the cloud config and runs `validateCloudConfig(…, {role: "indexer", chainId, rpcUrls})` instead. The handler logic below that point is untouched.
+  - With `CZAR_CLOUD_CONFIG` unset, both files behave exactly as today.
+- **The indexer runs as `ponder start --schema public`** (PM-013's CMD), the same schema the local stack uses. The signer and server read its tables unqualified.
 - **Reuse:** you may import exported helpers from `local-main.ts`. If one you need isn't exported, copy it into a new helper module rather than editing `local-main.ts`.
 
 ## Out of scope
@@ -43,17 +51,18 @@
 
 ## Config keys
 
-- Server and merchants keys already exist. Add `deploy.deploymentFile` (default `"deployments/arc-testnet.json"`, reason "the recorded testnet deployment, PM-010") and `deploy.objectStorePath` (default `"/var/lib/czar/objects"`) in lane A's section of `registry-production.ts`.
+- None new. Use `deploy.deploymentFile`, `deploy.objectStorePath`, `deploy.indexerUrl` and `deploy.credentialFilesDir` from PM-061.
 
 ## Tests to write first
 
 - `apps/server/test/cloud-main.test.ts`:
   - refuses each `validateCloudConfig` failure
-  - with a cloud-shaped test config (https `app.origin` and `merchants.publicOrigin` strings, `deploy.allowedRpcHosts = ["127.0.0.1"]`, a local Postgres plus pinned `arc-anvil`), it starts and `/health` answers. No test-only code path in `validateCloudConfig`
+  - with a cloud-shaped config whose hosts point at loopback fakes (a test-only override of `deploy.allowedRpcHosts` and the origin scheme check, never available outside tests) and a local Postgres plus pinned `arc-anvil`, it starts and `/health` answers
   - with `models.provider = none` no model client is constructed
   - with `anthropic` it is constructed and the key file is read once
 - `apps/merchants/test/cloud-main.test.ts`: the same pattern.
 - `apps/indexer/test/ponder-config-cloud.test.ts`: the cloud branch builds a connection string from the file; the local branch is unchanged.
+- `apps/indexer/test/register-external-events-cloud.test.ts`: with `CZAR_CLOUD_CONFIG` set and an https `app.origin`, the cloud guard runs and passes; with it unset, `validateLocalOnlyConfig` runs exactly as today.
 
 ## Acceptance tests
 
@@ -116,7 +125,10 @@
   - New keys go only in `packages/config/src/registry-production.ts`, in your lane's section (A, B, C, D or E).
   - Every key needs a type, a default (or `noDefault: true`), a unit, a reason and a `source` that cites SCR-170 or the spec section that names the key.
   - Never edit `registry.ts`. PM-061 owns its single two-line change.
+  - Every `source` has the form `docs/specs/<path>.md:<line>` (enforced by `loader.test.ts`).
+  - No key name may contain `passphrase`, `secret`, `private`, `mnemonic` or `seed` (enforced by `packages/config/src/names.ts` and `loader.test.ts`).
   - Regenerate `packages/config/test/__snapshots__/loader.test.ts.snap` with `pnpm --filter @czar/config exec vitest run -u`. Never edit it by hand.
+  - A merge conflict in the snapshot, or in a lane section of `registry-production.ts`, is resolved by keeping both sides' entries and regenerating the snapshot.
 - **Migrations:** none of the start-list tasks needs one. If yours does, stop and say so. The production range is `0030`–`0049`.
 - **Specs:**
   - Do not edit `docs/specs/**`. The one exception is new files under `docs/specs/05-build-plan/gate-0-results/` (PM-060 only).

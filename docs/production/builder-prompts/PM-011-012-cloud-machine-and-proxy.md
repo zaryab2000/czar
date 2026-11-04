@@ -22,15 +22,20 @@
   - It builds the `gcloud` command list for:
     - an e2-medium VM in `asia-south1-a` (zone overridable by flag)
     - Debian 12, a 30 GB balanced persistent disk
-    - a dedicated service account `czar-alpha-vm` with only the roles in SCR-170 §4, plus Secret Manager accessor and Storage object admin on the backup bucket
+    - a dedicated service account `czar-alpha-vm` with only the roles in SCR-170 §4, attached with `--scopes=cloud-platform` (with narrower default scopes, KMS and Secret Manager calls fail)
     - firewall rules: 80 and 443 from anywhere; 22 from `35.235.240.0/20` only
     - the key rings `czar-alpha` and `czar-alpha-pockets`
     - the backup bucket with a 14-day lifecycle rule
   - **Default is `--dry-run`:** print the commands, run nothing. `--apply` runs them. Project id and domain are flags, never hard-coded.
 - **`ops/cloud/provision/cloud-init.yaml`:**
   - installs Docker (pinned apt repository and version), Caddy (pinned) and the Ops Agent
-  - creates the `czar` user and the `/run/czar/secrets` tmpfs
-  - installs the systemd units
+  - creates users `czar` (UID 10001) and `czar-signer` (UID 10002), the group `czar-signer-clients` (GID 10010, members: both), the `/run/czar/secrets` tmpfs, and `/run/czar/signer` (owner 10002:10010, mode 0750) for the signer socket
+  - installs the systemd units, including `czar-metadata-guard.service` (next bullet)
+- **`ops/cloud/systemd/czar-metadata-guard.service`** (SCR-170 §4):
+  - runs before `docker.service`
+  - applies `iptables -A OUTPUT -d 169.254.169.254 -m owner ! --uid-owner 0 ! --uid-owner 10002 -j REJECT`, plus the `ip6tables` equivalent if IPv6 is on
+  - is idempotent (checks with `-C` before adding)
+  - Without it, any compromised container could sign with any KMS key directly.
 - **`ops/cloud/systemd/czar-secrets.service` + `ops/cloud/systemd/fetch-secrets.sh`:**
   - At boot, it reads the secret list from `ops/cloud/systemd/secrets.list`, which holds names only.
   - For each secret it gets an access token from `deploy.metadataTokenUrl`, fetches the latest version from Secret Manager over REST, and writes `/run/czar/secrets/<service>/<file>` with mode `0400`, owned by the service's container UID.
@@ -61,6 +66,7 @@
   - `create.sh --dry-run --project p --domain d.example` prints exactly the expected command list (golden file)
   - it exits non-zero without `--project`
   - no line contains a secret-looking value
+- `ops/cloud/test/metadata-guard.test.ts`: the unit renders the exact rule; running it twice adds the rule once (fake `iptables` on `PATH` that records calls).
 - `ops/cloud/test/fetch-secrets.test.ts`: run `fetch-secrets.sh` against a fake metadata server and a fake Secret Manager on loopback ports (base URLs overridable for tests only); files are written 0400 with the right content; nothing is printed to stdout.
 
 ## Acceptance tests
@@ -115,7 +121,10 @@
   - New keys go only in `packages/config/src/registry-production.ts`, in your lane's section (A, B, C, D or E).
   - Every key needs a type, a default (or `noDefault: true`), a unit, a reason and a `source` that cites SCR-170 or the spec section that names the key.
   - Never edit `registry.ts`. PM-061 owns its single two-line change.
+  - Every `source` has the form `docs/specs/<path>.md:<line>` (enforced by `loader.test.ts`).
+  - No key name may contain `passphrase`, `secret`, `private`, `mnemonic` or `seed` (enforced by `packages/config/src/names.ts` and `loader.test.ts`).
   - Regenerate `packages/config/test/__snapshots__/loader.test.ts.snap` with `pnpm --filter @czar/config exec vitest run -u`. Never edit it by hand.
+  - A merge conflict in the snapshot, or in a lane section of `registry-production.ts`, is resolved by keeping both sides' entries and regenerating the snapshot.
 - **Migrations:** none of the start-list tasks needs one. If yours does, stop and say so. The production range is `0030`–`0049`.
 - **Specs:**
   - Do not edit `docs/specs/**`. The one exception is new files under `docs/specs/05-build-plan/gate-0-results/` (PM-060 only).

@@ -43,19 +43,25 @@
     - a recovery that matches neither `v` → throw, nothing returned
   - **`signTransaction`:** serialise the EIP-1559 transaction unsigned, keccak256 it, sign through `signDigest` (`yParity = v − 27`), and return the signed serialisation (viem `serializeTransaction` with the signature).
   - **`createKey(keyId, merchantService?)`:**
-    - K4 pocket keys go in `signer.kms.pocketKeyRing` as `cryptoKeys.create` with id `k4-<pocket-salt>`
+    - K4 pocket keys go in `signer.kms.pocketKeyRing` as `cryptoKeys.create` with a random id `k4-<16 random hex>`
     - other keys go in `signer.kms.keyRing`
-    - returns `{keyRef, address}`
+    - poll the new version until its state is `ENABLED` (bounded by `kms.signTimeoutMs` per poll, at most 10 polls), then read its public key
+    - returns `{keyRef, address}`, where K4 refs are `K4:<address>` as in `local-backend.ts:246-268`
+  - **Restart recovery of pocket keys:** at start, list every enabled key version in `signer.kms.pocketKeyRing`, derive each address and register `K4:<address>`. Otherwise pocket keys created before a restart are forgotten and their funds cannot be swept.
+  - **Integrity:** send `digestCrc32c` with each `asymmetricSign`; require `verifiedDigestCrc32c = true` and check `signatureCrc32c` on the response. A mismatch throws, nothing returned.
   - **`destroyKey`:** destroys the key's version (Cloud KMS schedules destruction).
   - **Timeouts and errors:**
     - every HTTP call is bounded by `kms.signTimeoutMs`
     - non-2xx, timeout or malformed responses throw an ordinary `Error`; `service.ts` already records any error that is not the policy's `Denied` as `backend-error`, with nothing signed
     - log the key reference and HTTP status only
+- **`apps/signer/src/file-identity.ts`:** `fileSignerIdentity(dir)` implements `SignerSocketIdentity` (`socket.ts`) by reading `<dir>/<service>` token files (0400). Clients use `<credentialFilesDir>/<service>/signer-token`; the signer uses `<credentialFilesDir>/signer/client-tokens/<service>` (SCR-170 §4).
+- **Socket group option** in `socket.ts`: when `signer.socketGroupGid` is set, the folder is 0750 and the socket 0660 with that group, and the owner checks still require the signer's UID. When unset, the code path is byte-for-byte today's (owner-only 0700/0600).
 - **`apps/signer/src/cloud-main.ts`:**
-  - loads `CZAR_CLOUD_CONFIG`, runs `validateCloudConfig(config, {role: "signer"})`
-  - builds the same service, socket, audit and projection as `local-main.ts`, with the KMS backend
+  - loads `CZAR_CLOUD_CONFIG`; reads the deployment file (`deploy.deploymentFile`); confirms `eth_chainId`; runs `validateCloudConfig(config, {role: "signer", chainId, rpcUrls: [rpcUrl]})`
+  - composes `createSigner`, `startSignerSocket` and `startGasRefillJob` itself. `startSignerProcess` in `main.ts` refuses any backend but `local-keystore`, so do not call it and do not edit it
+  - passes `fileSignerIdentity` to the socket, and a `merchantServices` list naming `czar-search`, `czar-spot`, `czar-extract` and the six lab services (`apps/signer/src/local-main.ts:58` lists only `czar-search`; `policy.ts:684` reads the list)
   - the Postgres password comes from the `db-password` file (SCR-170 §4)
-  - the gas-refill `alert` is a structured log event `{event: "signer_gas_low", key}` through `@czar/logging`
+  - the gas-refill `alert` is a structured log event `{event: "signer_gas_low", keyId}` through `@czar/logging` (`keyId` is on the logging allowlist; `key` is dropped)
   - `local-main.ts` and `main.ts` are not edited
 
 ## Out of scope
@@ -66,7 +72,7 @@
 
 ## Config keys
 
-- All in PM-061: `signer.kms.apiBaseUrl`, `projectId`, `location`, `keyRing`, `pocketKeyRing`, `keyVersions`; `deploy.metadataTokenUrl`.
+- All in PM-061: `signer.kms.apiBaseUrl`, `projectId`, `location`, `keyRing`, `pocketKeyRing`, `keyVersions`; `signer.socketGroupGid`; `deploy.metadataTokenUrl`, `deploy.credentialFilesDir`, `deploy.deploymentFile`.
 - Existing: `signer.backend`, `kms.signTimeoutMs`, `kms.maxSignaturesPerMin.*`.
 
 ## Tests to write first
@@ -86,6 +92,9 @@
   - refuses `signer.backend = local-keystore`
   - refuses a non-allowlisted RPC host
   - with a cloud-shaped config pointing at loopback fakes, starts and answers `keyAddress` over the socket
+- Restart test: create two K4 keys on the fake KMS, start a new backend instance, and confirm both `K4:<address>` refs are known.
+- CRC32C test: a fake response with a wrong `signatureCrc32c`, or `verifiedDigestCrc32c = false` → throws.
+- `apps/signer/test/file-identity.test.ts` and a socket test: with `signer.socketGroupGid` unset, the folder and socket modes are 0700/0600 exactly as today; with it set, 0750/0660 and group-owned; a client with the right token connects, and one with a wrong token is refused.
 - Extend `no-secret-in-argv-env.test.ts` to cover `cloud-main.ts`.
 
 ## Acceptance tests
@@ -140,7 +149,10 @@
   - New keys go only in `packages/config/src/registry-production.ts`, in your lane's section (A, B, C, D or E).
   - Every key needs a type, a default (or `noDefault: true`), a unit, a reason and a `source` that cites SCR-170 or the spec section that names the key.
   - Never edit `registry.ts`. PM-061 owns its single two-line change.
+  - Every `source` has the form `docs/specs/<path>.md:<line>` (enforced by `loader.test.ts`).
+  - No key name may contain `passphrase`, `secret`, `private`, `mnemonic` or `seed` (enforced by `packages/config/src/names.ts` and `loader.test.ts`).
   - Regenerate `packages/config/test/__snapshots__/loader.test.ts.snap` with `pnpm --filter @czar/config exec vitest run -u`. Never edit it by hand.
+  - A merge conflict in the snapshot, or in a lane section of `registry-production.ts`, is resolved by keeping both sides' entries and regenerating the snapshot.
 - **Migrations:** none of the start-list tasks needs one. If yours does, stop and say so. The production range is `0030`–`0049`.
 - **Specs:**
   - Do not edit `docs/specs/**`. The one exception is new files under `docs/specs/05-build-plan/gate-0-results/` (PM-060 only).

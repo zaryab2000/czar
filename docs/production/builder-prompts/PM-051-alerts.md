@@ -26,7 +26,7 @@
     - disk usage above 80%
     - memory above 90% for 10 minutes
     - a log-based metric on `jsonPayload.event="signer_gas_low"`, alerting on any count in 5 minutes
-- **`ops/cloud/monitoring/ops-agent.yaml`:** collect Docker container logs and host metrics.
+- **`ops/cloud/monitoring/ops-agent.yaml`:** collect host metrics and the Docker `json-file` container logs (`/var/lib/docker/containers/*/*-json.log`), with a parser that unwraps Docker's `log` field and parses the app's JSON line, so `event` and `keyId` arrive as `jsonPayload` fields.
 
 ## Out of scope
 
@@ -40,7 +40,8 @@
 
 - `ops/cloud/test/monitoring.test.ts`:
   - the dry run prints the expected command list (golden file)
-  - the log filter string matches a real `signer_gas_low` line emitted by the signer's `cloud-main` alert function in a unit test
+  - the Ops Agent parser config, applied to a real Docker `json-file` line that wraps the signer's `signer_gas_low` event (captured from PM-017's unit test), yields `jsonPayload.event = "signer_gas_low"` and `jsonPayload.keyId`
+  - the log filter string matches that parsed entry
 
 ## Acceptance tests
 
@@ -92,7 +93,10 @@
   - New keys go only in `packages/config/src/registry-production.ts`, in your lane's section (A, B, C, D or E).
   - Every key needs a type, a default (or `noDefault: true`), a unit, a reason and a `source` that cites SCR-170 or the spec section that names the key.
   - Never edit `registry.ts`. PM-061 owns its single two-line change.
+  - Every `source` has the form `docs/specs/<path>.md:<line>` (enforced by `loader.test.ts`).
+  - No key name may contain `passphrase`, `secret`, `private`, `mnemonic` or `seed` (enforced by `packages/config/src/names.ts` and `loader.test.ts`).
   - Regenerate `packages/config/test/__snapshots__/loader.test.ts.snap` with `pnpm --filter @czar/config exec vitest run -u`. Never edit it by hand.
+  - A merge conflict in the snapshot, or in a lane section of `registry-production.ts`, is resolved by keeping both sides' entries and regenerating the snapshot.
 - **Migrations:** none of the start-list tasks needs one. If yours does, stop and say so. The production range is `0030`–`0049`.
 - **Specs:**
   - Do not edit `docs/specs/**`. The one exception is new files under `docs/specs/05-build-plan/gate-0-results/` (PM-060 only).

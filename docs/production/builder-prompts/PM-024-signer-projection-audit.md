@@ -18,7 +18,7 @@
 ## Scope
 
 - **A table in the PR body:** for every `Projection` method, give its source (chain read, indexer table, server table), its freshness rule, and what happens when the source is unreachable.
-- **Grants needed by the `czar_signer` role:** list every table the projection reads (indexer schema and server tables), as input to PM-014's Postgres init script.
+- **Grants needed by the `czar_signer` role:** list every table the projection reads (indexer tables such as `envelopes`, `pockets`, `gateway_transfers`, `anchors`, and server tables; all in schema `public`, read unqualified, `postgres-projection.ts:371-675`), as input to PM-014's Postgres init script. List the same for `czar_api` (indexer tables the server reads) and `czar_merchants`.
 - **Tests:** add fail-closed tests only where missing. Each case is "RPC unreachable / indexer table missing / stale freeze state → the request is denied, nothing signed".
 
 ## Out of scope
@@ -84,7 +84,10 @@
   - New keys go only in `packages/config/src/registry-production.ts`, in your lane's section (A, B, C, D or E).
   - Every key needs a type, a default (or `noDefault: true`), a unit, a reason and a `source` that cites SCR-170 or the spec section that names the key.
   - Never edit `registry.ts`. PM-061 owns its single two-line change.
+  - Every `source` has the form `docs/specs/<path>.md:<line>` (enforced by `loader.test.ts`).
+  - No key name may contain `passphrase`, `secret`, `private`, `mnemonic` or `seed` (enforced by `packages/config/src/names.ts` and `loader.test.ts`).
   - Regenerate `packages/config/test/__snapshots__/loader.test.ts.snap` with `pnpm --filter @czar/config exec vitest run -u`. Never edit it by hand.
+  - A merge conflict in the snapshot, or in a lane section of `registry-production.ts`, is resolved by keeping both sides' entries and regenerating the snapshot.
 - **Migrations:** none of the start-list tasks needs one. If yours does, stop and say so. The production range is `0030`–`0049`.
 - **Specs:**
   - Do not edit `docs/specs/**`. The one exception is new files under `docs/specs/05-build-plan/gate-0-results/` (PM-060 only).

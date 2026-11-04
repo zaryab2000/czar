@@ -36,6 +36,7 @@
   - Adding a work mode must need no change outside `provider/`.
   - The AI work modes are SCR-178.
 - **Signing:** all signing goes through the signer client (`provider-call`, PM-058). The provider holds no key.
+- **Separate process, not a merchant route:** the provider has its own composition and entry, `apps/merchants/src/provider/main.ts`. It does not edit `runtime.ts` (PM-042 owns it) and is not started by `local-main.ts`. `merchants.provider.enabled` defaults to `true`, so nothing may start it implicitly.
 - **Safety:** forced off on any mainnet chain id; labelled "Czar test provider" in its index entries.
 
 ## Out of scope
@@ -60,7 +61,7 @@
   - `over-budget`: budget above cap
   - `late`: submit after `submitBy`
   - `no-upload`: hash without upload
-- **T-108 acceptance under the ratings model:** where T-108 says "after seeding, both instances have `n_eff(delivery) ≥ 5` and appear in `ranked[]`", test instead that with no ratings both instances are listed in `RankingDecision.unverified[]` with reason `unrated`, and that honest jobs produce settled observations with `delivered = 1`. Flow 4A replaced `n_eff` ranking. If proving this needs a server-side harness change in a reserved file, stop that one assertion and report it.
+- **Not in this task:** T-108's "after seeding, both instances … appear in `ranked[]`" check. Under the ratings model it becomes "listed in `unverified[]` with reason `unrated`, and honest jobs settle with `delivered = 1`". It needs the server, payer and indexer together, so it runs in PM-045.
 - Once PM-058 is merged: one arc-anvil test signs `setBudget` and `submit` through the real signer `provider-call` policy.
 
 ## Acceptance tests
@@ -115,7 +116,10 @@
   - New keys go only in `packages/config/src/registry-production.ts`, in your lane's section (A, B, C, D or E).
   - Every key needs a type, a default (or `noDefault: true`), a unit, a reason and a `source` that cites SCR-170 or the spec section that names the key.
   - Never edit `registry.ts`. PM-061 owns its single two-line change.
+  - Every `source` has the form `docs/specs/<path>.md:<line>` (enforced by `loader.test.ts`).
+  - No key name may contain `passphrase`, `secret`, `private`, `mnemonic` or `seed` (enforced by `packages/config/src/names.ts` and `loader.test.ts`).
   - Regenerate `packages/config/test/__snapshots__/loader.test.ts.snap` with `pnpm --filter @czar/config exec vitest run -u`. Never edit it by hand.
+  - A merge conflict in the snapshot, or in a lane section of `registry-production.ts`, is resolved by keeping both sides' entries and regenerating the snapshot.
 - **Migrations:** none of the start-list tasks needs one. If yours does, stop and say so. The production range is `0030`–`0049`.
 - **Specs:**
   - Do not edit `docs/specs/**`. The one exception is new files under `docs/specs/05-build-plan/gate-0-results/` (PM-060 only).

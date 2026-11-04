@@ -22,7 +22,8 @@
   - `node:22.22.0-bookworm-slim` pinned by digest
   - `corepack enable` with pnpm 10.28.0
   - `pnpm install --frozen-lockfile` with a `pnpm fetch` cache layer
-  - a non-root user `czar` (UID 10001)
+  - non-root users: UID 10001 for every app image except the signer, which runs as UID 10002 (SCR-170 §4)
+  - all app images join GID 10010 (`czar-signer-clients`)
 - **One file per app** in `ops/cloud/docker/` (`server`, `signer`, `indexer`, `merchants`, `web`):
   - each starts `FROM` the base stage
   - each copies only what that app and its workspace dependencies need
@@ -31,8 +32,9 @@
   - server: `node --experimental-strip-types --disable-warning=ExperimentalWarning apps/server/src/cloud-main.ts`
   - signer: the same, with `apps/signer/src/cloud-main.ts`
   - merchants: the same, with `apps/merchants/src/cloud-main.ts`
-  - indexer: `pnpm --filter @czar/indexer exec ponder start --port 42069 --hostname 127.0.0.1`
+  - indexer: `pnpm --filter @czar/indexer exec ponder start --schema public --port 42069 --hostname 127.0.0.1` (`ponder start` refuses to run without a schema; `public` matches the local stack, SCR-170 §5)
   - web: `pnpm --filter @czar/web build` at image build time, then `next start --hostname 127.0.0.1 --port 3100` from `apps/web`. Run it directly so `apps/web/package.json` is not edited.
+- **Do not use `pnpm deploy`.** It copies workspace TypeScript into `node_modules`, where Node refuses to strip types. Copy the workspace source tree and run `pnpm install --frozen-lockfile --filter <app>...` instead.
 - **A repo-root `.dockerignore`** (new file) excluding:
   - `.git`, `node_modules`
   - `contracts/out`, `contracts/cache`, `contracts/broadcast`
@@ -52,8 +54,8 @@
 ## Tests to write first
 
 - `ops/cloud/test/images.test.ts`, with each image built:
-  - `docker run --rm --entrypoint id czar-<app>` prints `uid=10001`
-  - the image file list run through `check-no-secret-files` finds nothing
+  - `docker run --rm --entrypoint id czar-<app>` prints `uid=10001` (signer: `uid=10002`), in group 10010
+  - the image's file list (`docker export` piped to `tar -t`) contains no path matching the patterns `scripts/check-no-secret-files.mjs` uses. That script scans only `git ls-files`, so import or copy its pattern list into the test
   - `node --version` is `v22.22.0`
   - the web image contains `.next/BUILD_ID`
 
@@ -109,7 +111,10 @@
   - New keys go only in `packages/config/src/registry-production.ts`, in your lane's section (A, B, C, D or E).
   - Every key needs a type, a default (or `noDefault: true`), a unit, a reason and a `source` that cites SCR-170 or the spec section that names the key.
   - Never edit `registry.ts`. PM-061 owns its single two-line change.
+  - Every `source` has the form `docs/specs/<path>.md:<line>` (enforced by `loader.test.ts`).
+  - No key name may contain `passphrase`, `secret`, `private`, `mnemonic` or `seed` (enforced by `packages/config/src/names.ts` and `loader.test.ts`).
   - Regenerate `packages/config/test/__snapshots__/loader.test.ts.snap` with `pnpm --filter @czar/config exec vitest run -u`. Never edit it by hand.
+  - A merge conflict in the snapshot, or in a lane section of `registry-production.ts`, is resolved by keeping both sides' entries and regenerating the snapshot.
 - **Migrations:** none of the start-list tasks needs one. If yours does, stop and say so. The production range is `0030`–`0049`.
 - **Specs:**
   - Do not edit `docs/specs/**`. The one exception is new files under `docs/specs/05-build-plan/gate-0-results/` (PM-060 only).

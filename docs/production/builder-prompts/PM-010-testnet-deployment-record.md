@@ -17,12 +17,12 @@
 
 ## Scope
 
-- **`deployments/arc-testnet.json`:**
-  - `{chainId: 5042002, deployedAt, deployCommit, CzarVaultFactory, libraries{...}, OpenEvidenceLog, jobEscrow, jobEscrowKind, gatewayMinter, gatewayDomain}`, using the same field names `Deploy.s.sol` serializes.
-  - Public addresses only. No key references beyond what `Deploy.s.sol` writes.
+- **`deployments/arc-testnet.json`:** exactly the JSON `Deploy.s.sol` serialises (`contracts/script/Deploy.s.sol:98-130`): `chainId`, the factory hashes, `CzarVaultFactory`, each library as a flat field, `usdc`, `gatewayWallet`, `gatewayMinter`, `gatewayDomain`, `jobEscrow`. The indexer and signer read these field names.
+  - Public addresses only.
+- **`deployments/arc-testnet.meta.json`:** `{deployCommit, deployedAt, deployedBy: "<address only>", source: "broadcast run-latest.json"}`, kept separate so the manifest stays machine-identical to the script's output.
 - **`ops/cloud/verify-deployment.ts`:**
   - For each address, `eth_getCode` over `https://rpc.testnet.arc.io`. Read-only, no signing, no funds.
-  - It compares with the runtime bytecode from `arc-forge build` at the current commit.
+  - It compares with the runtime bytecode from `arc-forge build` at the current commit, built with the same `--libraries` link flags as the deploy, taken from the manifest's library addresses, so linked library addresses match.
   - It masks immutable positions using the artifact's `immutableReferences` and strips the CBOR metadata tail.
   - It prints `match`, `mismatch` or `no-code` per contract and exits non-zero on any mismatch.
   - The RPC host must be in `deploy.allowedRpcHosts`.
@@ -38,7 +38,7 @@
 ## Tests to write first
 
 - `ops/cloud/test/verify-deployment.test.ts`:
-  - Deploy to a local pinned `arc-anvil` with `Deploy.s.sol`, then run the verifier against that RPC (test config sets `deploy.allowedRpcHosts = ["127.0.0.1"]`) → all `match`.
+  - Deploy to a local pinned `arc-anvil` with `Deploy.s.sol`, then run the verifier against that RPC (allowed by a test-only host override) → all `match`.
   - Rebuild with one contract changed (a test fixture copy) → that contract `mismatch`.
   - A wrong address → `no-code`.
 
@@ -94,7 +94,10 @@
   - New keys go only in `packages/config/src/registry-production.ts`, in your lane's section (A, B, C, D or E).
   - Every key needs a type, a default (or `noDefault: true`), a unit, a reason and a `source` that cites SCR-170 or the spec section that names the key.
   - Never edit `registry.ts`. PM-061 owns its single two-line change.
+  - Every `source` has the form `docs/specs/<path>.md:<line>` (enforced by `loader.test.ts`).
+  - No key name may contain `passphrase`, `secret`, `private`, `mnemonic` or `seed` (enforced by `packages/config/src/names.ts` and `loader.test.ts`).
   - Regenerate `packages/config/test/__snapshots__/loader.test.ts.snap` with `pnpm --filter @czar/config exec vitest run -u`. Never edit it by hand.
+  - A merge conflict in the snapshot, or in a lane section of `registry-production.ts`, is resolved by keeping both sides' entries and regenerating the snapshot.
 - **Migrations:** none of the start-list tasks needs one. If yours does, stop and say so. The production range is `0030`–`0049`.
 - **Specs:**
   - Do not edit `docs/specs/**`. The one exception is new files under `docs/specs/05-build-plan/gate-0-results/` (PM-060 only).
