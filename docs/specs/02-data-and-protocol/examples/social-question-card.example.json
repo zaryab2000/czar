@@ -1,0 +1,10 @@
+{
+  "cardVersion": "1",
+  "network": "eip155:5042002",
+  "taskClass": "data-json.extract",
+  "capabilityTag": "page-extract",
+  "outputFormat": null,
+  "serviceId": "svc_323349701b9428c8a6dc42d8a7c99c4a",
+  "questionKind": "corroborate-failure",
+  "asOf": "2026-11-04T11:00:00Z"
+}

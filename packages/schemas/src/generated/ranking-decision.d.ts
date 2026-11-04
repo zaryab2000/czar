@@ -103,7 +103,7 @@ export interface RankingDecision {
      */
     score: number;
     /**
-     * Features (SCR-160 §9.3): good, bad, owners_rated, owners_bad, lower_bound, health_facts[], price_atomic.
+     * Features (SCR-160 §9.3): good, bad, owners_rated, owners_bad, lower_bound, health_facts[], price_atomic; incident (SCR-164 §3.13.1, when an incident is open): {incidentId, distinctOwners, negativeUnits, openedAt}.
      */
     features: {
       [k: string]: unknown;

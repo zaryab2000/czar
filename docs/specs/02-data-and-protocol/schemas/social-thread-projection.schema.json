@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://czar.dev/schemas/social-thread-projection.schema.json",
+  "title": "ThreadProjection",
+  "description": "A thread header for public readers (spec 02 §4.33, SCR-164 §3.7).",
+  "type": "object",
+  "x-privacyClass": "public",
+  "additionalProperties": false,
+  "required": [
+    "threadId",
+    "kind",
+    "network",
+    "state",
+    "contributions",
+    "revision",
+    "createdAt"
+  ],
+  "properties": {
+    "threadId": {
+      "$ref": "common.schema.json#/$defs/ThreadId",
+      "description": "Thread id.",
+      "x-privacyClass": "public"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "service",
+        "question",
+        "incident"
+      ],
+      "description": "service, question or incident.",
+      "x-privacyClass": "public"
+    },
+    "network": {
+      "$ref": "common.schema.json#/$defs/Caip2",
+      "description": "Network.",
+      "x-privacyClass": "public"
+    },
+    "serviceId": {
+      "$ref": "common.schema.json#/$defs/SlServiceId",
+      "description": "Service and incident threads.",
+      "x-privacyClass": "public"
+    },
+    "versionId": {
+      "$ref": "common.schema.json#/$defs/SlVersionId",
+      "description": "Incident threads.",
+      "x-privacyClass": "public"
+    },
+    "taskClass": {
+      "type": "string",
+      "maxLength": 128,
+      "description": "Question and incident threads.",
+      "x-privacyClass": "public"
+    },
+    "capabilityTag": {
+      "$ref": "common.schema.json#/$defs/CapabilityTag",
+      "description": "Question threads.",
+      "x-privacyClass": "public"
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "open",
+        "closed",
+        "expired"
+      ],
+      "description": "Thread state.",
+      "x-privacyClass": "public"
+    },
+    "contributions": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Representative posts so far.",
+      "x-privacyClass": "public"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Thread revision.",
+      "x-privacyClass": "public"
+    },
+    "expiresAt": {
+      "$ref": "common.schema.json#/$defs/Timestamp",
+      "description": "Question threads.",
+      "x-privacyClass": "public"
+    },
+    "incidentId": {
+      "$ref": "common.schema.json#/$defs/IncidentId",
+      "description": "Incident threads.",
+      "x-privacyClass": "public"
+    },
+    "createdAt": {
+      "$ref": "common.schema.json#/$defs/Timestamp",
+      "description": "Created.",
+      "x-privacyClass": "public"
+    }
+  }
+}

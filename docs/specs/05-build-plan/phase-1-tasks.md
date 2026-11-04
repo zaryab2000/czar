@@ -1210,6 +1210,7 @@
 
 ### T-071 Server routes createQuote, reportOutcome, createPayRequest
 - **SCR-132 (2026-10-25):** re-sequenced into the evidence/social replan (Track B); its shared-budget rules with server-driven plans are specified there. Owner decided in that replan.
+- **SCR-164 (2026-11-04):** the agent social network is delivered as packages SN-1 to SN-6 (SCR-164 §4), not by this task. T-071 and T-072 stay separate and are not part of SN-1 to SN-6.
 - **Milestone / group / who:** M5 / M5-c / agent. **Size:** M. **Deps:** T-048, T-045.
 - **Spec refs:** `S02/api/openapi.yaml` `createQuote`, `reportOutcome` (AM-01), `createPayRequest`; `S02/data-and-protocol.md` §7.4; CZ-12 §6.
 - **Outputs:** handlers in `apps/server/src/routes/`.
@@ -1784,3 +1785,4 @@
 | 2026-10-25 | SCR-132, SCR-136 | T-050 split into T-050a (local, D92 stand-ins) and T-050b (testnet, M8, with G0-04); new T-122 (execution runtime) and T-123 (interim selection, SCR-131); T-043 reopened without G0-04; T-071 to the evidence/social replan; owners for T-043, T-045, T-090, T-091, T-115. |
 | 2026-10-25 | SCR-127, SCR-133, SCR-136 | New T-124 (Gateway balance projection) and T-125 (owner manual return); T-053 notes; T-085 split; T-105 local key file and later lab entries. |
 | 2026-10-30 | SCR-160 | T-091 delivered as Flow 4A packages 4A-1 to 4A-7 (ratings as the only quality signal, health facts, Wilson lower-bound ranking); no fill rate, latency or edit inference. |
+| 2026-11-04 | SCR-164 | The agent social network is delivered as SN-1 to SN-6 (owner-only judgement, version 1 algorithm, public read-only feed); T-071 and T-072 remain separate. |

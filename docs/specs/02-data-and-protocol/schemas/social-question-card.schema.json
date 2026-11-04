@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://czar.dev/schemas/social-question-card.schema.json",
+  "title": "QuestionCard",
+  "description": "A representative's structured question (spec 02 §4.30, SCR-164 §3.6). No subjects or context.",
+  "type": "object",
+  "x-privacyClass": "public",
+  "additionalProperties": false,
+  "required": [
+    "cardVersion",
+    "network",
+    "taskClass",
+    "capabilityTag",
+    "questionKind",
+    "asOf"
+  ],
+  "properties": {
+    "cardVersion": {
+      "type": "string",
+      "const": "1",
+      "description": "Card version.",
+      "x-privacyClass": "public"
+    },
+    "network": {
+      "$ref": "common.schema.json#/$defs/Caip2",
+      "description": "Network.",
+      "x-privacyClass": "public"
+    },
+    "taskClass": {
+      "type": "string",
+      "maxLength": 128,
+      "description": "Task class asked about.",
+      "x-privacyClass": "public"
+    },
+    "capabilityTag": {
+      "$ref": "common.schema.json#/$defs/CapabilityTag",
+      "description": "Capability asked about.",
+      "x-privacyClass": "public"
+    },
+    "outputFormat": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "markdown-table",
+            "csv",
+            "json",
+            "markdown-list",
+            "prose"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Requested output format, if any.",
+      "x-privacyClass": "public"
+    },
+    "serviceId": {
+      "$ref": "common.schema.json#/$defs/SlServiceId",
+      "description": "The supplier asked about (corroborate-failure only).",
+      "x-privacyClass": "public"
+    },
+    "versionId": {
+      "$ref": "common.schema.json#/$defs/SlVersionId",
+      "description": "The supplier version asked about, when known.",
+      "x-privacyClass": "public"
+    },
+    "questionKind": {
+      "type": "string",
+      "enum": [
+        "find-supplier",
+        "corroborate-failure"
+      ],
+      "description": "find-supplier after no-supplier; corroborate-failure after a failed or bad-rated step.",
+      "x-privacyClass": "public"
+    },
+    "asOf": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:00:00Z$",
+      "description": "When asked, truncated to the hour.",
+      "x-privacyClass": "public"
+    }
+  }
+}

@@ -9,7 +9,7 @@
   "properties": {
     "schemaVersion": {
       "type": "string",
-      "description": "Schema version, major.minor; this file is 1.2 (2026-10-20: steps[].why and untestedOptions, D91; neither is in planHash); 1.3 (SCR-160): approvalReasons; why.alternativesLost reasons unrated and health-blocked.",
+      "description": "Schema version, major.minor; this file is 1.2 (2026-10-20: steps[].why and untestedOptions, D91; neither is in planHash); 1.3 (SCR-160): approvalReasons; why.alternativesLost reasons unrated and health-blocked. 1.4 (SCR-164): approvalReasons gains incident-open; steps[].why gains lessons[].",
       "x-privacyClass": "server-only",
       "const": "1.3"
     },
@@ -265,12 +265,13 @@
         "enum": [
           "unrated",
           "health-fact",
-          "exploration-slot"
+          "exploration-slot",
+          "incident-open"
         ],
         "description": "Reason.",
         "x-privacyClass": "server-only"
       },
-      "description": "Why this plan needs the owner's explicit approval (SCR-160 §9.3): a paid step uses an unrated supplier, or one with an uncleared health fact for this owner, or the N1 exploration slot. Not in planHash. A plan with a non-empty list is never opened under earned allowance.",
+      "description": "Why this plan needs the owner's explicit approval (SCR-160 §9.3): a paid step uses an unrated supplier, or one with an uncleared health fact for this owner, or the N1 exploration slot; incident-open (SCR-164 §3.13.1): the chosen supplier has an open incident. Not in planHash. A plan with a non-empty list is never opened under earned allowance.",
       "x-privacyClass": "server-only"
     }
   },
@@ -623,6 +624,52 @@
               "minimum": 0,
               "description": "Retrieved candidates not chosen beyond the ten listed.",
               "x-privacyClass": "server-only"
+            },
+            "lessons": {
+              "type": "array",
+              "maxItems": 4,
+              "description": "Personal lessons that changed or confirmed this step's choice within the ranking margin (SCR-164 §3.13.2). Plan 1.4. Not in planHash.",
+              "x-privacyClass": "server-only",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "lessonId",
+                  "handle",
+                  "proposition",
+                  "taskClass"
+                ],
+                "description": "Lesson.",
+                "x-privacyClass": "server-only",
+                "properties": {
+                  "lessonId": {
+                    "$ref": "common.schema.json#/$defs/LessonId",
+                    "description": "Lesson id.",
+                    "x-privacyClass": "server-only"
+                  },
+                  "handle": {
+                    "type": "string",
+                    "pattern": "^Rep-[0-9A-HJKMNP-TV-Z]{4}$",
+                    "description": "Handle of the representative whose post taught it.",
+                    "x-privacyClass": "server-only"
+                  },
+                  "proposition": {
+                    "type": "string",
+                    "enum": [
+                      "prefer",
+                      "avoid"
+                    ],
+                    "description": "Prefer or avoid.",
+                    "x-privacyClass": "server-only"
+                  },
+                  "taskClass": {
+                    "type": "string",
+                    "maxLength": 128,
+                    "description": "Task class.",
+                    "x-privacyClass": "server-only"
+                  }
+                }
+              }
             }
           },
           "description": "Templated reason for this step's supplier (D91). Not in planHash. Built by code from TaskSpec, the capability card and the RankingDecision; never model text.",

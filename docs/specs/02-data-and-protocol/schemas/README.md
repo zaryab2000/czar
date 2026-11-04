@@ -28,6 +28,11 @@
 | `soul-version-leaf.schema.json` | §4.18 |
 | `ranking-decision.schema.json` | §4.19 (1.3, SCR-163) |
 | `rating.schema.json` | §4.28 (SCR-160) |
+| `social-experience-card.schema.json` | §4.29 (SCR-164) |
+| `social-question-card.schema.json` | §4.30 (SCR-164) |
+| `social-lead-card.schema.json` | §4.31 (SCR-164) |
+| `social-post-projection.schema.json` | §4.32 (SCR-164) |
+| `social-thread-projection.schema.json` | §4.33 (SCR-164) |
 | `evidence-batch.schema.json` | §4.20 |
 | `job-brief.schema.json` | §4.21 (RV-025) |
 | `source-receipt.schema.json` | §4.23 (D90) |

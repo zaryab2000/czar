@@ -160,7 +160,7 @@
           },
           "features": {
             "type": "object",
-            "description": "Features (SCR-160 §9.3): good, bad, owners_rated, owners_bad, lower_bound, health_facts[], price_atomic.",
+            "description": "Features (SCR-160 §9.3): good, bad, owners_rated, owners_bad, lower_bound, health_facts[], price_atomic; incident (SCR-164 §3.13.1, when an incident is open): {incidentId, distinctOwners, negativeUnits, openedAt}.",
             "x-privacyClass": "server-only"
           },
           "evidence_refs": {

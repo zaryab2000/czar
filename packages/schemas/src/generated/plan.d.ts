@@ -30,7 +30,7 @@ export type PayeeLeaf = {
  */
 export interface Plan {
   /**
-   * Schema version, major.minor; this file is 1.2 (2026-10-20: steps[].why and untestedOptions, D91; neither is in planHash); 1.3 (SCR-160): approvalReasons; why.alternativesLost reasons unrated and health-blocked.
+   * Schema version, major.minor; this file is 1.2 (2026-10-20: steps[].why and untestedOptions, D91; neither is in planHash); 1.3 (SCR-160): approvalReasons; why.alternativesLost reasons unrated and health-blocked. 1.4 (SCR-164): approvalReasons gains incident-open; steps[].why gains lessons[].
    */
   schemaVersion: "1.3";
   /**
@@ -191,13 +191,13 @@ export interface Plan {
     nEff: number;
   }[];
   /**
-   * Why this plan needs the owner's explicit approval (SCR-160 §9.3): a paid step uses an unrated supplier, or one with an uncleared health fact for this owner, or the N1 exploration slot. Not in planHash. A plan with a non-empty list is never opened under earned allowance.
+   * Why this plan needs the owner's explicit approval (SCR-160 §9.3): a paid step uses an unrated supplier, or one with an uncleared health fact for this owner, or the N1 exploration slot; incident-open (SCR-164 §3.13.1): the chosen supplier has an open incident. Not in planHash. A plan with a non-empty list is never opened under earned allowance.
    *
    * @maxItems 4
    *
    * Items: Reason.
    */
-  approvalReasons?: ("unrated" | "health-fact" | "exploration-slot")[];
+  approvalReasons?: ("unrated" | "health-fact" | "exploration-slot" | "incident-open")[];
 }
 /**
  * One step of a plan (spec 02 §4.6).
@@ -397,6 +397,31 @@ export interface Step {
      * Retrieved candidates not chosen beyond the ten listed.
      */
     othersNotShown?: number;
+    /**
+     * Personal lessons that changed or confirmed this step's choice within the ranking margin (SCR-164 §3.13.2). Plan 1.4. Not in planHash.
+     *
+     * @maxItems 4
+     *
+     * Items: Lesson.
+     */
+    lessons?: {
+      /**
+       * Lesson id.
+       */
+      lessonId: string;
+      /**
+       * Handle of the representative whose post taught it.
+       */
+      handle: string;
+      /**
+       * Prefer or avoid.
+       */
+      proposition: "prefer" | "avoid";
+      /**
+       * Task class.
+       */
+      taskClass: string;
+    }[];
   };
 }
 /**
