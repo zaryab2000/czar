@@ -44,27 +44,27 @@ const servers: Server[] = [];
 
 async function startFake(handler: (response: ServerResponse) => void): Promise<Fake> {
   const requests: CapturedRequest[] = [];
-  let announce: () => void = () => {};
+  let announce: (() => void) | undefined;
   const firstRequest = new Promise<void>((resolve) => {
     announce = resolve;
   });
-  const server = createServer((request: IncomingMessage, response: ServerResponse) => {
+  const server = createServer((incoming: IncomingMessage, response: ServerResponse) => {
     const chunks: Buffer[] = [];
-    request.on("data", (chunk: Buffer) => chunks.push(chunk));
-    request.on("end", () => {
+    incoming.on("data", (chunk: Buffer) => chunks.push(chunk));
+    incoming.on("end", () => {
       const raw = Buffer.concat(chunks).toString("utf8");
       requests.push({
-        method: request.method ?? "",
-        url: request.url ?? "",
+        method: incoming.method ?? "",
+        url: incoming.url ?? "",
         headers: Object.fromEntries(
-          Object.entries(request.headers).map(([name, value]) => [
+          Object.entries(incoming.headers).map(([name, value]) => [
             name,
             Array.isArray(value) ? value.join(",") : (value ?? ""),
           ]),
         ),
         body: raw ? (JSON.parse(raw) as Record<string, unknown>) : {},
       });
-      announce();
+      announce?.();
       handler(response);
     });
   });
@@ -274,13 +274,13 @@ describe("createAnthropicModelClient", () => {
   it("throws when the reply is JSON that does not match the request schema", async () => {
     const fake = await startFake(replyJson(completionBody(JSON.stringify({ answer: 42 }))));
 
-    await expect(client(fake.origin).complete(request(), callOptions())).rejects.toThrow(
-      /schema/i,
-    );
+    await expect(client(fake.origin).complete(request(), callOptions())).rejects.toThrow(/schema/i);
   });
 
   it("throws when the reply carries no text block", async () => {
-    const fake = await startFake(replyJson({ content: [], usage: { input_tokens: 1, output_tokens: 1 } }));
+    const fake = await startFake(
+      replyJson({ content: [], usage: { input_tokens: 1, output_tokens: 1 } }),
+    );
 
     await expect(client(fake.origin).complete(request(), callOptions())).rejects.toThrow(
       /no text/i,
@@ -365,7 +365,9 @@ describe("createAnthropicModelClient", () => {
   }, 30_000);
 
   it("writes neither the key nor any prompt text to stdout, stderr or the console", async () => {
-    const fake = await startFake(replyJson(completionBody(JSON.stringify({ answer: INPUT_MARKER }))));
+    const fake = await startFake(
+      replyJson(completionBody(JSON.stringify({ answer: INPUT_MARKER }))),
+    );
     const captured: string[] = [];
     const record = (...args: unknown[]) => {
       for (const arg of args) captured.push(typeof arg === "string" ? arg : JSON.stringify(arg));
