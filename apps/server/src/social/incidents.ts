@@ -97,6 +97,7 @@ export function incidentForSelection(
 }
 
 interface ObservationRow {
+  objective_id: string;
   network: string;
   service_id: string;
   version_id: string;
@@ -142,6 +143,27 @@ function id(prefix: string): string {
   return randomId(prefix, { bytes: randomBytes });
 }
 
+async function privateLabels(
+  client: PoolClient,
+  observations: readonly ObservationRow[],
+): Promise<string[] | null> {
+  const objectiveIds = [...new Set(observations.map((row) => row.objective_id))];
+  if (objectiveIds.length === 0) return null;
+  const found = await client.query<{ objective_id: string; labels: unknown }>(
+    `SELECT objective_id,social_objective_subject_labels(objective_id) AS labels
+     FROM social_objective_projection WHERE objective_id=ANY($1::text[])`,
+    [objectiveIds],
+  );
+  if (found.rows.length !== objectiveIds.length) return null;
+  const labels: string[] = [];
+  for (const row of found.rows) {
+    if (!Array.isArray(row.labels) || !row.labels.every((label) => typeof label === "string"))
+      return null;
+    labels.push(...row.labels);
+  }
+  return labels;
+}
+
 async function systemPost(args: {
   client: PoolClient;
   threadId: string;
@@ -150,16 +172,17 @@ async function systemPost(args: {
   entityId: string;
   transition: "opened" | "closed";
   now: Date;
+  subjectLabels: readonly string[] | null;
 }): Promise<void> {
-  const { client, threadId, template, values, entityId, transition, now } = args;
+  const { client, threadId, template, values, entityId, transition, now, subjectLabels } = args;
   const card = { template, values };
-  if (!isPublicContentSafe(card, [])) return;
   const actionId = createHash("sha256")
     .update("system")
     .update(template)
     .update(entityId)
     .update(transition)
     .digest("hex");
+  if (!subjectLabels || !isPublicContentSafe(card, subjectLabels)) return;
   await client.query(
     `INSERT INTO social_posts(post_id,thread_id,author_id,kind,card,action_id,created_at)
      VALUES($1,$2,NULL,'system',$3::jsonb,$4,$5) ON CONFLICT(action_id) DO NOTHING`,
@@ -175,8 +198,18 @@ async function opened(args: {
   windowStart: Date;
   now: Date;
   windowDays: number;
+  subjectLabels: readonly string[] | null;
 }): Promise<void> {
-  const { client, key, negativeUnits, distinctOwners, windowStart, now, windowDays } = args;
+  const {
+    client,
+    key,
+    negativeUnits,
+    distinctOwners,
+    windowStart,
+    now,
+    windowDays,
+    subjectLabels,
+  } = args;
   const incidentId = id("inc_");
   const threadId = id("thr_");
   const subject = `incident:${key.network}:${key.serviceId}:${key.versionId}:${key.taskClass}`;
@@ -218,6 +251,7 @@ async function opened(args: {
     entityId: incidentId,
     transition: "opened",
     now,
+    subjectLabels,
   });
   await client.query(
     `INSERT INTO outbox_events(name,payload,delivered_at)
@@ -226,13 +260,15 @@ async function opened(args: {
   );
 }
 
-async function closed(
-  client: PoolClient,
-  incident: StoredIncident,
-  reason: "recovered" | "window-cleared" | "new-version",
-  positiveUnits: number,
-  now: Date,
-): Promise<void> {
+async function closed(args: {
+  client: PoolClient;
+  incident: StoredIncident;
+  reason: "recovered" | "window-cleared" | "new-version";
+  positiveUnits: number;
+  now: Date;
+  subjectLabels: readonly string[] | null;
+}): Promise<void> {
+  const { client, incident, reason, positiveUnits, now, subjectLabels } = args;
   await client.query(
     `UPDATE social_incidents SET state='closed',closed_at=$2,close_reason=$3,
       positive_units_since=$4 WHERE incident_id=$1 AND state='open'`,
@@ -254,6 +290,7 @@ async function closed(
     entityId: incident.incident_id,
     transition: "closed",
     now,
+    subjectLabels,
   });
   await client.query(
     `INSERT INTO outbox_events(name,payload,delivered_at)
@@ -346,7 +383,15 @@ async function evaluateKey(args: {
         : recovered
           ? "recovered"
           : null;
-    if (reason) await closed(client, open, reason, positives.length, now);
+    if (reason)
+      await closed({
+        client,
+        incident: open,
+        reason,
+        positiveUnits: positives.length,
+        now,
+        subjectLabels: await privateLabels(client, rows),
+      });
     return;
   }
   if (!newer && owners >= Number(config.get("social.incidentMinOwners")))
@@ -358,6 +403,7 @@ async function evaluateKey(args: {
       windowStart,
       now,
       windowDays,
+      subjectLabels: await privateLabels(client, negatives),
     });
 }
 
@@ -368,7 +414,7 @@ export async function evaluateIncidents(pool: Pool, config: Config, now: Date): 
     await client.query("BEGIN");
     await client.query("SELECT pg_advisory_xact_lock(hashtext('social-incidents'))");
     const rows = await client.query<ObservationRow>(
-      `SELECT o.network,o.service_id,o.version_id,o.task_class,o.user_id,o.settled_at,
+      `SELECT o.objective_id,o.network,o.service_id,o.version_id,o.task_class,o.user_id,o.settled_at,
         o.delivered,e.value AS rating
        FROM social_observation_projection o
        LEFT JOIN rating_receipts rr ON rr.obs_id=o.obs_id

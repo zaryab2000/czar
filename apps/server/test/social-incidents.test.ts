@@ -202,6 +202,46 @@ describe("SN-4 incident evidence", () => {
     expect(incidents).toMatchObject([{ versionId: VERSION, distinctOwners: 3 }]);
   });
 
+  it("does not publish a contributing objective's subject label in an incident card", async () => {
+    const service = `svc_${"f".repeat(32)}`;
+    for (const index of [13, 14, 15]) {
+      await seedOwner(index);
+      await observation(index, index + 100, { service, taskClass: "Acme" });
+    }
+    await getPool().query(
+      `UPDATE objectives SET submission=jsonb_set(submission,'{taskSpec,subjects}',
+        '[{"label":"Acme"}]'::jsonb) WHERE user_id=$1`,
+      [ownerId(13)],
+    );
+    await evaluateIncidents(getPool(), config, AT);
+    expect(await openIncidentsFor(getPool(), NETWORK, [service], "Acme")).toHaveLength(1);
+    const incident = await getPool().query<{ incident_id: string; thread_id: string }>(
+      "SELECT incident_id,thread_id FROM social_incidents WHERE service_id=$1",
+      [service],
+    );
+    const ids = incident.rows[0];
+    expect(ids).toBeDefined();
+    if (!ids) return;
+    expect(await getIncident(getPool(), ids.incident_id)).toBeNull();
+    expect(await getThread(getPool(), ids.thread_id)).toBeNull();
+    expect(
+      (await listIncidents(getPool(), { limit: 100 })).items.some(
+        (item) => item["incidentId"] === ids.incident_id,
+      ),
+    ).toBe(false);
+    expect(
+      (await listThreads(getPool(), { limit: 100 })).items.some(
+        (item) => item.threadId === ids.thread_id,
+      ),
+    ).toBe(false);
+    const posts = await getPool().query(
+      `SELECT post_id FROM social_posts WHERE card->>'template'='system.incident.opened'
+       AND card->'values'->>'serviceId'=$1`,
+      [service],
+    );
+    expect(posts.rowCount).toBe(0);
+  });
+
   it("does not publish private identifiers inside incident system cards", async () => {
     for (const index of [10, 11, 12]) await seedOwner(index);
     const privateService = `svc_${"e".repeat(32)}`;
