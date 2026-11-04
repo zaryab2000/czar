@@ -77,6 +77,7 @@ function makePlanner(
     readonly health?: PlannerPorts["health"];
     readonly remaining?: string;
     readonly unrated?: boolean;
+    readonly failedProbeIds?: readonly string[];
     readonly social?: PlannerDependencies["social"];
   } = {},
 ) {
@@ -100,7 +101,7 @@ function makePlanner(
           options.rankingQueries?.push(query);
           return {
             schemaVersion: "1.3",
-            query_id: "query-1",
+            query_id: "00000000-0000-4000-8000-000000000001",
             received_at: "2026-10-21T00:00:00Z",
             policy_version: "test",
             snapshot_id: "snap_1",
@@ -113,7 +114,7 @@ function makePlanner(
               (_, index) => ({
                 rank: index + 1,
                 service_id: `svc_${String.fromCharCode(97 + index).repeat(32)}`,
-                version_id: "svcver_1",
+                version_id: `ver_${"a".repeat(32)}`,
                 score: 0.9,
                 features: {},
                 evidence_refs: [],
@@ -167,6 +168,8 @@ function makePlanner(
         probe: async (resource, probeInput) => {
           options.probeCalls?.push({ resource, ...(probeInput ? { probeInput } : {}) });
           const id = resource.url.split("/").at(-1) ?? serviceId;
+          if (options.failedProbeIds?.includes(id))
+            return { ok: false as const, reason: "unavailable" as const };
           const live = {
             ...offer,
             amount: options.amount ?? offer.amount,
@@ -366,7 +369,7 @@ describe("planner fallback", () => {
         {
           incidentId: "inc_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
           serviceId,
-          versionId: "svcver_1",
+          versionId: `ver_${"a".repeat(32)}`,
           distinctOwners: 3,
           negativeUnits: 3,
           openedAt: "2026-10-20T00:00:00.000Z",
@@ -377,6 +380,7 @@ describe("planner fallback", () => {
     expect(built?.plan.schemaVersion).toBe("1.4");
     expect(built?.plan.approvalReasons).toEqual(["incident-open"]);
     expect(built?.approvalNeeded).toBe(true);
+    expect(built?.plan.rankingDecisionIds).toEqual(["00000000-0000-4000-8000-000000000001"]);
   });
 
   it("holds an exploration supplier on its stored unverified version", async () => {
@@ -396,6 +400,52 @@ describe("planner fallback", () => {
     const built = await makePlanner({ remaining: "999999999", unrated: true, social });
     expect(built?.plan.approvalReasons).toContain("incident-open");
     expect(built?.approvalNeeded).toBe(true);
+  });
+
+  it("does not promote a preferred supplier outside the top three probes", async () => {
+    const outside = `svc_${"d".repeat(32)}`;
+    const probes: Array<{ resource: PlannerService["resource"] }> = [];
+    const social: NonNullable<PlannerDependencies["social"]> = {
+      lessonsFor: async () => [
+        {
+          lessonId: "les_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
+          serviceId: outside,
+          handle: "Rep-ABCD",
+          proposition: "prefer",
+          taskClass: "data-json.search",
+          strength: 1,
+        },
+      ],
+      openIncidentsFor: async () => [],
+    };
+    const built = await makePlanner({ candidateCount: 4, social, probeCalls: probes });
+    expect(probes.map((probe) => probe.resource.url.split("/").at(-1))).toEqual([
+      serviceId,
+      `svc_${"b".repeat(32)}`,
+      `svc_${"c".repeat(32)}`,
+    ]);
+    expect(built?.plan.steps[0]?.serviceId).toBe(serviceId);
+    expect(built?.plan.steps[0]?.why?.lessons).toBeUndefined();
+  });
+
+  it("does not promote a preferred supplier whose live probe failed", async () => {
+    const failed = `svc_${"b".repeat(32)}`;
+    const social: NonNullable<PlannerDependencies["social"]> = {
+      lessonsFor: async () => [
+        {
+          lessonId: "les_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
+          serviceId: failed,
+          handle: "Rep-ABCD",
+          proposition: "prefer",
+          taskClass: "data-json.search",
+          strength: 1,
+        },
+      ],
+      openIncidentsFor: async () => [],
+    };
+    const built = await makePlanner({ candidateCount: 2, social, failedProbeIds: [failed] });
+    expect(built?.plan.steps[0]?.serviceId).toBe(serviceId);
+    expect(built?.plan.steps[0]?.why?.lessons).toBeUndefined();
   });
 
   it("adds a health reason for the owner and excludes H4-blocked suppliers", async () => {

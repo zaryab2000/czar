@@ -43,6 +43,7 @@ describe("SN-4 routes into buying", () => {
     expect(overlaid.map((row) => row.service_id)).toEqual([B, C, A]);
     expect(overlaid.map((row) => row.rank)).toEqual([1, 2, 3]);
     expect(overlaid[2]?.score).toBe(0.9);
+    expect(overlaid[2]?.version_id).toBe(VERSION);
     expect(overlaid[2]?.badges).toContain("incident-open");
     expect(overlaid[2]?.features["incident"]).toEqual({
       incident_id: incidents[0]?.incidentId,
