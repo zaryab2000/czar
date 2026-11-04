@@ -1,0 +1,16 @@
+[Unit]
+Description=Czar: block the GCE metadata server for every UID but root and the signer (SCR-170 §4)
+Documentation=https://github.com/zaryab2000/czar/blob/main/ops/cloud/README.md
+# Docker must not be able to start before the rule is in place: with network_mode: host any
+# container that starts first could mint a service-account token and sign with any KMS key.
+Before=docker.service docker.socket containerd.service
+After=network-pre.target
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/czar/bin/metadata-guard.sh
+
+[Install]
+WantedBy=multi-user.target
