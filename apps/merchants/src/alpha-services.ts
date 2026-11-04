@@ -73,8 +73,8 @@ export function extractServiceSpec(safeFetch: SafeFetch): MerchantServiceSpec {
 export interface AlphaMerchantServerOptions extends Omit<MerchantServerOptions, "services"> {
   /**
    * The shared `safeFetch`. It must be built with `maxRedirects` = `merchants.extractMaxRedirects`
-   * (redirect depth is a safeFetch dependency, not a per-call option). Left out, one is built from
-   * `fetch.*` and that key.
+   * (redirect depth is a safeFetch dependency, not a per-call option). Left out, one is built from the
+   * `merchants.extract*` keys with no loopback origin allowed.
    */
   readonly safeFetch?: SafeFetch;
   /** `User-Agent: Czar/<version>` for the shared `safeFetch`. */
