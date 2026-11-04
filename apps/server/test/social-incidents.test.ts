@@ -235,15 +235,15 @@ describe("SN-4 incident evidence", () => {
   });
 
   it("does not publish a contributing objective's subject label in an incident card", async () => {
-    const service = `svc_${"f".repeat(32)}`;
-    for (const index of [13, 14, 15]) {
+    const service = `svc_${"1".repeat(32)}`;
+    for (const index of [16, 17, 18]) {
       await seedOwner(index);
       await observation(index, index + 100, { service, taskClass: "Acme" });
     }
     await getPool().query(
       `UPDATE objectives SET submission=jsonb_set(submission,'{taskSpec,subjects}',
         '[{"label":"Acme"}]'::jsonb) WHERE user_id=$1`,
-      [ownerId(13)],
+      [ownerId(16)],
     );
     await evaluateIncidents(getPool(), config, AT);
     expect(await openIncidentsFor(getPool(), NETWORK, [service], "Acme")).toHaveLength(1);
