@@ -98,8 +98,8 @@ describe.skipIf(!enabled)("Linux install round trip in a pinned Debian container
         "/sbin/init",
       ]);
       try {
-        expect(started.stderr).toBe("");
-        expect(started.code).toBe(0);
+        // `docker run -d` writes image-pull progress to stderr, so only the exit code is asserted.
+        expect(started.code, started.stderr).toBe(0);
         const provision = await docker(["exec", CONTAINER_NAME, "bash", "-euc", PROVISION]);
         expect(provision.code, provision.stderr).toBe(0);
         const roundTrip = await docker([
