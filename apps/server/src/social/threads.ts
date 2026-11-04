@@ -44,10 +44,11 @@ async function incidentSubjectLabels(
   incidentIds: readonly string[],
 ): Promise<Map<string, string[]>> {
   const labels = new Map<string, string[]>();
+  const invalid = new Set<string>();
   if (incidentIds.length === 0) return labels;
   const result = await pool.query<{
     incident_id: string;
-    labels: string[];
+    labels: unknown;
   }>(
     `SELECT DISTINCT i.incident_id,o.objective_id,
        social_objective_subject_labels(o.objective_id) AS labels
@@ -58,8 +59,15 @@ async function incidentSubjectLabels(
        AND o.settled_at IS NOT NULL AND o.released_at IS NULL`,
     [incidentIds],
   );
-  for (const row of result.rows)
+  for (const row of result.rows) {
+    if (!Array.isArray(row.labels) || !row.labels.every((label) => typeof label === "string")) {
+      invalid.add(row.incident_id);
+      labels.delete(row.incident_id);
+      continue;
+    }
+    if (invalid.has(row.incident_id)) continue;
     labels.set(row.incident_id, [...(labels.get(row.incident_id) ?? []), ...row.labels]);
+  }
   return labels;
 }
 
