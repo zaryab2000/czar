@@ -32,8 +32,19 @@ missing, skipped or zero-step hosted jobs are not passing checks.
 | Same local head | `fnm exec --using=22.22.0 pnpm --filter @czar/web typecheck` | Passed | Web package only. |
 | Same local head | `fnm exec --using=22.22.0 pnpm lint` | Passed | Repository lint, not functional acceptance. |
 | Same local head | `fnm exec --using=22.22.0 pnpm --filter @czar/web build` | Passed; `/social`, `/social/me`, `/social/threads/[id]`, `/onboarding/representative` generated | No Playwright execution. |
-| Shared integration snapshot `f5a7167`, reported by the orchestrator | Exact command log pending; reported server/web typecheck, root lint, and schema checker from its required directory | Typecheck and lint passed; schema checker reported 34 files, 0 problems | Later SN-4 privacy tests are intentionally red pending a cross-lane fix; this is not current-head green full-suite evidence. |
-| Earlier shared integration snapshot, reported by the orchestrator | Exact command log pending for focused server social tests and web social Vitest | Server social 16/16 and web social 11/11 passed before the intentional red tests | Must rerun on final merged head. |
+| Shared integration snapshot `902f113`, reported by the orchestrator | Focused server command below | 15 files, 102/102 passed | Before SN-2 runtime and the local window-clear test joined; rerun on final merged head. |
+| Same integration snapshot | `fnm exec --using=22.22.0 pnpm --filter @czar/server exec vitest run --no-cache test/social-incidents.test.ts test/social-routes.test.ts` | 2 files, 13/13 passed | Before later SN-2 runtime and case-7 boundary commits. |
+| Same integration snapshot | `fnm exec --using=22.22.0 pnpm typecheck` and `fnm exec --using=22.22.0 pnpm lint` | Both passed after ignored local dependency links were repaired | Static checks, not runtime acceptance. |
+| Same integration snapshot | `fnm exec --using=22.22.0 pnpm --filter @czar/web exec vitest run packages/social-templates.test.ts packages/social-api.test.ts` | 11/11 passed | Direct template parity and API client tests; no browser round trip. |
+| Same integration snapshot | `fnm exec --using=22.22.0 pnpm --filter @czar/web build` | Passed after an ignored dependency link was repaired | Production build, no browser round trip. |
+| Same integration snapshot | `python3 -I check-schemas.py` from `docs/specs/02-data-and-protocol/schemas/` | 34 files checked, 0 problems | Metadata check, not full JSON Schema validation. |
+| SN-6 test commits `4105ee0` and `676abe7` | `fnm exec --using=22.22.0 pnpm --filter @czar/server exec vitest run test/social-incidents.test.ts` | 5/5 passed | Tests the two-owner `window-cleared` boundary and no-reopen edge on a package branch, not the final merged head. |
+
+The orchestrator's exact focused server command for `902f113` was:
+
+```sh
+fnm exec --using=22.22.0 pnpm --filter @czar/server exec vitest run --no-cache test/social-migration.test.ts test/social-routes.test.ts test/social/consumer.test.ts test/social/templates.test.ts test/social/router.test.ts test/social/denylist.test.ts test/social/experience-card.test.ts test/social/inbox.test.ts test/social-buying.test.ts test/social-incidents.test.ts test/social-leads.test.ts test/social-lessons.test.ts test/planner/planner.test.ts test/planner/service.test.ts test/selection/registered.test.ts
+```
 
 The fixture contains three controlled owners and three supplier descriptors. It marks only the
 `incident-search` supplier as locally registered. The
@@ -59,27 +70,43 @@ test or earlier run, not a pass for the full case.
 
 | # | Required behavior | Test mapping / current evidence | Final merged-head result |
 |---|---|---|---|
-| 1 | Posts have zero scoring weight; 100 duplicates leave counts, health and decision unchanged | `apps/server/test/social-buying.test.ts`; 100-post invariant still needs a focused test/run | Pending |
-| 2 | Five `objective.delivered` replays publish one experience per paid step | `apps/server/test/social/consumer.test.ts`, SN-2 worker tests | Pending |
-| 3 | Rating revision supersedes the old post without duplicate publish | SN-2 worker tests; `apps/server/test/social-routes.test.ts` covers revision-chain deletion separately | Pending |
-| 4 | Public strings exclude private subjects, paths, addresses, exact amounts and evidence IDs; public day times and random IDs | `apps/server/test/social/denylist.test.ts`, `social/experience-card.test.ts`, `social-routes.test.ts`; current SN-4 privacy regression is red | Pending |
-| 5 | Question routing and caps, while service threads remain open | `apps/server/test/social/router.test.ts`; full cap boundaries need final proof | Pending |
-| 6 | No-evidence reply abstains without a post | SN-3 routing/worker tests | Pending |
-| 7 | Incident open, unit/owner distinction, recovery, no flap, version change, window clear and unknown version | `apps/server/test/social-incidents.test.ts` | Pending |
-| 8 | Open incident changes ordering and approval, not score or version guard | `apps/server/test/social-buying.test.ts`; planner integration check | Pending |
-| 9 | Lessons obey exact margin and survivor/incident bounds | `apps/server/test/social-buying.test.ts` | Pending |
-| 10 | Lead probe and safe-fetch rejection matrix, with no payment | `apps/server/test/social-leads.test.ts`; verify every required edge | Pending |
-| 11 | Consent change during a run prevents a post | SN-2 runtime/worker tests | Pending |
-| 12 | Two workers on one inbox item publish once | `apps/server/test/social/inbox.test.ts`; worker commit race check | Pending |
-| 13 | Before-commit rollback and after-commit replay each yield one post/run | SN-2 runtime/worker fault tests | Pending |
+| 1 | Posts have zero scoring weight; 100 duplicates leave counts, health and decision unchanged | `apps/server/test/selection/registered.test.ts` has the 100-post DB and full stable-decision comparison | Pending final head |
+| 2 | Five `objective.delivered` replays publish one experience per paid step | SN-2 draft `apps/server/test/social/run.test.ts` has the five-replay test; merge and rerun pending | Pending |
+| 3 | Rating revision supersedes the old post without duplicate publish | SN-2 draft `social/run.test.ts` checks revision, moved evidence link and event count; verify the no-new-event assertion on final head | Pending |
+| 4 | Public strings exclude private subjects, paths, addresses, exact amounts and evidence IDs; public day times and random IDs | `social/denylist.test.ts`, `social/experience-card.test.ts`, `social-routes.test.ts`; random-ID prefix and complete outbound-string assertions need final-head review | Pending |
+| 5 | Question routing and caps, while service threads remain open | SN-2 draft `social/router.test.ts` tests three recipients and sharing-off; `social/run.test.ts` tests close at eight; 9th/10th/50th service posts and third experience still lack a focused test | Pending |
+| 6 | No-evidence reply abstains without a post | SN-2 draft `social/run.test.ts` asserts `abstain-no-evidence`; add a scoped no-new-post assertion | Pending |
+| 7 | Incident open, unit/owner distinction, recovery, no flap, version change, window clear and unknown version | `apps/server/test/social-incidents.test.ts` covers these; local `4105ee0` and `676abe7` add the third-owner expiry and no-reopen boundary (5/5) | Pending final head |
+| 8 | Open incident changes ordering and approval, not score or version guard | `social-buying.test.ts`, `planner/planner.test.ts` cover ordering, approval and exploration; check a stored-decision version-guard assertion | Pending |
+| 9 | Lessons obey exact margin and survivor/incident bounds | `social-buying.test.ts` covers millionth margin and survivor/incident ordering; check out-of-top-K and probe-failed branches | Pending |
+| 10 | Lead probe and safe-fetch rejection matrix, with no payment | `social-leads.test.ts` covers valid 402, wrong network, 200, unsafe HTTP and DNS failure; cross-host redirect, port/private address and duplicate origin need final test mapping | Pending |
+| 11 | Consent change during a run prevents a post | SN-2 draft `social/run.test.ts` covers context-to-commit consent change; merge and rerun pending | Pending |
+| 12 | Two workers on one inbox item publish once | `social/inbox.test.ts` covers lease claim; a two-worker publish race is not yet demonstrated | Pending |
+| 13 | Before-commit rollback and after-commit replay each yield one post/run | SN-2 draft `social/run.test.ts` has a fault test; its pre-reclaim post query is not scoped to the faulted action and is being corrected | Pending |
 | 14 | Delete tombstones every revision and supersedes derived lessons | `apps/server/test/social-routes.test.ts` | Pending |
-| 15 | No model usage and every note stays NULL | SN-2 worker suite plus DB assertion | Pending |
+| 15 | No model usage and every note stays NULL | SN-2 draft `social/run.test.ts` checks one post's NULL note; a suite-wide `model_usage` before/after and all-post NULL assertion are still missing | Pending |
 | 16 | `czar_social` cannot read base tables or write rating/ranking/money tables; concurrent migration succeeds | `apps/server/test/social-migration.test.ts` | Pending |
-| 17 | `planning → no-supplier` event is transactional and unique | `apps/server/test/planner/service.test.ts` plus SN-2 event test | Pending |
+| 17 | `planning → no-supplier` event is transactional and unique | `planner/service.test.ts` has success event; SN-2 draft adds trigger-induced rollback, which must merge and rerun | Pending |
 | 18 | Onboarding, public feed, owner tombstone and lesson dismiss in Playwright against local server | `apps/web/e2e/social.spec.ts` has four mocked-route UI checks; real-server `e2e-local` run not done | Pending |
 | 19 | All package suites, typecheck, lint, schema checker, Arc slice/runs 2/4/5 and Forge | Commands below; no final merged-head run | Pending |
 | 20 | A lower-id event that commits late is delivered once | `apps/server/test/social/consumer.test.ts` | Pending |
-| 21 | Sharing-off receives a lesson without publishing; publishing run skips | SN-3/worker tests | Pending |
+| 21 | Sharing-off receives a lesson without publishing; publishing run skips | `social-lessons.test.ts` tests lesson creation but not the sharing-off runner path; a combined test is missing | Pending |
+
+### Remaining acceptance evidence gaps
+
+The matrix maps every case to code or a deferred gate. The key-free gaps still requiring
+executable proof are: case 4's random-ID and complete public-string assertions; case 5's
+unbounded service-thread posting; case 6's no-new-post assertion; case 8's stored-decision
+version guard; case 9's out-of-top-K and probe-failed branches; case 10's cross-host redirect,
+port/private address and duplicate origin; case 12's two-worker publish race; case 13's
+faulted-action rollback and after-commit variant; case 15's suite-wide `model_usage` and NULL
+note checks; and case 21's sharing-off lesson and skipped publishing run. Some tests are in
+SN-2's unmerged draft and must be reviewed and rerun after integration.
+
+Case 18 requires a browser against the local server fixture. Case 19 additionally requires
+the Arc local-chain suites and Forge. The existing browser and Arc harnesses can create keys,
+so those gates remain pending explicit operator authorization. Mocked browser routes and
+key-free unit tests are supporting evidence only.
 
 ## Controlled local demo plan and evidence
 
@@ -169,7 +196,8 @@ to the final report's evidence location and link them here after the run.
 - **Builder decisions:** record final per-package choices with file and line after the bundled
   integration review. No unapproved specification change is implied by this draft.
 - **Defects fixed / found, not fixed:** populate from the exact final PR diff and review findings.
-  Current SN-4 privacy regressions require a test-first fix before the full suite can pass.
+  The SN-4 privacy regression was fixed before integration snapshot `902f113`; review and rerun
+  on the final head before calling it resolved for acceptance.
 - **Independent review:** pending. Give a fresh reviewer only the combined diff, `CLAUDE.md`,
   SCR-164 and the bounded defect brief in the orchestrator's definition of done. Record its
   concrete findings, fixes and final-head rerun.
