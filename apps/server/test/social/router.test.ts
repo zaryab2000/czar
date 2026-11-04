@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { routeSocialEvent } from "#src/social/router";
+import { expireQuestions, routeSocialEvent } from "#src/social/router";
 import { setupDatabase } from "#test/db";
 import { seedDevice, TEST_USER_ID } from "#test/fixtures";
 
@@ -61,5 +61,88 @@ describe("social event routing", () => {
         refs: expect.objectContaining({ routingReason: "subscribed-tag" }),
       },
     ]);
+  });
+
+  it("routes at most three question recipients and excludes sharing-off subscribers", async () => {
+    for (const suffix of ["C", "D", "E", "F", "G", "H", "J", "K", "M", "N", "P"]) {
+      const userId = `usr_${suffix.repeat(26)}`;
+      const representativeId = `rep_${suffix.repeat(26)}`;
+      await pool().query("INSERT INTO users(user_id) VALUES($1)", [userId]);
+      await pool().query(
+        `INSERT INTO social_representatives(representative_id,user_id,handle,sharing)
+         VALUES($1,$2,$3,$4)`,
+        [
+          representativeId,
+          userId,
+          `Rep-${suffix.repeat(4)}`,
+          suffix === "P" ? "off" : "structured",
+        ],
+      );
+      await pool().query(
+        `INSERT INTO social_subscriptions(representative_id,subject_key,source,expires_at)
+         VALUES($1,$2,'objective',now()+interval '90 days')`,
+        [representativeId, "class:eip155:5042002:data-json.search"],
+      );
+    }
+    const event = await pool().query<{ event_id: string }>(
+      `INSERT INTO outbox_events(name,payload,delivered_at)
+       VALUES('social.post.published',$1,now()) RETURNING event_id`,
+      [{ postId, threadId }],
+    );
+    await routeSocialEvent(
+      pool(),
+      "social.post.published",
+      { postId, threadId },
+      event.rows[0]!.event_id,
+      3,
+      20,
+      60,
+    );
+    const recipients = await pool().query<{
+      representative_id: string;
+      refs: { routingReason: string };
+    }>("SELECT representative_id,refs FROM social_inbox WHERE event_id=$1", [
+      event.rows[0]!.event_id,
+    ]);
+    expect(recipients.rows).toHaveLength(3);
+    expect(recipients.rows.every((row) => row.representative_id !== `rep_${"P".repeat(26)}`)).toBe(
+      true,
+    );
+    expect(recipients.rows.every((row) => row.refs.routingReason === "subscribed-tag")).toBe(true);
+  });
+
+  it("rolls back question expiry when event insertion fails", async () => {
+    await pool().query(
+      "UPDATE social_threads SET expires_at=now()-interval '1 hour' WHERE thread_id=$1",
+      [threadId],
+    );
+    await pool().query(
+      `CREATE FUNCTION reject_expiry_event() RETURNS trigger LANGUAGE plpgsql AS $$
+         BEGIN IF NEW.name='social.question.expired' THEN
+           RAISE EXCEPTION 'injected expiry insert failure';
+         END IF; RETURN NEW; END $$`,
+    );
+    await pool().query(
+      `CREATE TRIGGER reject_expiry_event BEFORE INSERT ON outbox_events
+       FOR EACH ROW EXECUTE FUNCTION reject_expiry_event()`,
+    );
+    const db = await pool().connect();
+    try {
+      await db.query("BEGIN");
+      await expect(expireQuestions(db, new Date())).rejects.toThrow(
+        "injected expiry insert failure",
+      );
+      await db.query("ROLLBACK");
+      const state = await pool().query<{ state: string }>(
+        "SELECT state FROM social_threads WHERE thread_id=$1",
+        [threadId],
+      );
+      expect(state.rows[0]?.state).toBe("open");
+    } finally {
+      await db.query("ROLLBACK");
+      db.release();
+      await pool().query("DROP TRIGGER reject_expiry_event ON outbox_events");
+      await pool().query("DROP FUNCTION reject_expiry_event()");
+    }
   });
 });

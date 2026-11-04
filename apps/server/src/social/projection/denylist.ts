@@ -4,15 +4,17 @@ const PRIVATE_ID = /(?:obs_|usr_|dev_|obj_|pln_|prq_|pay_)[0-9A-Za-z_]+/;
 const ADDRESS_OR_HASH = /0x(?:[0-9a-fA-F]{64}|[0-9a-fA-F]{40})(?![0-9a-fA-F])/;
 const FILE_NAME = /\.(?:md|csv|xlsx?|docx?|json|txt)\b/i;
 const WEB_URL = /https?:\/\//i;
+const EMAIL = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i;
 
 function unsafeString(value: string, labels: readonly string[], allowUrl: boolean): boolean {
   return (
     PRIVATE_ID.test(value) ||
     ADDRESS_OR_HASH.test(value) ||
     FILE_NAME.test(value) ||
+    EMAIL.test(value) ||
     (!allowUrl && WEB_URL.test(value)) ||
     labels.some((label) => label.length > 0 && value.toLowerCase().includes(label.toLowerCase())) ||
-    regexScreen(value).some((flag) => flag !== "none")
+    regexScreen(value).includes("injection-suspect")
   );
 }
 

@@ -220,7 +220,7 @@ export async function refreshSubscriptions(
 }
 
 /** Expire old question threads and enqueue one owner notification each. */
-export async function expireQuestions(db: Database, now: Date): Promise<number> {
+export async function expireQuestions(db: PoolClient, now: Date): Promise<number> {
   const expired = await db.query<{ thread_id: string }>(
     `UPDATE social_threads SET state='expired',revision=revision+1,updated_at=$1
      WHERE kind='question' AND state='open' AND expires_at<=$1 RETURNING thread_id`,

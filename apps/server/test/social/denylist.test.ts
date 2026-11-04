@@ -30,4 +30,8 @@ describe("social publication denylist", () => {
       ),
     ).toBe(false);
   });
+
+  it("allows the required UTC-day public timestamp", () => {
+    expect(isPublicContentSafe({ asOf: "2026-11-05T00:00:00Z" }, labels)).toBe(true);
+  });
 });

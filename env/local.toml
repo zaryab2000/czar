@@ -1,5 +1,10 @@
 # Local process parameters only. Runtime ports and RPC URLs are set by ops/local.
-"fetch.localMerchantOrigins" = ["http://127.0.0.1:8787"]
+# oxfmt-ignore
+"fetch.localMerchantOrigins" = [
+  "http://127.0.0.1:8787",
+  "http://127.0.0.1:8788",
+  "http://127.0.0.1:8789",
+]
 "fetch.localStandinOrigins" = ["http://127.0.0.1:4999"]
 "merchants.facilitatorBaseUrl" = "http://127.0.0.1:4999"
 "chain.gatewayApiBaseUrl" = "http://127.0.0.1:4999"
@@ -7,5 +12,9 @@
 "app.arcRpcUrl" = "http://127.0.0.1:8545"
 "merchants.searchBackend" = "fixture"
 "selection.czarRegisteredServices" = { "svc_223349701b9428c8a6dc42d8a7c99c4a" = { "serviceName" = "czar-search", "resource" = { "url" = "http://127.0.0.1:8787/v1/search", "method" = "GET" }, "probeInput" = { "query" = { "q" = "czar probe" } }, "capabilities" = [
+  "web-search",
+] }, "svc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" = { "serviceName" = "comparison-search", "resource" = { "url" = "http://127.0.0.1:8788/v1/search", "method" = "GET" }, "probeInput" = { "query" = { "q" = "czar probe" } }, "capabilities" = [
+  "web-search",
+] }, "svc_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" = { "serviceName" = "lesson-search", "resource" = { "url" = "http://127.0.0.1:8789/v1/search", "method" = "GET" }, "probeInput" = { "query" = { "q" = "czar probe" } }, "capabilities" = [
   "web-search",
 ] } }

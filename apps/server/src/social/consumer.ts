@@ -92,12 +92,12 @@ async function consumeOne(pool: Pool, config?: Config): Promise<boolean> {
       await client.query("ROLLBACK");
       return false;
     }
-    await client.query(
+    const delivery = await client.query(
       `INSERT INTO event_deliveries(event_id,consumer,state)
        VALUES($1,'social','done') ON CONFLICT DO NOTHING`,
       [event.event_id],
     );
-    if (isOwnerEvent(event.name)) {
+    if (delivery.rowCount === 1 && isOwnerEvent(event.name)) {
       const target = await ownerTarget(client, event);
       if (target) {
         await client.query(
@@ -106,7 +106,7 @@ async function consumeOne(pool: Pool, config?: Config): Promise<boolean> {
           [target.representativeId, event.event_id, target.kind, target.refs],
         );
       }
-    } else if (event.name.startsWith("social.")) {
+    } else if (delivery.rowCount === 1 && event.name.startsWith("social.")) {
       await routeSocialEvent(
         client,
         event.name,

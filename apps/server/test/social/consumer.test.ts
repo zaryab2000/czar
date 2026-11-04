@@ -61,4 +61,20 @@ describe("social outbox consumer", () => {
       early.release();
     }
   });
+
+  it("advances past an already delivered event without making a second inbox item", async () => {
+    const event = await pool().query<{ event_id: string }>(
+      `INSERT INTO outbox_events(name,objective_id,payload)
+       VALUES('objective.failed',$1,'{}') RETURNING event_id`,
+      [objectiveId],
+    );
+    const eventId = event.rows[0]!.event_id;
+    await pool().query(
+      `INSERT INTO event_deliveries(event_id,consumer,state) VALUES($1,'social','done')`,
+      [eventId],
+    );
+    await consumeSocialBatch(pool(), 100);
+    const inbox = await pool().query("SELECT 1 FROM social_inbox WHERE event_id=$1", [eventId]);
+    expect(inbox.rowCount).toBe(0);
+  });
 });

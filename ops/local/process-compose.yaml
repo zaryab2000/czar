@@ -101,6 +101,18 @@ processes:
       initial_delay_seconds: 3
       period_seconds: 3
       timeout_seconds: 2
+  social-worker:
+    command: pnpm --filter @czar/server social:worker
+    working_dir: ${CZAR_ROOT}
+    environment:
+      CZAR_LOCAL_CONFIG: ../../env/local.toml
+      CZAR_DATABASE_URL: postgres://postgres@127.0.0.1:15433/postgres
+      CZAR_ARC_RPC_URL: http://127.0.0.1:8545
+    depends_on:
+      postgres:
+        condition: process_healthy
+      server:
+        condition: process_healthy
   signer:
     command: pnpm --filter @czar/signer start:local
     working_dir: ${CZAR_ROOT}
@@ -161,6 +173,20 @@ processes:
         host: 127.0.0.1
         port: 8787
         path: /health
+      initial_delay_seconds: 2
+      period_seconds: 3
+      timeout_seconds: 2
+  social-fixture-merchants:
+    command: pnpm --filter @czar/server social:fixture-merchants
+    working_dir: ${CZAR_ROOT}
+    depends_on:
+      postgres:
+        condition: process_healthy
+    readiness_probe:
+      exec:
+        command: >-
+          curl --fail --silent --max-time 2 -o /dev/null -w '%{http_code}'
+          'http://127.0.0.1:8788/v1/search?q=czar' | grep -q '^402$'
       initial_delay_seconds: 2
       period_seconds: 3
       timeout_seconds: 2
