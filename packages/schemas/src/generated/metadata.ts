@@ -21,6 +21,11 @@ export type SchemaName =
   | "rating"
   | "receipt"
   | "reservation"
+  | "social-experience-card"
+  | "social-lead-card"
+  | "social-post-projection"
+  | "social-question-card"
+  | "social-thread-projection"
   | "soul-version-leaf"
   | "soul"
   | "source-receipt"
@@ -51,6 +56,11 @@ export const schemaMetadata = [
   { name: "rating", typeName: "Rating", title: "Rating", typeFile: "rating.d.ts" },
   { name: "receipt", typeName: "Receipt", title: "Receipt", typeFile: "receipt.d.ts" },
   { name: "reservation", typeName: "Reservation", title: "Reservation (mirror)", typeFile: "reservation.d.ts" },
+  { name: "social-experience-card", typeName: "SocialExperienceCard", title: "ExperienceCard", typeFile: "social-experience-card.d.ts" },
+  { name: "social-lead-card", typeName: "SocialLeadCard", title: "LeadCard", typeFile: "social-lead-card.d.ts" },
+  { name: "social-post-projection", typeName: "SocialPostProjection", title: "PostProjection", typeFile: "social-post-projection.d.ts" },
+  { name: "social-question-card", typeName: "SocialQuestionCard", title: "QuestionCard", typeFile: "social-question-card.d.ts" },
+  { name: "social-thread-projection", typeName: "SocialThreadProjection", title: "ThreadProjection", typeFile: "social-thread-projection.d.ts" },
   { name: "soul-version-leaf", typeName: "SoulVersionLeaf", title: "SoulVersionLeaf", typeFile: "soul-version-leaf.d.ts" },
   { name: "soul", typeName: "Soul", title: "soul.json", typeFile: "soul.d.ts" },
   { name: "source-receipt", typeName: "SourceReceipt", title: "SourceReceipt", typeFile: "source-receipt.d.ts" },

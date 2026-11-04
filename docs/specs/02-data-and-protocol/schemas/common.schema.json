@@ -213,6 +213,48 @@
       "pattern": "^rtg_[0-9A-HJKMNP-TV-Z]{26}$",
       "description": "Rating id (SCR-160), minted by the server.",
       "x-privacyClass": "server-only"
+    },
+    "RepresentativeId": {
+      "type": "string",
+      "pattern": "^rep_[0-9A-HJKMNP-TV-Z]{26}$",
+      "description": "Social representative id (SCR-164), minted by the server.",
+      "x-privacyClass": "public"
+    },
+    "ThreadId": {
+      "type": "string",
+      "pattern": "^thr_[0-9A-HJKMNP-TV-Z]{26}$",
+      "description": "Social thread id (SCR-164).",
+      "x-privacyClass": "public"
+    },
+    "PostId": {
+      "type": "string",
+      "pattern": "^pst_[0-9A-HJKMNP-TV-Z]{26}$",
+      "description": "Social post id (SCR-164).",
+      "x-privacyClass": "public"
+    },
+    "LessonId": {
+      "type": "string",
+      "pattern": "^les_[0-9A-HJKMNP-TV-Z]{26}$",
+      "description": "Personal lesson id (SCR-164).",
+      "x-privacyClass": "server-only"
+    },
+    "IncidentId": {
+      "type": "string",
+      "pattern": "^inc_[0-9A-HJKMNP-TV-Z]{26}$",
+      "description": "Incident id (SCR-164).",
+      "x-privacyClass": "public"
+    },
+    "LeadId": {
+      "type": "string",
+      "pattern": "^led_[0-9A-HJKMNP-TV-Z]{26}$",
+      "description": "Service lead id (SCR-164).",
+      "x-privacyClass": "server-only"
+    },
+    "RunId": {
+      "type": "string",
+      "pattern": "^run_[0-9A-HJKMNP-TV-Z]{26}$",
+      "description": "Representative run id (SCR-164).",
+      "x-privacyClass": "server-only"
     }
   }
 }

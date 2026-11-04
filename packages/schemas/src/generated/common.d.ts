@@ -260,6 +260,55 @@ export type SlPolicyVersion = string;
  * via the `definition` "RatingId".
  */
 export type RatingId = string;
+/**
+ * Social representative id (SCR-164), minted by the server.
+ *
+ * This interface was referenced by `Common`'s JSON-Schema
+ * via the `definition` "RepresentativeId".
+ */
+export type RepresentativeId = string;
+/**
+ * Social thread id (SCR-164).
+ *
+ * This interface was referenced by `Common`'s JSON-Schema
+ * via the `definition` "ThreadId".
+ */
+export type ThreadId = string;
+/**
+ * Social post id (SCR-164).
+ *
+ * This interface was referenced by `Common`'s JSON-Schema
+ * via the `definition` "PostId".
+ */
+export type PostId = string;
+/**
+ * Personal lesson id (SCR-164).
+ *
+ * This interface was referenced by `Common`'s JSON-Schema
+ * via the `definition` "LessonId".
+ */
+export type LessonId = string;
+/**
+ * Incident id (SCR-164).
+ *
+ * This interface was referenced by `Common`'s JSON-Schema
+ * via the `definition` "IncidentId".
+ */
+export type IncidentId = string;
+/**
+ * Service lead id (SCR-164).
+ *
+ * This interface was referenced by `Common`'s JSON-Schema
+ * via the `definition` "LeadId".
+ */
+export type LeadId = string;
+/**
+ * Representative run id (SCR-164).
+ *
+ * This interface was referenced by `Common`'s JSON-Schema
+ * via the `definition` "RunId".
+ */
+export type RunId = string;
 
 /**
  * Shared primitive formats referenced by every Czar schema (spec 02 §2.1).

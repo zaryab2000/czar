@@ -1210,6 +1210,7 @@
 
 ### T-071 Server routes createQuote, reportOutcome, createPayRequest
 - **SCR-132 (2026-10-25):** re-sequenced into the evidence/social replan (Track B); its shared-budget rules with server-driven plans are specified there. Owner decided in that replan.
+- **SCR-164 (2026-11-04):** the agent social network is delivered as packages SN-1 to SN-6 (SCR-164 §4), not by this task. T-071 and T-072 stay separate and are not part of SN-1 to SN-6.
 - **Milestone / group / who:** M5 / M5-c / agent. **Size:** M. **Deps:** T-048, T-045.
 - **Spec refs:** `S02/api/openapi.yaml` `createQuote`, `reportOutcome` (AM-01), `createPayRequest`; `S02/data-and-protocol.md` §7.4; CZ-12 §6.
 - **Outputs:** handlers in `apps/server/src/routes/`.
@@ -1692,6 +1693,47 @@
 
 ---
 
+## Agent social network (SCR-164)
+
+- **Source of truth:** `docs/specs/06-review/change-requests/SCR-164-agent-social-network.md` (shortened to SCR-164 below). Every task here is one PR into `build-v1`, tests first. The orchestrator brief is `docs/production/social-network-orchestrator-brief.md`.
+- **Common spec refs:** SCR-164 §3.0 (the five rules), §3.16 (config), §3.17 (privacy, logging, database role); `S02/schemas/social-*.schema.json`; `S02/api/openapi.yaml` tag `social`; `S04/shared/cross-cutting.md` §4 and §5.1.
+
+### SN-1 Foundation
+- **Milestone / group / who:** social / SN / agent. **Size:** L. **Deps:** SCR-164 merged.
+- **Spec refs:** SCR-164 §3.4, §3.5, §3.7, §3.14, §3.16, §3.17.
+- **Outputs:** `apps/server/migrations/0023-social.sql`; `randomId` in `apps/server/src/http/ids.ts`; `apps/server/src/social/{representatives,threads,posts,routes}.ts`; representative creation in `apps/server/src/devices/pair.ts`; `remoteAddr` in `apps/server/src/local-main.ts`; route mounting in `apps/server/src/app.ts`; `social.*` keys in `packages/config/src/registry.ts`.
+- **Acceptance tests:** SCR-164 §3.18 tests 14 and 16; unit tests for every module; every route response validated by `@czar/api-contract`.
+
+### SN-2 Events and worker
+- **Milestone / group / who:** social / SN / agent. **Size:** L. **Deps:** SN-1.
+- **Spec refs:** SCR-164 §3.1–§3.3, §3.6, §3.8–§3.10, §3.19.
+- **Outputs:** `apps/server/src/social/{consumer,inbox,worker-main}.ts`, `runtime/*`, `projection/*`; the `objective.no-supplier` event in `apps/server/src/planner/service.ts`; the worker entry in `ops/local/process-compose.yaml`; the seed and replay scripts.
+- **Acceptance tests:** SCR-164 §3.18 tests 2, 3, 4, 11, 12, 13, 15, 17 and 20.
+
+### SN-3 Questions, replies, routing
+- **Milestone / group / who:** social / SN / agent. **Size:** M. **Deps:** SN-2.
+- **Spec refs:** SCR-164 §3.7, §3.9, §3.12.
+- **Outputs:** `apps/server/src/social/router.ts`, subscriptions, the question, reply and attach actions, question expiry, caps.
+- **Acceptance tests:** SCR-164 §3.18 tests 5, 6 and 21.
+
+### SN-4 Routes into buying
+- **Milestone / group / who:** social / SN / agent. **Size:** L. **Deps:** SN-3.
+- **Spec refs:** SCR-164 §3.13; `S02/schemas/plan.schema.json` 1.4; `S02/schemas/ranking-decision.schema.json` `features.incident`.
+- **Outputs:** `apps/server/src/social/{incidents,lessons,leads}.ts`; the call sites in `apps/server/src/selection/registered/index.ts` and `apps/server/src/planner/index.ts`; Plan 1.4 emitters.
+- **Acceptance tests:** SCR-164 §3.18 tests 1, 7, 8, 9 and 10; then the full server suite, the arc-anvil slice, and runs 4 and 5 (`reports/flow-4a-complete.md`).
+
+### SN-5 Web
+- **Milestone / group / who:** social / SN / agent. **Size:** M. **Deps:** SN-1 (final round trip after SN-4).
+- **Spec refs:** SCR-164 §3.15, §3.8.
+- **Outputs:** `apps/web/app/social/**`, `apps/web/app/onboarding/representative`, the approve-screen lines, the Home tile, `apps/web/packages/social-templates.ts`.
+- **Acceptance tests:** SCR-164 §3.18 test 18.
+
+### SN-6 Demo and completion report
+- **Milestone / group / who:** social / SN / agent. **Size:** M. **Deps:** SN-4, SN-5.
+- **Spec refs:** SCR-164 §3.18, §3.19.
+- **Outputs:** the recorded demo; `reports/social-network-complete.md`.
+- **Acceptance tests:** SCR-164 §3.18 test 19, and all 21 tests passing on the merged head.
+
 ## Coverage
 
 ### Phase 1 components → tasks
@@ -1784,3 +1826,5 @@
 | 2026-10-25 | SCR-132, SCR-136 | T-050 split into T-050a (local, D92 stand-ins) and T-050b (testnet, M8, with G0-04); new T-122 (execution runtime) and T-123 (interim selection, SCR-131); T-043 reopened without G0-04; T-071 to the evidence/social replan; owners for T-043, T-045, T-090, T-091, T-115. |
 | 2026-10-25 | SCR-127, SCR-133, SCR-136 | New T-124 (Gateway balance projection) and T-125 (owner manual return); T-053 notes; T-085 split; T-105 local key file and later lab entries. |
 | 2026-10-30 | SCR-160 | T-091 delivered as Flow 4A packages 4A-1 to 4A-7 (ratings as the only quality signal, health facts, Wilson lower-bound ranking); no fill rate, latency or edit inference. |
+| 2026-11-04 | SCR-164 | The agent social network is delivered as SN-1 to SN-6 (owner-only judgement, version 1 algorithm, public read-only feed); T-071 and T-072 remain separate. |
+| 2026-11-05 | SCR-164 review | Task entries SN-1 to SN-6 added under "Agent social network (SCR-164)". |
