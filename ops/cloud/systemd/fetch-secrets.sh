@@ -112,18 +112,31 @@ read_list() {
 }
 
 # One folder per service, which is the only folder that service's container is shown.
+#
+# Every component is walked, not just the file's own folder, so a folder that exists only as an
+# intermediate parent (`signer/` above `signer/client-tokens/`) is owned and sealed exactly like
+# a leaf one, whatever order the rows are in.
 prepare_folders() {
-  local index service dir
+  local index relative dir part
+  local -a parts
   for index in "${!names[@]}"; do
-    service="${services[$index]}"
-    dir="$(dirname -- "$CREDENTIAL_FILES_DIR/$service/${files[$index]}")"
-    case "$dir" in
-      "$CREDENTIAL_FILES_DIR/"*) ;;
-      *) fail "refusing a destination outside the credential folder" ;;
+    relative="$(dirname -- "${services[$index]}/${files[$index]}")"
+    case "$relative" in
+      /* | .. | ../* | */../* | */..)
+        fail "refusing a destination outside the credential folder"
+        ;;
     esac
-    mkdir -p -- "$dir"
-    chown "${uids[$index]}" "$dir"
-    chmod "$SERVICE_DIR_WORK_MODE" "$dir"
+
+    dir="$CREDENTIAL_FILES_DIR"
+    parts=()
+    IFS=/ read -r -a parts <<<"$relative"
+    for part in "${parts[@]}"; do
+      [[ -n "$part" && "$part" != "." ]] || continue
+      dir="$dir/$part"
+      mkdir -p -- "$dir"
+      chown "${uids[$index]}" "$dir"
+      chmod "$SERVICE_DIR_WORK_MODE" "$dir"
+    done
   done
 }
 

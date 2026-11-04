@@ -193,6 +193,26 @@ test("each listed credential becomes a 0400 file owned by its service UID", asyn
   assert.equal(serviceDir.uid, uid);
 });
 
+test("a folder that exists only as a parent is owned and sealed like a leaf one", async () => {
+  // signer/ here exists only because signer/client-tokens/ is below it. If it were left
+  // root-owned at 0755, another container could list the signer's folder.
+  const fake = await fakes({ "czar-alpha-signer-token-server": "fixture-token-value" });
+  const run = await runFetch(
+    fake,
+    `czar-alpha-signer-token-server signer client-tokens/server ${uid} required\n`,
+  );
+  assert.equal(run.status, 0, run.stderr);
+  for (const folder of [join(run.dir, "signer"), join(run.dir, "signer", "client-tokens")]) {
+    const stats = statSync(folder);
+    assert.equal(stats.mode & 0o777, 0o500, `${folder} is not 0500`);
+    assert.equal(stats.uid, uid, `${folder} is not owned by the service UID`);
+  }
+  assert.equal(
+    readFileSync(join(run.dir, "signer", "client-tokens", "server"), "utf8"),
+    "fixture-token-value",
+  );
+});
+
 test("nothing is printed to stdout, and no value or token reaches stderr", async () => {
   const fake = await fakes({ "czar-alpha-db-password-server": "fixture-db-value" });
   const run = await runFetch(
