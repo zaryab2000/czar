@@ -163,6 +163,71 @@ describe("SN-4 unpaid lead probe", () => {
     expect(await state(dns)).toEqual({ state: "rejected", reject_reason: "probe-failed" });
   });
 
+  it("rejects a cross-host redirect even when the target also answers 402", async () => {
+    const leadId = await seedLead(7, "https://redirect.example");
+    const connected: string[] = [];
+    const transport: Transport = async (target) => {
+      connected.push(target.hostname);
+      return target.hostname === "redirect.example"
+        ? response(302, { location: "https://other.example/" })
+        : response(402, { "payment-required": challenge() });
+    };
+    await probeLeads(getPool(), loadConfig(), AT, fetchWith(transport));
+    expect(connected).toEqual(["redirect.example", "other.example"]);
+    expect(await state(leadId)).toEqual({ state: "rejected", reject_reason: "unsafe-origin" });
+  });
+
+  it("blocks a forbidden HTTPS port and a private address before connecting", async () => {
+    const connected: string[] = [];
+    const transport: Transport = async (target) => {
+      connected.push(target.hostname);
+      return response(402, { "payment-required": challenge() });
+    };
+    const port = await seedLead(8, "https://port.example:8443");
+    await probeLeads(getPool(), loadConfig(), AT, fetchWith(transport));
+    expect(await state(port)).toEqual({ state: "rejected", reject_reason: "unsafe-origin" });
+    const privateAddress = await seedLead(9, "https://169.254.169.254");
+    await probeLeads(getPool(), loadConfig(), AT, fetchWith(transport));
+    expect(await state(privateAddress)).toEqual({
+      state: "rejected",
+      reject_reason: "unsafe-origin",
+    });
+    expect(connected).toEqual([]);
+  });
+
+  it("classifies redirect loops and oversized or malformed 402 replies", async () => {
+    const loop = await seedLead(10, "https://loop.example");
+    await probeLeads(
+      getPool(),
+      loadConfig(),
+      AT,
+      fetchWith(async (target) => response(302, { location: `${target.path}next` })),
+    );
+    expect(await state(loop)).toEqual({ state: "rejected", reject_reason: "unsafe-origin" });
+    const oversized = await seedLead(11, "https://large.example");
+    await probeLeads(
+      getPool(),
+      loadConfig(),
+      AT,
+      fetchWith(async () => ({
+        status: 402,
+        headers: { "payment-required": challenge() },
+        body: (async function* () {
+          yield Buffer.alloc(65_537);
+        })(),
+      })),
+    );
+    expect(await state(oversized)).toEqual({ state: "rejected", reject_reason: "probe-failed" });
+    const malformed = await seedLead(12, "https://malformed.example");
+    await probeLeads(
+      getPool(),
+      loadConfig(),
+      AT,
+      fetchWith(async () => response(402, { "payment-required": "not-base64" })),
+    );
+    expect(await state(malformed)).toEqual({ state: "rejected", reject_reason: "probe-failed" });
+  });
+
   it("does not publish private identifiers from a queued lead as a system card", async () => {
     const leadId = await seedLead(6, "https://obs_private.example");
     await probeLeads(
