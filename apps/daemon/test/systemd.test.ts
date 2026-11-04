@@ -1,8 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { install, renderUserUnit, Systemctl, uninstall, update } from "@czar/daemon";
-import { Loginctl } from "@czar/daemon";
+import { install, Loginctl, renderUserUnit, Systemctl, uninstall, update } from "@czar/daemon";
 import { fakeSystemctl, linuxInstallDeps } from "./support.ts";
 
 const GOLDEN = fileURLToPath(new URL("./golden/czar-daemon.service", import.meta.url));
