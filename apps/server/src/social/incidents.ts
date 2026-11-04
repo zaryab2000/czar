@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import type { Config } from "@czar/config";
 import type { RankingDecision } from "@czar/schemas";
 import type { Pool, PoolClient } from "pg";
@@ -142,16 +142,24 @@ function id(prefix: string): string {
   return randomId(prefix, { bytes: randomBytes });
 }
 
-async function systemPost(
-  client: PoolClient,
-  threadId: string,
-  template: string,
-  values: Record<string, string | number>,
-  actionId: string,
-  now: Date,
-): Promise<void> {
+async function systemPost(args: {
+  client: PoolClient;
+  threadId: string;
+  template: string;
+  values: Record<string, string | number>;
+  entityId: string;
+  transition: "opened" | "closed";
+  now: Date;
+}): Promise<void> {
+  const { client, threadId, template, values, entityId, transition, now } = args;
   const card = { template, values };
   if (!isPublicContentSafe(card, [])) return;
+  const actionId = createHash("sha256")
+    .update("system")
+    .update(template)
+    .update(entityId)
+    .update(transition)
+    .digest("hex");
   await client.query(
     `INSERT INTO social_posts(post_id,thread_id,author_id,kind,card,action_id,created_at)
      VALUES($1,$2,NULL,'system',$3::jsonb,$4,$5) ON CONFLICT(action_id) DO NOTHING`,
@@ -194,11 +202,11 @@ async function opened(
       threadId,
     ],
   );
-  await systemPost(
+  await systemPost({
     client,
     threadId,
-    "system.incident.opened",
-    {
+    template: "system.incident.opened",
+    values: {
       distinctOwners,
       negativeUnits,
       serviceId: key.serviceId,
@@ -206,9 +214,10 @@ async function opened(
       taskClass: key.taskClass,
       windowDays,
     },
-    `${incidentId}:opened`,
+    entityId: incidentId,
+    transition: "opened",
     now,
-  );
+  });
   await client.query(
     `INSERT INTO outbox_events(name,payload,delivered_at)
      VALUES('social.incident.opened',$1::jsonb,now())`,
@@ -233,17 +242,18 @@ async function closed(
     incident.thread_id,
     now,
   ]);
-  await systemPost(
+  await systemPost({
     client,
-    incident.thread_id,
-    "system.incident.closed",
-    {
+    threadId: incident.thread_id,
+    template: "system.incident.closed",
+    values: {
       closeReason: reason,
       positiveUnits,
     },
-    `${incident.incident_id}:closed`,
+    entityId: incident.incident_id,
+    transition: "closed",
     now,
-  );
+  });
   await client.query(
     `INSERT INTO outbox_events(name,payload,delivered_at)
      VALUES('social.incident.closed',$1::jsonb,now())`,

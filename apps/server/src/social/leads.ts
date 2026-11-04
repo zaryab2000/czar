@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import type { Config } from "@czar/config";
 import {
   createSafeFetchFromConfig,
@@ -127,11 +127,17 @@ async function saveResult(
         },
       };
       if (isPublicContentSafe(card, [], lead.origin)) {
+        const actionId = createHash("sha256")
+          .update("system")
+          .update("system.lead.probed")
+          .update(lead.lead_id)
+          .update("probed")
+          .digest("hex");
         await client.query(
           `INSERT INTO social_posts(post_id,thread_id,author_id,kind,card,action_id,created_at)
            VALUES($1,$2,NULL,'system',$3::jsonb,$4,$5)
            ON CONFLICT(action_id) DO NOTHING`,
-          [postId, lead.thread_id, JSON.stringify(card), `${lead.lead_id}:probed`, now],
+          [postId, lead.thread_id, JSON.stringify(card), actionId, now],
         );
         await client.query(
           "UPDATE social_threads SET contributions=contributions+1,revision=revision+1 WHERE thread_id=$1",

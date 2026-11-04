@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { loadConfig } from "@czar/config";
 import { describe, expect, it } from "vitest";
 import { evaluateIncidents, openIncidentsFor } from "#src/social/incidents";
@@ -117,6 +118,17 @@ describe("SN-4 incident evidence", () => {
     let incidents = await openIncidentsFor(getPool(), NETWORK, [SERVICE], "web-search");
     expect(incidents).toHaveLength(1);
     expect(incidents[0]).toMatchObject({ distinctOwners: 3, negativeUnits: 3 });
+    const actionId = createHash("sha256")
+      .update("system")
+      .update("system.incident.opened")
+      .update(incidents[0]!.incidentId)
+      .update("opened")
+      .digest("hex");
+    const systemPosts = await getPool().query(
+      "SELECT action_id FROM social_posts WHERE action_id=$1",
+      [actionId],
+    );
+    expect(systemPosts.rowCount).toBe(1);
     await observation(1, 4);
     await evaluateIncidents(getPool(), config, AT);
     incidents = await openIncidentsFor(getPool(), NETWORK, [SERVICE], "web-search");

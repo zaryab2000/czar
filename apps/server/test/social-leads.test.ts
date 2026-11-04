@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { loadConfig } from "@czar/config";
 import { createSafeFetch, encodeBase64Json, type Transport } from "@czar/x402";
 import { describe, expect, it } from "vitest";
@@ -8,6 +9,15 @@ const getPool = setupDatabase();
 const NETWORK = "eip155:5042002";
 const ORIGIN = "https://seller.example";
 const AT = new Date("2026-11-05T00:00:00.000Z");
+
+function probedActionId(leadId: string): string {
+  return createHash("sha256")
+    .update("system")
+    .update("system.lead.probed")
+    .update(leadId)
+    .update("probed")
+    .digest("hex");
+}
 
 async function seedLead(index: number, origin = ORIGIN): Promise<string> {
   const userId = `usr_${String(index).padStart(26, "0")}`;
@@ -105,7 +115,7 @@ describe("SN-4 unpaid lead probe", () => {
       { leadId, origin: ORIGIN },
     ]);
     const posts = await getPool().query("SELECT card FROM social_posts WHERE action_id=$1", [
-      `${leadId}:probed`,
+      probedActionId(leadId),
     ]);
     expect(posts.rows[0]?.card["template"]).toBe("system.lead.probed");
   });
@@ -163,7 +173,7 @@ describe("SN-4 unpaid lead probe", () => {
     );
     const posts = await getPool().query<{ card: Record<string, unknown> }>(
       "SELECT card FROM social_posts WHERE action_id=$1",
-      [`${leadId}:probed`],
+      [probedActionId(leadId)],
     );
     expect(posts.rows.every((row) => !JSON.stringify(row.card).includes("obs_private"))).toBe(true);
   });
