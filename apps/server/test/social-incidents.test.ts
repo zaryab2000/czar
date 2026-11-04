@@ -266,6 +266,12 @@ describe("SN-4 incident evidence", () => {
         (item) => item.threadId === ids.thread_id,
       ),
     ).toBe(false);
+    await getPool().query(
+      `UPDATE objectives SET submission=jsonb_set(submission,'{taskSpec,subjects}',
+        '[{"label":null}]'::jsonb) WHERE user_id=$1`,
+      [ownerId(16)],
+    );
+    expect(await getIncident(getPool(), ids.incident_id)).toBeNull();
     const posts = await getPool().query(
       `SELECT post_id FROM social_posts WHERE card->>'template'='system.incident.opened'
        AND card->'values'->>'serviceId'=$1`,
