@@ -92,4 +92,20 @@ describe("SN-4 routes into buying", () => {
     expect(chooseWithLessons([first, outside], lessons, 0.05).selected.service_id).toBe(A);
     expect(chooseWithLessons([first], lessons, 0.05).selected.service_id).toBe(A);
   });
+
+  it("does not let a preference override the incident ordering band", () => {
+    const clean = ranked(B, 1, 0.8);
+    const flagged = { ...ranked(A, 2, 0.82), badges: ["incident-open"] };
+    const lessons = [
+      {
+        lessonId: "les_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
+        serviceId: A,
+        handle: "Rep-ABCD",
+        proposition: "prefer" as const,
+        taskClass: "data-json.search",
+        strength: 1,
+      },
+    ];
+    expect(chooseWithLessons([clean, flagged], lessons, 0.05).selected.service_id).toBe(B);
+  });
 });
