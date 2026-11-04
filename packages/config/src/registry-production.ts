@@ -6,6 +6,7 @@
 import type { ParameterSpec } from "./types.ts";
 
 const SCR_170 = "docs/specs/06-review/change-requests/SCR-170-public-alpha-cloud-deployment.md";
+const CZ_20 = "docs/specs/04-components/server/server-supply-side.md";
 
 export const PRODUCTION_PARAMETERS = [
   // Lane A: deploy — the cloud machine, its files and the recorded deployment.
@@ -185,5 +186,23 @@ export const PRODUCTION_PARAMETERS = [
 
   // Lane D: daemon — no production keys yet.
 
-  // Lane E: merchants — no production keys yet (the supply tasks add their own here).
+  // Lane E: merchants — the `czar-spot` public data source (D49, the PM-041 ruling).
+  {
+    key: "merchants.spotSourceUrl",
+    type: "string",
+    default: "https://api.coinbase.com/v2/prices/{pair}/spot",
+    unit: "url",
+    reason: "D49 public free source, chosen in the PM-041 ruling",
+    source: `${CZ_20}:64`,
+    notes:
+      "`{pair}` is replaced by one entry of merchants.spotPairs; keyless, no header or query identifies Czar",
+  },
+  {
+    key: "merchants.spotPairs",
+    type: "string[]",
+    default: ["BTC-USD", "ETH-USD", "USDC-USD"],
+    unit: "",
+    reason: "pairs the cache refreshes",
+    source: `${CZ_20}:60`,
+  },
 ] as const satisfies readonly ParameterSpec[];

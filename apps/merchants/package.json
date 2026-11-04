@@ -4,11 +4,16 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./alpha-services": "./src/alpha-services.ts",
+    "./extract": "./src/extract/index.ts",
     "./facilitator": "./src/facilitator.ts",
+    "./index-entry": "./src/index-entry.ts",
     "./payment-id-store": "./src/payment-id-store.ts",
     "./postgres-payment-id-store": "./src/postgres-payment-id-store.ts",
     "./runtime": "./src/runtime.ts",
-    "./search": "./src/search/index.ts"
+    "./search": "./src/search/index.ts",
+    "./spot": "./src/spot/index.ts",
+    "./vanilla-route": "./src/vanilla-route.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",

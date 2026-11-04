@@ -1213,6 +1213,16 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 30,
   },
   {
+    "key": "merchants.spotPairs",
+    "source": "default",
+    "unit": "",
+    "value": [
+      "BTC-USD",
+      "ETH-USD",
+      "USDC-USD",
+    ],
+  },
+  {
     "key": "merchants.spotPriceAtomic",
     "source": "default",
     "unit": "atomic",
@@ -1223,6 +1233,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "source": "default",
     "unit": "s",
     "value": 300,
+  },
+  {
+    "key": "merchants.spotSourceUrl",
+    "source": "default",
+    "unit": "url",
+    "value": "https://api.coinbase.com/v2/prices/{pair}/spot",
   },
   {
     "key": "merchants.sweepMaxFeeAtomic",
