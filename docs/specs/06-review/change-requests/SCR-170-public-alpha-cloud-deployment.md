@@ -151,7 +151,7 @@
   - migrations `0023` to `0029`
 - **Production uses:**
   - spec-change numbers **SCR-170 to SCR-189**
-  - migrations **`0030` to `0049`**. `0030` is taken by PM-016: `app_passkeys.rp_id` has `CHECK (rp_id = 'localhost')` (`0007-app-passkeys.sql:21`), which `0030` replaces with a check that the value is a lower-case host name.
+  - migrations **`0030` to `0049`**. `0030` is taken by PM-016: `passkey_credentials.rp_id` has `CHECK (rp_id = 'localhost')` (`0007-app-passkeys.sql:21`), which `0030` replaces with a check that the value is a lower-case host name.
   - Production migrations never reference social tables.
 - **Config keys:**
   - Every new key added in this window goes in a new file, `packages/config/src/registry-production.ts`, as `export const PRODUCTION_PARAMETERS = [...] as const satisfies readonly ParameterSpec[]`.
@@ -184,7 +184,16 @@
   - For each one: `git fetch -q origin +refs/heads/<ref>:refs/remotes/origin/<ref>`, then
     `git diff --name-only origin/build-v1...origin/<ref> > /tmp/social-files`, then
     `git diff --name-only origin/prod/integration...HEAD | grep -Fxf /tmp/social-files`.
-  - Any output means stop: that production PR waits until the social package it overlaps has merged, and then rebases.
+  - **A hit in a reserved source file means stop:** that production PR waits until the social package it overlaps has merged, then rebases.
+  - **A hit in one of the shared append-only files below is not a reason to wait.** Both sides add entries in different places; the conflict is mechanical and the resolution is fixed:
+
+| Shared file | Why both touch it | Resolution |
+|---|---|---|
+| `packages/config/src/registry.ts` | production adds the import and the spread at the top (PM-061); social adds keys inside `PARAMETERS` | keep both sides |
+| `packages/config/test/__snapshots__/loader.test.ts.snap` | both add keys | regenerate with `pnpm --filter @czar/config exec vitest run -u`, never hand-merge |
+| `packages/config/src/registry-production.ts` | two production lanes add keys in their own sections | keep both sides' entries, then regenerate the snapshot |
+| `apps/server/test/migrate.test.ts` | every migration task adds a test for its own migration | keep both tests; they assert different migration numbers |
+
   - With no social branch pushed yet, the reserved-path list above is the check.
 - **Merging into `build-v1`:**
   - Production reaches `build-v1` through `prod/integration` in **weekly batch PRs**. Zaryab merges each one.
