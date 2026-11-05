@@ -3,7 +3,10 @@ import type { AppPlan } from "@czar/schemas";
 
 const PLAN_ID = `pln_${"A".repeat(26)}`;
 const SELECTED = `svc_${"b".repeat(32)}`;
+const AVOIDED = `svc_${"a".repeat(32)}`;
 const LESSON_ID = `les_${"A".repeat(26)}`;
+const INCIDENT_LINE =
+  "This supplier has an open incident: several owners recently reported bad outcomes with it. Czar still ranks it as the best available. Approve to use it anyway.";
 
 function approvalPlan(incidentOpen: boolean): AppPlan {
   return {
@@ -42,6 +45,7 @@ function approvalPlan(incidentOpen: boolean): AppPlan {
               lessonId: LESSON_ID,
               handle: "Rep-ABCD",
               proposition: "avoid",
+              serviceId: AVOIDED,
               taskClass: "data-json.search",
             },
           ],
@@ -95,21 +99,22 @@ async function mockApproval(page: Page, plan: AppPlan): Promise<void> {
   );
 }
 
-test("approval never attributes an avoid lesson to the selected supplier without a bound id", async ({
+test("approval attributes an avoid lesson to its own supplier, not the chosen supplier", async ({
   page,
 }) => {
   await mockApproval(page, approvalPlan(false));
   await page.goto(`/approve/${PLAN_ID}`);
   await expect(page.getByRole("heading", { name: "Review this plan" })).toBeVisible();
   await expect(page.getByText(`Payee: selected.example`)).toBeVisible();
+  await expect(page.getByText(new RegExp(`that ${AVOIDED} did not`))).toBeVisible();
   await expect(page.getByText(new RegExp(`that ${SELECTED} did not`))).toHaveCount(0);
+  await expect(page.getByText(INCIDENT_LINE)).toHaveCount(0);
 });
 
 test("approval warns about the selected plan's open incident", async ({ page }) => {
   await mockApproval(page, approvalPlan(true));
   await page.goto(`/approve/${PLAN_ID}`);
   await expect(page.getByRole("heading", { name: "Review this plan" })).toBeVisible();
-  await expect(
-    page.getByText(/open incident|bad outcomes with this supplier recently/i),
-  ).toBeVisible();
+  await expect(page.getByText(INCIDENT_LINE, { exact: true })).toBeVisible();
+  await expect(page.getByText(/other owners reported bad outcomes/i)).toHaveCount(0);
 });
