@@ -19,6 +19,7 @@ import {
   type SignerNetwork,
   type StoredPlan,
   type TransactionPreparer,
+  type AuditRow,
   type AuditSink,
   type JobView,
 } from "../src/index.ts";
@@ -149,6 +150,10 @@ export interface State {
   slowWithdrawTrigger: "api-down" | "closed-dust" | null;
   pocketSpendAfterObservation: boolean;
   overdueManualReturnFacts: OverdueManualReturnFacts;
+  /** SCR-180: EIP-3009 nonces of the Gateway transfers the indexer has seen (lowercase). */
+  indexedNanoNonces: Set<string>;
+  /** SCR-180: EIP-3009 nonces of the x402 authorizations the indexer has seen used (lowercase). */
+  usedAuthorizationNonces: Set<string>;
 }
 
 export function defaultState(pocket: Address): State {
@@ -276,12 +281,57 @@ export function defaultState(pocket: Address): State {
       returnOverdue: false,
       manualReturnRecordedAfter: true,
     },
+    indexedNanoNonces: new Set(),
+    usedAuthorizationNonces: new Set(),
   };
 }
 
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
-export function fakeProjection(state: State): Projection {
+/** Spend fields of a signed audit row, as the service recorded them (SCR-180 §2). */
+type RecordedSpend = {
+  readonly kind: string;
+  readonly pocket?: string;
+  readonly vault?: string;
+  readonly payTo?: string;
+  readonly nonce: string;
+  readonly validBefore: bigint;
+  readonly envelopeId: bigint;
+  readonly stepIndex: number;
+  readonly amount: bigint;
+};
+
+/**
+ * SCR-180 §2 over the in-memory audit: signed rows of `kind` whose payment the fake indexer has not seen
+ * (`indexed`) and whose `validBefore` is still ahead; one entry per EIP-3009 nonce, at its largest amount.
+ */
+function pendingOf(
+  rows: readonly AuditRow[],
+  kind: string,
+  match: (spend: RecordedSpend) => boolean,
+  indexed: ReadonlySet<string>,
+  now: number,
+): RecordedSpend[] {
+  const byNonce = new Map<string, RecordedSpend>();
+  for (const row of rows) {
+    const spend = (row as { spend?: RecordedSpend }).spend;
+    if (row.outcome !== "signed" || row.kind !== kind || spend === undefined) continue;
+    if (!match(spend) || indexed.has(spend.nonce.toLowerCase())) continue;
+    if (BigInt(now) >= spend.validBefore) continue;
+    const seen = byNonce.get(spend.nonce.toLowerCase());
+    if (seen === undefined || seen.amount < spend.amount)
+      byNonce.set(spend.nonce.toLowerCase(), spend);
+  }
+  return [...byNonce.values()];
+}
+
+const sumAmounts = (items: readonly RecordedSpend[]) =>
+  items.reduce((total, item) => total + item.amount, 0n);
+
+export function fakeProjection(
+  state: State,
+  auditRows: () => readonly AuditRow[] = () => [],
+): Projection {
   return {
     freezeState: async () => ({
       frozen: state.frozen,
@@ -319,6 +369,30 @@ export function fakeProjection(state: State): Projection {
     slowWithdrawTrigger: async () => state.slowWithdrawTrigger,
     pocketSpendAfterObservation: async () => state.pocketSpendAfterObservation,
     overdueManualReturnFacts: async () => state.overdueManualReturnFacts,
+    pendingNanoSpent: async (pocket, payTo, now) => {
+      const pending = pendingOf(
+        auditRows(),
+        "gateway-nano",
+        (spend) => same(spend.pocket ?? "", pocket),
+        state.indexedNanoNonces,
+        now,
+      );
+      return {
+        step: sumAmounts(pending.filter((item) => same(item.payTo ?? "", payTo))),
+        pocket: sumAmounts(pending),
+      };
+    },
+    pendingCalls: async (vault, envelopeId, stepIndex, now) =>
+      pendingOf(
+        auditRows(),
+        "usdc-3009",
+        (spend) =>
+          same(spend.vault ?? "", vault) &&
+          spend.envelopeId === envelopeId &&
+          spend.stepIndex === stepIndex,
+        state.usedAuthorizationNonces,
+        now,
+      ).length,
   };
 }
 
@@ -400,7 +474,10 @@ export async function harness(
   let nowMs = NOW * 1000;
   const prepared: TransactionSerializableEIP1559[] = [];
   const network = options.network ?? NETWORK;
-  const projection = Object.assign(fakeProjection(state), options.projection ?? {});
+  const projection = Object.assign(
+    fakeProjection(state, () => audit.rows),
+    options.projection ?? {},
+  );
   const signer = createSigner({
     backend,
     projection,

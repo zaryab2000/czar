@@ -276,4 +276,117 @@ export const PRODUCTION_PARAMETERS = [
     source: `${CZ_20}:178`,
     notes: "CZ-20 §5.11 step 1 names the watch, not its cadence; default from the PM-046 task",
   },
+
+  // The test-merchant lab (PM-043, T-106): one `enabled` switch per service and each profile's parameter, per CZ-20 §5.8a.
+  {
+    key: "merchants.lab.lab-search-steady.enabled",
+    type: "boolean",
+    default: true,
+    unit: "",
+    reason:
+      "switches this lab service off on its own (CZ-20 §5.8a); the lab as a whole is merchants.lab.enabled",
+    source: `${CZ_20}:164`,
+    notes: "profile row at line 157 of the CZ-20 §5.8a table",
+  },
+  {
+    key: "merchants.lab.lab-search-flaky.enabled",
+    type: "boolean",
+    default: true,
+    unit: "",
+    reason:
+      "switches this lab service off on its own (CZ-20 §5.8a); the lab as a whole is merchants.lab.enabled",
+    source: `${CZ_20}:164`,
+    notes: "profile row at line 158 of the CZ-20 §5.8a table",
+  },
+  {
+    key: "merchants.lab.lab-search-slow.enabled",
+    type: "boolean",
+    default: true,
+    unit: "",
+    reason:
+      "switches this lab service off on its own (CZ-20 §5.8a); the lab as a whole is merchants.lab.enabled",
+    source: `${CZ_20}:164`,
+    notes: "profile row at line 159 of the CZ-20 §5.8a table",
+  },
+  {
+    key: "merchants.lab.lab-extract-schemabreak.enabled",
+    type: "boolean",
+    default: true,
+    unit: "",
+    reason:
+      "switches this lab service off on its own (CZ-20 §5.8a); the lab as a whole is merchants.lab.enabled",
+    source: `${CZ_20}:164`,
+    notes: "profile row at line 160 of the CZ-20 §5.8a table",
+  },
+  {
+    key: "merchants.lab.lab-extract-drift.enabled",
+    type: "boolean",
+    default: true,
+    unit: "",
+    reason:
+      "switches this lab service off on its own (CZ-20 §5.8a); the lab as a whole is merchants.lab.enabled",
+    source: `${CZ_20}:164`,
+    notes: "profile row at line 161 of the CZ-20 §5.8a table",
+  },
+  {
+    key: "merchants.lab.lab-spot-payee-swap.enabled",
+    type: "boolean",
+    default: true,
+    unit: "",
+    reason:
+      "switches this lab service off on its own (CZ-20 §5.8a); the lab as a whole is merchants.lab.enabled",
+    source: `${CZ_20}:164`,
+    notes: "profile row at line 162 of the CZ-20 §5.8a table",
+  },
+  {
+    key: "merchants.lab.lab-search-flaky.failRate",
+    type: "number",
+    default: 0.3,
+    unit: "fraction of calls",
+    reason:
+      "share of calls whose handler fails with a 5xx, unsettled and not charged (CZ-20 §5.8a)",
+    source: `${CZ_20}:158`,
+  },
+  {
+    key: "merchants.lab.lab-search-slow.delayMs",
+    type: "integer",
+    default: 6000,
+    unit: "ms",
+    reason:
+      "delivery delay, inside merchants.maxTimeoutSeconds and merchants.handlerTimeoutMs (CZ-20 §5.8a)",
+    source: `${CZ_20}:159`,
+  },
+  {
+    key: "merchants.lab.lab-extract-schemabreak.schemaBreakRate",
+    type: "number",
+    default: 0.2,
+    unit: "fraction of calls",
+    reason: "share of calls returning JSON that lacks `text` (CZ-20 §5.8a)",
+    source: `${CZ_20}:160`,
+  },
+  {
+    key: "merchants.lab.lab-extract-drift.driftRate",
+    type: "number",
+    default: 0.33,
+    unit: "fraction of 402s",
+    reason: "share of live 402s quoting a price above the index entry (CZ-20 §5.8a)",
+    source: `${CZ_20}:161`,
+  },
+  {
+    key: "merchants.lab.lab-extract-drift.driftBps",
+    type: "integer",
+    default: 2000,
+    unit: "bps",
+    reason: "how far above the index price a drifted 402 quotes: +2,000 bps is +20% (CZ-20 §5.8a)",
+    source: `${CZ_20}:161`,
+  },
+  {
+    key: "merchants.lab.lab-spot-payee-swap.payeeSwapEveryDays",
+    type: "integer",
+    default: 7,
+    unit: "days",
+    reason:
+      "the live 402 changes between the indexed payTo and a second Czar-owned payTo every this many days (CZ-20 §5.8a)",
+    source: `${CZ_20}:162`,
+  },
 ] as const satisfies readonly ParameterSpec[];

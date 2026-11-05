@@ -16,6 +16,12 @@ import {
   usdcEvents,
 } from "#src/external-abis";
 import { EXTERNAL_ADDRESSES } from "#src/external-events";
+import {
+  cloudConfigPointer,
+  cloudDatabaseConfig,
+  loadCloudIndexerConfig,
+  refuseUnsafeCloudConfig,
+} from "#src/cloud-config";
 
 const startBlockValue = process.env["CZAR_INDEXER_START_BLOCK"];
 if (startBlockValue !== undefined && !/^\d+$/.test(startBlockValue)) {
@@ -30,10 +36,17 @@ if (!Number.isSafeInteger(startBlock)) {
 
 const localConfigPath =
   process.env["CZAR_LOCAL_CONFIG"] ?? new URL("../../../env/local.toml", import.meta.url);
-const config = loadConfig({
-  envFile: parseParameterToml(readFileSync(localConfigPath, "utf8")),
-  env: parameterEnvironment(process.env),
-});
+// SCR-170 §3 (a): taken only when the pointer CZAR_CLOUD_CONFIG is set; unset, nothing below changes.
+const cloudConfigPath = cloudConfigPointer(process.env);
+const config =
+  cloudConfigPath === undefined
+    ? loadConfig({
+        envFile: parseParameterToml(readFileSync(localConfigPath, "utf8")),
+        env: parameterEnvironment(process.env),
+      })
+    : loadCloudIndexerConfig(cloudConfigPath, process.env);
+if (cloudConfigPath !== undefined)
+  refuseUnsafeCloudConfig(config, resolveIndexerRpcUrl(process.env["CZAR_INDEXER_RPC_URL"]));
 const MS_PER_SECOND = 1000;
 const deploymentPath =
   process.env["CZAR_INDEXER_DEPLOYMENT_PATH"] ??
@@ -56,6 +69,7 @@ const factoryAddress = deployment.CzarVaultFactory as `0x${string}`;
 const openEvidenceAddress = deployment.OpenEvidenceLog as `0x${string}`;
 
 export default createConfig({
+  ...(cloudConfigPath === undefined ? {} : { database: cloudDatabaseConfig(config, process.env) }),
   chains: {
     arcTestnet: {
       id: ARC_TESTNET_CHAIN_ID,

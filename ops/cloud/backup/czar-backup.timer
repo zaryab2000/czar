@@ -1,0 +1,12 @@
+[Unit]
+Description=Czar: nightly database backup at 02:30 UTC (SCR-170 §5)
+Documentation=https://github.com/zaryab2000/czar/blob/main/ops/cloud/README.md
+
+[Timer]
+OnCalendar=*-*-* 02:30:00 UTC
+# A machine that was off at 02:30 runs the missed backup at the next boot.
+Persistent=true
+Unit=czar-backup.service
+
+[Install]
+WantedBy=timers.target

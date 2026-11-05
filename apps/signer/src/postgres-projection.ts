@@ -10,6 +10,7 @@ import {
   type Hash,
   type PublicClient,
 } from "viem";
+import { pendingCallCount, pendingNanoTotals, type AuditSpendRow } from "./pending.ts";
 import type { AuditQueryExecutor } from "./postgres-audit.ts";
 import type {
   AutonomyView,
@@ -186,6 +187,8 @@ function indexerProjection(
   | "pocket"
   | "pocketBalances"
   | "nanoSpent"
+  | "pendingNanoSpent"
+  | "pendingCalls"
   | "slowWithdrawTrigger"
   | "pocketSpendAfterObservation"
   | "overdueManualReturnFacts"
@@ -200,6 +203,9 @@ function indexerProjection(
     },
     pocketBalances: (address) => pocketBalances(input, sql, address),
     nanoSpent: (pocket, payTo) => nanoSpend(sql, pocket, payTo),
+    pendingNanoSpent: (pocket, payTo, now) => pendingNanoSpend(sql, pocket, payTo, now),
+    pendingCalls: (vault, envelopeId, stepIndex, now) =>
+      pendingCallsOf(sql, vault, envelopeId, stepIndex, now),
     slowWithdrawTrigger: (address) => slowWithdrawTrigger(input, sql, address),
     pocketSpendAfterObservation: (pocket, observedAt) =>
       pocketSpendAfterObservation(input, sql, pocket, observedAt),
@@ -544,6 +550,75 @@ async function nanoSpend(sql: Sql, pocket: Address, payTo: Address) {
     step: BigInt(String(stepRows.rows[0]?.["total"] ?? "0")),
     pocket: BigInt(String(pocketRows.rows[0]?.["total"] ?? "0")),
   };
+}
+
+/**
+ * SCR-180 §2 audit prefilter: drops rows whose `validBefore` is a clean decimal at or before `now`. A row whose
+ * `validBefore` is missing or malformed is kept, so `pending.ts` sees it and refuses.
+ */
+const stillValid = (param: string) => `CASE
+         WHEN a.object_ids->0->>'validBefore' ~ '^(0|[1-9][0-9]{0,77})$'
+         THEN (a.object_ids->0->>'validBefore')::numeric > ${param}::numeric
+         ELSE true END`;
+
+const toSpendRows = (rows: SqlRows["rows"]): AuditSpendRow[] =>
+  rows.map((row) => ({
+    ids: row["ids"],
+    amountAtomic: row["amount_atomic"],
+    // Anything but a definite `true` keeps the signature pending (counted), never drops it.
+    indexed: row["indexed"] === true,
+  }));
+
+/**
+ * SCR-180 §2 for `gateway-nano`: this signer's signed rows for the pocket's key, each with whether the indexer
+ * holds a transfer from the pocket with its EIP-3009 nonce in a status `nanoSpend` counts. One statement, so the
+ * audit rows and the indexed nonces come from one snapshot. `policy.ts` reads this before `nanoSpent`, so a
+ * transfer indexed in between is counted twice (refuses) rather than not at all.
+ */
+async function pendingNanoSpend(sql: Sql, pocket: Address, payTo: Address, now: number) {
+  const result = await sql(
+    `SELECT a.object_ids->0 AS ids, a.amount_atomic,
+       EXISTS (
+         SELECT 1 FROM gateway_transfers g
+         WHERE lower(g.from_address)=lower($2)
+           AND lower(g.nonce)=lower(a.object_ids->0->>'nonce')
+           AND g.status IN ('received','batched','confirmed','completed')
+       ) AS indexed
+     FROM audit a
+     WHERE a.action='signer:gateway-nano' AND a.outcome='signed'
+       AND lower(a.object_ids->0->>'keyRef')=lower($1)
+       AND ${stillValid("$3")}`,
+    [`K4:${pocket}`, pocket, now],
+  );
+  return pendingNanoTotals(toSpendRows(result.rows), { pocket, payTo }, now);
+}
+
+/**
+ * SCR-180 §2 for the expected-calls check: this signer's signed `usdc-3009` rows for the vault, each with whether
+ * the indexer has that authorization nonce `used` (the `usedCalls` source in `readEnvelope`).
+ */
+async function pendingCallsOf(
+  sql: Sql,
+  vault: Address,
+  envelopeId: bigint,
+  stepIndex: number,
+  now: number,
+) {
+  const result = await sql(
+    `SELECT a.object_ids->0 AS ids, a.amount_atomic,
+       EXISTS (
+         SELECT 1 FROM authorizations z
+         WHERE lower(z.vault)=lower($1)
+           AND lower(z.nonce)=lower(a.object_ids->0->>'nonce')
+           AND z.used=true
+       ) AS indexed
+     FROM audit a
+     WHERE a.action='signer:usdc-3009' AND a.outcome='signed'
+       AND lower(a.object_ids->0->>'vault')=lower($1)
+       AND ${stillValid("$2")}`,
+    [vault, now],
+  );
+  return pendingCallCount(toSpendRows(result.rows), { vault, envelopeId, stepIndex }, now);
 }
 
 function serverProjection(

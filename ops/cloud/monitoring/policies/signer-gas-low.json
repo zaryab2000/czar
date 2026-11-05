@@ -1,0 +1,28 @@
+{
+  "displayName": "czar-alpha: signer gas key low",
+  "combiner": "OR",
+  "conditions": [
+    {
+      "displayName": "Any signer_gas_low event in 5 minutes",
+      "conditionThreshold": {
+        "filter": "metric.type=\"logging.googleapis.com/user/czar_signer_gas_low_events\"",
+        "aggregations": [
+          {
+            "alignmentPeriod": "300s",
+            "perSeriesAligner": "ALIGN_DELTA",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "groupByFields": ["metric.label.key_id"]
+          }
+        ],
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 0,
+        "duration": "0s",
+        "trigger": { "count": 1 }
+      }
+    }
+  ],
+  "documentation": {
+    "mimeType": "text/markdown",
+    "content": "The signer logged signer_gas_low: a gas key is below its minimum after a refill attempt, or could not be refilled. The key_id label names the key (K3, K7, K8 or relayer).\n\n- Check the relayer balance, then the signer's gas-refill status."
+  }
+}

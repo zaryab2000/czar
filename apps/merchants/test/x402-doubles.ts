@@ -60,6 +60,8 @@ export function paymentHeader(options: {
   amount: string;
   id?: string;
   accepted?: Record<string, unknown>;
+  /** The paying address; defaults to `BUYER`. */
+  buyer?: string;
 }) {
   const extensions =
     options.id === undefined
@@ -75,7 +77,7 @@ export function paymentHeader(options: {
     payload: {
       signature: `0x${"11".repeat(65)}`,
       authorization: {
-        from: BUYER,
+        from: options.buyer ?? BUYER,
         to: PAY_TO,
         value: options.amount,
         validAfter: "0",
