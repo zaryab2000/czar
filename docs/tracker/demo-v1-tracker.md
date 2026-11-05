@@ -74,6 +74,8 @@
 
 The **Suggested owner** column is advice. Zaryab writes the final owner in **Owner**.
 
+- **Delegated to COL (2026-11-05):** Package 1 (audit merchants) and Package 2 (browser pages). The full builder prompt is in [`colleague-delegation-packages-1-2.md`](colleague-delegation-packages-1-2.md). COL works only on the rows marked `COL`.
+
 ### 2.2 Status values
 
 | Status | Meaning |
@@ -135,8 +137,8 @@ Execute in this order. Tasks in the same phase can run in parallel unless **Depe
 
 | Lane | Tasks | Suggested owner |
 |---|---|---|
-| A: browser task path | UX-01, UX-02, UX-03, UX-04, BR-02, BR-04 | CL |
-| B: audit merchants | MR-01 to MR-08, BR-01, BR-03 | COL (with CL review of money and payment parts) or CL |
+| A: browser task path | UX-01, BR-02, BR-04 (CL); UX-02, UX-03, UX-04, UX-06, BR-06 (COL, Package 2) | CL + COL |
+| B: audit merchants | MR-01, MR-02, MR-04, MR-05, MR-07, MR-08 (COL, Package 1); BR-01, BR-03, MR-06 (CL); MR-03 (Z) | COL + CL (CL reviews money-path PRs) |
 | C: social and selection seeding | SOC-02, SOC-05, SOC-06, SEL-01, SEL-04, DEMO-01, DEMO-03 | GPT |
 
 ### Phase 3: integrate, prove and rehearse
@@ -169,11 +171,11 @@ OPS-01..05 ──┼─> OPS-06..10 ─> OPS-11 (real payment) ─┐
 | ID | Task | Pri | Phase | Depends on | Suggested owner | Owner | Status | PR | Acceptance check | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|
 | UX-01 | **Server route for browser "New task":** create an objective from a signed-in web session, with no paired device. Takes a capability (`code-review`, labelled "Smart contract audit"), a description, and the contract source or address. Applies the same limits, validation and redaction rules SPEC-01 sets. Tests first | P0 | 2 | SPEC-01 | CL (Opus) | | todo | | Route tests pass. An objective created from a web session reaches `planning` and then `awaiting-approval` against a registered audit merchant | Today objectives come only from a paired device (`POST /v1/objectives`, `czar objective`, macOS) |
-| UX-02 | **"New task" page:** form fields per SPEC-01 (description; paste source or contract address; service type "Smart contract audit"; optional max budget). Linked from Home | P0 | 2 | UX-01 | CL | | todo | | Playwright test: submit the form and see the new task with status "Planning" | Keep the copy plain; no jargon |
-| UX-03 | **Task progress in the browser:** a browser-created task shows its state (planning → awaiting approval → paying → delivered) and links to the approval page | P0 | 2 | UX-01 | CL | | todo | | Playwright: the state updates without a manual reload (polling is fine) | Check what Home already shows before building |
-| UX-04 | **Result and rating for browser tasks:** the delivered audit shows in the result card (Home and Receipts) with Good and Bad rating | P0 | 2 | UX-01, MR-01 | CL | | todo | | Rating a browser-created task writes an effective rating (`/v1/app/ratings`) | `result-card.tsx` and `/v1/app/ratings` already exist; confirm they work for browser tasks |
+| UX-02 | **"New task" page:** form fields per SPEC-01 (description; paste source or contract address; service type "Smart contract audit"; optional max budget). Linked from Home | P0 | 2 | UX-01 | COL | COL | | Playwright test: submit the form and see the new task with status "Planning" | Keep the copy plain; no jargon |
+| UX-03 | **Task progress in the browser:** a browser-created task shows its state (planning → awaiting approval → paying → delivered) and links to the approval page | P0 | 2 | UX-01 | COL | COL | | Playwright: the state updates without a manual reload (polling is fine) | Check what Home already shows before building |
+| UX-04 | **Result and rating for browser tasks:** the delivered audit shows in the result card (Home and Receipts) with Good and Bad rating | P0 | 2 | UX-01, MR-01 | COL | COL | | Rating a browser-created task writes an effective rating (`/v1/app/ratings`) | `result-card.tsx` and `/v1/app/ratings` already exist; confirm they work for browser tasks |
 | UX-05 | **Fresh-user onboarding on the cloud domain:** passkey → vault → fund → limits → representative consent ("Share experiences") | P0 | 3 | OPS-11, SC-03 | Z + CL | | todo | | A brand-new user on a second device completes onboarding with no help | Covers the rp id on the real domain (PM-016) and gas for wallet creation |
-| UX-06 | **Funding help:** a short "get testnet USDC" step in onboarding (Circle faucet link and amounts), or pre-funded demo wallets | P1 | 3 | OPS-05 | CL | | todo | | A new user knows exactly how to fund their wallet in under 1 minute | The treasury top-up is deferred (DD-06) |
+| UX-06 | **Funding help:** a short "get testnet USDC" step in onboarding (Circle faucet link and amounts), or pre-funded demo wallets | P1 | 3 | OPS-05 | COL | COL | | A new user knows exactly how to fund their wallet in under 1 minute | The treasury top-up is deferred (DD-06) |
 | UX-07 | **Demo labels:** controlled representatives show "Czar test agent" (today the badge says "Controlled representative"), and merchants show "Run by Czar" | P1 | 2 | SPEC-03 | GPT | | todo | | Feed, thread and approval screens show the labels | Needed for honesty (DD-03). The wording change needs its spec line |
 
 ### C2. Czar backend and brain
@@ -185,7 +187,7 @@ OPS-01..05 ──┼─> OPS-06..10 ─> OPS-11 (real payment) ─┐
 | BR-03 | **Payer sends the contract to the merchant:** the paid request carries the contract source or address in the shape SPEC-02 defines (POST body). Money path, tests first | P0 | 2 | SPEC-02, MR-01 | CL (Opus) | | todo | | Payer tests: the merchant receives the source; payment is exactly the 402 price; no payment on a probe failure | Registered services already support POST bodies (`registered/index.ts` `body`) |
 | BR-04 | **Result check for audits:** accept a delivered report only if it matches the audit-report schema (SPEC-02) | P0 | 2 | SPEC-02 | CL | | todo | | Acceptance test: a valid report is accepted, a malformed one rejected, and a shallow but valid report accepted (the rating judges quality, not the check) | |
 | BR-05 | **Turn on the model provider:** `models.provider = "anthropic"`, key file name, per-user caps; confirm which server parts call the model | P0 | 1 | OPS-04 | CL | | todo | | `/health` is fine with the provider on, and one model call is logged within its cap | `env/cloud.example.toml` has it `none` today |
-| BR-06 | **Readable "why" lines:** the approval page explains the merchant choice in plain words (score, ratings count, incident or not) | P1 | 2 | BR-02 | CL | | todo | | Zaryab reads the approval page and understands the choice in 10 seconds | Demo storytelling |
+| BR-06 | **Readable "why" lines:** the approval page explains the merchant choice in plain words (score, ratings count, incident or not) | P1 | 2 | BR-02 | COL | COL | | Zaryab reads the approval page and understands the choice in 10 seconds | Demo storytelling |
 
 ### C3. Smart contracts and keys
 
@@ -240,14 +242,14 @@ OPS-01..05 ──┼─> OPS-06..10 ─> OPS-11 (real payment) ─┐
 
 | ID | Task | Pri | Phase | Depends on | Suggested owner | Owner | Status | PR | Acceptance check | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|
-| MR-01 | **Merchant A, "Czar Lab Quick Audit":** x402 route on Arc testnet USDC; takes contract source or address; returns a schema-valid but **shallow** report (generic findings); fast, cheap model | P0 | 2 | SPEC-02 | COL or CL | | todo | | Unpaid request → 402 with Arc testnet terms; paid request → schema-valid report in under 30 s | Must be honest-shallow, not broken: the rating judges it |
-| MR-02 | **Merchant B, "Czar Lab Deep Audit":** same interface; a thorough, severity-ranked report with fixes; stronger model | P0 | 2 | SPEC-02 | COL or CL | | todo | | Same as MR-01, and the report lists severity, location and fix for each finding | |
+| MR-01 | **Merchant A, "Czar Lab Quick Audit":** x402 route on Arc testnet USDC; takes contract source or address; returns a schema-valid but **shallow** report (generic findings); fast, cheap model | P0 | 2 | SPEC-02 | COL | COL | | Unpaid request → 402 with Arc testnet terms; paid request → schema-valid report in under 30 s | Must be honest-shallow, not broken: the rating judges it |
+| MR-02 | **Merchant B, "Czar Lab Deep Audit":** same interface; a thorough, severity-ranked report with fixes; stronger model | P0 | 2 | SPEC-02 | COL | COL | | Same as MR-01, and the report lists severity, location and fix for each finding | |
 | MR-03 | **Payout addresses:** generate receive-only payout addresses for A and B offline; record only the addresses | P0 | 0 | — | Z | | todo | | Two addresses recorded in the merchant config; no private key on the server | Needs Zaryab's approval (new keys) |
-| MR-04 | **Register A and B in the Czar market:** catalog entries with the `code-review` capability, probe input, price, and verified service versions | P0 | 2 | MR-01, MR-02, BR-01 | COL or CL | | todo | | A planner probe of each returns one valid 402; the ranking decision lists both | |
-| MR-05 | **Prompt safety:** the contract source and any merchant input reach the model only as labelled, JSON-encoded data (`docs/specs/04-components/shared/ai-prompts.md`); output is schema-checked; spend is capped per call | P0 | 2 | MR-01, MR-02 | COL or CL | | todo | | A test contract with "ignore previous instructions" in a comment still returns a normal report | Untrusted-text rule in `CLAUDE.md` |
+| MR-04 | **Register A and B in the Czar market:** catalog entries with the `code-review` capability, probe input, price, and verified service versions | P0 | 2 | MR-01, MR-02, BR-01 | COL | COL | | A planner probe of each returns one valid 402; the ranking decision lists both | |
+| MR-05 | **Prompt safety:** the contract source and any merchant input reach the model only as labelled, JSON-encoded data (`docs/specs/04-components/shared/ai-prompts.md`); output is schema-checked; spend is capped per call | P0 | 2 | MR-01, MR-02 | COL | COL | | A test contract with "ignore previous instructions" in a comment still returns a normal report | Untrusted-text rule in `CLAUDE.md` |
 | MR-06 | **Live on the VM:** merchants container serves A and B behind Caddy; the planner reaches them | P0 | 3 | MR-04, OPS-10 | CL | | todo | | Probe from the VM server succeeds for both | |
-| MR-07 | **Merchant tests:** 402 terms, payment verification, replay rejection, delivery-time limit, report schema | P0 | 2 | MR-01, MR-02 | COL or CL | | todo | | Merchant test suite passes | Payment verification is a money path: tests first |
-| MR-08 | **Prices:** A cheaper than B (for example A 0.50 and B 1.00 testnet USDC) within the planner's default max | P1 | 2 | SPEC-02 | COL or CL | | todo | | Both prices are under `planner.defaultMaxUnitAtomic` | Price is not the reason A ranks first; the seeded history is |
+| MR-07 | **Merchant tests:** 402 terms, payment verification, replay rejection, delivery-time limit, report schema | P0 | 2 | MR-01, MR-02 | COL | COL | | Merchant test suite passes | Payment verification is a money path: tests first |
+| MR-08 | **Prices:** A cheaper than B (for example A 0.50 and B 1.00 testnet USDC) within the planner's default max | P1 | 2 | SPEC-02 | COL | COL | | Both prices are under `planner.defaultMaxUnitAtomic` | Price is not the reason A ranks first; the seeded history is |
 
 ### C8. Demo data, timing and rehearsal
 
@@ -266,16 +268,16 @@ OPS-01..05 ──┼─> OPS-06..10 ─> OPS-11 (real payment) ─┐
 
 | ID | Task | Pri | Phase | Depends on | Suggested owner | Owner | Status | PR | Acceptance check | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|
-| SPEC-01 | **SCR: browser "New task."** Covers: session-authenticated objective route (no device token); capability picker; form fields; size limits on pasted source; redaction and privacy rules for server-side intake; rate limits; state shown back to the browser | P0 | 0 | — | CL | | todo | | SCR merged into `build-v1` | Unblocks UX-01..04, BR-02 |
-| SPEC-02 | **SCR: audit merchants A and B.** Covers: catalog entries; request shape (POST body with source or address); audit-report result schema; result check; prices; payout key references; task class `smart-contract-audit`; model choice and spend caps; prompt safety | P0 | 0 | — | CL | | todo | | SCR merged | Unblocks MR-*, BR-01, BR-03, BR-04 |
-| SPEC-03 | **SCR: demo seeding, timing and reset.** Covers: a cloud-safe controlled seed (testnet-only guard plus an explicit demo flag); exact seed history for A and B; the "Czar test agent" label; demo timing overlay keys and values; reset scope | P0 | 0 | — | CL | | todo | | SCR merged | Unblocks SOC-02, SOC-06, SEL-01, SEL-04, DEMO-01, DEMO-03, UX-07 |
+| SPEC-01 | **SCR-181: browser "New task."** Covers: session-authenticated objective route (no device token); capability picker; form fields; size limits on pasted source; redaction and privacy rules for server-side intake; rate limits; state shown back to the browser | P0 | 0 | — | CL | | todo | | SCR merged into `build-v1` | Unblocks UX-01..04, BR-02 |
+| SPEC-02 | **SCR-182: audit merchants A and B.** Covers: catalog entries; request shape (POST body with source or address); audit-report result schema; result check; prices; payout key references; task class `smart-contract-audit`; model choice and spend caps; prompt safety | P0 | 0 | — | CL | | todo | | SCR merged | Unblocks MR-*, BR-01, BR-03, BR-04 |
+| SPEC-03 | **SCR-183: demo seeding, timing and reset.** Covers: a cloud-safe controlled seed (testnet-only guard plus an explicit demo flag); exact seed history for A and B; the "Czar test agent" label; demo timing overlay keys and values; reset scope | P0 | 0 | — | CL | | todo | | SCR merged | Unblocks SOC-02, SOC-06, SEL-01, SEL-04, DEMO-01, DEMO-03, UX-07 |
 | SPEC-04 | Production spec-gap bundle: lab seed name vs secret rule, second payee key reference, per-service lab price, RPC URLs as pointers, credential-list format, proxy body-cap key | P2 | — | — | CL | | todo | | SCR merged | Recorded in PR #227 |
 
 ### C10. Optional: live merchant ranking UI
 
 | ID | Task | Pri | Phase | Depends on | Suggested owner | Owner | Status | PR | Acceptance check | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|
-| OPT-01 | **Live ranking page:** read-only list of merchants for the audit task class with score, ratings count and incident badge, refreshing every few seconds | P1 | 2 | SEL-01, spec | TBD | | todo | | During the demo, A visibly moves below B within 2 minutes of Bob's rating | Strong visual for step 12; needs its own spec. Without it, the incident thread tells the story |
+| OPT-01 | **Live ranking page:** read-only list of merchants for the audit task class with score, ratings count and incident badge, refreshing every few seconds | P1 | 2 | SEL-01, spec | COL | COL | | During the demo, A visibly moves below B within 2 minutes of Bob's rating | Strong visual for step 12; needs its own spec. Without it, the incident thread tells the story |
 
 ---
 
@@ -335,3 +337,4 @@ OPS-01..05 ──┼─> OPS-06..10 ─> OPS-11 (real payment) ─┐
 | Date | Change | By |
 |---|---|---|
 | 2026-11-05 | Tracker created from the Demo v1 plan and decisions DD-01 to DD-06 | CL |
+| 2026-11-05 | Packages 1 and 2 delegated to COL (12 rows); SPEC-01 to SPEC-03 reserved as SCR-181, SCR-182, SCR-183 | CL |
