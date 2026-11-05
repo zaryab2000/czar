@@ -521,7 +521,7 @@ test("the smoke override is valid, keeps the cloud guard, and runs no indexer, m
     assert.equal(services[name], undefined, `${name} runs in the smoke run`);
     assert.deepEqual(withFull[name]?.profiles, ["full"], `${name} is not in the full profile`);
   }
-  for (const name of ["postgres", "postgres-init", "server", "signer", "arc-anvil", "kms-fake"])
+  for (const name of ["postgres", "postgres-init", "server", "signer", "kms-fake"])
     assert.ok(services[name] && services[name]?.profiles === undefined, `${name} missing`);
   // The smoke parameter file keeps the production RPC allowlist; the entries are driven with
   // injected clients against arc-anvil, so no guard is bypassed.
@@ -530,11 +530,17 @@ test("the smoke override is valid, keeps the cloud guard, and runs no indexer, m
   assert.match(smokeConfig, /^"deploy\.environment" = "cloud-testnet"$/m);
   assert.equal(services["server"]?.depends_on?.["indexer"], undefined);
   assert.equal(services["signer"]?.depends_on?.["server"]?.condition, "service_healthy");
-  assert.equal(services["server"]?.depends_on?.["arc-anvil"]?.condition, "service_healthy");
-  // arc-anvil is the checksummed arc-foundry binary, never upstream anvil or foundryup.
-  const anvil = services["arc-anvil"];
-  assert.ok(anvil?.command?.includes("--network") && anvil.command.includes("arc"));
-  assert.ok(anvil?.command?.[0]?.endsWith("arc-anvil"));
+  // The chain is the host's checksummed arc-anvil, started before `up`: a macOS binary cannot run
+  // in a Linux container, and the installer pins no aarch64-linux archive. So no container runs
+  // one, and nothing waits on one.
+  assert.equal(services["arc-anvil"], undefined, "a container arc-anvil runs in the smoke run");
+  for (const name of ["server", "signer"])
+    assert.equal(services[name]?.depends_on?.["arc-anvil"], undefined, `${name} waits on a container`);
+  const header = read("ops/cloud/compose.smoke.yaml").split("\nname:")[0] ?? "";
+  assert.match(
+    header,
+    /arc-anvil --network arc --chain-id 5042002 --host 127\.0\.0\.1 --port 8545 --mnemonic-random/,
+  );
 });
 
 test("no production source file carries a smoke bypass", () => {
