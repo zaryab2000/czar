@@ -35,7 +35,8 @@ export async function runDemoCheck(pool: Pool, config: Config): Promise<DemoChec
   );
   const incidents = await pool.query<{ count: string }>(
     `SELECT count(*)::text AS count FROM social_incidents
-     WHERE network='eip155:5042002' AND service_id=ANY($1::text[]) AND state='open'`,
+     WHERE network='eip155:5042002' AND service_id=ANY($1::text[])
+       AND task_class='smart-contract-audit' AND state='open'`,
     [[quick, deep]],
   );
   const decisions = await pool.query<{

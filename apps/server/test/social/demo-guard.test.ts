@@ -1,5 +1,10 @@
+import { randomUUID } from "node:crypto";
+import { writeFile, unlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { loadConfig } from "@czar/config";
+import { openDemoContext } from "#src/social/demo-context";
 import { assertDemoCommand } from "#src/social/demo-guard";
 
 const demoConfig = () =>
@@ -32,6 +37,27 @@ describe("SCR-183 demo command guard", () => {
     }
     for (const args of [[], ["--confirm", "local"], ["--confirm", "cloud-testnet", "x"]]) {
       expect(() => assertDemoCommand(args, demoConfig())).toThrow();
+    }
+  });
+
+  it("refuses the reset entry point before opening a database without confirmation", async () => {
+    const configPath = resolve(tmpdir(), `czar-demo-guard-${randomUUID()}.toml`);
+    await writeFile(
+      configPath,
+      [
+        '"demo.enabled" = true',
+        '"deploy.environment" = "cloud-testnet"',
+        '"selection.paymentNetwork" = "eip155:5042002"',
+      ].join("\n"),
+    );
+    try {
+      const env = { CZAR_CLOUD_CONFIG: configPath };
+      await expect(openDemoContext([], env)).rejects.toThrow("--confirm");
+      await expect(openDemoContext(["--confirm", "wrong"], env)).rejects.toThrow(
+        "does not match deploy.environment",
+      );
+    } finally {
+      await unlink(configPath);
     }
   });
 });
