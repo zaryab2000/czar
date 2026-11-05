@@ -10,6 +10,12 @@
 export const FORBIDDEN = [
   /\.key$/,
   /\.key\.json$/,
+  // A key manifest under any name: foo-keys.json, keys.json. `*-keys.example.json` and
+  // `keys.example.json` are placeholders and stay allowed. Without this the scan missed
+  // deployments/.signer-run2-<hex>-keys.json, a real key file an aborted run left behind
+  // (PM-065).
+  /(?<!\.example)-keys\.json$/,
+  /(^|\/)keys\.json$/,
   /(^|\/)\.env(?!\.example$)/,
   /(^|\/)keystore\//,
   /\.pem$/,
