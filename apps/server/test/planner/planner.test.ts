@@ -80,14 +80,21 @@ function makePlanner(
     readonly explorationId?: string;
     readonly failedProbeIds?: readonly string[];
     readonly social?: PlannerDependencies["social"];
+    readonly context?: string;
+    readonly subjectLabels?: readonly string[];
+    readonly configOverrides?: Readonly<Record<string, unknown>>;
   } = {},
 ) {
   const spec = {
     ...taskSpec,
-    subjects: Array.from({ length: options.subjects ?? 1 }, (_, i) => ({ label: `Subject ${i}` })),
+    subjects:
+      options.subjectLabels?.map((label) => ({ label })) ??
+      Array.from({ length: options.subjects ?? 1 }, (_, i) => ({ label: `Subject ${i}` })),
+    ...(options.context === undefined ? {} : { context: options.context }),
   };
   const config = loadConfig({
     envFile: {
+      ...options.configOverrides,
       ...(options.gatewayEnabled ? { "routing.gatewayEnabled": true } : {}),
       ...(options.jobEnabled ? { "routing.jobEnabled": true } : {}),
       "planner.newPayeeNeedsApproval": false,
@@ -799,5 +806,138 @@ describe("planner fallback", () => {
         expect(hasCostCoverage || (gatewayOnly && pocketIsWorthIt)).toBe(false);
       }
     }
+  });
+});
+
+describe("planner audit path (SCR-182 §5)", () => {
+  const CONTRACT = "contract Vault { function pay() external {} }";
+  const ADDRESS = `0x${"ab".repeat(20)}`;
+  // plan.schema.json caps inputKeys[].maxLength at 1000 until SCR-185 is applied, so these tests run
+  // at that cap. The default of 2000 is covered by the `it.fails` test below.
+  const SCHEMA_CAP = { "planner.inputMaxChars": { default: 1000, "code-review": 1000 } };
+  const auditService: PlannerService = {
+    ...fakeService(),
+    resource: { url: `https://merchants.example/v1/audit/${serviceId}`, method: "POST" },
+    extensions: {
+      czar: {
+        ...fakeService().extensions.czar,
+        card: { inputFields: [{ name: "contract", type: "string" }] },
+      },
+    },
+  };
+  const audit = (options: Parameters<typeof makePlanner>[0] = {}) =>
+    makePlanner({
+      capabilities: ["code-review"],
+      service: auditService,
+      context: CONTRACT,
+      subjectLabels: ["Vault"],
+      configOverrides: SCHEMA_CAP,
+      ...options,
+    });
+
+  it("plans a code-review step that sends the contract source as its only input", async () => {
+    const built = await audit();
+    expect(built).not.toBeNull();
+    const step = built!.plan.steps[0]!;
+    expect(step.capability).toBe("code-review");
+    expect(step.callInputs).toEqual([
+      { callIndex: 0, subjectIndex: 0, input: { contract: CONTRACT } },
+    ]);
+    expect(step.inputTemplate).toMatchObject({
+      contract: "{{contract}}",
+      inputKeys: [{ name: "contract", type: "string", maxLength: 1000 }],
+    });
+  });
+
+  it("sends the first subject's label when the objective has no source text", async () => {
+    const built = await makePlanner({
+      capabilities: ["code-review"],
+      service: auditService,
+      subjectLabels: [ADDRESS],
+      configOverrides: SCHEMA_CAP,
+    });
+    expect(built?.plan.steps[0]?.callInputs?.[0]?.input).toEqual({ contract: ADDRESS });
+  });
+
+  it("sends the contract exactly, even when it holds replacement patterns like $& and $1", async () => {
+    const tricky = "contract C { string s = '$& $1 $$ $` $''; }";
+    const built = await audit({ context: tricky });
+    expect(built?.plan.steps[0]?.callInputs?.[0]?.input).toEqual({ contract: tricky });
+  });
+
+  it("tells the owner the contract is sent, and never opens the plan under earned allowance", async () => {
+    const built = await audit({ remaining: "99000000" });
+    expect(built?.plan.steps[0]?.contextNotice).toBe("contract-sent");
+    expect(built?.plan.approvalReasons).toContain("contract-sent");
+    expect(built?.approvalNeeded).toBe(true);
+  });
+
+  it("is a schema 1.4 plan, because contract-sent exists only from schema 1.4", async () => {
+    const built = await audit();
+    expect(built?.plan.schemaVersion).toBe("1.4");
+  });
+
+  it("files the step under the smart-contract-audit task class and its acceptance profile", async () => {
+    const asked: string[] = [];
+    const built = await audit({
+      profileSource: {
+        profileIdFor: (taskClass) => {
+          asked.push(taskClass);
+          return `prof_${"c".repeat(32)}`;
+        },
+      },
+    });
+    expect(built?.plan.steps[0]?.acceptanceProfileId).toBe(`prof_${"c".repeat(32)}`);
+    expect(asked).toContain("smart-contract-audit");
+  });
+
+  it("cuts an input at planner.inputMaxChars for its capability, and says so in inputKeys", async () => {
+    const built = await audit({
+      context: "x".repeat(900),
+      configOverrides: { "planner.inputMaxChars": { default: 1000, "code-review": 800 } },
+    });
+    const step = built!.plan.steps[0]!;
+    expect(step.callInputs?.[0]?.input["contract"]).toHaveLength(800);
+    expect(step.inputTemplate).toMatchObject({
+      inputKeys: [{ name: "contract", type: "string", maxLength: 800 }],
+    });
+  });
+
+  it("uses the default cap for capabilities with no entry of their own", async () => {
+    const built = await makePlanner({
+      subjectLabels: ["s".repeat(150)],
+      configOverrides: { "planner.inputMaxChars": { default: 100, "code-review": 1000 } },
+    });
+    const step = built!.plan.steps[0]!;
+    expect(String(step.callInputs?.[0]?.input["query"])).toHaveLength(100);
+    expect(step.inputTemplate).toMatchObject({
+      inputKeys: [{ name: "query", type: "string", maxLength: 100 }],
+    });
+  });
+
+  it("keeps web-search inputs at 1000 characters by default and adds no contract-sent reason", async () => {
+    const built = await makePlanner();
+    const step = built!.plan.steps[0]!;
+    expect(step.inputTemplate).toMatchObject({
+      inputKeys: [{ name: "query", type: "string", maxLength: 1000 }],
+    });
+    expect(step.contextNotice).toBeUndefined();
+    expect(built?.plan.approvalReasons ?? []).not.toContain("contract-sent");
+  });
+
+  // Blocked on SCR-185 (plan.schema.json caps inputKeys[].maxLength at 1000). It passes in the body
+  // once the schema allows 2000; `it.fails` then reports a failure, which is the cue to make this a
+  // plain `it` and drop SCHEMA_CAP from the tests above.
+  it.fails("plans a code-review step at the default cap of 2000 characters", async () => {
+    const built = await makePlanner({
+      capabilities: ["code-review"],
+      service: auditService,
+      context: "x".repeat(1800),
+      subjectLabels: ["Vault"],
+    });
+    expect(built?.plan.steps[0]?.callInputs?.[0]?.input["contract"]).toHaveLength(1800);
+    expect(built?.plan.steps[0]?.inputTemplate).toMatchObject({
+      inputKeys: [{ name: "contract", type: "string", maxLength: 2000 }],
+    });
   });
 });
