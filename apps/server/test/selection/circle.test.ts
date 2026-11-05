@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { loadConfig } from "@czar/config";
-import { circleServiceId } from "@czar/hashing";
+import { circleServiceId, serviceVersionId } from "@czar/hashing";
 import type { PaymentRequirements, SafeFetch, SafeFetchResponse } from "@czar/x402";
 import type { Pool } from "pg";
 import { createCircleDiscovery } from "#src/selection/discovery/circle";
@@ -49,13 +49,17 @@ function page(items: Listing[], limit = 200, offset = 0, total = items.length): 
   };
 }
 
-function challenge(listing: Listing, changes: Record<string, unknown> = {}): SafeFetchResponse {
+function challenge(
+  listing: Listing,
+  changes: Record<string, unknown> = {},
+  extensions: Record<string, unknown> = {},
+): SafeFetchResponse {
   const offer = listing.accepts.find((entry) => entry.network === "eip155:5042002")!;
   const body = {
     x402Version: 2,
     resource: { url: listing.resource },
     accepts: [{ ...offer, ...changes }],
-    extensions: {},
+    extensions,
   };
   return {
     status: 402,
@@ -152,6 +156,20 @@ describe("SCR-187 Circle discovery", () => {
     expect(candidateCap.logs).toContainEqual({ outcome: "cap", count: 1 });
   });
 
+  it("never probes more than planner.probeTopK Circle candidates", async () => {
+    const first = eligibleListing();
+    const second = { ...eligibleListing(), resource: "https://api.botpay.network/pay" };
+    const probed: string[] = [];
+    const fetch: SafeFetch = async (url) => {
+      if (url.startsWith("https://api.circle.com")) return page([first, second]);
+      probed.push(url);
+      return challenge(url.includes("/pay") ? second : first);
+    };
+    const { source } = setup(fetch, { "planner.probeTopK": 1 });
+    expect(await source.discover("web-search")).toHaveLength(1);
+    expect(probed).toHaveLength(1);
+  });
+
   it("caches fresh pages, revalidates with an ETag, and drops expired stale data", async () => {
     let time = Date.parse("2026-11-05T16:00:00Z");
     const requestHeaders: Record<string, string>[] = [];
@@ -181,6 +199,35 @@ describe("SCR-187 Circle discovery", () => {
     time += 3_600_000 + 600_001;
     await source.discover("web-search");
     expect(request).toBe(3);
+  });
+
+  it("does not reuse a single page validator for a multi-page aggregate", async () => {
+    const first = eligibleListing();
+    const second = { ...eligibleListing(), resource: "https://api.botpay.network/pay" };
+    const replacement = { ...eligibleListing(), resource: "https://api.botpay.network/new" };
+    let time = Date.parse("2026-11-05T16:00:00Z");
+    const requestHeaders: Record<string, string>[] = [];
+    let pageCount = 0;
+    const fetch: SafeFetch = async (url, options) => {
+      if (!url.startsWith("https://api.circle.com")) {
+        const listing = url.includes("/new") ? replacement : url.includes("/pay") ? second : first;
+        return challenge(listing);
+      }
+      requestHeaders.push({ ...options?.headers });
+      const round = Math.floor(pageCount / 2);
+      const offset = Number(new URL(url).searchParams.get("offset"));
+      pageCount += 1;
+      return {
+        ...page([offset === 0 ? first : round === 0 ? second : replacement], 1, offset, 2),
+        headers: { etag: `page-${offset}`, "cache-control": "max-age=1" },
+      };
+    };
+    const { source } = setup(fetch, {}, () => new Date(time));
+    expect(await source.discover("web-search")).toHaveLength(2);
+    time += 1_001;
+    const refreshed = await source.discover("web-search");
+    expect(requestHeaders[2]).toEqual({});
+    expect(refreshed.map((candidate) => candidate.resource.url)).toContain(replacement.resource);
   });
 
   it("serves cached listings during the stale window when revalidation fails", async () => {
@@ -243,6 +290,26 @@ describe("SCR-187 Circle discovery", () => {
     expect(String(candidates[0]!.card["serviceName"])).toHaveLength(80);
     expect(String(candidates[0]!.card["description"])).toHaveLength(300);
     expect(recordVersion).toHaveBeenCalledOnce();
+  });
+
+  it("uses the validated live Bazaar schema in the recorded version", async () => {
+    const listing = eligibleListing();
+    const schema = { type: "object", properties: { input: { type: "object" } } };
+    const extensions = { bazaar: { info: { input: {} }, schema } };
+    const fetch: SafeFetch = async (url) =>
+      url.startsWith("https://api.circle.com")
+        ? page([listing])
+        : challenge(listing, {}, extensions);
+    const { source, recordVersion } = setup(fetch);
+    const [candidate] = await source.discover("web-search");
+    const payTo = listing.accepts.find((offer) => offer.network === "eip155:5042002")!.payTo;
+    const versionId = serviceVersionId({
+      payTo: payTo.toLowerCase(),
+      resource: { url: listing.resource, method: "GET" },
+      schema,
+    });
+    expect(candidate?.versionId).toBe(versionId);
+    expect(recordVersion).toHaveBeenCalledWith(expect.objectContaining({ versionId }));
   });
 
   it("drops the recorded SIWX and schema-less listings and other bad fits", async () => {
