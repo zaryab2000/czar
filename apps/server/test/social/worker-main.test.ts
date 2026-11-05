@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { loadConfig } from "@czar/config";
+import { loadConfig, type Config } from "@czar/config";
+import type { Pool } from "pg";
 import { evaluateIncidents } from "#src/social/incidents";
 import { probeLeads } from "#src/social/leads";
 import { createLesson } from "#src/social/lessons";
@@ -48,8 +49,8 @@ describe("social worker database role", () => {
 
 describe("social worker schedule", () => {
   it("evaluates incidents hourly while running other housekeeping every 15 minutes", async () => {
-    const evaluate = vi.fn(async () => {});
-    const probe = vi.fn(async () => {});
+    const evaluate = vi.fn(async (_pool: Pool, _config: Config, _now: Date) => {});
+    const probe = vi.fn(async (_pool: Pool, _config: Config, _now: Date) => {});
     const schedule = { nextHousekeepingAt: 0, nextIncidentAt: 0 };
     const start = Date.parse("2026-11-05T12:00:00Z");
 

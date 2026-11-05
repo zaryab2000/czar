@@ -20,6 +20,11 @@ export interface SocialHousekeepingHooks extends RunHooks {
   probeLeads?(pool: Pool, config: Config, now: Date): Promise<void>;
 }
 
+export interface SocialScheduleState {
+  nextHousekeepingAt: number;
+  nextIncidentAt: number;
+}
+
 export const socialWorkerHooks: SocialHousekeepingHooks = {
   createLesson,
   evaluateIncidents,
@@ -74,8 +79,27 @@ export async function socialHousekeepingPass(
   } finally {
     client.release();
   }
-  await hooks.evaluateIncidents?.(pool, config, now);
   await hooks.probeLeads?.(pool, config, now);
+}
+
+/** Run due housekeeping and incident evaluations on their configured schedules. */
+export async function runScheduledSocialHousekeeping(
+  pool: Pool,
+  config: Config,
+  now: Date,
+  schedule: SocialScheduleState,
+  hooks: SocialHousekeepingHooks = {},
+): Promise<void> {
+  if (!config.get("social.enabled")) return;
+  const nowMs = now.getTime();
+  if (nowMs >= schedule.nextHousekeepingAt) {
+    await socialHousekeepingPass(pool, config, now, hooks);
+    schedule.nextHousekeepingAt = nowMs + Number(config.get("social.housekeepingMinutes")) * 60_000;
+  }
+  if (nowMs >= schedule.nextIncidentAt) {
+    await hooks.evaluateIncidents?.(pool, config, now);
+    schedule.nextIncidentAt = nowMs + Number(config.get("social.incidentEvalMinutes")) * 60_000;
+  }
 }
 
 /** Start the local-only worker after configuration and migration preflight. */
@@ -102,15 +126,11 @@ export async function startSocialWorker(
     };
     process.once("SIGINT", stop);
     process.once("SIGTERM", stop);
-    let nextHousekeeping = 0;
+    const schedule: SocialScheduleState = { nextHousekeepingAt: 0, nextIncidentAt: 0 };
     while (!controller.signal.aborted) {
       const now = new Date();
       await socialWorkerPass(pool, config, now, hooks);
-      if (now.getTime() >= nextHousekeeping) {
-        await socialHousekeepingPass(pool, config, now, hooks);
-        nextHousekeeping =
-          now.getTime() + Number(config.get("social.housekeepingMinutes")) * 60_000;
-      }
+      await runScheduledSocialHousekeeping(pool, config, now, schedule, hooks);
       await new Promise((done) => setTimeout(done, Number(config.get("social.consumerPollMs"))));
     }
   } finally {
