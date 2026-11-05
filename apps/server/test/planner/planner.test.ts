@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { loadConfig } from "@czar/config";
-import { buildTree, payeeLeaf, verifyProof } from "@czar/hashing";
+import { buildTree, payeeLeaf, serviceVersionId, verifyProof } from "@czar/hashing";
 import {
   encodeBase64Json,
   USDC_ADDRESS,
@@ -16,6 +16,8 @@ import {
 } from "#src/planner/index";
 import { createSafeProber } from "#src/planner/probe";
 import { createRegisteredSelection } from "#src/selection/registered/index";
+import type { CircleCandidate } from "#src/selection/discovery/circle";
+import { readRankingDecision } from "#src/selection/ranking/decision-store";
 import { createPlannerProfileSource } from "#src/main";
 import { localTemplateProfile } from "#src/acceptance/profile";
 import { route, routingParamsFromConfig, cVd, pocketWorthIt } from "#src/router/index";
@@ -93,6 +95,7 @@ function makePlanner(
     readonly context?: string;
     readonly subjectLabels?: readonly string[];
     readonly configOverrides?: Readonly<Record<string, unknown>>;
+    readonly selection?: ReturnType<typeof createRegisteredSelection>;
   } = {},
 ) {
   const spec = {
@@ -114,7 +117,7 @@ function makePlanner(
     config,
     ...(options.social ? { social: options.social } : {}),
     ports: {
-      ranking: {
+      ranking: options.selection?.rank ?? {
         rank: async (query) => {
           options.rankingQueries?.push(query);
           return {
@@ -166,7 +169,7 @@ function makePlanner(
           };
         },
       },
-      directory: {
+      directory: options.selection?.directory ?? {
         get: async (id) => {
           const service =
             options.service ??
@@ -219,6 +222,47 @@ function makePlanner(
 }
 
 describe("planner fallback", () => {
+  it("plans a discovered unrated Circle service with owner approval", async () => {
+    const resource = { url: "https://circle-merchant.example/search", method: "GET" as const };
+    const circleId = `svc_${"b".repeat(32)}`;
+    const candidate: CircleCandidate = {
+      serviceId: circleId,
+      resource,
+      probeInput: { query: { query: "probe" } },
+      accepts: [offer],
+      extensions: {
+        czar: {
+          claim: { status: "unclaimed" },
+          evidence: null,
+          card: { serviceName: "Circle search", inputFields: [{ name: "query", type: "string" }] },
+          source: "circle-registry",
+        },
+      },
+      source: "circle-registry",
+      card: { serviceName: "Circle search", inputFields: [{ name: "query", type: "string" }] },
+      versionId: serviceVersionId({ payTo: offer.payTo.toLowerCase(), resource, schema: null }),
+      priceAtomic: offer.amount,
+      probe: { matchedOffer: offer, extensions402: { dropped: [] } },
+    };
+    const selection = createRegisteredSelection({
+      config: loadConfig({ envFile: { "selection.circleDiscovery.enabled": true } }),
+      safeFetch: async () => {
+        throw new Error("unexpected network probe");
+      },
+      pool: getPool(),
+      now: () => new Date("2026-10-21T00:00:00Z"),
+      circleDiscovery: { discover: async () => [candidate] },
+    });
+    const built = await makePlanner({ selection, proberOffers: [offer], remaining: "999999999" });
+    expect(built?.plan.steps[0]?.serviceId).toBe(circleId);
+    const decisionId = built?.plan.rankingDecisionIds?.[0];
+    if (!decisionId) throw new Error("Circle plan did not persist a ranking decision");
+    const decision = await readRankingDecision(getPool(), decisionId);
+    expect(decision?.unverified[0]?.version_id).toBe(candidate.versionId);
+    expect(built?.plan.approvalReasons).toContain("unrated");
+    expect(built?.approvalNeeded).toBe(true);
+  });
+
   it("uses the registered local-template-v1 profile for unpaid local steps", async () => {
     const profileSource = createPlannerProfileSource({
       profileIdFor(taskClass: string) {

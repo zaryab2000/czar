@@ -299,12 +299,20 @@ describe("registered selection", () => {
         czar: {
           claim: { status: "unclaimed" },
           evidence: null,
-          card: { serviceName: "Circle merchant", inputFields: [{ name: "q", type: "string" }] },
+          card: {
+            serviceName: "Circle merchant",
+            inputFields: [{ name: "q", type: "string" }],
+            outputSchema: { type: "object" },
+          },
           source: "circle-registry",
         },
       },
       source: "circle-registry",
-      card: { serviceName: "Circle merchant", inputFields: [{ name: "q", type: "string" }] },
+      card: {
+        serviceName: "Circle merchant",
+        inputFields: [{ name: "q", type: "string" }],
+        outputSchema: { type: "object" },
+      },
       versionId: serviceVersionId({
         payTo: circleOffer.payTo.toLowerCase(),
         resource: { url, method: "GET" },
@@ -340,6 +348,7 @@ describe("registered selection", () => {
     ]);
     expect(decision.candidates_considered).toBe(2);
     expect(await selection.directory.get(SERVICE_B)).toMatchObject({ serviceId: SERVICE_B });
+    expect(await selection.outputSchema.forService(SERVICE_B)).toEqual({ type: "object" });
     expect(await selection.directory.get(SERVICE_RATED)).toBeNull();
     expect(discovery.discover).toHaveBeenCalledWith("web-search");
   });
