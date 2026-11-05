@@ -5,18 +5,33 @@ function check(name, result, detail) {
 function deliveryCheck(input) {
   if (!input.paid) return check("delivery", "not_checked");
   if (!input.responseArrived) return check("delivery", "fail", { reason: "no-response" });
-  if (input.statusCode === null || input.statusCode < 200 || input.statusCode >= 300)
+  if (!validStatus(input.statusCode, input.genericDelivery))
     return check("delivery", "fail", { reason: "http-status" });
   if (input.bodyBytes === 0) return check("delivery", "fail", { reason: "empty-body" });
   if (input.elapsedMs > input.deliveryLimitMs)
     return check("delivery", "fail", { reason: "delivery-timeout" });
   if (input.bodyBytes > input.maxBodyBytes)
     return check("delivery", "fail", { reason: "body-too-large" });
+  const genericProblem = input.genericDelivery ? genericDeliveryProblem(input) : null;
+  if (genericProblem) return check("delivery", "fail", { reason: genericProblem });
   return check("delivery", "pass", {
     statusCode: input.statusCode,
     durationMs: input.elapsedMs,
     bodyBytes: input.bodyBytes,
   });
+}
+
+function validStatus(statusCode, genericDelivery) {
+  if (statusCode === null) return false;
+  return genericDelivery ? statusCode === 200 : statusCode >= 200 && statusCode < 300;
+}
+
+function genericDeliveryProblem(input) {
+  const mimeType = input.mimeType.toLowerCase().split(";", 1)[0].trim();
+  const claimsJson = mimeType === "application/json" || mimeType.endsWith("+json");
+  if (!claimsJson && !mimeType.startsWith("text/")) return "content-type";
+  if (claimsJson && !input.parsed.parseOk) return "invalid-json";
+  return null;
 }
 
 function structuralCheck(input) {

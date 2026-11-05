@@ -752,7 +752,7 @@ async function makePaidStep(args: {
     inputMaxChars,
   } = args;
   const taskClass = taskClassFor(capability, config);
-  const profile = ports.profiles.profileIdFor(taskClass);
+  const profile = ports.profiles.profileIdFor(taskClass, candidate.service);
   const subjects = input.taskSpec.subjects;
   const expectedCalls = callInputs.length;
   const decision = routeCandidate({

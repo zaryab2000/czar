@@ -51,7 +51,7 @@ export type ProbeResult =
 export interface PlannerPorts {
   readonly ranking: { rank(query: RankingQuery): Promise<RankingDecision> };
   readonly directory: { get(serviceId: string): Promise<PlannerService | null> };
-  readonly profiles: { profileIdFor(taskClass: string): string };
+  readonly profiles: { profileIdFor(taskClass: string, service?: PlannerService): string };
   readonly pocketKeys: { createPocketKey(planId: string): Promise<string> };
   readonly agentHosts: { hasAgentHost(deviceId: string): Promise<boolean> };
   readonly allowance: { remaining(userId: string, categoryId: string): Promise<string> };

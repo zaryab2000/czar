@@ -91,6 +91,15 @@ export const PARAMETERS = [
     source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:308",
   },
   {
+    key: "acceptance.genericMaxBytes",
+    type: "integer",
+    default: 1000000,
+    unit: "bytes",
+    reason: "generic-delivery.v1 response body cap",
+    source:
+      "docs/specs/06-review/change-requests/SCR-187-circle-registry-discovery-and-gateway.md:281",
+  },
+  {
     key: "acceptance.sandboxTimeoutMs",
     type: "integer",
     default: 5000,
@@ -2926,15 +2935,6 @@ export const PARAMETERS = [
     unit: "seconds",
     reason: "submitBy = expiredAt − 7,200 (M4)",
     source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:318",
-  },
-  {
-    key: "acceptance.genericMaxBytes",
-    type: "integer",
-    default: 1_000_000,
-    unit: "bytes",
-    reason: "Bound generic deliveries without output schemas (CD-09)",
-    source:
-      "docs/specs/06-review/change-requests/SCR-187-circle-registry-discovery-and-gateway.md:281",
   },
   {
     key: "acceptance.decisionMarginSeconds",

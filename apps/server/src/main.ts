@@ -28,7 +28,7 @@ import type { Signer } from "@czar/signer";
 import type { SafeFetch } from "@czar/x402";
 import type { Pool } from "pg";
 import { createAcceptanceChecker } from "#src/acceptance/index";
-import { localTemplateProfile } from "#src/acceptance/profile";
+import { hasOutputSchema, localTemplateProfile } from "#src/acceptance/profile";
 import type { AcceptancePorts } from "#src/acceptance/types";
 import { runBoundary } from "#src/boundary/index";
 import { createApp } from "#src/app";
@@ -1573,10 +1573,14 @@ export function createPlannerProfileSource(
   acceptance: Pick<Awaited<ReturnType<typeof createAcceptanceChecker>>, "profileIdFor">,
 ): PlannerPorts["profiles"] {
   return {
-    profileIdFor(taskClass) {
+    profileIdFor(taskClass, service) {
+      const circle = service?.extensions.czar.source === "circle-registry";
+      const schema = service?.extensions.czar.card["outputSchema"];
+      if (circle && !hasOutputSchema(schema)) return acceptance.profileIdFor("generic-delivery");
       if (taskClass === "data-json.search" || taskClass === "data-json.extract")
         return acceptance.profileIdFor("data-json");
       if (taskClass === "local") return localTemplateProfile().profile_id;
+      if (circle) return acceptance.profileIdFor("generic-delivery");
       return acceptance.profileIdFor(taskClass);
     },
   };

@@ -82,7 +82,94 @@ function inputFor(
   };
 }
 
+function genericInputFor(
+  checker: Awaited<ReturnType<typeof makeChecker>>,
+  sequence: number,
+  overrides: Partial<AcceptanceCheckInput> = {},
+): AcceptanceCheckInput {
+  const genericProfileId = checker.profileIdFor("generic-delivery");
+  const input = inputFor(checker, sequence);
+  return {
+    ...input,
+    profileId: genericProfileId,
+    step: { ...input.step, acceptanceProfileId: genericProfileId },
+    ...overrides,
+  };
+}
+
 describe("acceptance checker", () => {
+  it("uses generic-delivery.v1 for a screened text response without an output schema", async () => {
+    const checker = await makeChecker({ outputSchema: async () => null });
+    const result = await checker.check(
+      genericInputFor(checker, 21, {
+        bodyText: "A useful answer",
+        mimeType: "text/plain; charset=utf-8",
+      }),
+    );
+    expect(result.report.decision).toBe("pass");
+    expect(result.report.checks[0]).toMatchObject({ name: "delivery", result: "pass" });
+    expect(result.report.checks[1]).toMatchObject({ name: "structural", result: "inconclusive" });
+    expect(result.report.checks[2]).toMatchObject({ name: "requirement", result: "not_checked" });
+    const json = await checker.check(genericInputFor(checker, 26));
+    expect(json.report.decision).toBe("pass");
+    expect(json.report.checks[0]).toMatchObject({ name: "delivery", result: "pass" });
+  });
+
+  it("does not treat an empty Circle output example as a JSON Schema", async () => {
+    const checker = await makeChecker({ outputSchema: async () => ({ example: {} }) });
+    const result = await checker.check(genericInputFor(checker, 25));
+    expect(result.report.decision).toBe("pass");
+    expect(result.report.checks[1]).toMatchObject({
+      name: "structural",
+      result: "inconclusive",
+      detail: { parseOk: true },
+    });
+  });
+
+  it("does not let prior shape history reject a generic delivery", async () => {
+    const checker = await makeChecker({
+      outputSchema: async () => null,
+      history: async () => `0x${"f".repeat(64)}`,
+    });
+    const result = await checker.check(genericInputFor(checker, 27));
+    expect(result.report.decision).toBe("pass");
+    expect(result.report.checks[1]).toMatchObject({
+      name: "structural",
+      result: "inconclusive",
+      detail: { parseOk: true },
+    });
+  });
+
+  it.each([
+    { statusCode: 201, mimeType: "text/plain", bodyText: "ok", reason: "http-status" },
+    { statusCode: 200, mimeType: "application/xml", bodyText: "<ok/>", reason: "content-type" },
+    { statusCode: 200, mimeType: "application/json", bodyText: "{", reason: "invalid-json" },
+  ])("rejects generic delivery with $reason", async (scenario) => {
+    const checker = await makeChecker({ outputSchema: async () => null });
+    const { reason, ...overrides } = scenario;
+    const result = await checker.check(genericInputFor(checker, 22, overrides));
+    expect(result.report.decision).toBe("fail");
+    expect(result.report.checks[0]).toMatchObject({ result: "fail", detail: { reason } });
+  });
+
+  it("enforces acceptance.genericMaxBytes and quarantines a failed boundary screen", async () => {
+    const checker = await makeChecker({
+      config: loadConfig({ envFile: { "acceptance.genericMaxBytes": 12 } }),
+      outputSchema: async () => null,
+    });
+    const oversized = await checker.check(
+      genericInputFor(checker, 23, { bodyText: "longer than twelve" }),
+    );
+    expect(oversized.report.checks[0]).toMatchObject({
+      result: "fail",
+      detail: { reason: "body-too-large" },
+    });
+    const quarantined = await checker.check(
+      genericInputFor(checker, 24, { screen: { available: false } }),
+    );
+    expect(quarantined.report.decision).toBe("inconclusive");
+    expect(quarantined.report.limits).toContain("screen-unavailable");
+  });
   it("validates JSON, seeds the data-json profile, and stores a recomputable report", async () => {
     const lines: string[] = [];
     const checker = await makeChecker({ lines });
