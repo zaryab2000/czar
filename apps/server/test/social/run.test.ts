@@ -474,7 +474,7 @@ describe("representative run", () => {
     ).toBe("publish-reply");
   });
 
-  it("rolls back a post after an injected commit fault and replays once", async () => {
+  it("rolls back before commit and keeps one post after a commit crash", async () => {
     const crashObjective = `obj_${"C".repeat(26)}`;
     const submission = makeObjectiveSubmission(crashObjective);
     await pool().query(
@@ -515,9 +515,15 @@ describe("representative run", () => {
       inboxId,
       new Date(now.getTime() - 1),
     ]);
-    expect((await runSocialInbox(pool(), loadConfig(), context.random, now))?.stopReason).toBe(
-      "done",
-    );
+    expect(
+      (
+        await runSocialInbox(pool(), loadConfig(), context.random, now, {
+          afterCommit: async () => {
+            throw new Error("injected worker crash after commit");
+          },
+        })
+      )?.stopReason,
+    ).toBe("retry-transient");
     const published = await pool().query("SELECT 1 FROM social_posts WHERE action_id=$1", [
       expectedActionId,
     ]);

@@ -45,6 +45,7 @@ export interface RunResult {
 export interface RunHooks {
   beforeCommit?(): Promise<void>;
   afterPostInsert?(): Promise<void>;
+  afterCommit?(): Promise<void>;
   createLesson?(
     client: PoolClient,
     input: { representativeId: string; postId: string; now: Date },
@@ -738,6 +739,7 @@ async function executeClaim(
   hooks: RunHooks,
 ): Promise<RunResult | null> {
   const db = await pool.connect();
+  let committed = false;
   try {
     const found = await db.query<Representative>(
       `SELECT representative_id,user_id,sharing,sharing_version,paused
@@ -840,9 +842,11 @@ async function executeClaim(
     }
     await recordRun(context, result);
     await db.query("COMMIT");
+    committed = true;
+    await hooks.afterCommit?.();
     return result;
   } catch (error) {
-    await db.query("ROLLBACK");
+    if (!committed) await db.query("ROLLBACK");
     throw error;
   } finally {
     db.release();
