@@ -90,6 +90,7 @@
     - the deployment-file shape was wrong
     - PM-021's request mapping was wrong
 - **Not verified by the reviewer:** the server's 606-test baseline (no Postgres in its sandbox; I measured 606 on `ca106fd`; `d9fb168` adds only a report and a change to an excluded chain test), and the model id `claude-haiku-5-5` (needs a live call).
+- **Baseline since superseded (5 November).** On `prod/integration` at `cd62d74`, measured serially on an idle machine, the suite is **85 files / 645 passed / 0 failed** in about 5 minutes. Every builder that measured it under parallel load saw between 3 and 7 failures and each correctly refused to claim a pass; all of them were contention, none was a product defect. The cause is a class of test that puts a real-clock deadline around deterministic work — see §8.
 
 ## Section 2: the start list (building from 5 November)
 
@@ -287,8 +288,6 @@
 - Never push to or force-push `build-v1`.
 - **Every batch PR body carries:** the tasks in it, every acceptance test with its command and result, the full-suite results, the overlap check output, the decisions taken, and anything found and not fixed.
 
----
-
 ## Section 7: tracker updates
 
 | ID | Change | New status / phase | Owner | Note |
@@ -324,3 +323,24 @@
 | **PM-061** | **New, Phase 1:** config foundations (`registry-production.ts`, `validateCloudConfig`) | new, start now (first) | Architect (lane A) | |
 | **PM-062** | **New, Phase 3:** observation chain T-063 → T-066 → T-068 → T-069 as a feature track | new, wait | Architect | SCR-179 |
 | **PM-063** | **New, Phase 4:** T-051 part B: Gateway routes, sweeps, Czar-service refunds | new, wait | Architect | SCR-177 |
+
+---
+
+## Section 8: the real-clock test class (added 5 November)
+
+- **What happened.** Six builders ran in parallel, each running the server suite. Under that load the suite reported 3 to 7 failures, in different combinations each time. Measured serially on an idle machine it is **645/645, twice**. Not one of those failures was a product defect.
+- **The cost was not the failures.** It was that four separate builders each spent real effort proving the failures were not theirs — stashing their work, checking out base commits, re-running files alone — and each reported it to me to adjudicate. That is four times the same investigation.
+- **The mechanism.** Each of these tests puts a deadline measured on the **real** clock around work that is otherwise deterministic:
+
+| File | The real-clock dependency |
+|---|---|
+| `evidence/health-db.test.ts` | read `new Date()` once at module load, then asserted a settlement one second later had to be *after* a fact the database timestamps during the test. **Fixed in PM-064.** |
+| `payer/manual-return.test.ts` | `vi.useFakeTimers()` with `await vi.waitFor(...)`, whose default timeout is one second of *wall* time while the timers it awaits are faked |
+| `payer/database-vault-event-source.test.ts` | the same pairing, at **10** call sites — the heaviest concentration in the repository |
+| `payer/runtime.test.ts` | the same pairing, 1 call site |
+| `boundary.test.ts`, `rate.test.ts`, `acceptance/sandbox.test.ts`, `migrate.test.ts` | vitest's default 5,000 ms per-test timeout, on DB-backed work sharing one Postgres |
+
+- **The rule for this build:** cap builder parallelism, and treat any failure in those files as unproven until it is re-run alone. Record both results. Never report a suite as passing on a run you did not see pass.
+- **Not fixed beyond PM-064.** Raising or removing a genuine timing assertion would cost real coverage, and these are measuring real behaviour. The right fix is to drive the waits with fake timers rather than wall time, which is a test-quality task of its own, not something to fold into a production task.
+
+---
