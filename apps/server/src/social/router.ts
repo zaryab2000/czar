@@ -59,7 +59,8 @@ async function routePost(
   if (typeof postId !== "string" || typeof threadId !== "string") return;
   const found = await db.query<Published>(
     `SELECT p.post_id,p.thread_id,p.author_id,p.kind,t.network,t.service_id,t.version_id,
-       t.task_class,t.capability_tag,t.kind AS thread_kind,t.state,t.contributions
+       coalesce(p.card->>'taskClass',t.task_class) AS task_class,
+       t.capability_tag,t.kind AS thread_kind,t.state,t.contributions
      FROM social_posts p JOIN social_threads t ON t.thread_id=p.thread_id
      WHERE p.post_id=$1 AND t.thread_id=$2 AND p.tombstoned_at IS NULL`,
     [postId, threadId],

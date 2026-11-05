@@ -337,8 +337,9 @@ async function ownEvidence(
     post.service_id ?? (typeof post.card["serviceId"] === "string" ? post.card["serviceId"] : null);
   const versionId =
     post.version_id ?? (typeof post.card["versionId"] === "string" ? post.card["versionId"] : null);
+  // The post's own card names its subject; a service thread is shared by every task class.
   const taskClass =
-    post.task_class ?? (typeof post.card["taskClass"] === "string" ? post.card["taskClass"] : null);
+    (typeof post.card["taskClass"] === "string" ? post.card["taskClass"] : null) ?? post.task_class;
   const findSupplier = post.kind === "question" && post.card["questionKind"] === "find-supplier";
   for (let offset = 0; ; offset += 20) {
     const found = await context.db.query<{ objective_id: string; step_index: number }>(
@@ -379,7 +380,8 @@ async function planRouted(context: RunContext): Promise<PlannedPost[]> {
   if (typeof postId !== "string" || typeof threadId !== "string") return [];
   const found = await context.db.query<RoutedPost>(
     `SELECT p.post_id,p.thread_id,p.author_id,p.kind,p.card,
-       t.kind AS thread_kind,t.network,t.service_id,t.version_id,t.task_class,
+       t.kind AS thread_kind,t.network,t.service_id,t.version_id,
+       coalesce(p.card->>'taskClass',t.task_class) AS task_class,
        t.capability_tag,t.subject_key,t.state
      FROM social_posts p JOIN social_threads t ON t.thread_id=p.thread_id
      WHERE p.post_id=$1 AND p.thread_id=$2 AND p.tombstoned_at IS NULL`,
@@ -768,14 +770,14 @@ async function executeClaim(
     );
     let result: RunResult;
     let plans: PlannedPost[] = [];
+    const stale =
+      now.getTime() - (event.rows[0]?.created_at.getTime() ?? 0) >
+      Number(config.get("social.eventMaxAgeHours")) * 3_600_000;
     if (representative.paused) {
       result = { action: "abstain", stopReason: "skipped-paused", postId: null };
     } else if (representative.sharing === "off") {
       result = { action: "abstain", stopReason: "skipped-sharing-off", postId: null };
-    } else if (
-      now.getTime() - (event.rows[0]?.created_at.getTime() ?? 0) >
-      Number(config.get("social.eventMaxAgeHours")) * 3_600_000
-    ) {
+    } else if (stale) {
       result = { action: "abstain", stopReason: "skipped-stale", postId: null };
     } else {
       plans = await planPosts(context);
@@ -809,7 +811,8 @@ async function executeClaim(
       (current.rows[0]?.paused && !representative.paused)
     ) {
       result = { action: "abstain", stopReason: "rejected-consent-changed", postId: null };
-    } else if (!representative.paused) {
+    } else if (!representative.paused && !stale) {
+      // SCR-164 §3.9: a stale event is skipped, including the lesson a sharing-off reader may take.
       const routedPostId = item.refs["postId"];
       const lessonCreated =
         item.kind === "post-routed" && typeof routedPostId === "string" && hooks.createLesson

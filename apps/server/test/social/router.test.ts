@@ -111,6 +111,66 @@ describe("social event routing", () => {
     expect(recipients.rows.every((row) => row.refs.routingReason === "subscribed-tag")).toBe(true);
   });
 
+  it("routes an experience by its own task class, not the shared service thread's", async () => {
+    const serviceThread = `thr_${"S".repeat(26)}`;
+    const experienceId = `pst_${"S".repeat(26)}`;
+    const classBUser = `usr_${"Q".repeat(26)}`;
+    const classBRep = `rep_${"Q".repeat(26)}`;
+    const serviceId = `svc_${"c".repeat(32)}`;
+    await pool().query("INSERT INTO users(user_id) VALUES($1)", [classBUser]);
+    await pool().query(
+      `INSERT INTO social_representatives(representative_id,user_id,handle,sharing)
+       VALUES($1,$2,'Rep-QQQQ','structured')`,
+      [classBRep, classBUser],
+    );
+    await pool().query(
+      `INSERT INTO social_threads(thread_id,kind,network,service_id,task_class,subject_key)
+       VALUES($1,'service','eip155:5042002',$2,'class-a.search',$3)`,
+      [serviceThread, serviceId, `service:eip155:5042002:${serviceId}`],
+    );
+    await pool().query(
+      `INSERT INTO social_posts(post_id,thread_id,author_id,kind,action_id,card)
+       VALUES($1,$2,$3,'experience','cross-class-route',$4)`,
+      [
+        experienceId,
+        serviceThread,
+        repA,
+        {
+          cardVersion: "1",
+          network: "eip155:5042002",
+          serviceId,
+          taskClass: "class-b.search",
+          rating: "bad",
+          deliveryOutcome: "not-delivered",
+        },
+      ],
+    );
+    await pool().query(
+      `INSERT INTO social_subscriptions(representative_id,subject_key,source,expires_at)
+       VALUES($1,$2,'objective',now()+interval '90 days')`,
+      [classBRep, "class:eip155:5042002:class-b.search"],
+    );
+    const event = await pool().query<{ event_id: string }>(
+      `INSERT INTO outbox_events(name,payload,delivered_at)
+       VALUES('social.post.published',$1,now()) RETURNING event_id`,
+      [{ postId: experienceId, threadId: serviceThread }],
+    );
+    await routeSocialEvent(
+      pool(),
+      "social.post.published",
+      { postId: experienceId, threadId: serviceThread },
+      event.rows[0]!.event_id,
+      3,
+      20,
+      60,
+    );
+    const routed = await pool().query<{ representative_id: string }>(
+      "SELECT representative_id FROM social_inbox WHERE event_id=$1",
+      [event.rows[0]!.event_id],
+    );
+    expect(routed.rows.map((row) => row.representative_id)).toContain(classBRep);
+  });
+
   it("rolls back question expiry when event insertion fails", async () => {
     await pool().query(
       "UPDATE social_threads SET expires_at=now()-interval '1 hour' WHERE thread_id=$1",

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { SocialPostProjection } from "@czar/schemas";
 import { appApi } from "#src/app-api";
+import { feedCursor, mergeFeedPosts } from "#src/social-feed";
 import { SocialPost } from "#src/social-post";
 import { useAppData } from "#src/use-app-data";
 
@@ -10,17 +11,17 @@ export default function SocialFeedPage() {
   const load = useCallback(() => appApi.listSocialFeed(), []);
   const { data, error, loading, refresh } = useAppData(load);
   const [older, setOlder] = useState<SocialPostProjection[]>([]);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [olderCursor, setOlderCursor] = useState<string | null | undefined>(undefined);
   const [moreError, setMoreError] = useState<string>();
   const [moreBusy, setMoreBusy] = useState(false);
 
   useEffect(() => {
     if (!data) return;
-    setOlder([]);
-    setNextCursor(data.page.nextCursor);
     const timer = window.setInterval(refresh, data.pollSeconds * 1000);
     return () => window.clearInterval(timer);
   }, [data, refresh]);
+
+  const nextCursor = feedCursor(data?.page.nextCursor ?? null, olderCursor);
 
   async function loadMore() {
     if (!nextCursor) return;
@@ -29,7 +30,7 @@ export default function SocialFeedPage() {
     try {
       const result = await appApi.listSocialFeed(nextCursor);
       setOlder((items) => [...items, ...result.page.items]);
-      setNextCursor(result.page.nextCursor);
+      setOlderCursor(result.page.nextCursor);
     } catch {
       setMoreError("Czar could not load older posts. Try again.");
     } finally {
@@ -37,7 +38,7 @@ export default function SocialFeedPage() {
     }
   }
 
-  const posts = [...(data?.page.items ?? []), ...older];
+  const posts = mergeFeedPosts(data?.page.items ?? [], older);
   return (
     <section className="page-stack">
       <h1 className="czar-title">Representatives</h1>

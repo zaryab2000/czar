@@ -899,6 +899,117 @@ describe("representative run", () => {
     expect(run.rows).toEqual([{ stop_reason: "skipped-sharing-off" }]);
   });
 
+  it("never creates a lesson from a stale routed event, with sharing off or on", async () => {
+    const recipientRep = `rep_${"B".repeat(26)}`;
+    const source = await pool().query<{ post_id: string; thread_id: string }>(
+      `SELECT p.post_id,p.thread_id FROM social_posts p
+       JOIN social_evidence_links l ON l.post_id=p.post_id
+       WHERE p.author_id=$1 AND p.kind='experience' AND p.superseded_by IS NULL LIMIT 1`,
+      [representativeId],
+    );
+    const post = source.rows[0]!;
+    for (const [sharing, expected] of [
+      ["off", "skipped-sharing-off"],
+      ["structured", "skipped-stale"],
+    ] as const) {
+      await pool().query(
+        "UPDATE social_representatives SET paused=false,sharing=$2 WHERE representative_id=$1",
+        [recipientRep, sharing],
+      );
+      const event = await pool().query<{ event_id: string }>(
+        `INSERT INTO outbox_events(name,payload,delivered_at,created_at)
+         VALUES('social.post.published',$1,now(),'2026-11-01T00:00:00Z') RETURNING event_id`,
+        [{ postId: post.post_id, threadId: post.thread_id }],
+      );
+      await pool().query(
+        `INSERT INTO social_inbox(representative_id,event_id,kind,refs)
+         VALUES($1,$2,'post-routed',$3)`,
+        [
+          recipientRep,
+          event.rows[0]!.event_id,
+          { postId: post.post_id, threadId: post.thread_id, routingReason: "subscribed-service" },
+        ],
+      );
+      let lessonAttempts = 0;
+      const result = await runSocialInbox(
+        pool(),
+        loadConfig(),
+        { bytes: randomBytes },
+        new Date("2026-11-05T12:00:00Z"),
+        {
+          createLesson: async (...args) => {
+            lessonAttempts += 1;
+            return createLesson(...args);
+          },
+        },
+      );
+      expect(result).toEqual({ action: "abstain", stopReason: expected, postId: null });
+      expect(lessonAttempts).toBe(0);
+    }
+  });
+
+  it("does not reply to a routed experience with evidence from another task class", async () => {
+    await pool().query(
+      "UPDATE social_representatives SET sharing='structured',paused=false WHERE representative_id=$1",
+      [representativeId],
+    );
+    const thread = await pool().query<{ thread_id: string; task_class: string }>(
+      "SELECT thread_id,task_class FROM social_threads WHERE subject_key=$1",
+      [`service:eip155:5042002:${serviceId}`],
+    );
+    const serviceThread = thread.rows[0]!;
+    expect(serviceThread.task_class).not.toBe("other-json.class");
+    const otherRep = `rep_${"B".repeat(26)}`;
+    const crossClassPost = `pst_${"X".repeat(26)}`;
+    await pool().query(
+      `INSERT INTO social_posts(post_id,thread_id,author_id,kind,card,action_id)
+       VALUES($1,$2,$3,'experience',$4,'cross-class-experience')`,
+      [
+        crossClassPost,
+        serviceThread.thread_id,
+        otherRep,
+        {
+          cardVersion: "1",
+          network: "eip155:5042002",
+          serviceId,
+          versionId,
+          taskClass: "other-json.class",
+          rating: "bad",
+          deliveryOutcome: "not-delivered",
+        },
+      ],
+    );
+    const event = await pool().query<{ event_id: string }>(
+      `INSERT INTO outbox_events(name,payload,delivered_at)
+       VALUES('social.post.published',$1,now()) RETURNING event_id`,
+      [{ postId: crossClassPost, threadId: serviceThread.thread_id }],
+    );
+    await pool().query(
+      `INSERT INTO social_inbox(representative_id,event_id,kind,refs)
+       VALUES($1,$2,'post-routed',$3)`,
+      [
+        representativeId,
+        event.rows[0]!.event_id,
+        {
+          postId: crossClassPost,
+          threadId: serviceThread.thread_id,
+          routingReason: "has-evidence-for-service",
+        },
+      ],
+    );
+    const result = await runSocialInbox(
+      pool(),
+      loadConfig(),
+      { bytes: randomBytes },
+      new Date("2026-11-07T18:00:00Z"),
+    );
+    expect(result?.stopReason).toBe("abstain-no-evidence");
+    const replies = await pool().query("SELECT 1 FROM social_posts WHERE parent_post_id=$1", [
+      crossClassPost,
+    ]);
+    expect(replies.rowCount).toBe(0);
+  });
+
   it("leaves model usage unchanged and every post note empty across all representative runs", async () => {
     const usage = await pool().query<{ count: string }>(
       "SELECT count(*)::text AS count FROM model_usage",
