@@ -5,7 +5,7 @@
 | ID | SCR-188 |
 | Filed by | GPT orchestrator, 2026-11-05 |
 | Spec and section | `docs/specs/06-review/change-requests/SCR-187-circle-registry-discovery-and-gateway.md` §§4.6–4.7, 8, 13 test 12, 14; `docs/tracker/demo-v1-tracker.md` C11/CD-07 and DD-07 |
-| Status | Open |
+| Status | Accepted |
 
 ## Problem
 
@@ -32,4 +32,9 @@ The architect should also decide whether the Circle paid check remains a Demo v1
 
 ## Decision
 
-- Pending Zaryab and chief architect ruling.
+- **Accepted by Zaryab, 2026-11-05.** Keep the fail-closed eligibility and probe gates.
+  Use an eligible Czar merchant for the Gateway pocket and sweep proof. Defer the paid
+  Circle-listing check until a compatible listing exists or a separate accepted SCR
+  specifies the required SIWX, session and input support. The deferred Circle payment
+  is not a Demo v1 P0 completion gate. Discovery may return zero eligible Circle
+  candidates on the observed Arc testnet catalog; report that result truthfully.
