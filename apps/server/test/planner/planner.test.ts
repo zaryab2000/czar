@@ -230,6 +230,27 @@ describe("planner fallback", () => {
     });
   });
 
+  it("assigns the generic profile to a Circle service with no output schema", async () => {
+    const registered = fakeService();
+    const circle: PlannerService = {
+      ...registered,
+      extensions: {
+        czar: { ...registered.extensions.czar, source: "circle-registry" },
+      },
+    };
+    const profileSource = createPlannerProfileSource({
+      profileIdFor(taskClass: string) {
+        return taskClass === "generic-delivery"
+          ? `prof_${"b".repeat(32)}`
+          : `prof_${"a".repeat(32)}`;
+      },
+    } as never);
+
+    await expect(makePlanner({ service: circle, profileSource })).resolves.toMatchObject({
+      plan: { steps: [{ acceptanceProfileId: `prof_${"b".repeat(32)}` }] },
+    });
+  });
+
   it("sums only paid Gateway volume and excludes job and unpaid steps", () => {
     expect(
       computeObjectiveGatewayVolume([
