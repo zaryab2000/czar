@@ -261,6 +261,9 @@ function chainProjection(input: ProjectionInput): Projection {
     },
     pocketBalances: (pocket) => pocketBalances(input, pocket),
     nanoSpent: async () => ({ step: 0n, pocket: 0n }),
+    // SCR-180: this stand-in models no spend, indexed or pending.
+    pendingNanoSpent: async () => ({ step: 0n, pocket: 0n }),
+    pendingCalls: async () => 0,
     settledPayment: async () => false,
     autonomy: async () => undefined,
     job: async () => undefined,

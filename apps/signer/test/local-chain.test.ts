@@ -21,6 +21,7 @@ import {
   type TransactionReceipt,
   type TransactionSerializableEIP1559,
 } from "viem";
+import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { loadConfig } from "@czar/config";
 import { derivedNonce, paymentRefHash, slReceiptDigest, type SlReceipt } from "@czar/hashing";
 import type { PaymentRef } from "@czar/schemas";
@@ -28,6 +29,8 @@ import { czarVaultAbi, withFeeFloor } from "@czar/vault-client";
 import { CANONICAL_GATEWAY_WALLET } from "../../../ops/local/gateway-doubles.ts";
 import { runGasRefill, startGasRefillJob } from "#src/gas-refill";
 import { createSignerMetrics, type GasLowKey } from "#src/metrics";
+import { postgresAudit } from "#src/postgres-audit";
+import { createPostgresProjection } from "#src/postgres-projection";
 import { returnableAtomic, type Denied } from "#src/policy";
 import { createRpcGasRefillAdapters, createRpcTransactionPreparer } from "#src/runtime-adapters";
 import { pocketReturnGasReserve } from "#src/service";
@@ -197,6 +200,183 @@ describe.skipIf(!enabled)("SCR-146 §3.3 run 2: signer against real chain reads"
       );
       await expectReceiptSigned(run, x402PaymentRef(run, reservationId, 1, validBefore));
     }, 180_000);
+  });
+
+  // SCR-180 §2 on the real tables: the production audit writer and projection, the real indexer's
+  // `authorizations`, and its `gateway_transfers` table. Runs after TA-01, whose reservation it reuses.
+  describe("SCR-180 pending spend on the real audit and indexer tables", () => {
+    it("counts a signed, unused x402 authorization against expected calls until the indexer sees it used", async () => {
+      const latest = await run.db.pool.query<{ reservation_id: string }>(
+        `SELECT reservation_id::text AS reservation_id FROM reservations
+         WHERE lower(vault)=lower($1) AND envelope_id=$2 AND step_index=0
+         ORDER BY reservation_id DESC LIMIT 1`,
+        [run.vault, ENVELOPE_ID.toString()],
+      );
+      const reservationId = BigInt(latest.rows[0]?.reservation_id ?? "0");
+      const reservation = await run.node.publicClient.readContract({
+        address: run.vault,
+        abi: czarVaultAbi,
+        functionName: "getReservation",
+        args: [reservationId],
+      });
+      const now = () => chainNow(run.node);
+      const usedCalls = async () =>
+        (await realProjection(run).envelope(run.vault, ENVELOPE_ID))?.leaves.find(
+          (leaf) => leaf.stepIndex === 0,
+        )?.usedCalls;
+      // TA-01 paid indices 0 and 1: one call of the step is left.
+      expect(await usedCalls()).toBe(CALL_COUNT - 1);
+      expect(await realProjection(run).pendingCalls(run.vault, ENVELOPE_ID, 0, await now())).toBe(
+        0,
+      );
+
+      const index = CALL_COUNT - 1;
+      const signed = await run.sign("cz-15", {
+        keyId: "K3",
+        kind: "usdc-3009",
+        payload: {
+          vault: run.vault,
+          reservationId: reservationId.toString(),
+          index: String(index),
+          to: PAYEE,
+          value: UNIT_AMOUNT.toString(),
+          validBefore: reservation.validBefore.toString(),
+        },
+      });
+      if (!("signature" in signed)) throw new Error("usdc-3009 returned no signature");
+      const recorded = await run.db.pool.query<{ ids: Record<string, unknown>; amount: string }>(
+        `SELECT object_ids->0 AS ids, amount_atomic AS amount FROM audit
+         WHERE action='signer:usdc-3009' AND outcome='signed' ORDER BY audit_id DESC LIMIT 1`,
+      );
+      expect(recorded.rows[0]).toMatchObject({
+        amount: UNIT_AMOUNT.toString(),
+        ids: {
+          vault: run.vault.toLowerCase(),
+          nonce: derivedNonce(run.vault, reservationId, index).toLowerCase(),
+          validBefore: reservation.validBefore.toString(),
+          envelopeId: ENVELOPE_ID.toString(),
+          stepIndex: 0,
+        },
+      });
+      expect(await realProjection(run).pendingCalls(run.vault, ENVELOPE_ID, 0, await now())).toBe(
+        1,
+      );
+
+      // Indexed 2 + pending 1 = expectedCalls: the step's next reserve is refused before any transaction.
+      const preparedBefore = run.prepared.length;
+      await expectDenied(
+        run.sign("cz-15", {
+          keyId: "K3",
+          kind: "vault-call",
+          payload: {
+            vault: run.vault,
+            selector: "reserve",
+            args: {
+              envelopeId: ENVELOPE_ID.toString(),
+              stepIndex: "0",
+              payee: PAYEE,
+              stepCap: STEP_CAP.toString(),
+              proof: run.proofs.payee,
+              unitAmount: UNIT_AMOUNT.toString(),
+              count: "1",
+              validBefore: reservation.validBefore.toString(),
+            },
+          },
+        }),
+        "expected-calls-used",
+      );
+      expect(run.prepared.length).toBe(preparedBefore);
+
+      // Once used on chain and indexed, it is counted as used and no longer as pending: once, not twice.
+      await sendAsController(run, USDC, USDC_ABI, "transferWithAuthorization", [
+        run.vault,
+        PAYEE,
+        UNIT_AMOUNT,
+        0n,
+        reservation.validBefore,
+        derivedNonce(run.vault, reservationId, index),
+        signed.signature,
+      ]);
+      await waitForAuthorizations(run, reservationId, (rows) =>
+        rows.some((item) => item.index === index && item.used),
+      );
+      expect(await usedCalls()).toBe(CALL_COUNT);
+      expect(await realProjection(run).pendingCalls(run.vault, ENVELOPE_ID, 0, await now())).toBe(
+        0,
+      );
+    }, 180_000);
+
+    it("sums signed gateway-nano rows until gateway_transfers holds their nonce", async () => {
+      // A pocket address of its own, so no other case's audit rows or transfers are in scope.
+      const pocket = privateKeyToAccount(generatePrivateKey()).address.toLowerCase() as Address;
+      const other = privateKeyToAccount(generatePrivateKey()).address.toLowerCase() as Address;
+      const payTo = PAYEE.toLowerCase() as Address;
+      const nonce = repeatedHash32;
+      const now = await chainNow(run.node);
+      const audit = postgresAudit(run.db.pool);
+      const signedRow = (n: string, to: Address, amount: bigint, validBefore: number) =>
+        audit.write({
+          at: now * 1000,
+          caller: "cz-15",
+          keyRef: `K4:${pocket}`,
+          kind: "gateway-nano",
+          digest: nonce("d"),
+          purpose: { envelopeRef: "1" },
+          outcome: "signed",
+          spend: {
+            kind: "gateway-nano",
+            pocket,
+            payTo: to,
+            nonce: nonce(n),
+            validBefore: BigInt(validBefore),
+            envelopeId: 1n,
+            stepIndex: 0,
+            amount,
+          },
+        });
+      await signedRow("1", payTo, 700n, now + 600);
+      await signedRow("2", other, 300n, now + 600);
+      await signedRow("3", payTo, 900n, now);
+      const transfer = (n: string, status: string, amount: bigint) =>
+        withoutIndexerTriggers(
+          run,
+          `INSERT INTO gateway_transfers
+             (transfer_id, status, from_address, to_address, amount, nonce, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $7)`,
+          [
+            `scr-180-${pocket}-${n}`,
+            status,
+            pocket,
+            payTo,
+            amount.toString(),
+            nonce(n),
+            new Date().toISOString(),
+          ],
+        );
+      try {
+        await expect(realProjection(run).pendingNanoSpent(pocket, payTo, now)).resolves.toEqual({
+          step: 700n,
+          pocket: 1_000n,
+        });
+        await transfer("1", "received", 700n);
+        // A failed transfer is not counted by nanoSpent, so its authorization stays pending.
+        await transfer("2", "failed", 300n);
+        const pending = await realProjection(run).pendingNanoSpent(pocket, payTo, now);
+        const indexed = await realProjection(run).nanoSpent(pocket, payTo);
+        expect(pending).toEqual({ step: 0n, pocket: 300n });
+        expect(indexed).toEqual({ step: 700n, pocket: 700n });
+      } finally {
+        await withoutIndexerTriggers(
+          run,
+          "DELETE FROM gateway_transfers WHERE transfer_id LIKE $1",
+          [`scr-180-${pocket}-%`],
+        );
+        await run.db.pool.query(
+          "DELETE FROM audit WHERE action='signer:gateway-nano' AND lower(object_ids->0->>'keyRef')=lower($1)",
+          [`K4:${pocket}`],
+        );
+      }
+    }, 60_000);
   });
 
   describe("SCR-145 overdue manual-return write-off", () => {
@@ -523,6 +703,42 @@ type ManualReturn = {
 };
 
 type AuthorizationRow = { index: number; used: boolean; settled: boolean };
+
+/** The production Postgres projection over run 2's database and chain (SCR-180 cases). */
+function realProjection(run: Run2) {
+  return createPostgresProjection({
+    config,
+    database: run.db.pool,
+    chain: run.node.publicClient,
+    factory: run.deployment.CzarVaultFactory,
+  });
+}
+
+/**
+ * Writes a test row into an indexer table of run 2's throwaway database. Ponder's triggers on its tables write
+ * to session tables only its own connection has, so this one transaction runs with triggers off.
+ */
+async function withoutIndexerTriggers(
+  run: Run2,
+  text: string,
+  values: readonly unknown[],
+): Promise<void> {
+  const client = await run.db.pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SET LOCAL session_replication_role = replica");
+    await client.query(text, [...values]);
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/** A 32-byte value of one repeated hex byte, e.g. a test nonce. */
+const repeatedHash32 = (byte: string) => `0x${byte.repeat(64)}` as `0x${string}`;
 
 async function expectDenied(promise: Promise<unknown>, rule: string): Promise<void> {
   await expect(promise).rejects.toMatchObject({ name: "Denied", rule } satisfies Partial<Denied>);

@@ -127,6 +127,22 @@ export interface Projection {
   pocketBalances(pocket: Address): Promise<PocketBalances>;
   /** The paying step's `stepIndex` the pocket pays for, cumulative nanopayment totals. */
   nanoSpent(pocket: Address, payTo: Address): Promise<{ step: bigint; pocket: bigint }>;
+  /**
+   * SCR-180 §2: what this signer signed for the pocket that the indexer has not seen yet: signed `gateway-nano`
+   * audit rows with no indexed transfer of the same EIP-3009 nonce and `now < validBefore` (`now` in Unix
+   * seconds); `step` for this `payTo`, `pocket` for every payee. Throws when it cannot be computed.
+   */
+  pendingNanoSpent(
+    pocket: Address,
+    payTo: Address,
+    now: number,
+  ): Promise<{ step: bigint; pocket: bigint }>;
+  /**
+   * SCR-180 §2: calls of one step this signer signed (`usdc-3009`) that the indexer has not seen used yet, with
+   * `now < validBefore`; added to `PlanLeaf.usedCalls` for the expected-calls check. Throws when it cannot be
+   * computed.
+   */
+  pendingCalls(vault: Address, envelopeId: bigint, stepIndex: number, now: number): Promise<number>;
   settledPayment(vault: Address, paymentRef: PaymentRef): Promise<boolean>;
   autonomy(vault: Address, categoryId: Hash32): Promise<AutonomyView | undefined>;
   job(escrow: Address, jobId: bigint): Promise<JobView | undefined>;

@@ -63,6 +63,9 @@ export async function testSignerWithDetails(options: TestSignerOptions = {}) {
       return balances;
     },
     nanoSpent: async () => ({ step: 0n, pocket: 0n }),
+    // SCR-180: this stand-in models no spend, indexed or pending.
+    pendingNanoSpent: async () => ({ step: 0n, pocket: 0n }),
+    pendingCalls: async () => 0,
     settledPayment: async (_vault: Address, _hash: PaymentRef) => true,
     autonomy: async () => undefined,
     job: async () => undefined,
