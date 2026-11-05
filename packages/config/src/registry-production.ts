@@ -8,6 +8,7 @@ import type { ParameterSpec } from "./types.ts";
 const SCR_170 = "docs/specs/06-review/change-requests/SCR-170-public-alpha-cloud-deployment.md";
 const CZ_20 = "docs/specs/04-components/server/server-supply-side.md";
 const CZ_27 = "docs/specs/04-components/server/server-autonomy-roi-keys.md";
+const SCR_181 = "docs/specs/06-review/change-requests/SCR-181-browser-new-task.md";
 const SCR_182 = "docs/specs/06-review/change-requests/SCR-182-audit-merchants.md";
 
 export const PRODUCTION_PARAMETERS = [
@@ -204,6 +205,48 @@ export const PRODUCTION_PARAMETERS = [
     unit: "tokens",
     reason: "a local refusal above this; the price tier changes above it",
     source: `${SCR_170}:216`,
+  },
+
+  // Lane C (UX-01): tasks a signed-in owner starts in the browser (SCR-181 §5).
+  {
+    key: "app.objectiveMaxSourceChars",
+    type: "integer",
+    default: 2000,
+    unit: "chars",
+    reason: "longest pasted contract source; equals the taskSpec.context maximum",
+    source: `${SCR_181}:110`,
+  },
+  {
+    key: "app.webObjectivesPerUserPerHour",
+    type: "integer",
+    default: 10,
+    unit: "count",
+    reason: "stops one account flooding the planner and merchants with browser tasks",
+    source: `${SCR_181}:111`,
+  },
+  {
+    key: "app.webObjectiveMinutesSaved",
+    type: "integer",
+    default: 60,
+    unit: "minutes",
+    reason: "fixed estimate for a manual web task (D82)",
+    source: `${SCR_181}:112`,
+  },
+  {
+    key: "app.webObjectiveHourlyBand",
+    type: "string",
+    default: "C",
+    unit: "band",
+    reason: "neutral default; there is no local soul on the web",
+    source: `${SCR_181}:113`,
+  },
+  {
+    key: "app.objectivePollSeconds",
+    type: "integer",
+    default: 3,
+    unit: "s",
+    reason: "how often the browser polls a task's progress",
+    source: `${SCR_181}:114`,
   },
 
   // Lane D: daemon — no production keys yet.

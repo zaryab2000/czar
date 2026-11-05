@@ -41,7 +41,7 @@ export async function submitObjective(
   }
 }
 
-async function submitWithinTransaction(
+export async function submitWithinTransaction(
   client: PoolClient,
   config: Config,
   input: Parameters<typeof submitObjective>[2],
@@ -111,7 +111,7 @@ async function submitWithinTransaction(
   return { status: 202, body: responseBody };
 }
 
-function hashesMatch(body: ObjectiveSubmission): boolean {
+export function hashesMatch(body: ObjectiveSubmission): boolean {
   const specHash = taskSpecHash(body.taskSpec);
   return (
     objectiveHash({
