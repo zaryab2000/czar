@@ -1,4 +1,6 @@
 import type {
+  AppObjective,
+  AppObjectiveRequest,
   ApprovalIntent,
   ApprovalIntentRequest,
   ApprovalSummary,
@@ -49,6 +51,11 @@ export interface AppResultCard {
   readonly suppliers: readonly AppResultSupplier[];
   readonly amountDisplay?: string;
   readonly windowClosesAt: string;
+}
+
+export interface AppObjectiveAccepted {
+  readonly objectiveId: string;
+  readonly state: "received";
 }
 
 export interface AppRatingRequest {
@@ -459,6 +466,20 @@ export const appApi = {
       headers: { "Idempotency-Key": key },
       body: JSON.stringify(body),
     }),
+  /** Starts a task from the web app (SCR-181 §2). Retrying with the same key never creates a second task. */
+  createAppObjective: (body: AppObjectiveRequest, key = idempotencyKey()) =>
+    request<AppObjectiveAccepted>("/v1/app/objectives", {
+      method: "POST",
+      headers: { "Idempotency-Key": key },
+      body: JSON.stringify(body),
+    }),
+  listAppObjectives: (cursor?: string) => {
+    const query = new URLSearchParams();
+    if (cursor) query.set("cursor", cursor);
+    return request<AppPage<AppObjective>>(`/v1/app/objectives?${query}`);
+  },
+  getAppObjective: (objectiveId: string) =>
+    request<AppObjective>(`/v1/app/objectives/${encodeURIComponent(objectiveId)}`),
   getSoulPointer: () => request<SoulPointer>("/v1/soul/pointer"),
   createPairingCode: () =>
     request<PairingCode>("/v1/devices/pairing-codes", {
