@@ -50,14 +50,21 @@ describe("controlled social fixture", () => {
       observations: string;
       ratings: string;
       receipts: string;
-    }>(`SELECT
+      leads: string;
+      leadPosts: string;
+    }>(
+      `SELECT
       (SELECT count(*) FROM users WHERE controlled)::text AS users,
       (SELECT count(*) FROM social_representatives WHERE controlled)::text AS representatives,
       (SELECT count(*) FROM objectives o JOIN users u USING(user_id) WHERE u.controlled)::text AS objectives,
       (SELECT count(*) FROM observations WHERE controlled)::text AS observations,
       (SELECT count(*) FROM ratings r JOIN users u USING(user_id) WHERE u.controlled)::text AS ratings,
       (SELECT count(*) FROM rating_receipts rr JOIN observations o USING(obs_id)
-        WHERE o.controlled)::text AS receipts`);
+        WHERE o.controlled)::text AS receipts,
+      (SELECT count(*) FROM social_leads WHERE origin=$1)::text AS leads,
+      (SELECT count(*) FROM social_posts WHERE kind='lead')::text AS "leadPosts"`,
+      [fixture.noSupplier.lead.origin],
+    );
     expect(counts.rows[0]).toEqual({
       users: "3",
       representatives: "3",
@@ -65,6 +72,18 @@ describe("controlled social fixture", () => {
       observations: "18",
       ratings: "9",
       receipts: "18",
+      leads: "1",
+      leadPosts: "1",
+    });
+    const lead = await pool().query<{ card: Record<string, unknown>; state: string }>(
+      `SELECT p.card,l.state FROM social_leads l JOIN social_posts p USING(post_id)
+       WHERE l.origin=$1`,
+      [fixture.noSupplier.lead.origin],
+    );
+    expect(lead.rows[0]?.state).toBe("queued");
+    expect(lead.rows[0]?.card).toMatchObject({
+      origin: fixture.noSupplier.lead.origin,
+      source: "controlled-fixture",
     });
     const submissions = await pool().query<{ submission: unknown }>(
       `SELECT o.submission FROM objectives o JOIN users u USING(user_id) WHERE u.controlled`,

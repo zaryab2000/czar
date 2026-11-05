@@ -31,8 +31,8 @@ async function seedLead(index: number, origin = ORIGIN): Promise<string> {
     [repId, userId, `Rep-${String(index).padStart(4, "0")}`],
   );
   await getPool().query(
-    `INSERT INTO social_threads(thread_id,kind,network,subject_key,opened_by)
-     VALUES($1,'question',$2,$3,$4)`,
+    `INSERT INTO social_threads(thread_id,kind,network,subject_key,opened_by,contributions)
+     VALUES($1,'question',$2,$3,$4,1)`,
     [threadId, NETWORK, `question:${threadId}`, repId],
   );
   await getPool().query(
@@ -118,6 +118,14 @@ describe("SN-4 unpaid lead probe", () => {
       probedActionId(leadId),
     ]);
     expect(posts.rows[0]?.card["template"]).toBe("system.lead.probed");
+    expect(posts.rows[0]?.card["values"]["probeResult"]).toBe(
+      `it answers with a valid x402 payment request on ${NETWORK}`,
+    );
+    const thread = await getPool().query<{ contributions: number; revision: number }>(
+      `SELECT contributions,revision FROM social_threads WHERE thread_id=$1`,
+      [`thr_${String(1).padStart(26, "0")}`],
+    );
+    expect(thread.rows[0]).toEqual({ contributions: 1, revision: 2 });
   });
 
   it("rejects a wrong-network challenge and an unpaid 200", async () => {
@@ -137,6 +145,11 @@ describe("SN-4 unpaid lead probe", () => {
       fetchWith(async () => response(200)),
     );
     expect(await state(plain)).toEqual({ state: "rejected", reject_reason: "not-402" });
+    const rejectedPost = await getPool().query<{ card: { values: { probeResult: string } } }>(
+      "SELECT card FROM social_posts WHERE action_id=$1",
+      [probedActionId(plain)],
+    );
+    expect(rejectedPost.rows[0]?.card.values.probeResult).toBe("rejected (not-402)");
   });
 
   it("rejects an unapproved HTTP origin and a DNS failure without posting payment data", async () => {

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { objectiveHash, taskSpecHash } from "@czar/hashing";
+import { validateSocialLeadCard } from "@czar/schemas";
 import type { TaskSpec } from "@czar/schemas";
 import type { Pool, PoolClient } from "pg";
 import { randomId, type RandomSource } from "#src/http/ids";
@@ -40,6 +41,7 @@ export interface ControlledFixture {
     objectiveState: "no-supplier";
     capability: string;
     taskSpec: TaskSpec;
+    lead: { origin: string; pathHint: string; source: "controlled-fixture" };
   };
 }
 
@@ -55,6 +57,7 @@ interface SeedOptions {
 interface SeedOwner {
   userId: string;
   deviceId: string;
+  representativeId: string;
   vault: string;
 }
 
@@ -124,7 +127,7 @@ async function seedOwners(
         options.now,
       ],
     );
-    owners.set(owner.key, { userId, deviceId, vault });
+    owners.set(owner.key, { userId, deviceId, representativeId, vault });
   }
   return owners;
 }
@@ -264,6 +267,57 @@ async function seedNoSupplier(
     `INSERT INTO outbox_events(name,objective_id,payload,created_at)
      VALUES('objective.no-supplier',$1,'{}',$2)`,
     [objectiveId, options.now],
+  );
+  const lead = fixture.noSupplier.lead;
+  const threadId = randomId("thr_", options.random);
+  const postId = randomId("pst_", options.random);
+  const leadId = randomId("led_", options.random);
+  const card = {
+    cardVersion: "1",
+    network: fixture.network,
+    origin: lead.origin,
+    pathHint: lead.pathHint,
+    capabilityTag: fixture.noSupplier.capability,
+    source: lead.source,
+  };
+  if (!validateSocialLeadCard(card)) throw new Error("Invalid controlled fixture lead card.");
+  await db.query(
+    `INSERT INTO social_threads(thread_id,kind,network,task_class,capability_tag,
+       subject_key,opened_by,contributions,expires_at)
+     VALUES($1,'question',$2,$3,$3,$4,$5,1,$6)`,
+    [
+      threadId,
+      fixture.network,
+      fixture.noSupplier.capability,
+      `question:${threadId}`,
+      owner.representativeId,
+      new Date(options.now.getTime() + 24 * 3_600_000),
+    ],
+  );
+  await db.query(
+    `INSERT INTO social_posts(post_id,thread_id,author_id,kind,card,action_id,created_at)
+     VALUES($1,$2,$3,'lead',$4,$5,$6)`,
+    [
+      postId,
+      threadId,
+      owner.representativeId,
+      JSON.stringify(card),
+      `fixture-lead:${leadId}`,
+      options.now,
+    ],
+  );
+  await db.query(
+    `INSERT INTO social_leads(lead_id,post_id,network,origin,path_hint,capability_tag,created_at,updated_at)
+     VALUES($1,$2,$3,$4,$5,$6,$7,$7)`,
+    [
+      leadId,
+      postId,
+      fixture.network,
+      lead.origin,
+      lead.pathHint,
+      fixture.noSupplier.capability,
+      options.now,
+    ],
   );
 }
 

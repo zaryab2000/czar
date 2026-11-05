@@ -244,7 +244,7 @@ async function opened(args: {
       distinctOwners,
       negativeUnits,
       serviceId: key.serviceId,
-      versionClause: key.versionId === "ver_unknown" ? "" : ` (${key.versionId})`,
+      versionClause: key.versionId === "ver_unknown" ? "" : ` version ${key.versionId}`,
       taskClass: key.taskClass,
       windowDays,
     },

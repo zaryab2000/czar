@@ -123,7 +123,10 @@ async function saveResult(
         template: "system.lead.probed",
         values: {
           origin: lead.origin,
-          probeResult: outcome.reason ?? outcome.state,
+          probeResult:
+            outcome.state === "probed-ok"
+              ? `it answers with a valid x402 payment request on ${lead.network}`
+              : `rejected (${outcome.reason})`,
         },
       };
       if (isPublicContentSafe(card, [], lead.origin)) {
@@ -139,10 +142,9 @@ async function saveResult(
            ON CONFLICT(action_id) DO NOTHING`,
           [postId, lead.thread_id, JSON.stringify(card), actionId, now],
         );
-        await client.query(
-          "UPDATE social_threads SET contributions=contributions+1,revision=revision+1 WHERE thread_id=$1",
-          [lead.thread_id],
-        );
+        await client.query("UPDATE social_threads SET revision=revision+1 WHERE thread_id=$1", [
+          lead.thread_id,
+        ]);
         await client.query(
           `INSERT INTO outbox_events(name,payload,delivered_at)
            VALUES('social.post.published',$1::jsonb,now())`,

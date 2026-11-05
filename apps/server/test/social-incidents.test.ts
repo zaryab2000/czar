@@ -133,11 +133,12 @@ describe("SN-4 incident evidence", () => {
       .update(incidents[0]!.incidentId)
       .update("opened")
       .digest("hex");
-    const systemPosts = await getPool().query(
-      "SELECT action_id FROM social_posts WHERE action_id=$1",
+    const systemPosts = await getPool().query<{ card: { values: { versionClause: string } } }>(
+      "SELECT card FROM social_posts WHERE action_id=$1",
       [actionId],
     );
     expect(systemPosts.rowCount).toBe(1);
+    expect(systemPosts.rows[0]?.card.values.versionClause).toBe(` version ${VERSION}`);
     await observation(1, 4);
     await evaluateIncidents(getPool(), config, AT);
     incidents = await openIncidentsFor(getPool(), NETWORK, [SERVICE], "web-search");
