@@ -533,6 +533,13 @@ describe("representative run", () => {
       [inboxId],
     );
     expect(runCount.rows[0]?.count).toBe("1");
+    expect(await runSocialInbox(pool(), loadConfig(), context.random, now)).toBeNull();
+    const afterCommitReplay = await pool().query<{ posts: string; runs: string }>(
+      `SELECT (SELECT count(*) FROM social_posts WHERE action_id=$1)::text AS posts,
+         (SELECT count(*) FROM social_runs WHERE inbox_id=$2)::text AS runs`,
+      [expectedActionId, inboxId],
+    );
+    expect(afterCommitReplay.rows[0]).toEqual({ posts: "1", runs: "1" });
   });
 
   it("rejects publication when consent changes after context load", async () => {
