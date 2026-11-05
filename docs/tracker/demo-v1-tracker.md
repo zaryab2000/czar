@@ -14,72 +14,23 @@
 
 | Component | Done | In review | Open | Total | Done % |
 |---|---|---|---|---|---|
-| C1 User onboarding (browser) | 0 | 5 | 4 | 9 | ░░░░░░░░░░ 0% |
-| C2 Czar backend and brain | 4 | 1 | 3 | 8 | █████░░░░░ 50% |
+| C1 User onboarding (browser) | 5 | 0 | 4 | 9 | ██████░░░░ 56% |
+| C2 Czar backend and brain | 5 | 0 | 3 | 8 | ██████░░░░ 62% |
 | C3 Smart contracts and keys | 0 | 0 | 3 | 3 | ░░░░░░░░░░ 0% |
 | C4 Selection layer (ratings → discovery) | 2 | 0 | 2 | 4 | █████░░░░░ 50% |
 | C5 cZarBook social layer | 4 | 0 | 3 | 7 | ██████░░░░ 57% |
 | C6 Production readiness and operations | 2 | 0 | 12 | 14 | █░░░░░░░░░ 14% |
-| C7 x402 audit merchants | 0 | 6 | 2 | 8 | ░░░░░░░░░░ 0% |
+| C7 x402 audit merchants | 6 | 0 | 2 | 8 | ████████░░ 75% |
 | C8 Demo data, timing and rehearsal | 2 | 0 | 6 | 8 | ██░░░░░░░░ 25% |
 | C9 Specs and governance (Phase 0) | 3 | 0 | 1 | 4 | ████████░░ 75% |
 | C10 Optional | 0 | 0 | 1 | 1 | ░░░░░░░░░░ 0% |
-| C11 Circle registry discovery and Gateway nanopa | 1 | 0 | 10 | 11 | █░░░░░░░░░ 9% |
-| **All tasks** | **18** | **12** | **47** | **77** | **██░░░░░░░░ 23%** |
+| C11 Circle registry discovery and Gateway nanopa | 6 | 0 | 5 | 11 | ██████░░░░ 55% |
+| **All tasks** | **35** | **0** | **42** | **77** | **████░░░░░░ 45%** |
 
-- **P0 (the demo cannot run without these):** 17 of 59 done: ███░░░░░░░ 29%
-- **Done or in review:** 30 of 77: ████░░░░░░ 39%
-- **If #246 and #247 merge:** 12 more tasks move to done.
-- **Snapshot:** 2026-11-05 22:25 IST
+- **P0 (the demo cannot run without these):** 29 of 58 done: █████░░░░░ 50%
+- **Snapshot:** 2026-11-06 00:10 IST
 
 ---
-## 2. How to use this tracker
-
-### 2.1 Owners
-
-| Code | Who |
-|---|---|
-| **Z** | Zaryab (human setup, approvals, merges) |
-| **CL** | Claude (chief architect and its builder agents) |
-| **GPT** | GPT / Codex orchestrator agent |
-| **COL** | Zaryab's colleague |
-| **TBD** | Zaryab assigns |
-
-The **Suggested owner** column is advice. Zaryab writes the final owner in **Owner**.
-
-- **Delegated to COL (2026-11-05):** Package 1 (audit merchants) and Package 2 (browser pages). The full builder prompt is in [`colleague-delegation-packages-1-2.md`](colleague-delegation-packages-1-2.md). COL works only on the rows marked `COL`.
-
-### 2.2 Status values
-
-| Status | Meaning |
-|---|---|
-| `todo` | Not started |
-| `blocked` | Waiting on a dependency; name it in Notes |
-| `doing` | An owner is working on it |
-| `review` | PR open, waiting for review or merge |
-| `done` | Merged **and** its acceptance check passed |
-| `dropped` | Removed from scope; give the reason in Notes |
-
-### 2.3 Priority values
-
-| Priority | Meaning |
-|---|---|
-| **P0** | The demo cannot run without it |
-| **P1** | The demo runs without it, but is weaker or riskier |
-| **P2** | After the demo |
-
-### 2.4 Update rules for agents
-
-1. **Before starting:** set the task to `doing` and put your owner code in **Owner**, in the PR you open for the task (or in a small tracker-only PR).
-2. **When the PR opens:** set `review` and add the PR number.
-3. **When it is merged and the acceptance check passed:** set `done`.
-   - Paste the acceptance command and result into the PR, not into this file.
-4. **When blocked:** set `blocked` and name the blocking task ID in Notes.
-5. **Scope:** change only your own task rows. Never reorder or delete other rows.
-6. **New work:** if you discover a new task, add a row at the end of the right component, with ID `<component>-NEW-<n>`, status `todo` and owner `TBD`, and mention it in your PR.
-
----
-
 ## 3. Master execution order (critical path)
 
 Execute in this order. Tasks in the same phase can run in parallel unless **Depends on** says otherwise.
@@ -152,12 +103,12 @@ OPS-01..05 ──┼─> OPS-06..10 ─> OPS-11 (real payment) ─┐
 
 | ID | Task | Pri | Phase | Depends on | Suggested owner | Owner | Status | PR | Acceptance check | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|
-| UX-01 | **Server route for browser "New task":** create an objective from a signed-in web session, with no paired device. Takes a capability (`code-review`, labelled "Smart contract audit"), a description, and the contract source or address. Applies the same limits, validation and redaction rules SPEC-01 sets. Tests first | P0 | 2 | SPEC-01 | COL | COL | review | #247 | Route tests pass. An objective created from a web session reaches `planning` and then `awaiting-approval` against a registered audit merchant | Today objectives come only from a paired device (`POST /v1/objectives`, `czar objective`, macOS) |
-| UX-02 | **"New task" page:** form fields per SPEC-01 (description; paste source or contract address; service type "Smart contract audit"; optional max budget). Linked from Home | P0 | 2 | UX-01 | COL | COL | review | #247 | Playwright test: submit the form and see the new task with status "Planning" | Keep the copy plain; no jargon |
-| UX-03 | **Task progress in the browser:** a browser-created task shows its state (planning → awaiting approval → paying → delivered) and links to the approval page | P0 | 2 | UX-01 | COL | COL | review | #247 | Playwright: the state updates without a manual reload (polling is fine) | Check what Home already shows before building |
-| UX-04 | **Result and rating for browser tasks:** the delivered audit shows in the result card (Home and Receipts) with Good and Bad rating | P0 | 2 | UX-01, MR-01 | COL | COL | review | #247 | Rating a browser-created task writes an effective rating (`/v1/app/ratings`) | `result-card.tsx` and `/v1/app/ratings` already exist; confirm they work for browser tasks; Result card and rating done; the audit findings are not shown yet (UX-08) |
+| UX-01 | **Server route for browser "New task":** create an objective from a signed-in web session, with no paired device. Takes a capability (`code-review`, labelled "Smart contract audit"), a description, and the contract source or address. Applies the same limits, validation and redaction rules SPEC-01 sets. Tests first | P0 | 2 | SPEC-01 | COL | COL | done | #247 | Route tests pass. An objective created from a web session reaches `planning` and then `awaiting-approval` against a registered audit merchant | Today objectives come only from a paired device (`POST /v1/objectives`, `czar objective`, macOS) |
+| UX-02 | **"New task" page:** form fields per SPEC-01 (description; paste source or contract address; service type "Smart contract audit"; optional max budget). Linked from Home | P0 | 2 | UX-01 | COL | COL | done | #247 | Playwright test: submit the form and see the new task with status "Planning" | Keep the copy plain; no jargon |
+| UX-03 | **Task progress in the browser:** a browser-created task shows its state (planning → awaiting approval → paying → delivered) and links to the approval page | P0 | 2 | UX-01 | COL | COL | done | #247 | Playwright: the state updates without a manual reload (polling is fine) | Check what Home already shows before building |
+| UX-04 | **Result and rating for browser tasks:** the delivered audit shows in the result card (Home and Receipts) with Good and Bad rating | P0 | 2 | UX-01, MR-01 | COL | COL | done | #247 | Rating a browser-created task writes an effective rating (`/v1/app/ratings`) | `result-card.tsx` and `/v1/app/ratings` already exist; confirm they work for browser tasks; Result card and rating done; the audit findings are not shown yet (UX-08); The findings themselves move to UX-08 |
 | UX-05 | **Fresh-user onboarding on the cloud domain:** passkey → vault → fund → limits → representative consent ("Share experiences") | P0 | 3 | OPS-11, SC-03 | Z + CL | | todo | | A brand-new user on a second device completes onboarding with no help | Covers the rp id on the real domain (PM-016) and gas for wallet creation |
-| UX-06 | **Funding help:** a short "get testnet USDC" step in onboarding (Circle faucet link and amounts), or pre-funded demo wallets | P1 | 3 | OPS-05 | COL | COL | review | #247 | A new user knows exactly how to fund their wallet in under 1 minute | The treasury top-up is deferred (DD-06) |
+| UX-06 | **Funding help:** a short "get testnet USDC" step in onboarding (Circle faucet link and amounts), or pre-funded demo wallets | P1 | 3 | OPS-05 | COL | COL | done | #247 | A new user knows exactly how to fund their wallet in under 1 minute | The treasury top-up is deferred (DD-06) |
 | UX-07 | **Demo labels:** controlled representatives show "Czar test agent" (today the badge says "Controlled representative"), and merchants show "Run by Czar" | P1 | 2 | SPEC-03 | GPT | GPT | doing | #237, #236 | Feed, thread and approval screens show the labels | Needed for honesty (DD-03). The wording change needs its spec line; feed and /social/me labels done (#237); lesson-author badge spec merged (SCR-184, #236), build pending |
 | UX-08 | **Show the audit findings in the browser:** a session route returns a delivered task's result body, and the progress page and result card render the findings grouped by severity (location, issue, fix) as plain text | P0 | 2 | #247, SCR-188 | CL (spec), COL (build) | | todo | | Playwright: a delivered audit shows each finding; no HTML rendering of merchant text | Gap from #247: no app-session route returns a result body. Bob must read the shallow audit in the demo |
 | UX-09 | **"Czar removed N items" and the failed task's error class** shown on the progress page (SCR-181 §4, §6) | P2 | 2 | SCR-188 | COL | | todo | | Progress page shows both | Gap from #247: no field carries them yet |
@@ -169,9 +120,9 @@ OPS-01..05 ──┼─> OPS-06..10 ─> OPS-11 (real payment) ─┐
 | BR-01 | **Audit task class:** map `code-review` → `smart-contract-audit` in `planner.capabilityToTaskClass`, and give it a spending category | P0 | 2 | SPEC-02 | CL | CL | done | #235 | `taskClassFor("code-review")` returns `smart-contract-audit`, and planner tests pass | Keeps audit evidence separate from other code reviews |
 | BR-02 | **Planner handles browser objectives:** builds the task spec (topic, fields, contract source) and selects among registered audit merchants | P0 | 2 | UX-01, BR-01 | CL | CL | done | #238 | Planner test: a browser objective selects the top-ranked audit merchant and its plan has a readable "why" | Planner part in #238; merge needs SCR-185 (plan schema limits) |
 | BR-03 | **Payer sends the contract to the merchant:** the paid request carries the contract source or address in the shape SPEC-02 defines (POST body). Money path, tests first | P0 | 2 | SPEC-02, MR-01 | CL (Opus) | CL | done | #239 | Payer tests: the merchant receives the source; payment is exactly the 402 price; no payment on a probe failure | Registered services already support POST bodies (`registered/index.ts` `body`) |
-| BR-04 | **Result check for audits:** accept a delivered report only if it matches the audit-report schema (SPEC-02) | P0 | 2 | SPEC-02 | CL | CL | todo | | Acceptance test: a valid report is accepted, a malformed one rejected, and a shallow but valid report accepted (the rating judges quality, not the check) | Blocked: waits for COL's `audit-report.schema.json` (Package 1); Unblocked once #246 merges (audit-report.schema.json lands) |
+| BR-04 | **Result check for audits:** accept a delivered report only if it matches the audit-report schema (SPEC-02) | P0 | 2 | SPEC-02 | CL | CL | todo | | Acceptance test: a valid report is accepted, a malformed one rejected, and a shallow but valid report accepted (the rating judges quality, not the check) | Blocked: waits for COL's `audit-report.schema.json` (Package 1); Unblocked once #246 merges (audit-report.schema.json lands); audit-report.schema.json is merged (#246), so this is ready to build |
 | BR-05 | **Turn on the model provider:** `models.provider = "anthropic"`, key file name, per-user caps; confirm which server parts call the model | P0 | 1 | OPS-04 | CL | CL | done | #240 | `/health` is fine with the provider on, and one model call is logged within its cap | `env/cloud.example.toml` has it `none` today |
-| BR-06 | **Readable "why" lines:** the approval page explains the merchant choice in plain words (score, ratings count, incident or not) | P1 | 2 | BR-02 | COL | COL | review | #247 | Zaryab reads the approval page and understands the choice in 10 seconds | Demo storytelling |
+| BR-06 | **Readable "why" lines:** the approval page explains the merchant choice in plain words (score, ratings count, incident or not) | P1 | 2 | BR-02 | COL | COL | done | #247 | Zaryab reads the approval page and understands the choice in 10 seconds | Demo storytelling |
 | BR-07 | **Merchant display name on the approval page:** "Your contract will be sent to Czar Lab Quick Audit", not the payee host | P1 | 2 | SCR-188 | CL | | todo | | Approval page shows the display name | Gap from #247: the plan carries no merchant display name |
 | SEC-01 | **Shared merchant and fetch hardening:** `vanilla-route.ts` `readJsonBody` checks size before buffering; safeFetch drops custom headers on cross-origin redirects; cached replays are bound to the payer | P1 | 2 | — | CL (Opus) | | todo | | Tests for each case | Flagged in #246; shared code, money-adjacent |
 
@@ -228,14 +179,14 @@ OPS-01..05 ──┼─> OPS-06..10 ─> OPS-11 (real payment) ─┐
 
 | ID | Task | Pri | Phase | Depends on | Suggested owner | Owner | Status | PR | Acceptance check | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|
-| MR-01 | **Merchant A, "Czar Lab Quick Audit":** x402 route on Arc testnet USDC; takes contract source or address; returns a schema-valid but **shallow** report (generic findings); fast, cheap model | P0 | 2 | SPEC-02 | COL | COL | review | #246 | Unpaid request → 402 with Arc testnet terms; paid request → schema-valid report in under 30 s | Must be honest-shallow, not broken: the rating judges it |
-| MR-02 | **Merchant B, "Czar Lab Deep Audit":** same interface; a thorough, severity-ranked report with fixes; stronger model | P0 | 2 | SPEC-02 | COL | COL | review | #246 | Same as MR-01, and the report lists severity, location and fix for each finding | |
+| MR-01 | **Merchant A, "Czar Lab Quick Audit":** x402 route on Arc testnet USDC; takes contract source or address; returns a schema-valid but **shallow** report (generic findings); fast, cheap model | P0 | 2 | SPEC-02 | COL | COL | done | #246 | Unpaid request → 402 with Arc testnet terms; paid request → schema-valid report in under 30 s | Must be honest-shallow, not broken: the rating judges it |
+| MR-02 | **Merchant B, "Czar Lab Deep Audit":** same interface; a thorough, severity-ranked report with fixes; stronger model | P0 | 2 | SPEC-02 | COL | COL | done | #246 | Same as MR-01, and the report lists severity, location and fix for each finding | |
 | MR-03 | **Payout keys:** create signer keys `K10:czar-audit-quick` and `K10:czar-audit-deep` (Cloud KMS on the VM, the local keystore locally); `payTo` comes from the signer (SCR-182 §1) | P0 | 0 | — | Z | | todo | | The signer serves both K10 addresses, and no key material exists outside KMS or the keystore | Needs Zaryab's approval (new keys) |
-| MR-04 | **Register A and B in the Czar market:** catalog entries with the `code-review` capability, probe input, price, and verified service versions | P0 | 2 | MR-01, MR-02, BR-01 | COL | COL | review | #246 | A planner probe of each returns one valid 402; the ranking decision lists both | |
-| MR-05 | **Prompt safety:** the contract source and any merchant input reach the model only as labelled, JSON-encoded data (`docs/specs/04-components/shared/ai-prompts.md`); output is schema-checked; spend is capped per call | P0 | 2 | MR-01, MR-02 | COL | COL | review | #246 | A test contract with "ignore previous instructions" in a comment still returns a normal report | Untrusted-text rule in `CLAUDE.md` |
+| MR-04 | **Register A and B in the Czar market:** catalog entries with the `code-review` capability, probe input, price, and verified service versions | P0 | 2 | MR-01, MR-02, BR-01 | COL | COL | done | #246 | A planner probe of each returns one valid 402; the ranking decision lists both | |
+| MR-05 | **Prompt safety:** the contract source and any merchant input reach the model only as labelled, JSON-encoded data (`docs/specs/04-components/shared/ai-prompts.md`); output is schema-checked; spend is capped per call | P0 | 2 | MR-01, MR-02 | COL | COL | done | #246 | A test contract with "ignore previous instructions" in a comment still returns a normal report | Untrusted-text rule in `CLAUDE.md` |
 | MR-06 | **Live on the VM:** merchants container serves A and B behind Caddy; the planner reaches them | P0 | 3 | MR-04, OPS-10 | CL | | todo | | Probe from the VM server succeeds for both | |
-| MR-07 | **Merchant tests:** 402 terms, payment verification, replay rejection, delivery-time limit, report schema | P0 | 2 | MR-01, MR-02 | COL | COL | review | #246 | Merchant test suite passes | Payment verification is a money path: tests first |
-| MR-08 | **Prices:** A cheaper than B (for example A 0.50 and B 1.00 testnet USDC) within the planner's default max | P1 | 2 | SPEC-02 | COL | COL | review | #246 | Both prices are under `planner.defaultMaxUnitAtomic` | Price is not the reason A ranks first; the seeded history is |
+| MR-07 | **Merchant tests:** 402 terms, payment verification, replay rejection, delivery-time limit, report schema | P0 | 2 | MR-01, MR-02 | COL | COL | done | #246 | Merchant test suite passes | Payment verification is a money path: tests first |
+| MR-08 | **Prices:** A cheaper than B (for example A 0.50 and B 1.00 testnet USDC) within the planner's default max | P1 | 2 | SPEC-02 | COL | COL | done | #246 | Both prices are under `planner.defaultMaxUnitAtomic` | Price is not the reason A ranks first; the seeded history is |
 
 ### C8. Demo data, timing and rehearsal
 
@@ -282,14 +233,14 @@ OPS-01..05 ──┼─> OPS-06..10 ─> OPS-11 (real payment) ─┐
 | ID | Task | Pri | Phase | Depends on | Suggested owner | Owner | Status | PR | Acceptance check | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|
 | CD-01 | **SCR-187: Circle discovery source plus Gateway turn-on.** Covers: discovery request (network, category or query from capability, limits, paging, cache TTL); listing → candidate mapping (resource, method, `accepts`, input schema); merge and dedupe with `selection.czarRegisteredServices`; capability ↔ Circle category map; Gateway offer recognition (`extra.name = "GatewayWalletBatched"`) routed to the `gateway-nano` rail; the sweep and refund back to the vault; config keys; Circle terms caveat | P0 | 2 | — | CL | CL | done | #245 | SCR merged | Unblocks CD-02 to CD-09 |
-| CD-02 | **Verify the existing pocket return path against Circle's real testnet Gateway** (SCR-187 §7.2): fund → pay → settle → sweep back to the vault; failed call; halt and cancel drain; late-balance recovery. The return path already exists (SCR-004, SCR-127, `pocket.ts`, `pocket-recovery.ts`); it has only run against local stand-ins. **Money path, tests first** | P0 | 2 | CD-01 | GPT | GPT | review | #252 | Recorded-fixture tests, then one live run per case (approval): vault balance = before − settled payments; no pocket keeps a balance | Correction 2026-11-05: what SCR-177 cut was merchant-side sweeps and refunds, not the owner's pocket return. Live cases remain deferred pending testnet-funds approval. |
+| CD-02 | **Verify the existing pocket return path against Circle's real testnet Gateway** (SCR-187 §7.2): fund → pay → settle → sweep back to the vault; failed call; halt and cancel drain; late-balance recovery. The return path already exists (SCR-004, SCR-127, `pocket.ts`, `pocket-recovery.ts`); it has only run against local stand-ins. **Money path, tests first** | P0 | 2 | CD-01 | GPT | GPT | doing | #252 | Recorded-fixture tests, then one live run per case (approval): vault balance = before − settled payments; no pocket keeps a balance | Correction 2026-11-05: what SCR-177 cut was merchant-side sweeps and refunds, not the owner's pocket return. Live cases remain deferred pending testnet-funds approval.; Fixture tests and two fixes merged (#252); the four live runs on Circle's real testnet Gateway need testnet funds and approval, so they go to the production lane |
 | CD-03 | **Turn on Gateway nanopayments:** `routing.gatewayEnabled = true` for the demo deployment, only after CD-02 merges | P0 | 2 | CD-02 | CL | | todo | | Config dump shows it on; a `gateway-nano` step plans and pays against a Czar merchant on the local chain | |
-| CD-04 | **Selection recognises Circle Gateway offers:** today the eligibility rule misses them (no `paymentFlow`; SIWX declared as a 402-level extension). Route them to `gateway-nano`, and filter offers that need SIWX or sessions. Tests first | P0 | 2 | CD-01 | GPT | GPT | review | #251 | Tests with the real Quicknode and BotPay 402 shapes: classified correctly; never paid on the vanilla rail | Research Q4 |
-| CD-05 | **Circle discovery source:** fetch `network=eip155:5042002` plus the category or query for the capability; cache per the response `cache-control` (1 h); page by `offset` with dedupe (page order is unstable); map each listing to a candidate; live-probe before ranking | P0 | 2 | CD-01 | GPT | GPT | review | #253 | Recorded API fixtures: listings map to candidates; an unpaid probe is required before any is ranked; the API down means fallback to Czar's own catalog only | api.circle.com must be allowed by safe fetch and VM egress |
-| CD-06 | **One search, one ranking:** Czar's own catalog and Circle candidates merge into one candidate list per objective (dedupe by resource URL and method), then run through the normal ranking, incidents, lessons and filters | P0 | 2 | CD-04, CD-05 | GPT | GPT | review | #254 | Planner test: Circle and own candidates rank together; a capability mismatch is filtered out; Circle merchants are never excluded before ranking | Core of DD-07; SCR-187 §5.2 controls dedupe |
-| CD-07 | **End-to-end Gateway payment to an existing Circle merchant** on Arc testnet (for example Quicknode `arc-testnet`, 0.0001 USDC): discover → probe → rank → pay through the pocket → leftover swept back | P0 | 3 | CD-03, CD-06, OPS-11 | Z + CL | | todo | | Receipt with a real Gateway settlement; vault balance reconciles after the sweep | Needs testnet funds: Zaryab's approval |
-| CD-08 | **Input builder for listings:** build the request from the listing's input schema (body or query); listings without a schema need a model-built input (SCR-187 decides) | P1 | 2 | CD-05 | GPT | GPT | review | #255 | Tests per schema type; never sends fields outside the schema | 84% of Arc mainnet listings have no input schema |
-| CD-09 | **Generic delivery check for listings with no output schema** (for example "valid JSON or text within limits, then the boundary screen") | P1 | 2 | CD-01 | GPT | GPT | review | #256 | Acceptance tests for schema-less deliveries | |
+| CD-04 | **Selection recognises Circle Gateway offers:** today the eligibility rule misses them (no `paymentFlow`; SIWX declared as a 402-level extension). Route them to `gateway-nano`, and filter offers that need SIWX or sessions. Tests first | P0 | 2 | CD-01 | GPT | GPT | done | #251 | Tests with the real Quicknode and BotPay 402 shapes: classified correctly; never paid on the vanilla rail | Research Q4 |
+| CD-05 | **Circle discovery source:** fetch `network=eip155:5042002` plus the category or query for the capability; cache per the response `cache-control` (1 h); page by `offset` with dedupe (page order is unstable); map each listing to a candidate; live-probe before ranking | P0 | 2 | CD-01 | GPT | GPT | done | #253 | Recorded API fixtures: listings map to candidates; an unpaid probe is required before any is ranked; the API down means fallback to Czar's own catalog only | api.circle.com must be allowed by safe fetch and VM egress |
+| CD-06 | **One search, one ranking:** Czar's own catalog and Circle candidates merge into one candidate list per objective (dedupe by resource URL and method), then run through the normal ranking, incidents, lessons and filters | P0 | 2 | CD-04, CD-05 | GPT | GPT | done | #254 | Planner test: Circle and own candidates rank together; a capability mismatch is filtered out; Circle merchants are never excluded before ranking | Core of DD-07; SCR-187 §5.2 controls dedupe |
+| CD-07 | **End-to-end Gateway payment to an existing Circle merchant** on Arc testnet (for example Quicknode `arc-testnet`, 0.0001 USDC): discover → probe → rank → pay through the pocket → leftover swept back | P1 | 3 | CD-03, CD-06, OPS-11 | Z + CL | | todo | | Receipt with a real Gateway settlement; vault balance reconciles after the sweep | Needs testnet funds: Zaryab's approval; Deferred by SCR-188 (#250): no Arc testnet Circle listing passes the fail-closed gates today; the Gateway proof uses a Czar merchant instead; not a Demo v1 gate |
+| CD-08 | **Input builder for listings:** build the request from the listing's input schema (body or query); listings without a schema need a model-built input (SCR-187 decides) | P1 | 2 | CD-05 | GPT | GPT | done | #255 | Tests per schema type; never sends fields outside the schema | 84% of Arc mainnet listings have no input schema |
+| CD-09 | **Generic delivery check for listings with no output schema** (for example "valid JSON or text within limits, then the boundary screen") | P1 | 2 | CD-01 | GPT | GPT | done | #256 | Acceptance tests for schema-less deliveries | |
 | CD-10 | **List Czar's merchants through Circle's registry route:** apply to list Czar Search, Spot, Extract and audit A and B on Circle's agent marketplace (testnet). The application and its approval are Circle's process | P1 | 2 | MR-06 | Z | | todo | | Listings visible in the discovery API for `eip155:5042002` | Approval and timeline are not guaranteed, so `czarRegisteredServices` stays as the fallback; listing names Czar publicly |
 | CD-11 | **Circle terms confirmation:** written confirmation that caching, re-ranking and showing incidents about listed sellers is allowed | P1 | 2 | — | Z | | todo | | Written reply from Circle | Research Q5: terms are silent; Developer Terms s.2 risk |
 
@@ -357,3 +308,4 @@ OPS-01..05 ──┼─> OPS-06..10 ─> OPS-11 (real payment) ─┐
 | 2026-11-05 | SCR-187 filed (CD-01); CD-02 corrected (verify the existing pocket return path against the real testnet Gateway, not build it); C11 build owner GPT | CL |
 | 2026-11-05 | Progress dashboard added (§0); Packages 1 and 2 in review (#246, #247); new tasks UX-08, UX-09, BR-07, SEC-01 from #246/#247 gaps; BR-04 unblocked on #246 merge | CL |
 | 2026-11-05 | Status sync: #233, #237, #243, #244, #245 merged (10 tasks done); UX-07 partly done | CL |
+| 2026-11-06 | Status sync: #246, #247 (Packages 1, 2), #249, #250–#256 (C11) merged; CD-07 deferred to P1 by SCR-188; CD-02 live runs moved to production | CL |
