@@ -92,7 +92,16 @@ async function cloudFixture(
   }
 
   const keyVersions: Record<string, string> = {};
-  for (const keyRef of ["K3", "K5", "K7", "K8", "K10:czar-search", "relayer"])
+  for (const keyRef of [
+    "K3",
+    "K5",
+    "K7",
+    "K8",
+    "K10:czar-search",
+    "K10:czar-audit-quick",
+    "K10:czar-audit-deep",
+    "relayer",
+  ])
     keyVersions[keyRef] = kms.addKey(kms.keyRing, keyRef.replace(":", "-")).versionName;
 
   const deploymentPath = join(dir, "arc-testnet.json");
@@ -231,7 +240,16 @@ describe("signer cloud entry point (SCR-170 §3)", () => {
     try {
       expect(running.chainId).toBe(ARC_TESTNET);
       expect(running.keyRefs).toEqual(
-        ["K10:czar-search", "K3", "K5", "K7", "K8", "relayer"].toSorted(),
+        [
+          "K10:czar-search",
+          "K10:czar-audit-quick",
+          "K10:czar-audit-deep",
+          "K3",
+          "K5",
+          "K7",
+          "K8",
+          "relayer",
+        ].toSorted(),
       );
       const server = await createSignerClient({
         socketPath: f.socketPath,
@@ -253,12 +271,15 @@ describe("signer cloud entry point (SCR-170 §3)", () => {
         }),
       });
       expect(await merchants.keyAddress("cz-20", "K10:czar-search")).toMatch(/^0x[0-9a-f]{40}$/);
+      // The audit merchants (SCR-182 §1) get their payout addresses the same way.
+      for (const service of ["czar-audit-quick", "czar-audit-deep"])
+        expect(await merchants.keyAddress("cz-20", `K10:${service}`)).toMatch(/^0x[0-9a-f]{40}$/);
       await expect(merchants.keyAddress("cz-20", "K10:not-a-service")).rejects.toMatchObject({
         rule: "key-not-allowed",
       });
       expect(CLOUD_MERCHANT_SERVICES).toContain("czar-spot");
       expect(CLOUD_MERCHANT_SERVICES).toContain("lab-spot-payee-swap");
-      expect(CLOUD_MERCHANT_SERVICES).toHaveLength(9);
+      expect(CLOUD_MERCHANT_SERVICES).toHaveLength(11);
 
       // A wrong token is refused even with the socket reachable.
       const wrong = await createSignerClient({

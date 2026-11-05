@@ -54,6 +54,9 @@ export const CLOUD_MERCHANT_SERVICES: readonly string[] = [
   "czar-search",
   "czar-spot",
   "czar-extract",
+  // The audit merchants (SCR-182 §1); their keys are created by MR-03.
+  "czar-audit-quick",
+  "czar-audit-deep",
   "lab-search-steady",
   "lab-search-flaky",
   "lab-search-slow",
