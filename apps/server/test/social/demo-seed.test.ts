@@ -224,8 +224,23 @@ describe("SCR-183 demo seed command", () => {
     const { config, check: afterWorker } = await seedInitialAudit();
     const bob = await seedPreservationFixtures();
     for (let cycle = 0; cycle < 2; cycle += 1) {
+      const controlledObjectives = await pool().query<{ objective_id: string }>(
+        `SELECT o.objective_id FROM objectives o JOIN users u USING(user_id)
+         JOIN social_representatives r USING(user_id)
+         WHERE u.controlled AND r.controlled AND r.handle=ANY($1::text[])`,
+        [["Rep-CZ01", "Rep-CZ02", "Rep-CZ03"]],
+      );
+      const objectiveIds = new Set(controlledObjectives.rows.map((row) => row.objective_id));
+      const controlledBudgets = await pool().query<{ representative_id: string }>(
+        `SELECT b.representative_id FROM social_budgets b
+         JOIN social_representatives r USING(representative_id)
+         WHERE r.handle=ANY($1::text[])`,
+        [["Rep-CZ01", "Rep-CZ02", "Rep-CZ03"]],
+      );
+      expect(controlledBudgets.rowCount).toBeGreaterThan(0);
       const beforeEvents = await pool().query(
-        "SELECT event_id,name,payload,txid::text FROM outbox_events ORDER BY event_id",
+        `SELECT event_id,name,objective_id,payload,created_at,delivered_at,txid::text
+         FROM outbox_events ORDER BY event_id`,
       );
       const beforeDeliveries = await pool().query(
         "SELECT event_id,consumer,state FROM event_deliveries ORDER BY event_id",
@@ -273,10 +288,24 @@ describe("SCR-183 demo seed command", () => {
       expect(
         (
           await pool().query(
-            "SELECT event_id,name,payload,txid::text FROM outbox_events ORDER BY event_id",
+            "SELECT 1 FROM social_budgets WHERE representative_id=ANY($1::text[])",
+            [controlledBudgets.rows.map((row) => row.representative_id)],
+          )
+        ).rowCount,
+      ).toBe(0);
+      expect(
+        (
+          await pool().query(
+            `SELECT event_id,name,objective_id,payload,created_at,delivered_at,txid::text
+             FROM outbox_events ORDER BY event_id`,
           )
         ).rows,
-      ).toEqual(beforeEvents.rows);
+      ).toEqual(
+        beforeEvents.rows.map((event) => ({
+          ...event,
+          objective_id: objectiveIds.has(event.objective_id as string) ? null : event.objective_id,
+        })),
+      );
       expect(
         (
           await pool().query(

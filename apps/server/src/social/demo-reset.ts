@@ -207,7 +207,7 @@ async function deleteEvidence(db: PoolClient, target: ResetTargets): Promise<voi
 }
 
 async function deleteControlledOwners(db: PoolClient, target: ResetTargets): Promise<void> {
-  // SCR-186 follow-up: retained events require this nullable FK to be cleared.
+  // SCR-186 permits clearing only this FK on controlled owners' retained events.
   await db.query("UPDATE outbox_events SET objective_id=NULL WHERE objective_id=ANY($1::text[])", [
     target.objectives,
   ]);
