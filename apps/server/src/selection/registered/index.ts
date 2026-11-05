@@ -3,10 +3,12 @@ import { H, serviceVersionId } from "@czar/hashing";
 import type { Config } from "@czar/config";
 import type { CapabilityCard, RankingDecision } from "@czar/schemas";
 import {
+  classifyOffer,
   readPaymentRequired,
   type PaymentRequirements,
   type SafeFetch,
   type SafeFetchOptions,
+  type SanitizedExtensions,
 } from "@czar/x402";
 import { keccak256, toBytes } from "viem";
 import type { Pool } from "pg";
@@ -50,6 +52,7 @@ interface RegisteredRecord {
   readonly serviceId: string;
   readonly registration: Registration;
   readonly accepts: readonly PaymentRequirements[];
+  readonly extensions402: SanitizedExtensions;
   readonly outputSchema: Readonly<Record<string, unknown>> | null;
   readonly inputFields: readonly CardField[];
   readonly outputFields: readonly CardField[];
@@ -72,9 +75,7 @@ interface SnapshotOffer {
   readonly asset: string | null;
   readonly amount: string;
   readonly payTo: string;
-  readonly siwx: boolean;
-  readonly siwxOnly: boolean;
-  readonly batchSettlement: boolean;
+  readonly classification: "vanilla" | "gateway" | "unsupported";
   readonly versionId: string | null;
 }
 
@@ -93,10 +94,12 @@ interface SnapshotService {
 
 interface ProbePolicyDescriptor {
   readonly policy: "czar-registered-probe-snapshot";
-  readonly scr: "SCR-163";
+  readonly scr: "SCR-187";
   readonly network: string;
   readonly usdcAsset: string;
-  readonly offerRule: "scheme-exact,asset-usdc,no-siwx,no-siwx-only,no-batch-settlement";
+  readonly offerRule: "scheme-exact,asset-usdc,classify-offer,gateway-switch";
+  readonly gatewayEnabled: boolean;
+  readonly gatewayWalletAddress: string;
   readonly unverifiedWithApproval: boolean;
   readonly exploration: "lowest-eligible-live-price-then-serviceId";
   readonly ranked: "current-version-wilson";
@@ -140,7 +143,7 @@ export function createRegisteredSelection(
   const network = String(options.config.get("selection.paymentNetwork"));
   const usdcAsset = String(options.config.get("chain.usdcAddress")).toLowerCase();
   const unverifiedWithApproval = Boolean(options.config.get("selection.unverifiedWithApproval"));
-  const descriptor = policyDescriptor(network, usdcAsset, unverifiedWithApproval);
+  const descriptor = policyDescriptor(network, usdcAsset, unverifiedWithApproval, options.config);
 
   async function getProbe(serviceId: string): Promise<ProbeOutcome | null> {
     const registration = registrations.get(serviceId);
@@ -306,6 +309,7 @@ async function readRegisteredProbe(
         serviceId,
         registration,
         accepts: result.paymentRequired.accepts,
+        extensions402: result.extensions,
         outputSchema,
         inputFields: cardFields(
           objectAt(declared, ...declaredInputPath(registration.resource.method), "properties"),
@@ -423,12 +427,13 @@ async function createDecision(args: {
   readonly now: () => Date;
 }): Promise<RankingDecision> {
   const { query, services, descriptor, now } = args;
-  const snapshot = makeSnapshot(services, descriptor);
+  const snapshot = makeSnapshot(services, descriptor, args.config);
   const eligibility = evaluateSnapshot(
     snapshot.services,
     query,
     descriptor.network,
     descriptor.usdcAsset,
+    descriptor.gatewayEnabled,
   );
   await persistSnapshot(args.pool, snapshot, now(), args.retentionDays);
   const confidenceZ = Number(args.config.get("selection.confidenceZ"));
@@ -498,6 +503,7 @@ function makeSnapshot(
     outcome: ProbeOutcome;
   }[],
   descriptor: ProbePolicyDescriptor,
+  config: Config,
 ): ProbeSnapshot {
   return {
     kind: "czar-registered-probe-snapshot",
@@ -519,7 +525,7 @@ function makeSnapshot(
                 probedAt: outcome.probedAt,
                 offers: outcome.record.accepts
                   .map((offer) => ({
-                    ...reduceOffer(offer),
+                    ...reduceOffer(offer, outcome.record!.extensions402, config),
                     versionId: outcome.record!.versionIds.get(offer.payTo.toLowerCase()) ?? null,
                   }))
                   .toSorted(compareSnapshotOffer),
@@ -535,12 +541,13 @@ function evaluateSnapshot(
   query: RankingQuery,
   network: string,
   usdcAsset: string,
+  gatewayEnabled: boolean,
 ): EligibilityResult {
   const candidates = services.filter((service) => service.capabilities.includes(query.capability));
   const excluded: RankingDecision["excluded"] = [];
   const eligible: Array<{ serviceId: string; amount: bigint; versionId: string }> = [];
   for (const service of candidates) {
-    const result = evaluateService(service, network, usdcAsset, query.max_price_atomic);
+    const result = evaluateService(service, network, usdcAsset, query, gatewayEnabled);
     if (result.excluded) excluded.push(result.excluded);
     if (result.eligible) eligible.push(result.eligible);
   }
@@ -552,7 +559,8 @@ function evaluateService(
   service: SnapshotService,
   network: string,
   usdcAsset: string,
-  maxPrice: string,
+  query: RankingQuery,
+  gatewayEnabled: boolean,
 ): {
   excluded?: RankingDecision["excluded"][number];
   eligible?: { serviceId: string; amount: bigint; versionId: string };
@@ -570,16 +578,29 @@ function evaluateService(
     return {
       excluded: { service_id: service.serviceId, gate: "network", detail: "wrong-network" },
     };
-  const usable = onNetwork.filter((offer) => isUsableOffer(offer, usdcAsset));
+  const usable = onNetwork.filter((offer) =>
+    isUsableOffer(offer, usdcAsset, query, gatewayEnabled),
+  );
   if (usable.length === 0)
     return {
       excluded: {
         service_id: service.serviceId,
         gate: "offer",
-        detail: "no-payable-live-offer",
+        detail:
+          !gatewayEnabled &&
+          onNetwork.some(
+            (offer) =>
+              offer.scheme === "exact" &&
+              offer.asset === usdcAsset &&
+              offer.classification === "gateway",
+          )
+            ? "gateway-off"
+            : "no-payable-live-offer",
       },
     };
-  const affordable = usable.filter((offer) => BigInt(offer.amount) <= BigInt(maxPrice));
+  const affordable = usable.filter(
+    (offer) => BigInt(offer.amount) <= BigInt(query.max_price_atomic),
+  );
   if (affordable.length === 0)
     return {
       excluded: {
@@ -608,16 +629,18 @@ function evaluateService(
   };
 }
 
-function reduceOffer(offer: PaymentRequirements): Omit<SnapshotOffer, "versionId"> {
+function reduceOffer(
+  offer: PaymentRequirements,
+  extensions402: SanitizedExtensions,
+  config: Config,
+): Omit<SnapshotOffer, "versionId"> {
   return {
     network: /^eip155:[1-9][0-9]{0,19}$/.test(offer.network) ? offer.network : null,
     scheme: /^[a-z0-9-]{1,32}$/.test(offer.scheme) ? offer.scheme : null,
     asset: /^0x[0-9a-fA-F]{40}$/.test(offer.asset) ? offer.asset.toLowerCase() : null,
     amount: offer.amount,
     payTo: offer.payTo.toLowerCase(),
-    siwx: offer.extra["siwx"] === true,
-    siwxOnly: offer.extra["siwxOnly"] === true,
-    batchSettlement: offer.extra["paymentFlow"] === "batch-settlement",
+    classification: classifyOffer(offer, extensions402, config),
   };
 }
 
@@ -676,13 +699,16 @@ function policyDescriptor(
   network: string,
   usdcAsset: string,
   unverifiedWithApproval: boolean,
+  config: Config,
 ): ProbePolicyDescriptor {
   return {
     policy: "czar-registered-probe-snapshot",
-    scr: "SCR-163",
+    scr: "SCR-187",
     network,
     usdcAsset,
-    offerRule: "scheme-exact,asset-usdc,no-siwx,no-siwx-only,no-batch-settlement",
+    offerRule: "scheme-exact,asset-usdc,classify-offer,gateway-switch",
+    gatewayEnabled: Boolean(config.get("routing.gatewayEnabled")),
+    gatewayWalletAddress: String(config.get("chain.gatewayWalletAddress")).toLowerCase(),
     unverifiedWithApproval,
     exploration: "lowest-eligible-live-price-then-serviceId",
     ranked: "current-version-wilson",
@@ -723,13 +749,20 @@ function compareText(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
-function isUsableOffer(offer: SnapshotOffer, usdcAsset: string): boolean {
+function isUsableOffer(
+  offer: SnapshotOffer,
+  usdcAsset: string,
+  query: RankingQuery,
+  gatewayEnabled: boolean,
+): boolean {
   return (
     offer.scheme === "exact" &&
     offer.asset === usdcAsset &&
-    !offer.siwx &&
-    !offer.siwxOnly &&
-    !offer.batchSettlement
+    (offer.classification === "vanilla"
+      ? query.rails.includes("x402-exact")
+      : offer.classification === "gateway" &&
+        gatewayEnabled &&
+        query.rails.includes("gateway-batched"))
   );
 }
 

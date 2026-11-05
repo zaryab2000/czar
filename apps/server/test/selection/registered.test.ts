@@ -28,6 +28,7 @@ interface SnapshotForReconstruction {
   readonly descriptor: {
     readonly usdcAsset: string;
     readonly unverifiedWithApproval: boolean;
+    readonly gatewayEnabled: boolean;
   };
   readonly services: Array<{
     serviceId: string;
@@ -67,15 +68,23 @@ function reconstructEligibility(
       (reducedOffer) =>
         reducedOffer["scheme"] === "exact" &&
         reducedOffer["asset"] === snapshot.descriptor.usdcAsset &&
-        reducedOffer["siwx"] === false &&
-        reducedOffer["siwxOnly"] === false &&
-        reducedOffer["batchSettlement"] === false,
+        (reducedOffer["classification"] === "vanilla" ||
+          (snapshot.descriptor.gatewayEnabled && reducedOffer["classification"] === "gateway")),
     );
     if (payable.length === 0) {
       excluded.push({
         service_id: service.serviceId,
         gate: "offer",
-        detail: "no-payable-live-offer",
+        detail:
+          !snapshot.descriptor.gatewayEnabled &&
+          offers.some(
+            (reducedOffer) =>
+              reducedOffer["scheme"] === "exact" &&
+              reducedOffer["asset"] === snapshot.descriptor.usdcAsset &&
+              reducedOffer["classification"] === "gateway",
+          )
+            ? "gateway-off"
+            : "no-payable-live-offer",
       });
       continue;
     }
@@ -276,6 +285,38 @@ beforeEach(async () => {
 });
 
 describe("registered selection", () => {
+  it("excludes a Gateway-only offer while Gateway is off", async () => {
+    const gatewayOnly = {
+      extra: {
+        name: "GatewayWalletBatched",
+        verifyingContract: "0x0077777d7eba4688bdef3e311b846f25870a19b9",
+      },
+    };
+    const fetchImpl = vi.fn<SafeFetch>(async () =>
+      response("100", "0xaaa", NETWORK, undefined, RESOURCE, gatewayOnly),
+    );
+    const services = { [SERVICE_A]: registration() };
+    const at = new Date("2026-11-05T12:00:00Z");
+    const now = () => at;
+
+    const off = await setup(fetchImpl, services, now).rank.rank(query());
+    expect(off.excluded).toContainEqual({
+      service_id: SERVICE_A,
+      gate: "offer",
+      detail: "gateway-off",
+    });
+    expect(off.unverified).toEqual([]);
+    const on = await setup(fetchImpl, services, now, {
+      "routing.gatewayEnabled": true,
+    }).rank.rank(query());
+    expect(on.excluded).toEqual([]);
+    expect(on.unverified.map((candidate) => candidate.service_id)).toEqual([SERVICE_A]);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(
+      fetchImpl.mock.calls.every(([, options]) => !options?.headers?.["payment-signature"]),
+    ).toBe(true);
+  });
+
   it("keeps evidence counts, health and every decision field stable after 100 social posts", async () => {
     const serviceId = `svc_${"f".repeat(32)}`;
     const now = new Date("2026-11-05T00:00:00Z");
@@ -572,9 +613,7 @@ describe("registered selection", () => {
             asset: USDC_ASSET,
             amount: "25",
             payTo: `0x${"aaa".padStart(40, "0")}`,
-            siwx: false,
-            siwxOnly: false,
-            batchSettlement: false,
+            classification: "vanilla",
           },
         ],
       },
@@ -651,9 +690,7 @@ describe("registered selection", () => {
           network: NETWORK,
           scheme: "exact",
           asset: USDC_ASSET,
-          siwx: false,
-          siwxOnly: true,
-          batchSettlement: false,
+          classification: "unsupported",
         },
       ],
     });
