@@ -176,7 +176,7 @@ OPS-01..05 ──┼─> OPS-06..10 ─> OPS-11 (real payment) ─┐
 | UX-04 | **Result and rating for browser tasks:** the delivered audit shows in the result card (Home and Receipts) with Good and Bad rating | P0 | 2 | UX-01, MR-01 | COL | COL | todo | | Rating a browser-created task writes an effective rating (`/v1/app/ratings`) | `result-card.tsx` and `/v1/app/ratings` already exist; confirm they work for browser tasks |
 | UX-05 | **Fresh-user onboarding on the cloud domain:** passkey → vault → fund → limits → representative consent ("Share experiences") | P0 | 3 | OPS-11, SC-03 | Z + CL | | todo | | A brand-new user on a second device completes onboarding with no help | Covers the rp id on the real domain (PM-016) and gas for wallet creation |
 | UX-06 | **Funding help:** a short "get testnet USDC" step in onboarding (Circle faucet link and amounts), or pre-funded demo wallets | P1 | 3 | OPS-05 | COL | COL | todo | | A new user knows exactly how to fund their wallet in under 1 minute | The treasury top-up is deferred (DD-06) |
-| UX-07 | **Demo labels:** controlled representatives show "Czar test agent" (today the badge says "Controlled representative"), and merchants show "Run by Czar" | P1 | 2 | SPEC-03 | GPT | GPT | doing | | Feed, thread and approval screens show the labels | Feed, thread and profile labels tested; approval lesson badge awaits SCR-184 (#236). |
+| UX-07 | **Demo labels:** controlled representatives show "Czar test agent" (today the badge says "Controlled representative"), and merchants show "Run by Czar" | P1 | 2 | SPEC-03 | GPT | GPT | review | #237 | Feed, thread and approval screens show the labels | Feed, thread and profile labels tested; approval lesson badge awaits SCR-184 (#236). |
 
 ### C2. Czar backend and brain
 
@@ -205,7 +205,7 @@ OPS-01..05 ──┼─> OPS-06..10 ─> OPS-11 (real payment) ─┐
 | SEL-01 | **Starting ranking:** the seed history makes **A rank 1 and B rank 2, both in `ranked[]`** (rated, not "unverified") before Bob's run | P0 | 2 | SPEC-03, SOC-02, MR-04 | GPT | | todo | | The stored ranking decision for `smart-contract-audit` shows A at rank 1 and B at rank 2, with no incident | **B must be in `ranked[]`**: an incident never excludes A, so if B is unverified, Alice still gets A |
 | SEL-02 | **Bob's bad rating counts:** rating → `ratings_effective` → a negative unit on A's settled observation within the window | P0 | 3 | UX-04, OPS-11 | CL | | todo | | Bob's observation is settled and bound to a `bad` effective rating within 1 minute of rating | Depends on the indexer confirming Bob's payment |
 | SEL-03 | **Alice gets B:** after the incident opens, Alice's ranking moves A below B, and her plan recommends B with no incident approval reason | P0 | 3 | SOC-04, UX-05 | CL | | todo | | Alice's plan step = Merchant B; A has the `incident-open` badge in her stored decision | The core demo moment |
-| SEL-04 | **Demo timing (selection):** `selection.snapshotRefreshSeconds` 300 → 30 and `selection.ratingRefreshDebounceSeconds` 30 → 5 in the demo overlay | P0 | 2 | SPEC-03 | GPT | GPT | doing | | Values loaded on the VM (config dump) | Demo overlay tests pass locally; VM config dump pending. |
+| SEL-04 | **Demo timing (selection):** `selection.snapshotRefreshSeconds` 300 → 30 and `selection.ratingRefreshDebounceSeconds` 30 → 5 in the demo overlay | P0 | 2 | SPEC-03 | GPT | GPT | review | #237 | Values loaded on the VM (config dump) | Demo overlay tests pass locally; VM config dump pending. |
 
 ### C5. cZarBook social layer
 
@@ -255,7 +255,7 @@ OPS-01..05 ──┼─> OPS-06..10 ─> OPS-11 (real payment) ─┐
 
 | ID | Task | Pri | Phase | Depends on | Suggested owner | Owner | Status | PR | Acceptance check | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|
-| DEMO-01 | **Demo timing overlay** (for example `env/demo.toml`): incident check every 1 min, snapshot refresh 30 s, rating debounce 5 s, plus any other wait SPEC-03 lists | P0 | 2 | SPEC-03 | GPT | GPT | doing | | The VM loads the overlay, and a config dump shows the demo values | Demo overlay tests pass locally; VM config dump pending. |
+| DEMO-01 | **Demo timing overlay** (for example `env/demo.toml`): incident check every 1 min, snapshot refresh 30 s, rating debounce 5 s, plus any other wait SPEC-03 lists | P0 | 2 | SPEC-03 | GPT | GPT | review | #237 | The VM loads the overlay, and a config dump shows the demo values | Demo overlay tests pass locally; VM config dump pending. |
 | DEMO-02 | **Demo accounts:** Bob and Alice passkeys on the demo devices; wallets created and funded; Bob's representative on | P0 | 3 | UX-05, OPS-05 | Z | | todo | | Both log in and see a funded wallet | Alice must have **no** own evidence on A |
 | DEMO-03 | **One-command reset and re-seed** for the whole demo state (social, selection seed, Bob's and Alice's tasks) | P0 | 2 | SOC-06, SEL-01 | GPT | | todo | | Reset then dry run gives the same result twice | Testnet only; refuses on any other network |
 | DEMO-04 | **Runbook:** minute-by-minute script; who clicks what on which device; expected screen at each step; what to say while waiting; fallback if a step is slow | P0 | 3 | Phase 2 done | CL | | todo | | Zaryab can run the demo from the runbook alone | |
