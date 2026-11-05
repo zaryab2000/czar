@@ -341,6 +341,12 @@ export function serviceId(
   return `svc_${keccak256(new TextEncoder().encode(preimage)).slice(2, 34)}`;
 }
 
+/** Derives a stable service ID from a Circle registry resource (SCR-187 §4.5). */
+export function circleServiceId(network: string, method: string, resource: string): string {
+  const preimage = `circle|${network}|${method}|${resource}`;
+  return `svc_${keccak256(new TextEncoder().encode(preimage)).slice(2, 34)}`;
+}
+
 /** `inputCommit = H({hashRule, kind: "job-input", inputs, inputSalt})` (RV-025). */
 export function inputCommit(inputs: Readonly<Record<string, unknown>>, inputSalt: string): Hash32 {
   return H({ hashRule: HASH_RULE, kind: "job-input", inputs, inputSalt });

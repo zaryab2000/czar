@@ -75,6 +75,8 @@ interface PaidStepDraft {
   readonly callInputs: NonNullable<Step["callInputs"]>;
   readonly template?: string;
   readonly oneStringKey?: string;
+  readonly inputDefaults?: PlannerService["inputDefaults"];
+  readonly inputMaxChars?: number;
 }
 
 type CollectedEntry = { readonly kind: "unpaid"; readonly step: Step } | PaidStepDraft;
@@ -367,17 +369,29 @@ function preparePaidStep(
   config: Config,
 ): Omit<PaidStepDraft, "kind" | "candidate" | "capability"> | null {
   const fields = candidate.service.extensions.czar.card["inputFields"];
-  const oneStringKey = getSingleStringInput(fields);
+  const inputDefaults = candidate.service.inputDefaults;
+  const oneStringKey = inputDefaults
+    ? getCircleFreeTextInput(fields, inputDefaults)
+    : getSingleStringInput(fields);
   const template = CALL_TEMPLATES[capability];
   const jobCandidate = candidate.jobProvider === true;
   if ((!template || !oneStringKey) && !jobCandidate) return null;
+  const inputMaxChars = Math.min(
+    inputMaxCharsFor(capability, config),
+    candidate.service.inputMaxChars ?? Number.POSITIVE_INFINITY,
+  );
   const callInputs =
     template && oneStringKey
-      ? renderCalls(template, oneStringKey, taskSpec, inputMaxCharsFor(capability, config))
+      ? renderCalls(template, oneStringKey, taskSpec, inputMaxChars).map((call) => ({
+          ...call,
+          input: { ...call.input, ...inputDefaults },
+        }))
       : renderJobCalls(taskSpec);
   return {
     callInputs,
-    ...(template && oneStringKey ? { template, oneStringKey } : {}),
+    ...(template && oneStringKey
+      ? { template, oneStringKey, inputMaxChars, ...(inputDefaults ? { inputDefaults } : {}) }
+      : {}),
   };
 }
 
@@ -414,6 +428,47 @@ function getSingleStringInput(fields: unknown): string | null {
   )
     return null;
   return field.name;
+}
+
+function getCircleFreeTextInput(
+  fields: unknown,
+  fixedInputs: Readonly<Record<string, string | number | boolean>>,
+): string | null {
+  if (!Array.isArray(fields) || fields.length > 20) return null;
+  const free = fields.filter(
+    (field) =>
+      typeof field === "object" &&
+      field !== null &&
+      field.type === "string" &&
+      typeof field.name === "string" &&
+      !Object.hasOwn(fixedInputs, field.name),
+  );
+  return free.length === 1 ? free[0].name : null;
+}
+
+function buildInputKeys(
+  fields: unknown,
+  freeTextKey: string,
+  fixedInputs: PlannerService["inputDefaults"],
+  maxChars: number,
+): NonNullable<NonNullable<Step["inputTemplate"]>["inputKeys"]> {
+  if (!fixedInputs || !Array.isArray(fields))
+    return [{ name: freeTextKey, type: "string", maxLength: maxChars }];
+  return fields.map((field: { name: string; type: string }) => {
+    const fixed = fixedInputs[field.name];
+    return {
+      name: field.name,
+      type:
+        field.type === "integer"
+          ? ("number" as const)
+          : (field.type as "string" | "number" | "boolean"),
+      ...(field.name === freeTextKey
+        ? { maxLength: maxChars }
+        : typeof fixed === "string"
+          ? { maxLength: Math.max(1, fixed.length) }
+          : {}),
+    };
+  });
 }
 
 async function unpaidStep(args: {
@@ -663,6 +718,8 @@ async function makePaidStep(args: {
   readonly callInputs: NonNullable<Step["callInputs"]>;
   readonly template?: string;
   readonly oneStringKey?: string;
+  readonly inputDefaults?: PlannerService["inputDefaults"];
+  readonly inputMaxChars?: number;
 }): Promise<{ step: Step; leaves: Plan["payeeLeaves"]; jobExpiresMs?: number } | null> {
   const {
     candidate,
@@ -676,6 +733,8 @@ async function makePaidStep(args: {
     callInputs,
     template,
     oneStringKey,
+    inputDefaults,
+    inputMaxChars,
   } = args;
   const taskClass = taskClassFor(capability, config);
   const profile = ports.profiles.profileIdFor(taskClass, candidate.service);
@@ -716,13 +775,13 @@ async function makePaidStep(args: {
       ? {
           inputTemplate: {
             [oneStringKey]: template,
-            inputKeys: [
-              {
-                name: oneStringKey,
-                type: "string" as const,
-                maxLength: inputMaxCharsFor(capability, config),
-              },
-            ],
+            ...inputDefaults,
+            inputKeys: buildInputKeys(
+              candidate.service.extensions.czar.card["inputFields"],
+              oneStringKey,
+              inputDefaults,
+              inputMaxChars ?? inputMaxCharsFor(capability, config),
+            ),
           },
         }
       : {}),

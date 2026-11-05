@@ -251,6 +251,41 @@ describe("planner fallback", () => {
     });
   });
 
+  it("builds a Circle call with only the schema-declared free text and fixed fields", async () => {
+    const service: PlannerService = {
+      ...fakeService(),
+      inputDefaults: { limit: 5, safe: false },
+      inputMaxChars: 10,
+      extensions: {
+        czar: {
+          ...fakeService().extensions.czar,
+          source: "circle-registry",
+          card: {
+            inputFields: [
+              { name: "query", type: "string" },
+              { name: "limit", type: "number" },
+              { name: "safe", type: "boolean" },
+            ],
+          },
+        },
+      },
+    };
+    const built = await makePlanner({ service });
+    const step = built?.plan.steps[0];
+    expect(step?.callInputs?.[0]?.input).toMatchObject({ limit: 5, safe: false });
+    expect(Object.keys(step?.callInputs?.[0]?.input ?? {}).toSorted()).toEqual([
+      "limit",
+      "query",
+      "safe",
+    ]);
+    expect(String(step?.callInputs?.[0]?.input["query"])).toHaveLength(10);
+    expect(step?.inputTemplate?.inputKeys).toEqual([
+      { name: "query", type: "string", maxLength: 10 },
+      { name: "limit", type: "number" },
+      { name: "safe", type: "boolean" },
+    ]);
+  });
+
   it("sums only paid Gateway volume and excludes job and unpaid steps", () => {
     expect(
       computeObjectiveGatewayVolume([
