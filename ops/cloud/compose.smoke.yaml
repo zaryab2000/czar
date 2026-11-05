@@ -207,6 +207,8 @@ services:
     profiles: ["full"]
   merchants:
     profiles: ["full"]
+  social-worker:
+    profiles: ["full"]
   web:
     profiles: ["full"]
 

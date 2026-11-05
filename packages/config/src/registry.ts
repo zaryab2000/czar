@@ -1884,12 +1884,15 @@ export const PARAMETERS = [
       "web-search": "data-json.search",
       "page-extract": "data-json.extract",
       "table-build": "local",
+      "code-review": "smart-contract-audit",
     },
     unit: "",
-    reason: "maps capabilities to CZ-18 task classes",
+    reason:
+      "maps capabilities to CZ-18 task classes; code-review keeps audit evidence apart from other reviews (SCR-182 §5)",
     source: "docs/specs/04-components/server/server-planning-and-payment.md:146",
     partial: true,
-    notes: "Spec gives a partial table ending in '…'; full mapping missing.",
+    notes:
+      "Spec gives a partial table ending in '…'; full mapping missing. code-review added by SCR-182 §5.",
   },
   {
     key: "planner.categoryByCapability",
@@ -1898,6 +1901,7 @@ export const PARAMETERS = [
       "web-search": "research",
       "page-extract": "research",
       summarize: "research",
+      "code-review": "research",
       "data-*": "data",
       "image-*": "creative",
       "*": "general",
@@ -1922,6 +1926,15 @@ export const PARAMETERS = [
     reason:
       "envelope lifetime: 24 h approval window (api.planTtlHours) plus 24 h to run; raised for job steps (SCR-120)",
     source: "docs/specs/04-components/server/server-planning-and-payment.md:170",
+  },
+  {
+    key: "planner.inputMaxChars",
+    type: "object",
+    default: { default: 1000, "code-review": 2000 },
+    unit: "chars",
+    reason:
+      "longest paid-call input value per capability; code-review carries the owner's contract source (SCR-182 §5, §6)",
+    source: "docs/specs/06-review/change-requests/SCR-182-audit-merchants.md:148",
   },
   {
     key: "planner.jobSlackBps",
