@@ -10,7 +10,12 @@ import {
   taskSpecHash,
   type Hash32,
 } from "@czar/hashing";
-import { GATEWAY_EXTRA_NAME, USDC_ADDRESS, type PaymentRequirements } from "@czar/x402";
+import {
+  classifyOffer,
+  USDC_ADDRESS,
+  type PaymentRequirements,
+  type SanitizedExtensions,
+} from "@czar/x402";
 import { keccak256, stringToHex } from "viem";
 import { route, routingParamsFromConfig, type RouteDecision } from "#src/router/index";
 import { createSafeProber } from "#src/planner/probe";
@@ -59,6 +64,7 @@ interface Candidate {
   readonly service: PlannerService;
   readonly offer?: import("@czar/x402").PaymentRequirements;
   readonly offers: readonly import("@czar/x402").PaymentRequirements[];
+  readonly extensions402?: SanitizedExtensions;
   readonly amount: bigint;
   readonly rank: number;
   readonly fromExploration: boolean;
@@ -403,7 +409,8 @@ function computeGatewayVolume(entries: readonly CollectedEntry[], config: Config
     const gatewayOffer =
       !job && !entry.candidate.unprobed
         ? entry.candidate.offers.find(
-            (offer) => offer.extra["name"] === GATEWAY_EXTRA_NAME && isUsablePlannerOffer(offer),
+            (offer) =>
+              plannerOfferClass(offer, entry.candidate.extensions402, config) === "gateway",
           )
         : undefined;
     return {
@@ -549,6 +556,7 @@ async function selectCandidate(
     ports,
     network,
     max,
+    config,
     ...(exploration ? { exploration } : {}),
   });
   const probed =
@@ -559,6 +567,7 @@ async function selectCandidate(
           ports,
           network,
           max,
+          config,
           ...(exploration ? { exploration } : {}),
         })
       : candidates;
@@ -610,9 +619,10 @@ async function probeRanked(args: {
   readonly ports: PlannerPorts;
   readonly network: string;
   readonly max: bigint;
+  readonly config: Config;
   readonly exploration?: string;
 }): Promise<{ candidates: Candidate[]; failures: string[] }> {
-  const { ranked, input, ports, network, max, exploration } = args;
+  const { ranked, input, ports, network, max, config, exploration } = args;
   const candidates: Candidate[] = [];
   const failures: string[] = [];
   for (const [rank, row] of ranked.entries()) {
@@ -653,7 +663,9 @@ async function probeRanked(args: {
       continue;
     }
     const offers = probe.offers.filter((offer) => offer.network === network);
-    const offer = offers.find(isUsablePlannerOffer);
+    const offer = offers.find(
+      (item) => plannerOfferClass(item, probe.extensions402, config) !== "unsupported",
+    );
     if (!offer) continue;
     const amount = BigInt(offer.amount);
     if (
@@ -666,6 +678,7 @@ async function probeRanked(args: {
       service,
       offer,
       offers,
+      ...(probe.extensions402 ? { extensions402: probe.extensions402 } : {}),
       amount,
       rank,
       fromExploration: row.serviceId === exploration,
@@ -680,16 +693,18 @@ async function indexFallback(args: {
   readonly ports: PlannerPorts;
   readonly network: string;
   readonly max: bigint;
+  readonly config: Config;
   readonly exploration?: string;
 }): Promise<Candidate[]> {
-  const { ranked, input, ports, network, max, exploration } = args;
+  const { ranked, input, ports, network, max, config, exploration } = args;
   const candidates: Candidate[] = [];
   for (const [rank, row] of ranked.entries()) {
     if (input.excludedServices?.has(row.serviceId)) continue;
     if (await ports.health?.isInjectionBlocked(network, row.serviceId)) continue;
     const service = await ports.directory.get(row.serviceId);
     const offer = service?.accepts.find(
-      (item) => item.network === network && isUsablePlannerOffer(item),
+      (item) =>
+        item.network === network && plannerOfferClass(item, undefined, config) !== "unsupported",
     );
     if (!service || service.serviceId !== row.serviceId || !offer || BigInt(offer.amount) > max)
       continue;
@@ -851,6 +866,8 @@ function routeCandidate(args: {
       acceptanceProfileId: profile,
     },
     offers: candidate.offers,
+    config,
+    ...(candidate.extensions402 ? { extensions402: candidate.extensions402 } : {}),
     planNetwork: network,
     unitAmount: candidate.amount,
     expectedCalls,
@@ -882,7 +899,9 @@ function paymentDetails(args: {
   if (job && listedPrice === undefined) return null;
   const offer =
     decision.kind === "gateway-nano"
-      ? candidate.offers.find((item) => item.extra["name"] === GATEWAY_EXTRA_NAME)
+      ? candidate.offers.find(
+          (item) => plannerOfferClass(item, candidate.extensions402, config) === "gateway",
+        )
       : candidate.offer;
   if (!job && !offer) return null;
   const baseAmount = job ? BigInt(listedPrice as string) : BigInt(offer!.amount);
@@ -994,14 +1013,14 @@ function matchedFields(fields: readonly string[], outputs: unknown): string[] {
   return fields.filter((field) => available.has(field.trim().toLowerCase()));
 }
 
-function isUsablePlannerOffer(offer: PaymentRequirements): boolean {
-  return (
-    offer.scheme === "exact" &&
-    offer.asset.toLowerCase() === USDC_ADDRESS.toLowerCase() &&
-    offer.extra["siwx"] !== true &&
-    offer.extra["siwxOnly"] !== true &&
-    offer.extra["paymentFlow"] !== "batch-settlement"
-  );
+function plannerOfferClass(
+  offer: PaymentRequirements,
+  extensions402: SanitizedExtensions | undefined,
+  config: Config,
+): "vanilla" | "gateway" | "unsupported" {
+  if (offer.scheme !== "exact" || offer.asset.toLowerCase() !== USDC_ADDRESS.toLowerCase())
+    return "unsupported";
+  return classifyOffer(offer, extensions402 ?? { dropped: [] }, config);
 }
 
 function stepWhy(

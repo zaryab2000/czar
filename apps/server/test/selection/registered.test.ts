@@ -1,5 +1,5 @@
 import { loadConfig } from "@czar/config";
-import { H, jcsString } from "@czar/hashing";
+import { H, jcsString, serviceVersionId } from "@czar/hashing";
 import { encodeBase64Json, type SafeFetch } from "@czar/x402";
 import { validateSchema } from "@czar/schemas";
 import { keccak256, toBytes } from "viem";
@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createAcceptancePorts } from "#src/acceptance/ports";
 import type { RankingQuery } from "#src/planner/ports";
 import { createRegisteredSelection } from "#src/selection/registered/index";
+import type { CircleCandidate } from "#src/selection/discovery/circle";
 import { rankingPolicyVersion } from "#src/selection/ranking/decision";
 import { readRankingDecision } from "#src/selection/ranking/decision-store";
 import { setupDatabase } from "#test/db";
@@ -28,6 +29,7 @@ interface SnapshotForReconstruction {
   readonly descriptor: {
     readonly usdcAsset: string;
     readonly unverifiedWithApproval: boolean;
+    readonly gatewayEnabled: boolean;
   };
   readonly services: Array<{
     serviceId: string;
@@ -67,15 +69,23 @@ function reconstructEligibility(
       (reducedOffer) =>
         reducedOffer["scheme"] === "exact" &&
         reducedOffer["asset"] === snapshot.descriptor.usdcAsset &&
-        reducedOffer["siwx"] === false &&
-        reducedOffer["siwxOnly"] === false &&
-        reducedOffer["batchSettlement"] === false,
+        (reducedOffer["classification"] === "vanilla" ||
+          (snapshot.descriptor.gatewayEnabled && reducedOffer["classification"] === "gateway")),
     );
     if (payable.length === 0) {
       excluded.push({
         service_id: service.serviceId,
         gate: "offer",
-        detail: "no-payable-live-offer",
+        detail:
+          !snapshot.descriptor.gatewayEnabled &&
+          offers.some(
+            (reducedOffer) =>
+              reducedOffer["scheme"] === "exact" &&
+              reducedOffer["asset"] === snapshot.descriptor.usdcAsset &&
+              reducedOffer["classification"] === "gateway",
+          )
+            ? "gateway-off"
+            : "no-payable-live-offer",
       });
       continue;
     }
@@ -276,6 +286,105 @@ beforeEach(async () => {
 });
 
 describe("registered selection", () => {
+  it("merges Circle candidates with registered services and keeps registered duplicates", async () => {
+    const registeredUrl = "https://merchant.example/v1/search";
+    const circleUrl = "https://circle-merchant.example/v1/search";
+    const circleOffer = offer("20", "0xbbb");
+    const candidate = (serviceId: string, url: string): CircleCandidate => ({
+      serviceId,
+      resource: { url, method: "GET" },
+      probeInput: { query: { q: "probe" } },
+      accepts: [circleOffer],
+      extensions: {
+        czar: {
+          claim: { status: "unclaimed" },
+          evidence: null,
+          card: {
+            serviceName: "Circle merchant",
+            inputFields: [{ name: "q", type: "string" }],
+            outputSchema: { type: "object" },
+          },
+          source: "circle-registry",
+        },
+      },
+      source: "circle-registry",
+      card: {
+        serviceName: "Circle merchant",
+        inputFields: [{ name: "q", type: "string" }],
+        outputSchema: { type: "object" },
+      },
+      versionId: serviceVersionId({
+        payTo: circleOffer.payTo.toLowerCase(),
+        resource: { url, method: "GET" },
+        schema: null,
+      }),
+      priceAtomic: "20",
+      probe: { matchedOffer: circleOffer, extensions402: { dropped: [] } },
+    });
+    const fetchImpl = vi.fn<SafeFetch>(async () => response("30", "0xaaa"));
+    const config = loadConfig({
+      envFile: {
+        "selection.czarRegisteredServices": { [SERVICE_A]: registration(registeredUrl) },
+        "selection.circleDiscovery.enabled": true,
+      },
+    });
+    const discovery = {
+      discover: vi.fn(async () => [
+        candidate(SERVICE_B, circleUrl),
+        candidate(SERVICE_RATED, `${registeredUrl}/`),
+      ]),
+    };
+    const selection = createRegisteredSelection({
+      config,
+      safeFetch: fetchImpl,
+      pool: getPool(),
+      now: () => new Date("2026-11-05T12:00:00Z"),
+      circleDiscovery: discovery,
+    });
+    const decision = await selection.rank.rank(query());
+    expect(decision.unverified.map((item) => item.service_id).toSorted()).toEqual([
+      SERVICE_A,
+      SERVICE_B,
+    ]);
+    expect(decision.candidates_considered).toBe(2);
+    expect(await selection.directory.get(SERVICE_B)).toMatchObject({ serviceId: SERVICE_B });
+    expect(await selection.outputSchema.forService(SERVICE_B)).toEqual({ type: "object" });
+    expect(await selection.directory.get(SERVICE_RATED)).toBeNull();
+    expect(discovery.discover).toHaveBeenCalledWith("web-search");
+  });
+
+  it("excludes a Gateway-only offer while Gateway is off", async () => {
+    const gatewayOnly = {
+      extra: {
+        name: "GatewayWalletBatched",
+        verifyingContract: "0x0077777d7eba4688bdef3e311b846f25870a19b9",
+      },
+    };
+    const fetchImpl = vi.fn<SafeFetch>(async () =>
+      response("100", "0xaaa", NETWORK, undefined, RESOURCE, gatewayOnly),
+    );
+    const services = { [SERVICE_A]: registration() };
+    const at = new Date("2026-11-05T12:00:00Z");
+    const now = () => at;
+
+    const off = await setup(fetchImpl, services, now).rank.rank(query());
+    expect(off.excluded).toContainEqual({
+      service_id: SERVICE_A,
+      gate: "offer",
+      detail: "gateway-off",
+    });
+    expect(off.unverified).toEqual([]);
+    const on = await setup(fetchImpl, services, now, {
+      "routing.gatewayEnabled": true,
+    }).rank.rank(query());
+    expect(on.excluded).toEqual([]);
+    expect(on.unverified.map((candidate) => candidate.service_id)).toEqual([SERVICE_A]);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(
+      fetchImpl.mock.calls.every(([, options]) => !options?.headers?.["payment-signature"]),
+    ).toBe(true);
+  });
+
   it("keeps evidence counts, health and every decision field stable after 100 social posts", async () => {
     const serviceId = `svc_${"f".repeat(32)}`;
     const now = new Date("2026-11-05T00:00:00Z");
@@ -572,9 +681,7 @@ describe("registered selection", () => {
             asset: USDC_ASSET,
             amount: "25",
             payTo: `0x${"aaa".padStart(40, "0")}`,
-            siwx: false,
-            siwxOnly: false,
-            batchSettlement: false,
+            classification: "vanilla",
           },
         ],
       },
@@ -651,9 +758,7 @@ describe("registered selection", () => {
           network: NETWORK,
           scheme: "exact",
           asset: USDC_ASSET,
-          siwx: false,
-          siwxOnly: true,
-          batchSettlement: false,
+          classification: "unsupported",
         },
       ],
     });
