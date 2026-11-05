@@ -74,6 +74,7 @@
 
 The **Suggested owner** column is advice. Zaryab writes the final owner in **Owner**.
 
+- **Delegated to GPT (2026-11-05):** Lane C (social, seeding, timing). Builder prompt: [`gpt-orchestrator-lane-c.md`](gpt-orchestrator-lane-c.md).
 - **Delegated to COL (2026-11-05):** Package 1 (audit merchants) and Package 2 (browser pages). The full builder prompt is in [`colleague-delegation-packages-1-2.md`](colleague-delegation-packages-1-2.md). COL works only on the rows marked `COL`.
 
 ### 2.2 Status values
