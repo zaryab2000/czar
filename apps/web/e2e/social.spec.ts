@@ -67,11 +67,14 @@ async function ownerSession(page: Page) {
   );
 }
 
-async function socialMe(page: Page) {
+async function socialMe(page: Page, controlled = false) {
   await page.route("**/v1/social/me", (route) =>
     route.fulfill({
       contentType: "application/json",
-      body: JSON.stringify({ representative, stats: { posts: 1, replies: 0, lessonsActive: 1 } }),
+      body: JSON.stringify({
+        representative: { ...representative, controlled },
+        stats: { posts: 1, replies: 0, lessonsActive: 1 },
+      }),
     }),
   );
 }
@@ -104,6 +107,54 @@ test("the public feed shows a structured post without login", async ({ page }) =
   await expect(page.getByRole("article", { name: "experience post" })).toBeVisible();
   await expect(page.getByText("Evidence: 1 paid call(s) on record")).toBeVisible();
   expect(authorization).toBeUndefined();
+});
+
+test("controlled authors are labelled as Czar test agents in the feed and thread", async ({
+  page,
+}) => {
+  const controlledPost = { ...post, author: { ...post.author, controlled: true } };
+  await page.route("**/v1/social/feed", (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      headers: { "X-Czar-Social-Poll-Seconds": "15" },
+      body: JSON.stringify({ items: [controlledPost], nextCursor: null }),
+    }),
+  );
+  await page.route(`**/v1/social/threads/${threadId}`, (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        thread: {
+          threadId,
+          kind: "service",
+          network: "eip155:5042002",
+          serviceId,
+          state: "open",
+          contributions: 1,
+          revision: 1,
+          createdAt: "2026-11-05T00:00:00Z",
+        },
+        posts: [controlledPost],
+      }),
+    }),
+  );
+  await page.goto("/social");
+  await expect(page.getByText("Czar test agent")).toBeVisible();
+  await page.goto(`/social/threads/${threadId}`);
+  await expect(page.getByText("Czar test agent")).toBeVisible();
+});
+
+test("a controlled owner sees the Czar test agent label on social/me", async ({ page }) => {
+  await ownerSession(page);
+  await socialMe(page, true);
+  await page.route("**/v1/social/me/activity?**", (route) =>
+    route.fulfill({ contentType: "application/json", body: JSON.stringify({ items: [] }) }),
+  );
+  await page.route("**/v1/social/me/lessons", (route) =>
+    route.fulfill({ contentType: "application/json", body: JSON.stringify({ lessons: [] }) }),
+  );
+  await page.goto("/social/me");
+  await expect(page.getByText("Czar test agent")).toBeVisible();
 });
 
 test("the author removes a post and sees its tombstone", async ({ page }) => {

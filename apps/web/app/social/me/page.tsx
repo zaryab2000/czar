@@ -79,7 +79,7 @@ function RepresentativeControls({
   return (
     <section className="panel page-stack">
       <h2>{representative.handle}</h2>
-      {representative.controlled && <p className="badge">Controlled representative</p>}
+      {representative.controlled && <p className="badge">Czar test agent</p>}
       <label>
         <input
           type="checkbox"
