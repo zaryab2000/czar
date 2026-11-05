@@ -58,7 +58,9 @@ try {
     schemaValid: schema.valid,
     shapeHash: actualShapeHash,
     deliveryLimitMs: Math.min(workerData.limits.deliveryTimeoutMs, input.maxTimeoutSeconds * 1000),
-    maxBodyBytes: workerData.limits.maxBodyBytes,
+    maxBodyBytes: input.genericDelivery
+      ? workerData.limits.genericMaxBytes
+      : workerData.limits.maxBodyBytes,
   });
   parentPort.postMessage({ ok: true, checks }, []);
 } catch {

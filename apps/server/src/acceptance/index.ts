@@ -3,7 +3,7 @@ import type { AcceptanceReport } from "@czar/schemas";
 import { validateSchema } from "@czar/schemas";
 import { readFile } from "node:fs/promises";
 import type { Pool } from "pg";
-import { dataJsonProfile } from "#src/acceptance/profile";
+import { dataJsonProfile, genericDeliveryProfile, hasOutputSchema } from "#src/acceptance/profile";
 import { executorHash, runSandboxedChecks, type SandboxCheck } from "#src/acceptance/sandbox";
 import type {
   AcceptanceCheckInput,
@@ -28,14 +28,16 @@ export async function createAcceptanceChecker(dependencies: AcceptanceDependenci
   const executorSource = await readFile(new URL("./executor/checks.js", import.meta.url), "utf8");
   const codeHash = executorHash(executorSource);
   const dataProfile = dataJsonProfile(codeHash);
+  const genericProfile = genericDeliveryProfile(codeHash);
   await seedDataJsonProfile(dependencies.pool, dataProfile);
+  await seedDataJsonProfile(dependencies.pool, genericProfile);
 
   return {
     codeHash,
     profileIdFor(taskClass: string): string {
-      if (taskClass !== "data-json")
-        throw new RangeError("No acceptance profile is seeded for task class " + taskClass + ".");
-      return dataProfile.profile_id;
+      if (taskClass === "data-json") return dataProfile.profile_id;
+      if (taskClass === "generic-delivery") return genericProfile.profile_id;
+      throw new RangeError("No acceptance profile is seeded for task class " + taskClass + ".");
     },
     getProfileId: (taskClass: string) => getProfileId(dependencies.pool, taskClass),
     check: (input: AcceptanceCheckInput) => checkAcceptance(input, dependencies, executorSource),
@@ -93,13 +95,14 @@ async function checkAcceptance(
     checks = uncheckedChecks();
     if (!input.screen.available) extraLimits.push("screen-unavailable");
   } else {
-    const outputSchema = await dependencies.ports.outputSchema.forService(input.serviceId);
+    const declaredSchema = await dependencies.ports.outputSchema.forService(input.serviceId);
+    const outputSchema = hasOutputSchema(declaredSchema) ? declaredSchema : null;
     const historyShapeHash = outputSchema
       ? null
       : await dependencies.ports.shapeHistory.forService(input.serviceId);
     const sandbox = await runSandboxedChecks({
       executorSource,
-      input: sandboxInput(input, historyShapeHash),
+      input: sandboxInput(input, historyShapeHash, isGenericProfile(profile)),
       outputSchema,
       config: dependencies.config,
     });
@@ -160,7 +163,11 @@ function screenDisposition(input: AcceptanceCheckInput): "screened" | "quarantin
     : "screened";
 }
 
-function sandboxInput(input: AcceptanceCheckInput, historyShapeHash: string | null) {
+function sandboxInput(
+  input: AcceptanceCheckInput,
+  historyShapeHash: string | null,
+  genericDelivery: boolean,
+) {
   return {
     paid: input.paid,
     responseArrived: input.responseArrived,
@@ -170,11 +177,16 @@ function sandboxInput(input: AcceptanceCheckInput, historyShapeHash: string | nu
     bodyText: input.bodyText,
     bodyBytes: input.bodyText === null ? 0 : Buffer.byteLength(input.bodyText, "utf8"),
     mimeType: input.mimeType,
-    expectedKeys: input.step.inputTemplate?.expectedKeys ?? [],
+    expectedKeys: genericDelivery ? [] : (input.step.inputTemplate?.expectedKeys ?? []),
+    genericDelivery,
     historyShapeHash,
     deliveredAsIs: input.deliveredAsIs ?? false,
     ...(input.outputFormat ? { outputFormat: input.outputFormat } : {}),
   };
+}
+
+function isGenericProfile(profile: StoredProfile): boolean {
+  return profile.profile_json["name"] === "generic-delivery.v1";
 }
 
 async function loadProfile(pool: Pool, profileId: string): Promise<StoredProfile> {

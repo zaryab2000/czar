@@ -12,6 +12,7 @@ export interface SandboxInput {
   readonly bodyBytes: number;
   readonly mimeType: string;
   readonly expectedKeys: readonly string[];
+  readonly genericDelivery: boolean;
   readonly historyShapeHash: string | null;
   readonly deliveredAsIs: boolean;
   readonly outputFormat?: string;
@@ -47,8 +48,10 @@ export async function runSandboxedChecks(args: {
 }): Promise<SandboxOutcome> {
   const started = performance.now();
   const maxBodyBytes = Number(args.config.get("acceptance.maxBodyBytes"));
+  const genericMaxBytes = Number(args.config.get("acceptance.genericMaxBytes"));
+  const effectiveMaxBytes = args.input.genericDelivery ? genericMaxBytes : maxBodyBytes;
   const input =
-    args.input.bodyBytes > maxBodyBytes ? { ...args.input, bodyText: null } : args.input;
+    args.input.bodyBytes > effectiveMaxBytes ? { ...args.input, bodyText: null } : args.input;
   const copiedInput = JSON.parse(JSON.stringify(input)) as SandboxInput;
   const schema = prepareSchema(
     args.outputSchema,
@@ -63,6 +66,7 @@ export async function runSandboxedChecks(args: {
       limits: {
         deliveryTimeoutMs: Number(args.config.get("acceptance.deliveryTimeoutMs")),
         maxBodyBytes: Number(args.config.get("acceptance.maxBodyBytes")),
+        genericMaxBytes,
         schemaMaxBytes: Number(args.config.get("acceptance.schemaMaxBytes")),
       },
     },

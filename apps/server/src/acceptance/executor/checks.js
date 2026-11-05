@@ -5,13 +5,26 @@ function check(name, result, detail) {
 function deliveryCheck(input) {
   if (!input.paid) return check("delivery", "not_checked");
   if (!input.responseArrived) return check("delivery", "fail", { reason: "no-response" });
-  if (input.statusCode === null || input.statusCode < 200 || input.statusCode >= 300)
+  if (
+    input.statusCode === null ||
+    (input.genericDelivery
+      ? input.statusCode !== 200
+      : input.statusCode < 200 || input.statusCode >= 300)
+  )
     return check("delivery", "fail", { reason: "http-status" });
   if (input.bodyBytes === 0) return check("delivery", "fail", { reason: "empty-body" });
   if (input.elapsedMs > input.deliveryLimitMs)
     return check("delivery", "fail", { reason: "delivery-timeout" });
   if (input.bodyBytes > input.maxBodyBytes)
     return check("delivery", "fail", { reason: "body-too-large" });
+  if (input.genericDelivery) {
+    const mimeType = input.mimeType.toLowerCase().split(";", 1)[0].trim();
+    const claimsJson = mimeType === "application/json" || mimeType.endsWith("+json");
+    if (!claimsJson && !mimeType.startsWith("text/"))
+      return check("delivery", "fail", { reason: "content-type" });
+    if (claimsJson && !input.parsed.parseOk)
+      return check("delivery", "fail", { reason: "invalid-json" });
+  }
   return check("delivery", "pass", {
     statusCode: input.statusCode,
     durationMs: input.elapsedMs,
