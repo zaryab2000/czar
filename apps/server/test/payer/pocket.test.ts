@@ -14,7 +14,7 @@ import { makeObjectiveSubmission, seedDevice, TEST_USER_ID } from "#test/fixture
 import { loadConfig } from "@czar/config";
 import { buildTree, pocketLeaf } from "@czar/hashing";
 import { KEY_IDS } from "@czar/signer";
-import { appendExecutionPhase } from "#src/payer/executions";
+import { appendExecutionPhase, getExecutionTrace } from "#src/payer/executions";
 import {
   buildExactPaymentPayload,
   buildPaymentRequired,
@@ -632,6 +632,48 @@ describe("pocket funding", () => {
     );
     expect(settled.rows).toHaveLength(4);
     expect(settled.rows.every((row) => row.settled_at instanceof Date)).toBe(true);
+  });
+
+  it("records the Circle transfer UUID from PAYMENT-RESPONSE.transaction", async () => {
+    const { challenge, input } = gatewayRetryFixture();
+    // Recorded Arc testnet transfer id: apps/indexer/test/fixtures/gateway/transfers.json.
+    const transferId = "d863fd6a-6e1c-4ab6-ac61-22966d41529a";
+    const safeFetch = vi.fn(async (_url: string, options?: { headers?: Record<string, string> }) =>
+      options?.headers?.["payment-signature"]
+        ? {
+            status: 200,
+            url: "http://127.0.0.1:4021/data",
+            headers: {
+              "payment-response": Buffer.from(
+                JSON.stringify({ success: true, transaction: transferId }),
+              ).toString("base64"),
+            },
+            body: new Uint8Array(),
+          }
+        : {
+            status: 402,
+            url: "http://127.0.0.1:4021/data",
+            headers: { "payment-required": challenge },
+            body: new Uint8Array(),
+          },
+    );
+    await payGatewaySteps(input, {
+      pool: getPool(),
+      config: loadConfig(),
+      signer: {
+        sign: vi.fn(async () => ({
+          signature: `0x${"ab".repeat(65)}` as const,
+          digest: `0x${"cd".repeat(32)}` as const,
+        })),
+      },
+      safeFetch,
+      now: () => new Date(),
+      gatewayStatus: vi.fn(async () => "pending" as const),
+    });
+    const trace = await getExecutionTrace(getPool(), PLAN_ID, 0, 0);
+    const paid = trace.find((row) => row.phase === "pocket.paid[0]");
+    expect(paid?.payload["transferId"]).toBe(transferId);
+    expect(paid?.payload["paymentRef"]).toMatchObject({ transferId });
   });
 
   it("does not sign an alternate Gateway payee without a committed service identity", async () => {
