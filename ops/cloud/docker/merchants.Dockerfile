@@ -21,6 +21,9 @@ COPY apps/merchants        apps/merchants
 # apps/merchants/src/migrate.ts applies this one server migration by reading it relative to its own
 # file (../../server/migrations/), so without it the cloud merchants fail at start (PM-014).
 COPY apps/server/migrations/0012-merchant-payment-identifiers.sql apps/server/migrations/
+# @czar/schemas reads the spec schema files when it is first imported, so every image that
+# ships the package ships them too.
+COPY docs/specs/02-data-and-protocol/schemas docs/specs/02-data-and-protocol/schemas
 
 COPY ops/cloud/docker/healthcheck/http-health.mjs ops/cloud/docker/healthcheck/
 

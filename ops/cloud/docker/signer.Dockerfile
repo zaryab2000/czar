@@ -20,6 +20,9 @@ COPY packages/logging      packages/logging
 COPY packages/schemas      packages/schemas
 COPY packages/vault-client packages/vault-client
 COPY apps/signer           apps/signer
+# @czar/schemas reads the spec schema files when it is first imported, so every image that
+# ships the package ships them too.
+COPY docs/specs/02-data-and-protocol/schemas docs/specs/02-data-and-protocol/schemas
 
 COPY ops/cloud/docker/healthcheck/signer-socket.mjs ops/cloud/docker/healthcheck/
 
