@@ -52,6 +52,10 @@ Caddy on the host as the only public listener, and every credential a file on a 
 6. **Add the Secret Manager versions.** `create.sh` creates every secret **empty**; putting a
    value in one is Zaryab's step and never this script's. Then, on the VM:
    `sudo systemctl start czar-secrets.service`.
+   The nightly backup (PM-052, PM-052b) is installed by cloud-init: the PostgreSQL 16 client, the
+   scripts under `/opt/czar/ops/backup`, `/etc/czar/backup.env` (the bucket name) and
+   `czar-backup.timer`, enabled for the next boot. The timer fires at 02:30 UTC and needs the
+   `backup/db-password` file from this step.
 7. **Images and compose are PM-013 and PM-014.** Until they land, Caddy answers 502: it is
    enabled with nothing behind it. That is the intended end state of PM-011/PM-012.
 
@@ -200,5 +204,4 @@ this checkout's code at that address; the exit code is then 1.
 - Running `--apply`, or anything else against Google Cloud.
 - Container images (PM-013) and the cloud compose file (PM-014).
 - Monitoring and alerts (PM-051), which configure the Ops Agent this installs.
-- Backups (PM-052), which use the bucket and the retention rule this creates.
 - Key creation (PM-018). `create.sh` creates the two key rings and no key.

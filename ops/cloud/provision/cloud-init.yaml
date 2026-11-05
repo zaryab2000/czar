@@ -22,6 +22,7 @@
 #   docker-compose-plugin       2.32.4-1~debian.12~bookworm
 #   caddy                       2.10.0
 #   google-cloud-ops-agent      2.53.0~debian12
+#   postgresql-client-16        16.15-1.pgdg12+2   (apt.postgresql.org, bookworm-pgdg)
 #
 # Debian's own packages (curl, jq, gnupg, iptables, ca-certificates) are installed unpinned:
 # they come from the distribution's signed point release, which is itself the pin.
@@ -218,6 +219,84 @@ runcmd:
   - apt-get update
   - DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends google-cloud-ops-agent=2.53.0~debian12
   - apt-mark hold google-cloud-ops-agent
+
+  # ---- 8b. the nightly backup (PM-052b; SCR-170 §5) -----------------------------------------------
+  # pg-backup.sh runs on the host as root and calls pg_dump and psql, so the host needs the
+  # PostgreSQL 16 client: Debian 12's own is version 15, which refuses to dump a version 16 server.
+  # It comes from the PostgreSQL project's signed repository, pinned to the server's minor and held.
+  - curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc -o /etc/apt/keyrings/postgresql.asc
+  - chmod a+r /etc/apt/keyrings/postgresql.asc
+  - echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/postgresql.asc] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" > /etc/apt/sources.list.d/pgdg.list
+  - apt-get update
+  - DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends postgresql-client-16=16.15-1.pgdg12+2
+  - apt-mark hold postgresql-client-16
+  # The scripts and units are repository files passed as instance metadata, like the ones above.
+  - install -d -m 0755 -o root -g root /opt/czar/ops/backup
+  - [
+      curl,
+      -fsS,
+      -H,
+      "Metadata-Flavor: Google",
+      "http://metadata.google.internal/computeMetadata/v1/instance/attributes/czar-backup-sh",
+      -o,
+      /opt/czar/ops/backup/pg-backup.sh,
+    ]
+  - [
+      curl,
+      -fsS,
+      -H,
+      "Metadata-Flavor: Google",
+      "http://metadata.google.internal/computeMetadata/v1/instance/attributes/czar-backup-lib-sh",
+      -o,
+      /opt/czar/ops/backup/lib.sh,
+    ]
+  - [
+      curl,
+      -fsS,
+      -H,
+      "Metadata-Flavor: Google",
+      "http://metadata.google.internal/computeMetadata/v1/instance/attributes/czar-restore-drill-sh",
+      -o,
+      /opt/czar/ops/backup/pg-restore-drill.sh,
+    ]
+  - [
+      curl,
+      -fsS,
+      -H,
+      "Metadata-Flavor: Google",
+      "http://metadata.google.internal/computeMetadata/v1/instance/attributes/czar-backup-service",
+      -o,
+      /etc/systemd/system/czar-backup.service,
+    ]
+  - [
+      curl,
+      -fsS,
+      -H,
+      "Metadata-Flavor: Google",
+      "http://metadata.google.internal/computeMetadata/v1/instance/attributes/czar-backup-timer",
+      -o,
+      /etc/systemd/system/czar-backup.timer,
+    ]
+  - chmod 0755 /opt/czar/ops/backup/pg-backup.sh /opt/czar/ops/backup/pg-restore-drill.sh
+  - chmod 0644 /opt/czar/ops/backup/lib.sh /etc/systemd/system/czar-backup.service /etc/systemd/system/czar-backup.timer
+  - chown root:root /opt/czar/ops/backup/pg-backup.sh /opt/czar/ops/backup/lib.sh /opt/czar/ops/backup/pg-restore-drill.sh
+  - [
+      curl,
+      -fsS,
+      -H,
+      "Metadata-Flavor: Google",
+      "http://metadata.google.internal/computeMetadata/v1/instance/attributes/CZAR_BACKUP_BUCKET",
+      -o,
+      /run/czar-backup-bucket,
+    ]
+  # CZAR_BACKUP_BUCKET is the bucket's name, a pointer and not a credential (D70, D78).
+  - sh -c 'printf "CZAR_BACKUP_BUCKET=%s\n" "$(cat /run/czar-backup-bucket)" > /etc/czar/backup.env'
+  - rm -f /run/czar-backup-bucket
+  - chmod 0644 /etc/czar/backup.env
+  - systemctl daemon-reload
+  # Enabled for the boot that follows, not started: the unit needs backup/db-password, which
+  # czar-secrets.service writes once Zaryab has added the Secret Manager versions.
+  - systemctl enable czar-backup.timer
 
   # ---- 9. the credential unit: enabled, deliberately NOT started here -------------------------
   # Every row of secrets.list marked `required` must already have a version in Secret Manager
