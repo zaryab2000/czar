@@ -8,6 +8,7 @@ import {
 } from "@czar/x402";
 import type { Pool } from "pg";
 import type { PlannerService } from "#src/planner/ports";
+import { mapCircleInput } from "#src/selection/discovery/circle-input";
 import { recordServiceVersion } from "#src/selection/service-versions";
 
 interface CircleListing {
@@ -342,8 +343,8 @@ function mapListing(
   if (listing.metadata.siwx === true) return { reason: "siwx" };
   if (hasRequiredHeaders(listing.metadata.requiredHeaders)) return { reason: "required-headers" };
   if (!CALL_TEMPLATE_CAPABILITIES.has(capability)) return { reason: "no-template" };
-  const field = oneRequiredString(listing.metadata.input, method);
-  if (!field) return { reason: "no-template" };
+  const input = mapCircleInput(listing.metadata.input, method);
+  if (!input) return { reason: "no-template" };
   const offer = affordable.reduce((best, next) =>
     BigInt(next.amount) < BigInt(best.amount) ? next : best,
   );
@@ -352,36 +353,33 @@ function mapListing(
     serviceName: truncate(listing.metadata.provider?.name, MAX_SERVICE_NAME_CHARS),
     description: truncate(listing.metadata.description, MAX_DESCRIPTION_CHARS),
     category: truncate(listing.metadata.provider?.category, MAX_SERVICE_NAME_CHARS),
-    inputFields: [{ name: field, type: "string" }],
+    inputFields: input.inputFields,
     ...(isObject(listing.metadata.output) ? { outputSchema: listing.metadata.output } : {}),
   };
+  const probeValues = {
+    ...input.fixedInputs,
+    [input.freeTextKey]: "probe".slice(0, input.freeTextMaxLength),
+  };
   const probeInput =
-    method === "GET" ? { query: { [field]: "probe" } } : { body: { [field]: "probe" } };
+    method === "GET"
+      ? {
+          query: Object.fromEntries(
+            Object.entries(probeValues).map(([key, value]) => [key, String(value)]),
+          ),
+        }
+      : { body: probeValues };
   const service: PlannerService = {
     serviceId: circleServiceId(network, method, listing.resource),
     resource,
     probeInput,
+    inputDefaults: input.fixedInputs,
+    ...(input.freeTextMaxLength === undefined ? {} : { inputMaxChars: input.freeTextMaxLength }),
     accepts: networkOffers,
     extensions: {
       czar: { claim: { status: "unclaimed" }, evidence: null, card, source: "circle-registry" },
     },
   };
   return { service, offer };
-}
-
-function oneRequiredString(input: unknown, method: "GET" | "POST"): string | null {
-  if (!isObject(input)) return null;
-  const schema = input[method === "GET" ? "queryParams" : "body"];
-  if (
-    !isObject(schema) ||
-    !Array.isArray(schema["required"]) ||
-    schema["required"].length !== 1 ||
-    !isObject(schema["properties"])
-  )
-    return null;
-  const name = schema["required"][0];
-  const property = typeof name === "string" ? schema["properties"][name] : null;
-  return isObject(property) && property["type"] === "string" && name.length <= 64 ? name : null;
 }
 
 function hasRequiredHeaders(value: unknown): boolean {

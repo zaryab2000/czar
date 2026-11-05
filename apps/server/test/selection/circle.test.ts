@@ -292,6 +292,40 @@ describe("SCR-187 Circle discovery", () => {
     expect(recordVersion).toHaveBeenCalledOnce();
   });
 
+  it("maps schema defaults and examples into a bounded unpaid probe", async () => {
+    const listing = eligibleListing();
+    listing.metadata.input["queryParams"] = {
+      type: "object",
+      required: ["query", "limit", "safe"],
+      properties: {
+        query: { type: "string", maxLength: 2 },
+        limit: { type: "number", default: 5 },
+        safe: { type: "boolean", example: false },
+      },
+    };
+    const requests: URL[] = [];
+    const fetch: SafeFetch = async (url) => {
+      if (url.startsWith("https://api.circle.com")) return page([listing]);
+      requests.push(new URL(url));
+      return challenge(listing);
+    };
+    const { source } = setup(fetch);
+    const [candidate] = await source.discover("web-search");
+    expect(candidate?.probeInput).toEqual({ query: { query: "pr", limit: "5", safe: "false" } });
+    expect(candidate?.card["inputFields"]).toEqual([
+      { name: "query", type: "string" },
+      { name: "limit", type: "number" },
+      { name: "safe", type: "boolean" },
+    ]);
+    expect(candidate?.inputDefaults).toEqual({ limit: 5, safe: false });
+    expect(candidate?.inputMaxChars).toBe(2);
+    expect(Object.fromEntries(requests[0]!.searchParams)).toEqual({
+      query: "pr",
+      limit: "5",
+      safe: "false",
+    });
+  });
+
   it("uses the validated live Bazaar schema in the recorded version", async () => {
     const listing = eligibleListing();
     const schema = { type: "object", properties: { input: { type: "object" } } };

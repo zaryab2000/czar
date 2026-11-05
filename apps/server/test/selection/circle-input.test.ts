@@ -11,6 +11,16 @@ function schema(constant: Record<string, unknown>) {
   };
 }
 
+function textBody(query: Record<string, unknown>) {
+  return {
+    body: {
+      type: "object",
+      required: ["query"],
+      properties: { query },
+    },
+  };
+}
+
 describe("SCR-187 CD-08 Circle input schema", () => {
   it("uses one free-text query field and fills other fields from defaults or examples", () => {
     const result = mapCircleInput(
@@ -99,6 +109,18 @@ describe("SCR-187 CD-08 Circle input schema", () => {
         "POST",
       ),
     ).toBeNull();
+    expect(
+      mapCircleInput(
+        {
+          body: {
+            type: "object",
+            required: ["inputKeys"],
+            properties: { inputKeys: { type: "string" } },
+          },
+        },
+        "POST",
+      ),
+    ).toBeNull();
   });
 
   it("refuses examples that do not match their declared type or enum", () => {
@@ -132,5 +154,46 @@ describe("SCR-187 CD-08 Circle input schema", () => {
         "POST",
       ),
     ).toBeNull();
+  });
+
+  it("ignores optional fields without examples and never includes example-only extra keys", () => {
+    const optional = Object.fromEntries(
+      Array.from({ length: 21 }, (_, index) => [`unused${index}`, { type: "object" }]),
+    );
+    expect(
+      mapCircleInput(
+        {
+          body: {
+            type: "object",
+            required: ["query", "limit"],
+            example: { limit: 3, injected: "must not send" },
+            properties: {
+              query: { type: "string" },
+              limit: { type: "integer" },
+              ...optional,
+            },
+          },
+        },
+        "POST",
+      ),
+    ).toEqual({
+      freeTextKey: "query",
+      fixedInputs: { limit: 3 },
+      inputFields: [
+        { name: "query", type: "string" },
+        { name: "limit", type: "integer" },
+      ],
+    });
+  });
+
+  it("keeps a declared free-text length limit and refuses fixed-choice free text", () => {
+    expect(mapCircleInput(textBody({ type: "string", maxLength: 10 }), "POST")).toEqual({
+      freeTextKey: "query",
+      freeTextMaxLength: 10,
+      fixedInputs: {},
+      inputFields: [{ name: "query", type: "string" }],
+    });
+    expect(mapCircleInput(textBody({ type: "string", enum: ["a", "b"] }), "POST")).toBeNull();
+    expect(mapCircleInput(textBody({ type: "string", pattern: "^[0-9]+$" }), "POST")).toBeNull();
   });
 });

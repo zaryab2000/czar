@@ -3,6 +3,7 @@ type InputType = "string" | "number" | "integer" | "boolean";
 
 export interface CircleInputShape {
   readonly freeTextKey: string;
+  readonly freeTextMaxLength?: number;
   readonly fixedInputs: Readonly<Record<string, InputValue>>;
   readonly inputFields: readonly { readonly name: string; readonly type: InputType }[];
 }
@@ -20,7 +21,7 @@ export function mapCircleInput(input: unknown, method: "GET" | "POST"): CircleIn
   const required = schema["required"];
   if (!isRecord(properties) || !Array.isArray(required) || !required.every(isInputKey)) return null;
   const entries = Object.entries(properties);
-  if (entries.length === 0 || entries.length > MAX_INPUT_KEYS) return null;
+  if (entries.length === 0) return null;
   if (entries.some(([key, property]) => !isInputKey(key) || !isRecord(property))) return null;
   const requiredKeys = new Set(required);
   if ([...requiredKeys].some((key) => !(key in properties))) return null;
@@ -32,14 +33,25 @@ export function mapCircleInput(input: unknown, method: "GET" | "POST"): CircleIn
   );
   if (freeTextKeys.length !== 1) return null;
   const freeTextKey = freeTextKeys[0]![0];
+  const freeTextProperty = freeTextKeys[0]![1] as Record<string, unknown>;
+  if (
+    Object.hasOwn(freeTextProperty, "enum") ||
+    Object.hasOwn(freeTextProperty, "const") ||
+    Object.hasOwn(freeTextProperty, "pattern")
+  )
+    return null;
+  const declaredLength = freeTextProperty["maxLength"];
+  if (
+    declaredLength !== undefined &&
+    (!Number.isSafeInteger(declaredLength) || (declaredLength as number) < 1)
+  )
+    return null;
   const fixed: Array<readonly [string, InputValue]> = [];
   const inputFields: Array<{ name: string; type: InputType }> = [];
   for (const [key, property] of entries) {
     if (!isRecord(property)) return null;
-    const type = property["type"];
-    if (!isInputType(type)) return null;
     if (key === freeTextKey) {
-      inputFields.push({ name: key, type });
+      inputFields.push({ name: key, type: "string" });
       continue;
     }
     const candidate = readValue(property, key, schema);
@@ -47,11 +59,21 @@ export function mapCircleInput(input: unknown, method: "GET" | "POST"): CircleIn
       if (requiredKeys.has(key)) return null;
       continue;
     }
+    const type = property["type"];
+    if (!isInputType(type)) return null;
     if (!validValue(candidate.value, type, property)) return null;
     fixed.push([key, candidate.value]);
     inputFields.push({ name: key, type });
+    if (inputFields.length > MAX_INPUT_KEYS) return null;
   }
-  return { freeTextKey, fixedInputs: Object.fromEntries(fixed), inputFields };
+  return {
+    freeTextKey,
+    ...(typeof declaredLength === "number"
+      ? { freeTextMaxLength: Math.min(declaredLength, MAX_STRING_LENGTH) }
+      : {}),
+    fixedInputs: Object.fromEntries(fixed),
+    inputFields,
+  };
 }
 
 function readValue(
@@ -110,7 +132,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isInputKey(value: unknown): value is string {
-  return typeof value === "string" && INPUT_KEY.test(value);
+  return (
+    typeof value === "string" &&
+    value !== "inputKeys" &&
+    value !== "expectedKeys" &&
+    INPUT_KEY.test(value)
+  );
 }
 
 function isInputType(value: unknown): value is InputType {
