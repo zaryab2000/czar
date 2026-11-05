@@ -138,6 +138,8 @@ async function assertNoCrossSubjectReferences(db: PoolClient, target: ResetTarge
        AND t.opened_by=ANY($2::text[])
      UNION ALL SELECT 1 FROM social_evidence_links e JOIN social_posts p USING(post_id)
        WHERE p.thread_id<>ALL($1::text[]) AND e.obs_id=ANY($4::text[])
+     UNION ALL SELECT 1 FROM supplier_health h
+       WHERE h.cleared_by_obs_id=ANY($4::text[]) AND h.obs_id<>ALL($4::text[])
      LIMIT 1`,
     [target.threads, target.representatives, target.posts, target.observations],
   );
@@ -177,13 +179,9 @@ async function deleteSocial(
   );
   await db.query("DELETE FROM social_posts WHERE post_id=ANY($1::text[])", [target.posts]);
   await db.query("DELETE FROM social_threads WHERE thread_id=ANY($1::text[])", [target.threads]);
-  const subjects = services.map((id) => `service:eip155:5042002:${id}`);
-  subjects.push("class:eip155:5042002:smart-contract-audit");
-  await db.query(
-    `DELETE FROM social_subscriptions WHERE representative_id=ANY($1::text[])
-       OR subject_key=ANY($2::text[])`,
-    [target.representatives, subjects],
-  );
+  await db.query("DELETE FROM social_subscriptions WHERE representative_id=ANY($1::text[])", [
+    target.representatives,
+  ]);
   await db.query("DELETE FROM social_budgets WHERE representative_id=ANY($1::text[])", [
     target.representatives,
   ]);

@@ -24,10 +24,22 @@ async function seedPreservationFixtures(): Promise<{
   oldRatingId: string;
   newRatingId: string;
   otherIncidentId: string;
+  representativeId: string;
 }> {
   const database = pool();
   const random = { bytes: randomBytes };
   await seedDevice(database);
+  const representativeId = randomId("rep_", random);
+  await database.query(
+    `INSERT INTO social_representatives(representative_id,user_id,handle,sharing)
+     VALUES($1,$2,'Rep-B0B0','structured')`,
+    [representativeId, TEST_USER_ID],
+  );
+  await database.query(
+    `INSERT INTO social_subscriptions(representative_id,subject_key,source,expires_at)
+     VALUES($1,$2,'purchase',$3)`,
+    [representativeId, `service:${network}:${quickId}`, new Date(Date.now() + 86_400_000)],
+  );
   await database.query("UPDATE users SET vault=$1 WHERE user_id=$2", [bobVault, TEST_USER_ID]);
   const objectiveId = randomId("obj_", random);
   const planId = randomId("pln_", random);
@@ -95,7 +107,7 @@ async function seedPreservationFixtures(): Promise<{
     newRatingId,
   ]);
   const otherIncidentId = await seedOtherSocialHistory(database);
-  return { observationId, oldRatingId, newRatingId, otherIncidentId };
+  return { observationId, oldRatingId, newRatingId, otherIncidentId, representativeId };
 }
 
 async function seedOtherSocialHistory(database: Pool): Promise<string> {
@@ -264,6 +276,16 @@ describe("SCR-183 demo seed command", () => {
           settlement_tx: `0x${"d".repeat(64)}`,
         },
       ]);
+      expect(
+        (
+          await pool().query(
+            `SELECT r.sharing,s.subject_key FROM social_representatives r
+             JOIN social_subscriptions s USING(representative_id)
+             WHERE r.representative_id=$1`,
+            [bob.representativeId],
+          )
+        ).rows,
+      ).toEqual([{ sharing: "structured", subject_key: `service:${network}:${quickId}` }]);
       const ratings = await pool().query<{ rating_id: string }>(
         "SELECT rating_id FROM ratings WHERE rating_id=ANY($1::text[])",
         [[bob.oldRatingId, bob.newRatingId]],
