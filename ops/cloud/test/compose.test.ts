@@ -535,7 +535,11 @@ test("the smoke override is valid, keeps the cloud guard, and runs no indexer, m
   // one, and nothing waits on one.
   assert.equal(services["arc-anvil"], undefined, "a container arc-anvil runs in the smoke run");
   for (const name of ["server", "signer"])
-    assert.equal(services[name]?.depends_on?.["arc-anvil"], undefined, `${name} waits on a container`);
+    assert.equal(
+      services[name]?.depends_on?.["arc-anvil"],
+      undefined,
+      `${name} waits on a container`,
+    );
   const header = read("ops/cloud/compose.smoke.yaml").split("\nname:")[0] ?? "";
   assert.match(
     header,

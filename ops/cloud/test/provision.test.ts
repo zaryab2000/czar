@@ -455,11 +455,31 @@ test("the Caddy admin API is off, so a host-network container cannot reconfigure
 // ---- PM-052b: the nightly backup reaches the VM ------------------------------------------------
 
 const BACKUP_FILES = [
-  { attribute: "czar-backup-sh", source: "ops/cloud/backup/pg-backup.sh", target: "/opt/czar/ops/backup/pg-backup.sh" },
-  { attribute: "czar-backup-lib-sh", source: "ops/cloud/backup/lib.sh", target: "/opt/czar/ops/backup/lib.sh" },
-  { attribute: "czar-restore-drill-sh", source: "ops/cloud/backup/pg-restore-drill.sh", target: "/opt/czar/ops/backup/pg-restore-drill.sh" },
-  { attribute: "czar-backup-service", source: "ops/cloud/backup/czar-backup.service", target: "/etc/systemd/system/czar-backup.service" },
-  { attribute: "czar-backup-timer", source: "ops/cloud/backup/czar-backup.timer", target: "/etc/systemd/system/czar-backup.timer" },
+  {
+    attribute: "czar-backup-sh",
+    source: "ops/cloud/backup/pg-backup.sh",
+    target: "/opt/czar/ops/backup/pg-backup.sh",
+  },
+  {
+    attribute: "czar-backup-lib-sh",
+    source: "ops/cloud/backup/lib.sh",
+    target: "/opt/czar/ops/backup/lib.sh",
+  },
+  {
+    attribute: "czar-restore-drill-sh",
+    source: "ops/cloud/backup/pg-restore-drill.sh",
+    target: "/opt/czar/ops/backup/pg-restore-drill.sh",
+  },
+  {
+    attribute: "czar-backup-service",
+    source: "ops/cloud/backup/czar-backup.service",
+    target: "/etc/systemd/system/czar-backup.service",
+  },
+  {
+    attribute: "czar-backup-timer",
+    source: "ops/cloud/backup/czar-backup.timer",
+    target: "/etc/systemd/system/czar-backup.timer",
+  },
 ] as const;
 
 test("create.sh passes the backup files and the bucket name to the VM", () => {
@@ -469,7 +489,10 @@ test("create.sh passes the backup files and the bucket name to the VM", () => {
   assert.ok(create, "no instances create command");
   for (const { attribute, source } of BACKUP_FILES)
     assert.ok(create.includes(`${attribute}=${source}`), `${attribute} is not passed to the VM`);
-  assert.match(create, /--metadata=CZAR_DOMAIN=d\.example,CZAR_BACKUP_BUCKET=czar-alpha-backups-p /);
+  assert.match(
+    create,
+    /--metadata=CZAR_DOMAIN=d\.example,CZAR_BACKUP_BUCKET=czar-alpha-backups-p /,
+  );
 });
 
 test("cloud-init fetches each backup file to the path the backup unit runs", () => {
@@ -503,7 +526,10 @@ test("cloud-init writes only the bucket pointer to backup.env and enables the ti
   // Enabled for the boot that follows; not started here, because the unit needs the credential
   // files czar-secrets.service writes once Zaryab has added the Secret Manager versions.
   assert.match(cloudInit, /^ {2}- systemctl enable czar-backup\.timer$/m);
-  assert.doesNotMatch(cloudInit, /systemctl (enable )?--now czar-backup|systemctl start czar-backup/);
+  assert.doesNotMatch(
+    cloudInit,
+    /systemctl (enable )?--now czar-backup|systemctl start czar-backup/,
+  );
 });
 
 test("cloud-init installs the PostgreSQL 16 client the backup script runs, from PGDG", () => {
