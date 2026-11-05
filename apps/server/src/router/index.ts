@@ -1,6 +1,11 @@
 import { loadConfig, type Config, type ParameterValue } from "@czar/config";
 import { MIN_MAX_FEE_PER_GAS } from "@czar/vault-client";
-import { GATEWAY_EXTRA_NAME, USDC_ADDRESS, type PaymentRequirements } from "@czar/x402";
+import {
+  classifyOffer,
+  USDC_ADDRESS,
+  type PaymentRequirements,
+  type SanitizedExtensions,
+} from "@czar/x402";
 import type { Step } from "@czar/schemas";
 
 export const MAX_AUTHORIZATIONS_PER_RESERVATION = 128;
@@ -45,6 +50,8 @@ export interface RouterInput {
   readonly eth_gasPrice: bigint;
   readonly merchantCallsPerSecond?: MerchantRate;
   readonly params: RoutingParams;
+  readonly config?: Config;
+  readonly extensions402?: SanitizedExtensions;
 }
 
 export type RoutingReason =
@@ -163,7 +170,12 @@ export function route(input: RouterInput): RouteResult {
     return { kind: "erc8183-job", routingReason: jobReason, calls };
   }
 
-  const offers = usableOffers(input.offers, input.planNetwork);
+  const offers = usableOffers(
+    input.offers,
+    input.planNetwork,
+    input.config ?? loadConfig(),
+    input.extensions402 ?? { dropped: [] },
+  );
   if (calls === 0) return skipped("fee-exceeds-payment");
   if (!offers.hasExact && offers.hasGateway && !input.params.gatewayEnabled)
     return skipped("no-usable-offer");
@@ -187,30 +199,26 @@ export function route(input: RouterInput): RouteResult {
   return skipped("no-usable-offer");
 }
 
-function usableOffers(offers: readonly PaymentRequirements[], planNetwork: string) {
+function usableOffers(
+  offers: readonly PaymentRequirements[],
+  planNetwork: string,
+  config: Config,
+  extensions402: SanitizedExtensions,
+) {
   let hasExact = false;
   let hasGateway = false;
   let hadCandidate = false;
   for (const offer of offers) {
     // planNetwork is selection.paymentNetwork, set by the planner from @czar/config (D83).
-    if (!isUsableOffer(offer) || offer.network !== planNetwork) continue;
+    if (offer.scheme !== "exact" || offer.network !== planNetwork) continue;
     if (offer.asset.toLowerCase() !== USDC_ADDRESS.toLowerCase()) continue;
-    const gateway = offer.extra["name"] === GATEWAY_EXTRA_NAME;
-    hasExact ||= !gateway;
-    hasGateway ||= gateway;
+    const classification = classifyOffer(offer, extensions402, config);
+    if (classification === "unsupported") continue;
+    hasExact ||= classification === "vanilla";
+    hasGateway ||= classification === "gateway";
     hadCandidate = true;
   }
   return { hasExact, hasGateway, hadCandidate };
-}
-
-function isUsableOffer(offer: PaymentRequirements): boolean {
-  const extra = offer.extra;
-  return (
-    offer.scheme === "exact" &&
-    extra["siwx"] !== true &&
-    extra["siwxOnly"] !== true &&
-    extra["paymentFlow"] !== "batch-settlement"
-  );
 }
 
 function gasTotal(calls: bigint, params: RoutingParams): bigint {

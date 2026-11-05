@@ -47,7 +47,10 @@ const exact: PaymentRequirements = {
 };
 const gateway: PaymentRequirements = {
   ...exact,
-  extra: { name: GATEWAY_EXTRA_NAME },
+  extra: {
+    name: GATEWAY_EXTRA_NAME,
+    verifyingContract: loadConfig().get("chain.gatewayWalletAddress"),
+  },
 };
 function input(overrides: Partial<RouterInput> = {}): RouterInput {
   return {
@@ -131,6 +134,27 @@ describe("CZ-14 payment router cost model", () => {
     expect(route(input({ offers: [gateway], unitAmount: 1n, params: enabled }))).toMatchObject({
       kind: "gateway-nano",
     });
+  });
+
+  it("routes a verified Circle Gateway batch offer through the pocket", () => {
+    const config = loadConfig({ envFile: { "routing.gatewayEnabled": true } });
+    const circleGateway: PaymentRequirements = {
+      ...gateway,
+      extra: {
+        name: GATEWAY_EXTRA_NAME,
+        verifyingContract: config.get("chain.gatewayWalletAddress"),
+        paymentFlow: "batch-settlement",
+      },
+    };
+    expect(
+      route(
+        input({
+          offers: [circleGateway],
+          unitAmount: 1_000n,
+          params: routingParamsFromConfig(config),
+        }),
+      ),
+    ).toMatchObject({ kind: "gateway-nano" });
   });
 
   it("keeps job routes off by default and enables them only by config", () => {

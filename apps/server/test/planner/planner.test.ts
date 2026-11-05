@@ -1,7 +1,12 @@
 import { createServer } from "node:http";
 import { loadConfig } from "@czar/config";
-import { buildTree, payeeLeaf, verifyProof } from "@czar/hashing";
-import { encodeBase64Json, USDC_ADDRESS, type PaymentRequirements } from "@czar/x402";
+import { buildTree, payeeLeaf, serviceVersionId, verifyProof } from "@czar/hashing";
+import {
+  encodeBase64Json,
+  USDC_ADDRESS,
+  type PaymentRequirements,
+  type SanitizedExtensions,
+} from "@czar/x402";
 import { describe, expect, it } from "vitest";
 import {
   computeObjectiveGatewayVolume,
@@ -11,6 +16,8 @@ import {
 } from "#src/planner/index";
 import { createSafeProber } from "#src/planner/probe";
 import { createRegisteredSelection } from "#src/selection/registered/index";
+import type { CircleCandidate } from "#src/selection/discovery/circle";
+import { readRankingDecision } from "#src/selection/ranking/decision-store";
 import { createPlannerProfileSource } from "#src/main";
 import { localTemplateProfile } from "#src/acceptance/profile";
 import { route, routingParamsFromConfig, cVd, pocketWorthIt } from "#src/router/index";
@@ -39,6 +46,10 @@ const offer: PaymentRequirements = {
   maxTimeoutSeconds: 60,
   extra: {},
 };
+const gatewayExtra = {
+  name: "GatewayWalletBatched",
+  verifyingContract: loadConfig().get("chain.gatewayWalletAddress"),
+};
 
 function fakeService(id = serviceId, accepted = offer): PlannerService {
   return {
@@ -63,6 +74,7 @@ function makePlanner(
     readonly gatewayEnabled?: boolean;
     readonly jobEnabled?: boolean;
     readonly proberOffers?: readonly PaymentRequirements[];
+    readonly proberExtensions?: SanitizedExtensions;
     readonly hasAgent?: boolean;
     readonly service?: PlannerService;
     readonly candidateCount?: number;
@@ -83,6 +95,7 @@ function makePlanner(
     readonly context?: string;
     readonly subjectLabels?: readonly string[];
     readonly configOverrides?: Readonly<Record<string, unknown>>;
+    readonly selection?: ReturnType<typeof createRegisteredSelection>;
   } = {},
 ) {
   const spec = {
@@ -104,7 +117,7 @@ function makePlanner(
     config,
     ...(options.social ? { social: options.social } : {}),
     ports: {
-      ranking: {
+      ranking: options.selection?.rank ?? {
         rank: async (query) => {
           options.rankingQueries?.push(query);
           return {
@@ -156,7 +169,7 @@ function makePlanner(
           };
         },
       },
-      directory: {
+      directory: options.selection?.directory ?? {
         get: async (id) => {
           const service =
             options.service ??
@@ -184,7 +197,11 @@ function makePlanner(
             amount: options.amount ?? offer.amount,
             payTo: `0x${id.slice(4, 5).repeat(40)}`,
           };
-          return { ok: true as const, offers: options.proberOffers ?? [live] };
+          return {
+            ok: true as const,
+            offers: options.proberOffers ?? [live],
+            ...(options.proberExtensions ? { extensions402: options.proberExtensions } : {}),
+          };
         },
       },
     },
@@ -205,6 +222,47 @@ function makePlanner(
 }
 
 describe("planner fallback", () => {
+  it("plans a discovered unrated Circle service with owner approval", async () => {
+    const resource = { url: "https://circle-merchant.example/search", method: "GET" as const };
+    const circleId = `svc_${"b".repeat(32)}`;
+    const candidate: CircleCandidate = {
+      serviceId: circleId,
+      resource,
+      probeInput: { query: { query: "probe" } },
+      accepts: [offer],
+      extensions: {
+        czar: {
+          claim: { status: "unclaimed" },
+          evidence: null,
+          card: { serviceName: "Circle search", inputFields: [{ name: "query", type: "string" }] },
+          source: "circle-registry",
+        },
+      },
+      source: "circle-registry",
+      card: { serviceName: "Circle search", inputFields: [{ name: "query", type: "string" }] },
+      versionId: serviceVersionId({ payTo: offer.payTo.toLowerCase(), resource, schema: null }),
+      priceAtomic: offer.amount,
+      probe: { matchedOffer: offer, extensions402: { dropped: [] } },
+    };
+    const selection = createRegisteredSelection({
+      config: loadConfig({ envFile: { "selection.circleDiscovery.enabled": true } }),
+      safeFetch: async () => {
+        throw new Error("unexpected network probe");
+      },
+      pool: getPool(),
+      now: () => new Date("2026-10-21T00:00:00Z"),
+      circleDiscovery: { discover: async () => [candidate] },
+    });
+    const built = await makePlanner({ selection, proberOffers: [offer], remaining: "999999999" });
+    expect(built?.plan.steps[0]?.serviceId).toBe(circleId);
+    const decisionId = built?.plan.rankingDecisionIds?.[0];
+    if (!decisionId) throw new Error("Circle plan did not persist a ranking decision");
+    const decision = await readRankingDecision(getPool(), decisionId);
+    expect(decision?.unverified[0]?.version_id).toBe(candidate.versionId);
+    expect(built?.plan.approvalReasons).toContain("unrated");
+    expect(built?.approvalNeeded).toBe(true);
+  });
+
   it("uses the registered local-template-v1 profile for unpaid local steps", async () => {
     const profileSource = createPlannerProfileSource({
       profileIdFor(taskClass: string) {
@@ -244,7 +302,7 @@ describe("planner fallback", () => {
   it("computes V from every selected paid step's live Gateway offer", async () => {
     const gatewayOffers = [
       { ...offer, amount: "8000" },
-      { ...offer, amount: "8000", extra: { name: "GatewayWalletBatched" } },
+      { ...offer, amount: "8000", extra: gatewayExtra },
     ];
     const built = await makePlanner({
       capabilities: ["web-search", "page-extract", "web-search", "page-extract"],
@@ -334,8 +392,15 @@ describe("planner fallback", () => {
     expect(built).toBeNull();
   });
 
+  it("does not plan a seller requiring 402-level sign-in", async () => {
+    const built = await makePlanner({
+      proberExtensions: { dropped: ["sign-in-with-x"] },
+    });
+    expect(built).toBeNull();
+  });
+
   it("adds a kind-4 pocket leaf and enables pocket cap for gateway steps", async () => {
-    const gateway = { ...offer, extra: { name: "GatewayWalletBatched" } };
+    const gateway = { ...offer, extra: gatewayExtra };
     const built = await makePlanner({ proberOffers: [gateway], gatewayEnabled: true });
     expect(built?.plan.steps[0]?.kind).toBe("gateway-nano");
     expect(built?.plan.pocketCapBps).toBe(2500);
@@ -344,8 +409,38 @@ describe("planner fallback", () => {
     ).toBe(true);
   });
 
+  it("plans a verified Circle Gateway batch offer", async () => {
+    const gateway = {
+      ...offer,
+      extra: {
+        ...gatewayExtra,
+        paymentFlow: "batch-settlement",
+      },
+    };
+    const built = await makePlanner({ proberOffers: [gateway], gatewayEnabled: true });
+    expect(built?.plan.steps[0]?.kind).toBe("gateway-nano");
+  });
+
+  it("commits the payee of the classified Gateway offer", async () => {
+    const wrongContract = {
+      ...offer,
+      payTo: `0x${"4".repeat(40)}`,
+      extra: { ...gatewayExtra, verifyingContract: `0x${"5".repeat(40)}` },
+    };
+    const verified = {
+      ...offer,
+      extra: { ...gatewayExtra, paymentFlow: "batch-settlement" },
+    };
+    const built = await makePlanner({
+      proberOffers: [wrongContract, verified],
+      gatewayEnabled: true,
+    });
+    expect(built?.plan.steps[0]?.kind).toBe("gateway-nano");
+    expect(built?.plan.steps[0]?.payee).toBe(verified.payTo);
+  });
+
   it("does not plan a Gateway-only offer while routing.gatewayEnabled is false", async () => {
-    const gateway = { ...offer, extra: { name: "GatewayWalletBatched" } };
+    const gateway = { ...offer, extra: gatewayExtra };
     await expect(makePlanner({ proberOffers: [gateway] })).resolves.toBeNull();
   });
 
@@ -770,9 +865,7 @@ describe("planner fallback", () => {
       const amount = BigInt((state % 5_000_000) + 1);
       const volume = BigInt((Math.imul(state, 2_246_822_519) >>> 0) % 20_000_000);
       const gatewayOnly = index % 2 === 0;
-      const offers = gatewayOnly
-        ? [{ ...offer, extra: { name: "GatewayWalletBatched" } }]
-        : [offer];
+      const offers = gatewayOnly ? [{ ...offer, extra: gatewayExtra }] : [offer];
       const step = {
         stepIndex: 0,
         stepId: "stp_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",

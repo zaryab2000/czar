@@ -32,7 +32,11 @@ export function createSafeProber(config: Config) {
           body: Buffer.from(response.body).toString("utf8"),
         });
         return parsed.ok
-          ? { ok: true, offers: parsed.paymentRequired.accepts }
+          ? {
+              ok: true,
+              offers: parsed.paymentRequired.accepts,
+              extensions402: parsed.extensions,
+            }
           : { ok: false, reason: "malformed" };
       } catch (error) {
         return {
