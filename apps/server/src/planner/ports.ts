@@ -19,6 +19,8 @@ export interface PlannerService {
     readonly query?: Readonly<Record<string, string>>;
     readonly body?: Readonly<Record<string, unknown>>;
   };
+  readonly inputDefaults?: Readonly<Record<string, string | number | boolean>>;
+  readonly inputMaxChars?: number;
   readonly accepts: readonly PaymentRequirements[];
   readonly providerAddress?: string;
   readonly listedPrice?: string;
