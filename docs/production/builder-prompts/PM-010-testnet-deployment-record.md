@@ -149,7 +149,10 @@
   - `pnpm -r typecheck`
   - `pnpm lint`
   - the full test suite of every package you touched
-  - `pnpm --filter @czar/server exec vitest run --exclude "test/local-pocket/**" --exclude "**/*-arc.test.ts"` (baseline on `d9fb168`: 82 files, 606 passed, 0 failed)
+  - `pnpm --filter @czar/server exec vitest run --exclude "test/local-pocket/**" --exclude "**/*-arc.test.ts"` (baseline on `prod/integration` at `cd62d74`, measured serially on an idle machine: **85 files, 645 passed, 0 failed**, about 5 minutes)
+  - The old figure of "82 files, 606 passed" was taken at `d9fb168`, long since overtaken by SN-1, PM-016, PM-021, PM-037 and PM-064. Do not measure against it.
+  - **This suite only gives a trustworthy answer on a quiet machine.** Several tests put a real-clock deadline around otherwise deterministic work, so they fail under load with nothing wrong in the product: `evidence/health-db.test.ts` (fixed in PM-064), `boundary.test.ts`, `rate.test.ts`, `acceptance/sandbox.test.ts`, `migrate.test.ts`, and the three `payer/` files that combine `vi.useFakeTimers()` with `vi.waitFor()` — `manual-return.test.ts`, `database-vault-event-source.test.ts` (10 call sites) and `runtime.test.ts`. Under 7-way contention this suite reported up to 7 failures; serially it is 645/645, twice.
+  - So: if a failure appears, **re-run that file alone before concluding anything**, record both results, and never report the suite as passing on a run you did not see pass
 - Postgres 16 for tests runs on `127.0.0.1:15432` (see `apps/server/test/db.ts`).
 - **CI does not run** (GitHub Actions billing). Ignore its status; all verification is local.
 
