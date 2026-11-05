@@ -1778,6 +1778,7 @@ exports[`registry > matches the dump snapshot 1`] = `
     "source": "default",
     "unit": "",
     "value": {
+      "code-review": "smart-contract-audit",
       "page-extract": "data-json.extract",
       "table-build": "local",
       "web-search": "data-json.search",
@@ -1789,6 +1790,7 @@ exports[`registry > matches the dump snapshot 1`] = `
     "unit": "",
     "value": {
       "*": "general",
+      "code-review": "research",
       "data-*": "data",
       "image-*": "creative",
       "page-extract": "research",
@@ -1813,6 +1815,15 @@ exports[`registry > matches the dump snapshot 1`] = `
     "source": "default",
     "unit": "hours",
     "value": 48,
+  },
+  {
+    "key": "planner.inputMaxChars",
+    "source": "default",
+    "unit": "chars",
+    "value": {
+      "code-review": 2000,
+      "default": 1000,
+    },
   },
   {
     "key": "planner.jobSlackBps",
