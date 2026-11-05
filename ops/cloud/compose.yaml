@@ -252,6 +252,40 @@ services:
       signer:
         condition: service_healthy
 
+  social-worker:
+    <<: *app
+    image: czar-server:${CZAR_IMAGE_TAG:?set CZAR_IMAGE_TAG to the commit build-all.sh tagged}
+    user: "10001:10010"
+    command:
+      [
+        node,
+        --experimental-strip-types,
+        --disable-warning=ExperimentalWarning,
+        apps/server/src/social/cloud-worker-main.ts,
+      ]
+    healthcheck:
+      disable: true
+    logging:
+      driver: json-file
+    environment:
+      CZAR_CLOUD_CONFIG: /etc/czar/cloud.toml
+      CZAR_DATABASE_URL: postgres://czar_api@127.0.0.1:5432/czar
+      CZAR_ARC_RPC_URL: https://rpc.testnet.arc.io
+    volumes:
+      - *cloud-config
+      - *deployment
+      - type: bind
+        source: /run/czar/secrets/social-worker
+        target: /run/czar/secrets/social-worker
+        read_only: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
+      server:
+        condition: service_healthy
+
   web:
     <<: *app
     image: czar-web:${CZAR_IMAGE_TAG:?set CZAR_IMAGE_TAG to the commit build-all.sh tagged}

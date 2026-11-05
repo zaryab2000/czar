@@ -26,10 +26,18 @@ const read = (relative: string) => readFileSync(join(repoRoot, relative), "utf8"
 /** The production start order (SCR-170 §1; ops/local/process-compose.yaml). */
 const START_ORDER = ["postgres", "indexer", "server", "signer", "merchants"] as const;
 /** Czar's own app containers: the only ones whose stdout the Ops Agent may ship. */
-const APP_SERVICES = ["server", "signer", "merchants", "web"] as const;
+const APP_SERVICES = ["server", "signer", "merchants", "social-worker", "web"] as const;
 /** Containers whose raw stdout must never reach Cloud Logging (logging ruling, PM-014). */
 const UNSHIPPED_SERVICES = ["postgres", "postgres-init", "indexer"] as const;
-const LONG_RUNNING = ["postgres", "indexer", "server", "signer", "merchants", "web"] as const;
+const LONG_RUNNING = [
+  "postgres",
+  "indexer",
+  "server",
+  "signer",
+  "merchants",
+  "social-worker",
+  "web",
+] as const;
 const SECRETS_ROOT = "/run/czar/secrets";
 const SIGNER_RUN_DIR = "/run/czar/signer";
 const CLOUD_CONFIG_TARGET = "/etc/czar/cloud.toml";
@@ -101,6 +109,7 @@ test("docker compose -f ops/cloud/compose.yaml config is valid", () => {
     "postgres-init",
     "server",
     "signer",
+    "social-worker",
     "web",
   ]);
 });
@@ -109,8 +118,9 @@ test("the image tag is required, never a floating default", () => {
   const result = compose([composeFile]);
   assert.notEqual(result.status, 0, "compose accepted a missing CZAR_IMAGE_TAG");
   assert.match(result.stderr, /CZAR_IMAGE_TAG/);
-  for (const name of APP_SERVICES.concat(["indexer"] as never))
+  for (const name of ["server", "signer", "merchants", "web", "indexer"])
     assert.equal(service(name).image, `czar-${name}:0123abc`, name);
+  assert.equal(service("social-worker").image, "czar-server:0123abc");
 });
 
 test("postgres uses the image digest pinned in ops/local/compose.yaml", () => {
@@ -165,6 +175,7 @@ test("every database URL pointer names the service's own role and carries no pas
     server: "czar_api",
     signer: "czar_signer",
     merchants: "czar_merchants",
+    "social-worker": "czar_api",
   };
   for (const [name, role] of Object.entries(roles)) {
     const url = new URL(String(service(name).environment?.["CZAR_DATABASE_URL"]));
@@ -184,6 +195,7 @@ test("each secrets mount is read-only and per service", () => {
     server: "server",
     signer: "signer",
     merchants: "merchants",
+    "social-worker": "social-worker",
     "postgres-init": "postgres-init",
   };
   for (const [name, entry] of Object.entries(model().services)) {
@@ -212,6 +224,7 @@ test("secrets.list fills every credential folder a service mounts, under that se
     .map((line) => line.split(/\s+/));
   const uidOf = new Map(rows.map(([, folder, , uid]) => [folder, uid]));
   assert.equal(uidOf.get("server"), APP_UID);
+  assert.equal(uidOf.get("social-worker"), APP_UID);
   assert.equal(uidOf.get("merchants"), APP_UID);
   assert.equal(uidOf.get("indexer"), APP_UID);
   assert.equal(uidOf.get("signer"), SIGNER_UID);
@@ -220,6 +233,7 @@ test("secrets.list fills every credential folder a service mounts, under that se
   const init = rows.filter(([, folder]) => folder === "postgres-init");
   const bySecret = (folder: string) =>
     rows.find(([, f, file]) => f === folder && file === "db-password")?.[0];
+  assert.equal(bySecret("social-worker"), bySecret("server"));
   assert.deepEqual(Object.fromEntries(init.map(([secret, , file]) => [file, secret])), {
     czar_api: bySecret("server"),
     czar_signer: bySecret("signer"),
@@ -247,9 +261,26 @@ test("secrets.list gives the signer an expected token for every caller it loads 
 
 test("services run as the SCR-170 §4 users", () => {
   assert.equal(service("signer").user, `${SIGNER_UID}:${SIGNER_CLIENT_GID}`);
-  for (const name of ["server", "merchants", "indexer", "web"])
+  for (const name of ["server", "merchants", "indexer", "social-worker", "web"])
     assert.equal(service(name).user, `${APP_UID}:${SIGNER_CLIENT_GID}`, name);
   assert.equal(service("postgres-init").user, `${POSTGRES_IMAGE_UID}:${POSTGRES_IMAGE_UID}`);
+});
+
+test("the cloud social worker uses the server image without an HTTP healthcheck", () => {
+  const worker = service("social-worker");
+  assert.deepEqual(worker.command, [
+    "node",
+    "--experimental-strip-types",
+    "--disable-warning=ExperimentalWarning",
+    "apps/server/src/social/cloud-worker-main.ts",
+  ]);
+  assert.equal(worker.healthcheck?.disable, true);
+  assert.equal(worker.depends_on?.["server"]?.condition, "service_healthy");
+  assert.equal(worker.logging?.driver, "json-file");
+  assert.doesNotMatch(
+    read("apps/server/src/social/cloud-worker-main.ts"),
+    /validateLocalOnlyConfig/,
+  );
 });
 
 test("the signer socket folder is the host folder, bind-mounted into signer, server and merchants only", () => {
@@ -272,7 +303,7 @@ test("the signer socket folder is the host folder, bind-mounted into signer, ser
 });
 
 test("env/cloud.toml and the deployment file are mounted read-only and the pointer names them", () => {
-  for (const name of ["indexer", "server", "signer", "merchants"]) {
+  for (const name of ["indexer", "server", "signer", "merchants", "social-worker"]) {
     const entry = service(name);
     const config = entry.volumes?.find((mount) => mount.target === CLOUD_CONFIG_TARGET);
     assert.equal(config?.type, "bind", name);
@@ -291,6 +322,7 @@ test("every RPC pointer is the Arc testnet RPC", () => {
     indexer: "CZAR_INDEXER_RPC_URL",
     server: "CZAR_ARC_RPC_URL",
     merchants: "CZAR_ARC_RPC_URL",
+    "social-worker": "CZAR_ARC_RPC_URL",
     signer: "CZAR_SIGNER_RPC_URL",
   };
   for (const files of [[composeFile], [composeFile, smokeFile]])
@@ -517,7 +549,7 @@ test("the smoke override is valid, keeps the cloud guard, and runs no indexer, m
   });
   assert.equal(full.status, 0, full.stderr);
   const withFull = (JSON.parse(full.stdout) as Model).services;
-  for (const name of ["indexer", "merchants", "web"]) {
+  for (const name of ["indexer", "merchants", "social-worker", "web"]) {
     assert.equal(services[name], undefined, `${name} runs in the smoke run`);
     assert.deepEqual(withFull[name]?.profiles, ["full"], `${name} is not in the full profile`);
   }
@@ -535,7 +567,11 @@ test("the smoke override is valid, keeps the cloud guard, and runs no indexer, m
   // one, and nothing waits on one.
   assert.equal(services["arc-anvil"], undefined, "a container arc-anvil runs in the smoke run");
   for (const name of ["server", "signer"])
-    assert.equal(services[name]?.depends_on?.["arc-anvil"], undefined, `${name} waits on a container`);
+    assert.equal(
+      services[name]?.depends_on?.["arc-anvil"],
+      undefined,
+      `${name} waits on a container`,
+    );
   const header = read("ops/cloud/compose.smoke.yaml").split("\nname:")[0] ?? "";
   assert.match(
     header,
