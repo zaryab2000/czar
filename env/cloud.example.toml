@@ -46,3 +46,11 @@
 # fetch.localStandinOrigins, merchants.facilitatorBaseUrl, chain.gatewayApiBaseUrl,
 # app.circleClientUrl and app.arcRpcUrl are local-stack values. validateCloudConfig refuses to
 # start if fetch.localStandinOrigins is non-empty here.
+
+# ── Test-merchant lab (PM-043, CZ-20 §5.8a) ───────────────────────────────────
+# The free public data sources the lab's handlers read (PM-041 ruling, 2026-11-05). The registry default
+# for this key is still unset; the default change is folded into the post-social spec PR (PM-057).
+"merchants.labSources" = ["czar-fixture-search-corpus", "czar-public-domain-pages", "coinbase-public-spot"]
+# The lab starts only when the merchant entry asks for it, the payment network is a test chain and this
+# price is set (20,000 to 100,000 atomic USDC, spread around the catalog median). Left unset, no lab route exists.
+# "merchants.lab.priceAtomic" = 50000

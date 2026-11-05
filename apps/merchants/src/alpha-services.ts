@@ -1,4 +1,5 @@
-// The public-alpha service list: `czar-search`, `czar-spot` and `czar-extract` (CZ-20 §5.1).
+// The public-alpha service list: `czar-search`, `czar-spot` and `czar-extract` (CZ-20 §5.1), plus the
+// test-merchant lab (CZ-20 §5.8a) when the caller asks for it.
 //
 // This is the composition the cloud entry and the tests call. `local-main.ts` does not: it keeps calling
 // `createMerchantServer` with no service list, which serves `czar-search` alone, because the local signer
@@ -7,6 +8,7 @@
 // stack needs new K10 entries under `ops/local/**`, which this task does not own.
 import { createSafeFetch, type SafeFetch } from "@czar/x402";
 import { createExtractRoute, EXTRACT_PATH } from "./extract/index.ts";
+import { resolveLabServices, type LabRegistration } from "./lab/register.ts";
 import { createSpotRoute, SPOT_PATH } from "./spot/index.ts";
 import {
   createMerchantServer,
@@ -79,12 +81,18 @@ export interface AlphaMerchantServerOptions extends Omit<MerchantServerOptions, 
   readonly safeFetch?: SafeFetch;
   /** `User-Agent: Czar/<version>` for the shared `safeFetch`. */
   readonly version?: string;
+  /**
+   * Asks for the test-merchant lab (CZ-20 §5.8a). Left out, the lab is not registered and no lab key is
+   * looked up. Even when asked for, it stays off if `merchants.lab.enabled` is `false` or the payment network
+   * is not a test chain.
+   */
+  readonly lab?: LabRegistration;
 }
 
-export function createAlphaMerchantServer(
+export async function createAlphaMerchantServer(
   options: AlphaMerchantServerOptions,
 ): Promise<MerchantRuntime> {
-  const { safeFetch: given, version, ...serverOptions } = options;
+  const { safeFetch: given, version, lab, ...serverOptions } = options;
   const safeFetch =
     given ??
     createSafeFetch({
@@ -95,8 +103,20 @@ export function createAlphaMerchantServer(
       timeoutMs: Number(options.config.get("merchants.extractTimeoutMs")),
       version: version ?? "0.0.0",
     });
+  const labServices = await resolveLabServices({
+    config: options.config,
+    signer: options.signer,
+    logger: options.logger,
+    safeFetch,
+    lab,
+  });
   return createMerchantServer({
     ...serverOptions,
-    services: [searchServiceSpec, spotServiceSpec(safeFetch), extractServiceSpec(safeFetch)],
+    services: [
+      searchServiceSpec,
+      spotServiceSpec(safeFetch),
+      extractServiceSpec(safeFetch),
+      ...labServices,
+    ],
   });
 }
