@@ -1261,10 +1261,46 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 600,
   },
   {
+    "key": "merchants.provider.czar-provider-a.minWorkSeconds",
+    "source": "default",
+    "unit": "s",
+    "value": 60,
+  },
+  {
+    "key": "merchants.provider.czar-provider-a.modes",
+    "source": "default",
+    "unit": "",
+    "value": [
+      "placeholder",
+      "honest",
+    ],
+  },
+  {
+    "key": "merchants.provider.czar-provider-b.minWorkSeconds",
+    "source": "default",
+    "unit": "s",
+    "value": 60,
+  },
+  {
+    "key": "merchants.provider.czar-provider-b.modes",
+    "source": "default",
+    "unit": "",
+    "value": [
+      "placeholder",
+      "honest",
+    ],
+  },
+  {
     "key": "merchants.provider.enabled",
     "source": "default",
     "unit": "",
     "value": true,
+  },
+  {
+    "key": "merchants.provider.pollMs",
+    "source": "default",
+    "unit": "ms",
+    "value": 2000,
   },
   {
     "key": "merchants.publicOrigin",
