@@ -2928,6 +2928,15 @@ export const PARAMETERS = [
     source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:318",
   },
   {
+    key: "acceptance.genericMaxBytes",
+    type: "integer",
+    default: 1_000_000,
+    unit: "bytes",
+    reason: "Bound generic deliveries without output schemas (CD-09)",
+    source:
+      "docs/specs/06-review/change-requests/SCR-187-circle-registry-discovery-and-gateway.md:281",
+  },
+  {
     key: "acceptance.decisionMarginSeconds",
     type: "integer",
     default: 900,
@@ -2967,6 +2976,99 @@ export const PARAMETERS = [
     unit: "chain-namespace-key",
     reason: "The only network plans, payees and payments use in Phase 1 (D13, D83)",
     source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:750",
+  },
+  {
+    key: "selection.circleDiscovery.enabled",
+    type: "boolean",
+    default: false,
+    unit: "flag",
+    reason: "Off until Circle terms are confirmed; the deployment overlay turns it on",
+    source:
+      "docs/specs/06-review/change-requests/SCR-187-circle-registry-discovery-and-gateway.md:272",
+  },
+  {
+    key: "selection.circleDiscovery.baseUrl",
+    type: "string",
+    default: "https://api.circle.com/v2/x402/discovery/resources",
+    unit: "url",
+    reason: "Circle x402 discovery API v2",
+    source:
+      "docs/specs/06-review/change-requests/SCR-187-circle-registry-discovery-and-gateway.md:273",
+  },
+  {
+    key: "selection.circleDiscovery.pageLimit",
+    type: "integer",
+    default: 200,
+    unit: "items",
+    reason: "Circle discovery API page maximum",
+    source:
+      "docs/specs/06-review/change-requests/SCR-187-circle-registry-discovery-and-gateway.md:274",
+  },
+  {
+    key: "selection.circleDiscovery.maxPages",
+    type: "integer",
+    default: 5,
+    unit: "pages",
+    reason: "Bounds Circle discovery refresh work",
+    source:
+      "docs/specs/06-review/change-requests/SCR-187-circle-registry-discovery-and-gateway.md:275",
+  },
+  {
+    key: "selection.circleDiscovery.timeoutMs",
+    type: "integer",
+    default: 3000,
+    unit: "ms",
+    reason: "Circle discovery must not block planning for long",
+    source:
+      "docs/specs/06-review/change-requests/SCR-187-circle-registry-discovery-and-gateway.md:276",
+  },
+  {
+    key: "selection.circleDiscovery.maxResponseBytes",
+    type: "integer",
+    default: 2_000_000,
+    unit: "bytes",
+    reason: "Caps Circle discovery response size",
+    source:
+      "docs/specs/06-review/change-requests/SCR-187-circle-registry-discovery-and-gateway.md:277",
+  },
+  {
+    key: "selection.circleDiscovery.cacheSeconds",
+    type: "integer",
+    default: 3600,
+    unit: "seconds",
+    reason: "Matches Circle's max-age cache lifetime",
+    source:
+      "docs/specs/06-review/change-requests/SCR-187-circle-registry-discovery-and-gateway.md:278",
+  },
+  {
+    key: "selection.circleDiscovery.maxCandidates",
+    type: "integer",
+    default: 20,
+    unit: "count per capability",
+    reason: "Bounds candidates sent to live probing",
+    source:
+      "docs/specs/06-review/change-requests/SCR-187-circle-registry-discovery-and-gateway.md:279",
+  },
+  {
+    key: "selection.circleDiscovery.capabilityMap",
+    type: "object",
+    default: {
+      "web-search": { category: "WEB_SEARCH_RESEARCH" },
+      "page-extract": { category: "WEB_SEARCH_RESEARCH", query: "extract" },
+      "data-lookup": { category: "DATA_ENRICHMENT" },
+      "email-lookup": { category: "DATA_ENRICHMENT" },
+      "company-lookup": { category: "DATA_ENRICHMENT" },
+      "price-lookup": { category: "FINANCIAL_ANALYSIS", query: "price" },
+      "image-generate": { category: "CREATIVE" },
+      summarize: { category: "INFERENCE", query: "summarize" },
+      translate: { category: "INFERENCE", query: "translate" },
+      transcribe: { category: "INFERENCE", query: "transcribe" },
+      "code-review": { query: "audit" },
+    },
+    unit: "capability map",
+    reason: "Maps Czar capability tags to Circle category and substring query",
+    source:
+      "docs/specs/06-review/change-requests/SCR-187-circle-registry-discovery-and-gateway.md:280",
   },
   {
     key: "selection.marketNetwork",
