@@ -216,7 +216,7 @@ This SCR is the normative spec for C11 until it is folded into the component spe
 - **Acceptance:**
   - the vault balance after each case equals before, minus exactly the settled payments
   - no pocket keeps a balance
-  - each phase is recorded in `payer_executions`
+  - each phase is recorded in `step_executions`
 
 ### 7.3 CD-03: the switch
 - **`routing.gatewayEnabled = true` only in the demo deployment overlay** (`env/cloud-demo.example.toml`), and only after CD-02 merges.
