@@ -507,6 +507,19 @@ async function planPosts(context: RunContext): Promise<PlannedPost[]> {
   return [];
 }
 
+async function isUnvettedLeadQuestion(context: RunContext): Promise<boolean> {
+  if (context.item.kind !== "post-routed") return false;
+  const postId = context.item.refs["postId"];
+  if (typeof postId !== "string") return false;
+  const question = await context.db.query(
+    `SELECT 1 FROM social_posts WHERE post_id=$1 AND kind='question'
+       AND card->>'questionKind'='find-supplier' AND author_id<>$2
+       AND tombstoned_at IS NULL`,
+    [postId, context.representative.representative_id],
+  );
+  return question.rowCount === 1;
+}
+
 async function threadFor(context: RunContext, plan: PlannedPost): Promise<string> {
   if (plan.existingThreadId) {
     const existing = await context.db.query<{
@@ -768,7 +781,11 @@ async function executeClaim(
       plans = await planPosts(context);
       result = {
         action: "abstain",
-        stopReason: item.kind === "outcome-updated" ? "abstain-no-rule" : "abstain-no-evidence",
+        stopReason:
+          item.kind === "outcome-updated" ||
+          (plans.length === 0 && (await isUnvettedLeadQuestion(context)))
+            ? "abstain-no-rule"
+            : "abstain-no-evidence",
         postId: null,
       };
     }

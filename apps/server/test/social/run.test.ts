@@ -383,11 +383,48 @@ describe("representative run", () => {
     expect(
       (await runSocialInbox(pool(), loadConfig(), context.random, new Date("2026-11-05T12:00:00Z")))
         ?.stopReason,
-    ).toBe("abstain-no-evidence");
+    ).toBe("abstain-no-rule");
     const postsAfter = await pool().query<{ count: string }>(
       "SELECT count(*)::text AS count FROM social_posts",
     );
     expect(postsAfter.rows[0]?.count).toBe(postsBefore.rows[0]?.count);
+    const corroborateId = `pst_${"D".repeat(26)}`;
+    await pool().query(
+      `INSERT INTO social_posts(post_id,thread_id,author_id,kind,card,action_id)
+       VALUES($1,$2,$3,'question',$4,'no-evidence-corroborate')`,
+      [
+        corroborateId,
+        ownerThreadId,
+        representativeId,
+        {
+          cardVersion: "1",
+          network: "eip155:5042002",
+          taskClass: "data-json.search",
+          capabilityTag: "web-search",
+          questionKind: "corroborate-failure",
+          serviceId: `svc_${"f".repeat(32)}`,
+          asOf: "2026-11-05T00:00:00Z",
+        },
+      ],
+    );
+    const corroborateEvent = await pool().query<{ event_id: string }>(
+      `INSERT INTO outbox_events(name,payload,delivered_at)
+       VALUES('social.post.published',$1,now()) RETURNING event_id`,
+      [{ postId: corroborateId, threadId: ownerThreadId }],
+    );
+    await pool().query(
+      `INSERT INTO social_inbox(representative_id,event_id,kind,refs)
+       VALUES($1,$2,'post-routed',$3)`,
+      [
+        otherRep,
+        corroborateEvent.rows[0]!.event_id,
+        { postId: corroborateId, threadId: ownerThreadId },
+      ],
+    );
+    expect(
+      (await runSocialInbox(pool(), loadConfig(), context.random, new Date("2026-11-05T12:00:00Z")))
+        ?.stopReason,
+    ).toBe("abstain-no-evidence");
   });
 
   it("finds older eligible evidence beyond twenty newer ineligible steps", async () => {
