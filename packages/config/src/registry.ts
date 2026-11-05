@@ -91,6 +91,15 @@ export const PARAMETERS = [
     source: "docs/specs/04-components/server/server-acceptance-evidence-selection.md:308",
   },
   {
+    key: "acceptance.genericMaxBytes",
+    type: "integer",
+    default: 1000000,
+    unit: "bytes",
+    reason: "generic-delivery.v1 response body cap",
+    source:
+      "docs/specs/06-review/change-requests/SCR-187-circle-registry-discovery-and-gateway.md:281",
+  },
+  {
     key: "acceptance.sandboxTimeoutMs",
     type: "integer",
     default: 5000,

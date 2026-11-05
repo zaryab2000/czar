@@ -57,6 +57,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 15,
   },
   {
+    "key": "acceptance.genericMaxBytes",
+    "source": "default",
+    "unit": "bytes",
+    "value": 1000000,
+  },
+  {
     "key": "acceptance.kmsRetryMax",
     "source": "default",
     "unit": "count",
