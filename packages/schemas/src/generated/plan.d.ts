@@ -418,6 +418,10 @@ export interface Step {
        */
       proposition: "prefer" | "avoid";
       /**
+       * The supplier the lesson is about (social_lessons.service_id). For an avoid lesson it is the supplier passed over, never the step's chosen supplier (SCR-165 §2).
+       */
+      serviceId: string;
+      /**
        * Task class.
        */
       taskClass: string;

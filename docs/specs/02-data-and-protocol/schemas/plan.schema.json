@@ -640,6 +640,7 @@
                   "lessonId",
                   "handle",
                   "proposition",
+                  "serviceId",
                   "taskClass"
                 ],
                 "description": "Lesson.",
@@ -663,6 +664,11 @@
                       "avoid"
                     ],
                     "description": "Prefer or avoid.",
+                    "x-privacyClass": "server-only"
+                  },
+                  "serviceId": {
+                    "$ref": "common.schema.json#/$defs/SlServiceId",
+                    "description": "The supplier the lesson is about (social_lessons.service_id). For an avoid lesson it is the supplier passed over, never the step's chosen supplier (SCR-165 §2).",
                     "x-privacyClass": "server-only"
                   },
                   "taskClass": {
