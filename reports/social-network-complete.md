@@ -1,8 +1,8 @@
-# Agent social network completion report (draft)
+# Agent social network completion report
 
 ## Status and scope
 
-**SN-6 / SCR-164. This report is a draft. Flow 4A's social network is not yet signed off.**
+**SN-6 / SCR-164. Flow 4A's social network is awaiting PR review and merge.**
 The final evidence must come from one merged `build-v1` head after SN-1 through SN-6. A test
 file, a passing package branch, or a mocked browser route does not establish that final result.
 
@@ -20,8 +20,9 @@ No post, reply count, handle, or model-written note is itself a supplier score.
 | SN-5 web | UI, template parity, web build and real-server Chromium case 18 passed. | Final PR/head review and merge pending. |
 | SN-6 controlled demo and report | Controlled local seed/replay, 18 Playwright screenshots, virtual-device pairing, live incident and lesson plans, 100 duplicate replays and this report are integrated. | Final PR-head review and merge pending. |
 
-The combined integration branch is draft PR #208 into `build-v1`; Zaryab has not merged it.
-Record its final reviewed head, merge commit, and review status here before sign-off.
+The combined integration branch is PR #208 into `build-v1`; Zaryab has not merged it.
+The source and local evidence were pushed at `cef6358`; review status and the eventual merge
+commit require separate verification before sign-off.
 Hosted Actions are unavailable due to billing;
 missing, skipped or zero-step hosted jobs are not passing checks.
 
@@ -62,8 +63,8 @@ seed; a representative run without a vetted origin ends `abstain-no-rule`.
 
 Local demo commits through `00aaa11` add the virtual-device pairing and the two live
 planner-built approval captures. This report records their exact input boundaries. The
-local branch and PR head must be synchronized before final review; the final pushed SHA
-and subsequent merged SHA are not yet known.
+source and demo are pushed to PR #208. Its final reviewed SHA must be checked after this
+report edit; the eventual merged SHA remains pending.
 
 ## Key-free evidence already collected
 
@@ -195,8 +196,8 @@ test or earlier run, not a pass for the full case.
 | 15 | No model usage and every note stays NULL | `social/run.test.ts` now compares `model_usage` before and after its representative-run suite and counts zero non-NULL notes across every post in that suite's DB | Mapped test passed at draft `b6a0941`; merged head pending |
 | 16 | `czar_social` cannot read base tables or write rating/ranking/money tables; concurrent migration succeeds | `apps/server/test/social-migration.test.ts` | Mapped test passed at draft `b6a0941`; merged head pending |
 | 17 | `planning → no-supplier` event is transactional and unique | Integrated `planner/service.test.ts` checks success and trigger-induced rollback leaves planning state with zero events | Mapped test passed at draft `b6a0941`; merged head pending |
-| 18 | Onboarding, public feed, owner tombstone and lesson dismiss in Playwright against local server | `apps/web/e2e/social-real.spec.ts` passed 1/1 at integration `f3c6884` with real social API and disposable DB; `/v1/me` was the only mocked ancillary read; DB cleanup verified 0 leftovers | Browser 1/1 passed at draft `b6a0941`; controlled demo pending |
-| 19 | All package suites, typecheck, lint, schema checker, Arc slice/runs 2/4/5 and Forge | Draft `da569bb`: full server, signer, daemon, indexer, vault-client passed serially; local Arc slice 1/1, run 2 20/20, run 4 13/13, run 5 15/15; exact base run 2 20/20; Arc Forge exited 0 at `b6a0941` | All named local gates passed at draft `b6a0941`; controlled demo and merged head pending |
+| 18 | Onboarding, public feed, owner tombstone and lesson dismiss in Playwright against local server | `apps/web/e2e/social-real.spec.ts` passed 1/1 with real social API and disposable DB; `/v1/me` was the only mocked ancillary read; DB cleanup verified 0 leftovers. The separate controlled demo captured 18 Playwright screenshots. | Browser and controlled demo complete; merged head pending |
+| 19 | All package suites, typecheck, lint, schema checker, Arc slice/runs 2/4/5 and Forge | All 14 suites passed serially on integration source head, as did the static gates, local Arc slice 1/1, run 2 20/20, run 4 13/13, run 5 15/15 and Arc Forge; exact SCR-165 base run 2 passed 20/20 | All named local gates passed; merged head pending |
 | 20 | A lower-id event that commits late is delivered once | `apps/server/test/social/consumer.test.ts` | Mapped test passed at draft `b6a0941`; merged head pending |
 | 21 | Sharing-off receives a lesson without publishing; publishing run skips | `social/run.test.ts` checks private lesson creation with no public post and, at `22825d6`, a would-publish inbox item ending `skipped-sharing-off` with unchanged post count and a recorded run | Mapped test passed at draft `b6a0941`; merged head pending |
 
@@ -368,8 +369,9 @@ Playwright images and their controlled input limits are indexed above.
   `e2a1485`; it found the three defects above and no confirmed critical security or buying
   regression in its assigned scope. Its initial database-URL concern was withdrawn after
   checking SCR-164 §3.19's explicit loopback-host rule. Its follow-up through local
-  `e6b48de` found the fixes present and no new critical source issue. The later demo
-  commits `3f3fb01` and `00aaa11`, plus the final report, still need exact pushed-head review.
+  `e6b48de` found the fixes present and no new critical source issue. Its exact pushed-head
+  follow-up at `cef6358` reviewed the later demo commits, artifacts and report, finding no
+  P0/P1 or new source defect. It requested this report-state cleanup before readiness.
 - **Architect disposition:** SCR-165 merged at `c8f7af1`. Its count-free incident line,
   lesson-source `serviceId`, and idempotent duplicate-lead outcome are integrated with focused
   regressions. The architect's binding SCR-166 ruling restricts leads in this iteration to
