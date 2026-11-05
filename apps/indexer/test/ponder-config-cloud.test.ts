@@ -1,6 +1,6 @@
 // PM-059 / SCR-170 §3 (a): `ponder.config.ts` takes a cloud branch only when the pointer
 // `CZAR_CLOUD_CONFIG` is set. The branch checks the RPC host before Ponder contacts it, and sets
-// `database: {kind: "postgres", connectionString}` from the password-free URL pointer, with the password
+// `database: {kind: "postgres", poolConfig}` (host, port, database, user, password function) from the password-free URL pointer, with the password
 // read from the indexer's `db-password` file. With the pointer unset nothing changes. Each case loads the
 // config in a child process, as `ponder-config-start-block.test.ts` does; nothing is contacted.
 import { spawnSync } from "node:child_process";
@@ -21,7 +21,8 @@ afterEach(async () => {
 const PASSWORD_FREE_URL = "postgres://czar_indexer@127.0.0.1:5432/czar";
 const DESCRIBE_DATABASE =
   "const d = config.database; const out = d === undefined ? {absent: true} : " +
-  "{kind: d.kind, connectionString: d.connectionString, passwordType: typeof d.poolConfig?.password, " +
+  "{kind: d.kind, connectionString: d.connectionString, host: d.poolConfig?.host, port: d.poolConfig?.port, " +
+  "database: d.poolConfig?.database, user: d.poolConfig?.user, passwordType: typeof d.poolConfig?.password, " +
   "password: typeof d.poolConfig?.password === 'function' ? await d.poolConfig.password() : null};" +
   "process.stdout.write(JSON.stringify(out));";
 const WHOLE_CONFIG = "process.stdout.write(JSON.stringify(config));";
@@ -103,7 +104,10 @@ describe("ponder.config.ts cloud branch (SCR-170 §3 a)", () => {
     expect(result.status).toBe(0);
     expect(JSON.parse(String(result.stdout))).toEqual({
       kind: "postgres",
-      connectionString: PASSWORD_FREE_URL,
+      host: "127.0.0.1",
+      port: 5432,
+      database: "czar",
+      user: "czar_indexer",
       passwordType: "function",
       password: "from-the-file",
     });
