@@ -716,6 +716,7 @@ async function makePaidStep(args: {
         ? {
             lessons: candidate.lessons.map((lesson) => ({
               lessonId: lesson.lessonId,
+              serviceId: lesson.serviceId,
               handle: lesson.handle,
               proposition: lesson.proposition,
               taskClass: lesson.taskClass,
