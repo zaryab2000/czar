@@ -31,7 +31,9 @@
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.2.13",
+    "@types/pg": "8.23.1",
     "ajv": "8.20.0",
-    "hono": "4.13.13"
+    "hono": "4.13.13",
+    "pg": "8.23.1"
   }
 }

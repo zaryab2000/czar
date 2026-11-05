@@ -191,13 +191,13 @@ export interface Plan {
     nEff: number;
   }[];
   /**
-   * Why this plan needs the owner's explicit approval (SCR-160 §9.3): a paid step uses an unrated supplier, or one with an uncleared health fact for this owner, or the N1 exploration slot; incident-open (SCR-164 §3.13.1): the chosen supplier has an open incident. Not in planHash. A plan with a non-empty list is never opened under earned allowance.
+   * Why this plan needs the owner's explicit approval (SCR-160 §9.3): a paid step uses an unrated supplier, or one with an uncleared health fact for this owner, or the N1 exploration slot; incident-open (SCR-164 §3.13.1): the chosen supplier has an open incident; contract-sent (SCR-182 §5): a code-review step sends the owner's contract to the merchant. Not in planHash. A plan with a non-empty list is never opened under earned allowance.
    *
-   * @maxItems 4
+   * @maxItems 5
    *
    * Items: Reason.
    */
-  approvalReasons?: ("unrated" | "health-fact" | "exploration-slot" | "incident-open")[];
+  approvalReasons?: ("unrated" | "health-fact" | "exploration-slot" | "incident-open" | "contract-sent")[];
 }
 /**
  * One step of a plan (spec 02 §4.6).
@@ -346,9 +346,9 @@ export interface Step {
     };
   }[];
   /**
-   * Shown on the approval screen for a job step whose provider gets only the task description and TaskSpec context, no files (D86; Phase 1 has no file sharing).
+   * Shown on the approval screen for a job step whose provider gets only the task description and TaskSpec context, no files (D86; Phase 1 has no file sharing); contract-sent (SCR-182 §5) for a code-review step, whose input is the owner's contract source sent to the merchant.
    */
-  contextNotice?: "task-description-only";
+  contextNotice?: "task-description-only" | "contract-sent";
   /**
    * Templated reason for this step's supplier (D91). Not in planHash. Built by code from TaskSpec, the capability card and the RankingDecision; never model text.
    */

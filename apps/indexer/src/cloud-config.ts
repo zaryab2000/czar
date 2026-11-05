@@ -9,15 +9,16 @@
 // - `register-external-events.ts` runs the full guard, confirming the chain id with `eth_chainId`, in
 //   place of `validateLocalOnlyConfig`.
 import { readFileSync } from "node:fs";
-import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
   ARC_TESTNET_CHAIN_ID,
+  cloudPoolOptions,
+  type CloudPoolOptions,
+  type Config,
   loadConfig,
   parameterEnvironment,
   parseParameterToml,
   validateCloudConfig,
-  type Config,
 } from "@czar/config";
 import { createPublicClient, http } from "viem";
 
@@ -62,11 +63,16 @@ export function refuseUnsafeCloudConfig(config: Config, rpcUrl: string): void {
 
 export interface CloudDatabaseConfig {
   readonly kind: "postgres";
-  readonly connectionString: string;
-  readonly poolConfig: { readonly password: () => Promise<string> };
+  readonly poolConfig: CloudPoolOptions;
 }
 
-/** Ponder's `database` for the cloud: no password in the URL; node-postgres reads it from the file. */
+/**
+ * Ponder's `database` for the cloud: no password in the URL; node-postgres reads it from the file.
+ *
+ * The URL is split into fields and no `connectionString` is given. Ponder passes
+ * `{ connectionString, ...poolConfig }` to node-postgres, which parses the string over the options,
+ * and a URL with no password writes `password: null` over the password function (PR #225).
+ */
 export function cloudDatabaseConfig(config: Config, env: Environment): CloudDatabaseConfig {
   const connectionString = env[DATABASE_URL_POINTER]?.trim();
   if (connectionString === undefined || connectionString === "")
@@ -84,11 +90,7 @@ export function cloudDatabaseConfig(config: Config, env: Environment): CloudData
     INDEXER_CREDENTIAL_FOLDER,
     DB_PASSWORD_FILE,
   );
-  return {
-    kind: "postgres",
-    connectionString,
-    poolConfig: { password: async () => (await readFile(passwordFile, "utf8")).trim() },
-  };
+  return { kind: "postgres", poolConfig: cloudPoolOptions(url, passwordFile) };
 }
 
 export interface CloudIndexerGuardOptions {
