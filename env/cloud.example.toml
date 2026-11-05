@@ -42,11 +42,20 @@
 # today's owner-only socket, which no other container could open.
 "signer.socketGroupGid" = 10010
 
-# ── Model provider: off until it is connected deliberately ────────────────────
-"models.provider" = "none"
-# "models.anthropic.model" = "claude-haiku-5-5"
-# File NAME under deploy.credentialFilesDir, never the key itself.
-# "models.anthropic.apiKeyFile" = "anthropic-api-key"
+# ── Model provider (BR-05) ────────────────────────────────────────────────────
+# Anthropic. The server calls the model in two places, both through the per-user budget:
+#   - the boundary, on every delivered merchant response: P-01 screens it, P-02 reads its fields;
+#   - POST /v1/model, the daemon's prompt proxy (P-01, P-02, P-04, P-05, P-06, P-07).
+# The planner makes no model call. Each call is capped by models.<prompt>.maxTokensPerCall and
+# models.<prompt>.timeoutMs; each user by that prompt's models.<prompt>MonthlyTokens and by
+# models.userMonthlyTokens. This file overrides none of them, so the registry defaults apply.
+# The key is read from its file on the first call, not at start. With the file absent a call fails:
+# the boundary falls back to its regex and code checks and POST /v1/model answers 503. Set
+# "models.provider" = "none" to switch the model off.
+"models.provider" = "anthropic"
+"models.anthropic.model" = "claude-haiku-5-5"
+# File NAME inside <deploy.credentialFilesDir>/server, never the key itself.
+"models.anthropic.apiKeyFile" = "anthropic-api-key"
 
 # ── Local-only keys that must stay out of this file ───────────────────────────
 # fetch.localStandinOrigins, merchants.facilitatorBaseUrl, chain.gatewayApiBaseUrl,
