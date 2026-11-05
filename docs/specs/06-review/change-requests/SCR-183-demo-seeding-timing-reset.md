@@ -113,18 +113,31 @@ This SCR is the normative spec for the tasks above until its content is folded i
   - Alice's plan recommending B: as soon as the incident is open, because ranking reads open incidents when it builds each decision
 
 ### 6. Reset (`social:demo-reset`)
-- **Deletes, inside one transaction:**
-  - **every social row:** posts, threads, evidence links, inbox, runs, incidents, lessons, leads, subscriptions, consumer cursor rows written since seeding
-  - **the evidence for the two audit services only:**
-    - observations, ratings, rating receipts, effective ratings and supplier counts for `czar-audit-quick` and `czar-audit-deep`
-    - ranking decisions and health facts for task class `smart-contract-audit`
-  - **the controlled owners** and their objectives, devices and representatives
-- **Keeps:**
-  - Bob's and Alice's accounts, wallets, devices and representatives
-  - all receipts, envelopes and chain-derived payment records
-  - everything for other services
-- **Bob's and Alice's own representatives** are kept with their sharing setting. Their inbox and runs go with the social rows.
-- **Afterwards,** run `social:demo-seed` to get the starting state back. A reset followed by a seed twice in a row must give the same `demo-check` result.
+- **Deletes, inside one transaction, only Demo v1 rehearsal state (SCR-186):**
+  - The three controlled seed owners: their users, devices, representatives, objectives,
+    synthetic observations, ratings, rating-receipt bindings, effective-rating projection,
+    subscriptions, inbox rows and runs.
+  - Social threads with subject `service:eip155:5042002:<A>`,
+    `service:eip155:5042002:<B>`, or `class:eip155:5042002:smart-contract-audit`;
+    incident threads for A or B in the audit task class; and question threads whose question
+    card has `taskClass = smart-contract-audit`. Delete those threads' posts, evidence links,
+    inbox rows and runs that reference them.
+  - A/B `smart-contract-audit` social incidents and lessons.
+  - Non-controlled A/B `smart-contract-audit` ratings created at or after the rehearsal
+    boundary, their `rating_receipts` bindings, and any health facts created by those
+    ratings. The boundary is the earliest `users.created_at` of the controlled seed owners,
+    read before deleting them. If no controlled owners exist, delete no real user's rating
+    and report that fact. Ratings older than the boundary survive.
+- **Keeps:** Bob's and Alice's accounts, wallets, devices, representatives and sharing
+  settings; every real observation, payment ID, settlement transaction, receipt, envelope
+  and chain-derived record; every other service or task-class social row; the global social
+  consumer cursor, all outbox events and event deliveries; and all immutable ranking
+  decisions. Never rewind the cursor or replay old events.
+- **Refreshes:** recompute supplier counts from retained evidence and store a fresh ranking
+  snapshot after reset and again after seed. Never edit counts by hand. An unrated delivered
+  Bob observation is neither a negative unit nor a rating count.
+- **Afterwards,** run `social:demo-seed` to restore the starting state. Two consecutive
+  `reset → seed → check` cycles must give the same result.
 
 ### 7. Not changed
 - The incident, lesson and routing logic (SCR-164, SCR-165), the scores, and the ranking order.
@@ -140,7 +153,10 @@ This SCR is the normative spec for the tasks above until its content is folded i
 4. **Planner:** with that incident open, a new user's `code-review` plan chooses B, and the stored decision shows A with `incident-open`, below B.
 5. **Reset:**
    - `reset → seed → check` twice gives identical results
-   - receipts and other services' rows are untouched
+   - Bob's observation, payment ID and settlement transaction survive
+   - a pre-boundary A/B rating survives
+   - other services' and other task classes' social threads and posts survive
+   - the global cursor, outbox events, event deliveries and ranking decisions survive
    - the reset refuses without the guard
 6. **Label:** feed, thread, `/social/me` and approval-lesson author lines show "Czar test agent" for controlled representatives.
 7. **Timing overlay:** loading `env/cloud-demo.example.toml` yields exactly the §5 demo values, and production defaults are unchanged without it.
@@ -151,3 +167,6 @@ This SCR is the normative spec for the tasks above until its content is folded i
 
 ## Decision
 - <filled in by Zaryab>
+- SCR-186 applies the chief architect's 2026-11-05 binding reset-scope ruling to §6 and
+  reset acceptance test 5. The outbox-event objective foreign-key follow-up is recorded in
+  SCR-186 and remains open.
