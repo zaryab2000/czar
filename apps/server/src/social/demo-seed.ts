@@ -1,8 +1,12 @@
 import { randomBytes } from "node:crypto";
 import type { Config } from "@czar/config";
+import type { RankingDecision } from "@czar/schemas";
 import { createSafeFetchFromConfig, type SafeFetch } from "@czar/x402";
 import type { Pool } from "pg";
-import { createRegisteredSelection } from "#src/selection/registered/index";
+import {
+  createRegisteredSelection,
+  type RegisteredSelection,
+} from "#src/selection/registered/index";
 import { refreshSupplierCounts } from "#src/selection/ranking/counts";
 import { rankingPolicyVersion } from "#src/selection/ranking/decision";
 import { taskClassFor } from "#src/selection/task-class";
@@ -95,10 +99,30 @@ export async function runDemoSeed(
   });
   await replayControlledFixtures(pool);
   await socialHousekeepingPass(pool, config, now);
+  const decision = await refreshDemoRanking(pool, config, now, safeFetch, selection);
+  if (
+    decision.ranked[0]?.service_id !== quick.serviceId ||
+    decision.ranked[1]?.service_id !== deep.serviceId
+  ) {
+    throw new Error("Demo seed did not produce A first and B second in ranked services.");
+  }
+}
+
+/** Rebuild counts from evidence and store a fresh audit ranking decision. */
+export async function refreshDemoRanking(
+  pool: Pool,
+  config: Config,
+  now: Date,
+  safeFetch: SafeFetch = createSafeFetchFromConfig(config, "czar-server/demo-ranking"),
+  existingSelection?: RegisteredSelection,
+): Promise<RankingDecision> {
+  const selection =
+    existingSelection ?? createRegisteredSelection({ config, pool, safeFetch, now: () => now });
+  const network = String(config.get("selection.paymentNetwork"));
   const confidenceZ = Number(config.get("selection.confidenceZ"));
   const refreshed = await refreshSupplierCounts({
     pool,
-    network: fixture.network,
+    network,
     policyVersion: rankingPolicyVersion({
       confidenceZ,
       consecutiveFailures: Number(config.get("health.consecutiveFailures")),
@@ -110,19 +134,13 @@ export async function runDemoSeed(
   });
   if (!refreshed) throw new Error("Demo seed could not acquire the ranking refresh lease.");
   const taskSpec = auditTaskSpec();
-  const decision = await selection.rank.rank({
+  return selection.rank.rank({
     taskClass: "smart-contract-audit",
     capability: "code-review",
     taskSpec,
-    networks: [fixture.network],
+    networks: [network],
     rails: ["x402-exact", "gateway-batched", "erc8183-job"],
     max_price_atomic: String(config.get("planner.defaultMaxUnitAtomic")),
     unknown_policy: "exclude",
   });
-  if (
-    decision.ranked[0]?.service_id !== quick.serviceId ||
-    decision.ranked[1]?.service_id !== deep.serviceId
-  ) {
-    throw new Error("Demo seed did not produce A first and B second in ranked services.");
-  }
 }
