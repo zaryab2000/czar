@@ -1,6 +1,6 @@
 // Generated from docs/specs/02-data-and-protocol/schemas. Do not edit.
 import { validateSchema } from "#src/validator";
-import type { AcceptanceReport, ActivityEvent, CapabilityCard, DemandProofLeaf, DemandProofLeafV2, Envelope, EvidenceBatch, InterviewSubmission, JobBrief, JobRecord, MarketView, ObjectiveSubmission, Objective, PaymentRef, Plan, PocketRecord, ProposedBelief, RankingDecision, Rating, Receipt, Reservation, SocialExperienceCard, SocialLeadCard, SocialPostProjection, SocialQuestionCard, SocialThreadProjection, SoulVersionLeaf, Soul, SourceReceipt, SourceScan, StepError, StepResult, TaskSpec } from "./types.ts";
+import type { AcceptanceReport, ActivityEvent, AuditReport, AuditRequest, CapabilityCard, DemandProofLeaf, DemandProofLeafV2, Envelope, EvidenceBatch, InterviewSubmission, JobBrief, JobRecord, MarketView, ObjectiveSubmission, Objective, PaymentRef, Plan, PocketRecord, ProposedBelief, RankingDecision, Rating, Receipt, Reservation, SocialExperienceCard, SocialLeadCard, SocialPostProjection, SocialQuestionCard, SocialThreadProjection, SoulVersionLeaf, Soul, SourceReceipt, SourceScan, StepError, StepResult, TaskSpec } from "./types.ts";
 
 export function validateAcceptanceReport(value: unknown): value is AcceptanceReport {
   return validateSchema("acceptance-report", value);
@@ -8,6 +8,14 @@ export function validateAcceptanceReport(value: unknown): value is AcceptanceRep
 
 export function validateActivityEvent(value: unknown): value is ActivityEvent {
   return validateSchema("activity-event", value);
+}
+
+export function validateAuditReport(value: unknown): value is AuditReport {
+  return validateSchema("audit-report", value);
+}
+
+export function validateAuditRequest(value: unknown): value is AuditRequest {
+  return validateSchema("audit-request", value);
 }
 
 export function validateCapabilityCard(value: unknown): value is CapabilityCard {

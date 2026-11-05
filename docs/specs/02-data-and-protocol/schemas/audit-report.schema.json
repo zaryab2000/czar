@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://czar.dev/schemas/audit-report.schema.json",
+  "title": "AuditReport",
+  "description": "The report an audit merchant returns for a paid request (SCR-182 §3). The merchant validates it before returning; an invalid report is a handler failure and is never settled. Every finding of czar-audit-deep carries a location and a fix.",
+  "type": "object",
+  "x-privacyClass": "server-only",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "service", "summary", "findings", "inputHash", "model", "generatedAt"],
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "description": "Schema version, major.minor; this file is 1.0.",
+      "x-privacyClass": "server-only",
+      "const": "1.0"
+    },
+    "service": {
+      "type": "string",
+      "description": "The audit service that wrote the report.",
+      "x-privacyClass": "server-only",
+      "enum": ["czar-audit-quick", "czar-audit-deep"]
+    },
+    "summary": {
+      "type": "string",
+      "description": "Short overall assessment.",
+      "x-privacyClass": "server-only",
+      "maxLength": 600
+    },
+    "findings": {
+      "type": "array",
+      "description": "Findings, most severe first; czar-audit-quick returns at most merchants.audit.quick.maxFindings (3).",
+      "x-privacyClass": "server-only",
+      "maxItems": 15,
+      "items": { "$ref": "#/$defs/Finding" }
+    },
+    "inputHash": {
+      "$ref": "common.schema.json#/$defs/Hash32",
+      "description": "H(contract) over the contract value the buyer sent (@czar/hashing), so the report is bound to its input.",
+      "x-privacyClass": "server-only"
+    },
+    "model": {
+      "type": "string",
+      "description": "The model id that produced the findings.",
+      "x-privacyClass": "server-only",
+      "maxLength": 64
+    },
+    "generatedAt": {
+      "$ref": "common.schema.json#/$defs/Timestamp",
+      "description": "When the merchant produced the report.",
+      "x-privacyClass": "server-only"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "service": { "const": "czar-audit-deep" } },
+        "required": ["service"]
+      },
+      "then": {
+        "properties": {
+          "findings": { "items": { "required": ["severity", "issue", "location", "fix"] } }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "Finding": {
+      "type": "object",
+      "description": "One finding.",
+      "x-privacyClass": "server-only",
+      "additionalProperties": false,
+      "required": ["severity", "issue"],
+      "properties": {
+        "severity": {
+          "type": "string",
+          "description": "How serious the finding is.",
+          "x-privacyClass": "server-only",
+          "enum": ["critical", "high", "medium", "low", "info"]
+        },
+        "issue": {
+          "type": "string",
+          "description": "What is wrong.",
+          "x-privacyClass": "server-only",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "location": {
+          "type": "string",
+          "description": "Where in the contract, for example a function name; optional for czar-audit-quick.",
+          "x-privacyClass": "server-only",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "fix": {
+          "type": "string",
+          "description": "How to fix it; optional for czar-audit-quick.",
+          "x-privacyClass": "server-only",
+          "minLength": 1,
+          "maxLength": 400
+        }
+      }
+    }
+  }
+}
