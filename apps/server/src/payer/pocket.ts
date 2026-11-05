@@ -655,6 +655,8 @@ async function payGatewayStep(
       stepCap: BigInt(step.stepCap),
       payees: [step.payee, ...(step.alternates ?? [])].filter(isAddress),
       trustedPayees: [],
+      config: dependencies.config,
+      extensions402: read.extensions,
     });
     if (
       !choice.ok ||

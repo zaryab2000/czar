@@ -25,6 +25,7 @@ import {
 } from "@czar/x402";
 
 const getPool = setupDatabase();
+const GATEWAY_WALLET = String(loadConfig().get("chain.gatewayWalletAddress"));
 /** A test-only K3 key generated per run; nothing is committed. */
 const K3 = privateKeyToAccount(generatePrivateKey());
 
@@ -65,7 +66,7 @@ function gatewayRetryFixture() {
         asset: "0x3600000000000000000000000000000000000000",
         payTo,
         maxTimeoutSeconds: 30,
-        extra: { name: "GatewayWalletBatched" },
+        extra: { name: "GatewayWalletBatched", verifyingContract: GATEWAY_WALLET },
       },
     ],
   });
@@ -541,7 +542,7 @@ describe("pocket funding", () => {
           asset: "0x3600000000000000000000000000000000000000",
           payTo,
           maxTimeoutSeconds: 30,
-          extra: { name: "GatewayWalletBatched" },
+          extra: { name: "GatewayWalletBatched", verifyingContract: GATEWAY_WALLET },
         },
       ],
       extensions: {
@@ -764,7 +765,7 @@ describe("pocket funding", () => {
           asset: "0x3600000000000000000000000000000000000000",
           payTo,
           maxTimeoutSeconds: 30,
-          extra: { name: "GatewayWalletBatched" },
+          extra: { name: "GatewayWalletBatched", verifyingContract: GATEWAY_WALLET },
         },
       ],
       extensions: {
@@ -876,7 +877,7 @@ describe("pocket funding", () => {
           asset: "0x3600000000000000000000000000000000000000",
           payTo,
           maxTimeoutSeconds: 30,
-          extra: { name: "GatewayWalletBatched" },
+          extra: { name: "GatewayWalletBatched", verifyingContract: GATEWAY_WALLET },
         },
       ],
     });
