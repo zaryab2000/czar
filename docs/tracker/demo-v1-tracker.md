@@ -42,7 +42,8 @@
 | DD-03 | 2026-11-05 | Steps 9–13 use **seeded, labelled Czar test agents** (`controlled` representatives) to supply the other owners' bad experiences. They are never presented as real users. |
 | DD-04 | 2026-11-05 | The ranking flip uses the **incident gate** (SCR-164 §3.13.1): 3 distinct owners with bad outcomes within the 14-day **lookback** window. It must show **live, within about 1–2 minutes**, by shortening the demo timing settings (§3, C8). |
 | DD-05 | 2026-11-05 | **We build the two audit merchants ourselves**, branded "Czar Lab Quick Audit" (A) and "Czar Lab Deep Audit" (B), labelled as run by Czar. We do not clone or proxy onedollaraudit.com: it is a real third party, runs on Base mainnet, and takes up to 8 hours. |
-| DD-06 | 2026-11-05 | The robot-key fix, invite gate, global cap, kill switch, treasury, Gateway sweeps, Python privacy helper, ERC-8183 specialists and npm publishing stay **deferred** (§5). |
+| DD-06 | 2026-11-05 | The robot-key fix, invite gate, global cap, kill switch, treasury, Python privacy helper, ERC-8183 specialists and npm publishing stay **deferred** (§5). Gateway sweeps moved into C11 by DD-07. |
+| DD-07 | 2026-11-05 | **Czar discovers merchants from Circle's Arc testnet registry too.** For each objective, Czar searches **both** its own catalog and Circle's x402 discovery API (`GET https://api.circle.com/v2/x402/discovery/resources`, `network=eip155:5042002`). It ranks all candidates with its own scoring, and filters in or out by capability, payment fit, probe and ranking. Circle merchants are never excluded up front. **Gateway nanopayments are turned on**, with the sweep back to the vault built first. Czar's own merchants (A and B included) also go through Circle's normal registry route. The demo may still use any merchants. Source: Circle discovery research, 2026-11-05. |
 
 ### 1.4 Rules every task follows
 
@@ -140,6 +141,15 @@ Execute in this order. Tasks in the same phase can run in parallel unless **Depe
 | A: browser task path | UX-01, UX-02, UX-03, UX-04, UX-06, BR-06 (COL, Package 2); BR-02, BR-04 (CL) | COL + CL |
 | B: audit merchants | MR-01, MR-02, MR-04, MR-05, MR-07, MR-08 (COL, Package 1); BR-01, BR-03, MR-06 (CL); MR-03 (Z) | COL + CL (CL reviews money-path PRs) |
 | C: social and selection seeding | SOC-02, SOC-05, SOC-06, SEL-01, SEL-04, DEMO-01, DEMO-03 | GPT |
+
+### Phase 2b: Circle registry and Gateway (C11, after SPEC work)
+
+| Order | Task | What |
+|---|---|---|
+| 2b.1 | CD-01 | SCR-187 |
+| 2b.2 | CD-02 → CD-03 | Sweep first, then Gateway on |
+| 2b.3 | CD-04, CD-05 (parallel) → CD-06 | Offer recognition, discovery source, one ranking |
+| 2b.4 | CD-07 | Real Gateway payment to a Circle merchant (after OPS-11) |
 
 ### Phase 3: integrate, prove and rehearse
 
@@ -281,6 +291,32 @@ OPS-01..05 ──┼─> OPS-06..10 ─> OPS-11 (real payment) ─┐
 
 ---
 
+### C11. Circle registry discovery and Gateway nanopayments (DD-07)
+
+- **Why:** Czar must work with the merchants already on Circle's Arc testnet registry, not only with its own catalog.
+- **Research facts (2026-11-05):**
+  - 134 Arc testnet listings, **all payable only through Circle Gateway**
+  - no audit seller among them
+  - substring search, no quality signal
+  - input schema often missing; output schema mostly missing
+- **Order inside C11:** spec → sweep (money safety) → Gateway on → discovery source → merge into selection → end-to-end test.
+  - CD-01 to CD-07 are P0 because DD-07 makes them part of Demo v1.
+  - If they put the demo at risk, Zaryab can move them to P1.
+
+| ID | Task | Pri | Phase | Depends on | Suggested owner | Owner | Status | PR | Acceptance check | Notes |
+|---|---|---|---|---|---|---|---|---|---|---|
+| CD-01 | **SCR-187: Circle discovery source plus Gateway turn-on.** Covers: discovery request (network, category or query from capability, limits, paging, cache TTL); listing → candidate mapping (resource, method, `accepts`, input schema); merge and dedupe with `selection.czarRegisteredServices`; capability ↔ Circle category map; Gateway offer recognition (`extra.name = "GatewayWalletBatched"`) routed to the `gateway-nano` rail; the sweep and refund back to the vault; config keys; Circle terms caveat | P0 | 2 | — | CL | | todo | | SCR merged | Unblocks CD-02 to CD-09 |
+| CD-02 | **Pocket sweep and refund back to the vault:** withdraw every unspent Gateway deposit from the pocket to the owner's vault after the step (success, failure or cancel). **Money path, tests first** | P0 | 2 | CD-01 | Claude builder (Opus) | | todo | | Tests: leftover after a success, a failed call or a cancel returns to the vault; nothing is left stranded; replay-safe | Was cut as SCR-177/PM-044/PM-047; required before CD-03 |
+| CD-03 | **Turn on Gateway nanopayments:** `routing.gatewayEnabled = true` for the demo deployment, only after CD-02 merges | P0 | 2 | CD-02 | CL | | todo | | Config dump shows it on; a `gateway-nano` step plans and pays against a Czar merchant on the local chain | |
+| CD-04 | **Selection recognises Circle Gateway offers:** today the eligibility rule misses them (no `paymentFlow`; SIWX declared as a 402-level extension). Route them to `gateway-nano`, and filter offers that need SIWX or sessions. Tests first | P0 | 2 | CD-01 | Claude builder | | todo | | Tests with the real Quicknode and BotPay 402 shapes: classified correctly; never paid on the vanilla rail | Research Q4 |
+| CD-05 | **Circle discovery source:** fetch `network=eip155:5042002` plus the category or query for the capability; cache per the response `cache-control` (1 h); page by `offset` with dedupe (page order is unstable); map each listing to a candidate; live-probe before ranking | P0 | 2 | CD-01 | GPT or Claude builder | | todo | | Recorded API fixtures: listings map to candidates; an unpaid probe is required before any is ranked; the API down means fallback to Czar's own catalog only | api.circle.com must be allowed by safe fetch and VM egress |
+| CD-06 | **One search, one ranking:** Czar's own catalog and Circle candidates merge into one candidate list per objective (dedupe by resource URL and `payTo`), then run through the normal ranking, incidents, lessons and filters | P0 | 2 | CD-04, CD-05 | Claude builder | | todo | | Planner test: Circle and own candidates rank together; a capability mismatch is filtered out; Circle merchants are never excluded before ranking | Core of DD-07 |
+| CD-07 | **End-to-end Gateway payment to an existing Circle merchant** on Arc testnet (for example Quicknode `arc-testnet`, 0.0001 USDC): discover → probe → rank → pay through the pocket → leftover swept back | P0 | 3 | CD-03, CD-06, OPS-11 | Z + CL | | todo | | Receipt with a real Gateway settlement; vault balance reconciles after the sweep | Needs testnet funds: Zaryab's approval |
+| CD-08 | **Input builder for listings:** build the request from the listing's input schema (body or query); listings without a schema need a model-built input (SCR-187 decides) | P1 | 2 | CD-05 | Claude builder | | todo | | Tests per schema type; never sends fields outside the schema | 84% of Arc mainnet listings have no input schema |
+| CD-09 | **Generic delivery check for listings with no output schema** (for example "valid JSON or text within limits, then the boundary screen") | P1 | 2 | CD-01 | Claude builder | | todo | | Acceptance tests for schema-less deliveries | |
+| CD-10 | **List Czar's merchants through Circle's registry route:** apply to list Czar Search, Spot, Extract and audit A and B on Circle's agent marketplace (testnet). The application and its approval are Circle's process | P1 | 2 | MR-06 | Z | | todo | | Listings visible in the discovery API for `eip155:5042002` | Approval and timeline are not guaranteed, so `czarRegisteredServices` stays as the fallback; listing names Czar publicly |
+| CD-11 | **Circle terms confirmation:** written confirmation that caching, re-ranking and showing incidents about listed sellers is allowed | P1 | 2 | — | Z | | todo | | Written reply from Circle | Research Q5: terms are silent; Developer Terms s.2 risk |
+
 ## 5. Deferred (not in Demo v1)
 
 | Item | Why deferred | Reference |
@@ -290,7 +326,7 @@ OPS-01..05 ──┼─> OPS-06..10 ─> OPS-11 (real payment) ─┐
 | Robot key per wallet | Supervised demo only | SCR-171, PM-023 |
 | Narrower passkey powers | Supervised demo only | SCR-173, PM-029 |
 | Invite gate, global cap, kill switch | Supervised demo only | — |
-| Treasury top-ups, Gateway sweeps, refunds | Pre-fund demo wallets instead | SCR-177, PM-044, PM-047 |
+| Treasury top-ups | Pre-fund demo wallets instead | SCR-177 |
 | Python privacy helper | Not on the browser path | PM-036 |
 | ERC-8183 job specialists | x402 only for Demo v1 | — |
 | npm publishing and license | No install needed for a browser demo | PM-034 |
@@ -341,3 +377,4 @@ OPS-01..05 ──┼─> OPS-06..10 ─> OPS-11 (real payment) ─┐
 | 2026-11-05 | SCR-181 and SCR-182 filed; UX-01 delegated to COL so Package 2 needs nothing from CL; MR-03 is now the two K10 signer keys | CL |
 | 2026-11-05 | SCR-183 filed (demo seeding, timing, reset) | CL |
 | 2026-11-05 | Status sync: SPEC-01..03, OPS-06, BR-01..03, BR-05 done; SCR-185 applied (#238); BR-04 blocked on COL schema; GPT PRs #233, #236, #237, #243 in review; reset (SOC-06, DEMO-03) ruled via SCR-186 (#242) | CL |
+| 2026-11-05 | DD-07 and C11 added: Circle registry discovery, Gateway nanopayments on with the sweep first, Czar merchants via Circle's registry route; Gateway sweeps removed from deferred | CL |
