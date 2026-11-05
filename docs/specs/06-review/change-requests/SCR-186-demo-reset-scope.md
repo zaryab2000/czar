@@ -4,7 +4,7 @@
 |---|---|
 | ID | SCR-186 |
 | Filed by | GPT Lane C, 2026-11-05 |
-| Spec and section | `docs/specs/06-review/change-requests/SCR-183-demo-seeding-timing-reset.md` §6 |
+| Spec and section | `docs/specs/06-review/change-requests/SCR-183-demo-seeding-timing-reset.md` §§5–6 |
 | Status | Accepted (architect ruling, 2026-11-05); implementation pending |
 
 ## Problem
@@ -32,16 +32,18 @@ Replace §6's deletion rule with the binding decision below. No new table or fie
 
 - Architect ruling, 2026-11-05, accepted as binding for SOC-06/DEMO-03:
   1. Delete only demo rehearsal state. Remove the controlled seed owners and their users,
-     devices, representatives, objectives, synthetic observations, ratings, rating receipts,
-     effective ratings, subscriptions, inbox and runs. Remove social threads for
+     devices, representatives, social budgets, objectives, synthetic observations, ratings,
+     rating receipts, effective ratings, subscriptions, inbox and runs. Remove social threads for
      `service:eip155:5042002:<A>`, `service:eip155:5042002:<B>`, and
-     `class:eip155:5042002:smart-contract-audit`; incident threads for A or B; and question
+     `class:eip155:5042002:smart-contract-audit`; audit incident threads for A or B; and question
      threads whose card task class is `smart-contract-audit`. Remove those threads' posts,
      evidence links, and related inbox and runs. Remove A/B `smart-contract-audit` incidents
      and lessons. Keep all other services, task classes and social rows, including Bob's and
      Alice's representatives and sharing settings.
   2. Keep the global social consumer cursor, all outbox events and all event deliveries.
-     Never rewind or delete them. New seed events are consumed normally.
+     Never rewind or delete them. Before deleting controlled objectives, set only
+     `outbox_events.objective_id` to `NULL` for events whose objective belongs to a
+     controlled owner. Change no other outbox column. New seed events are consumed normally.
   3. Never delete a non-controlled user's observation, payment ID, settlement transaction,
      receipt, envelope or other chain-derived record. Delete only non-controlled A/B
      `smart-contract-audit` ratings created at or after the rehearsal boundary, with their
@@ -56,14 +58,16 @@ Replace §6's deletion rule with the binding decision below. No new table or fie
   5. Test two reset/seed/check cycles with identical results; preservation of Bob's
      observation, payment ID and settlement; pre-boundary A/B ratings; another service's
      thread/posts; and cursor, outbox events and deliveries. Test guard refusal.
+  6. Amend SCR-183 §5: the demo overlay sets `social.repDailyPostCap = 50`; the
+     production default remains 10. Each controlled agent makes 8–9 posts on seed day,
+     and the higher demo cap allows corroboration replies and another same-day rehearsal.
 
-## Implementation follow-up
+## Foreign-key ruling
 
 - `outbox_events.objective_id` has a foreign key to `objectives.objective_id`
   (`apps/server/migrations/0001-cz12.sql:132`). Controlled seed replay writes outbox events
   with their synthetic objective IDs. Deleting those objectives while keeping the event rows
   byte-for-byte unchanged is impossible under this schema.
-- Recommended follow-up ruling: preserve every outbox event row, ID, payload, transaction ID,
-  cursor and delivery; set only the synthetic events' `objective_id` to `NULL` before deleting
-  their objectives. The column is nullable. This narrows the unchanged-event assertion to
-  event identity and delivery history. Awaiting architect confirmation before this mutation.
+- The architect approved setting only `outbox_events.objective_id` to `NULL` on events
+  referencing controlled owners' objectives before deleting those objectives. Preserve
+  every other outbox field, the consumer cursor and all event deliveries.
