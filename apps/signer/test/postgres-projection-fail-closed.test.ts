@@ -7,7 +7,7 @@
 //   3. through the real signer service, each such failure ends with a refused request, a `backend-error`
 //      audit row and an untouched backend.
 import type { Address, Hash32 } from "@czar/hashing";
-import { paymentRefHash } from "@czar/hashing";
+import { jobKey, paymentRefHash } from "@czar/hashing";
 import type { PaymentRef } from "@czar/schemas";
 import { loadConfig } from "@czar/config";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -272,6 +272,25 @@ const CASES: readonly MethodCase[] = [
     method: "pocketSpendAfterObservation",
     sources: ["database"],
     call: (p) => p.pocketSpendAfterObservation(pocketAddress, NOW * 1000),
+  },
+  {
+    label: "deliverableAccepted",
+    method: "deliverableAccepted",
+    sources: ["database"],
+    call: (p) =>
+      (p.deliverableAccepted as NonNullable<Projection["deliverableAccepted"]>)(planHash, planHash),
+  },
+  {
+    label: "pendingNanoSpent",
+    method: "pendingNanoSpent",
+    sources: ["database"],
+    call: (p) => p.pendingNanoSpent(pocketAddress, PAYEE, NOW),
+  },
+  {
+    label: "pendingCalls",
+    method: "pendingCalls",
+    sources: ["database"],
+    call: (p) => p.pendingCalls(VAULT, 1n, 0, NOW),
   },
   {
     label: "overdueManualReturnFacts",
@@ -664,6 +683,8 @@ describe("layer 3: through the signer, a failed source refuses the request and s
     readonly request: (t: Harness) => readonly [string, never];
     /** State the request needs to reach `method`, applied to the control run and the failing run alike. */
     readonly arrange?: (t: Harness) => void;
+    /** Harness options both runs need (the test-provider keys for `deliverableAccepted`). */
+    readonly options?: { readonly providerKeys?: boolean };
   }
 
   const stalePocketFigure = (t: Harness) => {
@@ -754,6 +775,59 @@ describe("layer 3: through the signer, a failed source refuses the request and s
     { method: "pocket", request: nanoRequest },
     { method: "envelope", request: nanoRequest },
     { method: "nanoSpent", request: nanoRequest },
+    // SCR-180 §3: the audit read behind pending fails → backend-error, nothing signed.
+    { method: "pendingNanoSpent", request: nanoRequest },
+    {
+      method: "pendingCalls",
+      request: () =>
+        [
+          "cz-15",
+          {
+            keyId: "K3",
+            kind: "vault-call",
+            payload: {
+              vault: VAULT,
+              selector: "reserve",
+              args: {
+                envelopeId: "1",
+                stepIndex: "0",
+                payee: PAYEE,
+                stepCap: "500000",
+                proof: [h("1")],
+                unitAmount: "100000",
+                count: "3",
+                validBefore: "1760800600",
+              },
+            },
+          },
+        ] as never,
+    },
+    {
+      method: "deliverableAccepted",
+      options: { providerKeys: true },
+      arrange: (t) => {
+        t.state.job = {
+          evaluator: t.address("K7"),
+          clientVault: VAULT,
+          provider: t.address("K21a"),
+        };
+        t.state.deliverables.add(`${jobKey(ESCROW, 5n).toLowerCase()}:${h("6")}`);
+      },
+      request: () =>
+        [
+          "czar-provider-a",
+          {
+            keyId: "K21a",
+            kind: "provider-call",
+            payload: {
+              escrow: ESCROW,
+              jobId: "5",
+              action: "submit",
+              args: { contentHash: h("6") },
+            },
+          },
+        ] as never,
+    },
     {
       method: "pocketBalances",
       arrange: (t) => {
@@ -901,12 +975,13 @@ describe("layer 3: through the signer, a failed source refuses the request and s
 
   for (const scenario of SCENARIOS) {
     it(`${scenario.method}: signs when healthy, and refuses with nothing signed when its source is down`, async () => {
-      const control = await harness();
+      const control = await harness({ ...scenario.options });
       scenario.arrange?.(control);
       await expect(send(scenario.request)(control)).resolves.toBeDefined();
       expect(control.calls.length).toBe(1);
 
       const failing = await harness({
+        ...scenario.options,
         projection: { [scenario.method]: dead[scenario.method] } as Partial<Projection>,
       });
       scenario.arrange?.(failing);

@@ -50,6 +50,7 @@ import {
   type VaultFunctionName,
 } from "./abi.ts";
 import { PROVIDER_KEY_IDS, type KeyId, type Kind, type ProviderKeyId } from "./kinds.ts";
+import type { SpendRecord } from "./pending.ts";
 import type { OverdueManualReturnFacts, Projection } from "./projection.ts";
 import type { PaymentRef } from "@czar/schemas";
 import { coerceArgs, type ProviderAction, type ShapeError } from "./requests.ts";
@@ -181,6 +182,8 @@ export type Decision =
       /** Wraps the 65-byte signature in the vault envelope (02 §6.3), when the kind has one. */
       readonly wrap?: (signature: Hex) => Hex;
       readonly purpose: PurposeIds;
+      /** SCR-180 §2: what the signed audit row records so the signature counts as pending. */
+      readonly spend?: SpendRecord;
     }
   | {
       readonly type: "transaction";
@@ -288,6 +291,14 @@ async function planLeaf(
   envelopeId: bigint,
   match: { stepIndex: number; payee: Address; kind: number; stepCap?: bigint },
 ) {
+  // SCR-180 §2: calls this signer signed that the indexer has not seen used yet. Read before the indexed
+  // count, so an authorization indexed in between is counted twice (refuses) rather than not at all.
+  const pendingCalls = await ctx.projection.pendingCalls(
+    vault,
+    envelopeId,
+    match.stepIndex,
+    ctx.now(),
+  );
   const envelope = await ctx.projection.envelope(vault, envelopeId);
   if (envelope === undefined || envelope.state !== "Open") deny("envelope-not-open");
   const leaf = (envelope as NonNullable<typeof envelope>).leaves.find(
@@ -299,7 +310,7 @@ async function planLeaf(
   );
   if (leaf === undefined) deny("leaf-not-in-plan");
   const found = leaf as NonNullable<typeof leaf>;
-  if (found.usedCalls >= found.expectedCalls) deny("expected-calls-used");
+  if (found.usedCalls + pendingCalls >= found.expectedCalls) deny("expected-calls-used");
   return found;
 }
 
@@ -485,7 +496,23 @@ async function usdc3009(ctx: PolicyContext, req: Req): Promise<Decision> {
       ].map((type) => ({ type })),
       [KIND_TAGS.USDC_3009, reservationId, index, to, value, 0n, validBefore, nonce, agentSig],
     );
-  return { type: "digest", digest, wrap, purpose: { reservationId: reservationId.toString() } };
+  // SCR-180 §2: one call of the reservation's step, pending until the indexer sees the nonce used.
+  const spend: SpendRecord = {
+    kind: "usdc-3009",
+    vault,
+    nonce,
+    validBefore,
+    envelopeId: r.envelopeId,
+    stepIndex: r.stepIndex,
+    amount: value,
+  };
+  return {
+    type: "digest",
+    digest,
+    wrap,
+    purpose: { reservationId: reservationId.toString() },
+    spend,
+  };
 }
 
 async function gatewayBurn(ctx: PolicyContext, req: Req): Promise<Decision> {
@@ -740,9 +767,15 @@ async function gatewayNano(ctx: PolicyContext, req: Req): Promise<Decision> {
       candidate.kind === 1 && candidate.stepKind === "gateway-nano" && eq(candidate.payee, payTo),
   );
   if (leaf === undefined) deny("payee-not-in-plan");
+  const found = leaf as NonNullable<typeof leaf>;
+  const validBefore = req.validBefore as bigint;
+  const nonce = req.nonce as Hash32;
+  // SCR-180 §2: spent = indexed + pending. Pending is read first, so a transfer indexed between the two reads
+  // is counted twice (refuses) rather than not at all.
+  const pending = await ctx.projection.pendingNanoSpent(pocket, payTo, ctx.now());
   const spent = await ctx.projection.nanoSpent(pocket, payTo);
-  if (spent.step + amount > (leaf as NonNullable<typeof leaf>).stepCap) deny("step-cap");
-  if (spent.pocket + amount > view.funded) deny("pocket-funded");
+  if (spent.step + pending.step + amount > found.stepCap) deny("step-cap");
+  if (spent.pocket + pending.pocket + amount > view.funded) deny("pocket-funded");
   const digest = toTypedDataHash(
     domainSeparator(ctx.network.nanoDomain),
     transferWithAuthorizationStructHash({
@@ -750,11 +783,21 @@ async function gatewayNano(ctx: PolicyContext, req: Req): Promise<Decision> {
       to: payTo,
       value: amount,
       validAfter: 0n,
-      validBefore: req.validBefore as bigint,
-      nonce: req.nonce as Hash32,
+      validBefore,
+      nonce,
     }),
   );
-  return { type: "digest", digest, purpose: { envelopeRef: view.envelopeId.toString() } };
+  const spend: SpendRecord = {
+    kind: "gateway-nano",
+    pocket,
+    payTo,
+    nonce,
+    validBefore,
+    envelopeId: view.envelopeId,
+    stepIndex: found.stepIndex,
+    amount,
+  };
+  return { type: "digest", digest, purpose: { envelopeRef: view.envelopeId.toString() }, spend };
 }
 
 async function pocketDelegate(ctx: PolicyContext, req: Req): Promise<Decision> {

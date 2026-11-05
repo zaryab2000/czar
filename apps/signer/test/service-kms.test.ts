@@ -115,3 +115,5 @@ describe("signer service on the gcp-kms backend", () => {
 await import("./service.test.ts");
 await import("./policy.test.ts");
 await import("./provider-call.test.ts");
+// SCR-180 §5 test 6: the pending-spend cases under Cloud KMS as well as the local keystore.
+await import("./pending-spend.test.ts");
