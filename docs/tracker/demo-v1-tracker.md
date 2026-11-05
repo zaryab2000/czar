@@ -137,7 +137,7 @@ Execute in this order. Tasks in the same phase can run in parallel unless **Depe
 
 | Lane | Tasks | Suggested owner |
 |---|---|---|
-| A: browser task path | UX-01, BR-02, BR-04 (CL); UX-02, UX-03, UX-04, UX-06, BR-06 (COL, Package 2) | CL + COL |
+| A: browser task path | UX-01, UX-02, UX-03, UX-04, UX-06, BR-06 (COL, Package 2); BR-02, BR-04 (CL) | COL + CL |
 | B: audit merchants | MR-01, MR-02, MR-04, MR-05, MR-07, MR-08 (COL, Package 1); BR-01, BR-03, MR-06 (CL); MR-03 (Z) | COL + CL (CL reviews money-path PRs) |
 | C: social and selection seeding | SOC-02, SOC-05, SOC-06, SEL-01, SEL-04, DEMO-01, DEMO-03 | GPT |
 
@@ -170,7 +170,7 @@ OPS-01..05 ──┼─> OPS-06..10 ─> OPS-11 (real payment) ─┐
 
 | ID | Task | Pri | Phase | Depends on | Suggested owner | Owner | Status | PR | Acceptance check | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|
-| UX-01 | **Server route for browser "New task":** create an objective from a signed-in web session, with no paired device. Takes a capability (`code-review`, labelled "Smart contract audit"), a description, and the contract source or address. Applies the same limits, validation and redaction rules SPEC-01 sets. Tests first | P0 | 2 | SPEC-01 | CL (Opus) | | todo | | Route tests pass. An objective created from a web session reaches `planning` and then `awaiting-approval` against a registered audit merchant | Today objectives come only from a paired device (`POST /v1/objectives`, `czar objective`, macOS) |
+| UX-01 | **Server route for browser "New task":** create an objective from a signed-in web session, with no paired device. Takes a capability (`code-review`, labelled "Smart contract audit"), a description, and the contract source or address. Applies the same limits, validation and redaction rules SPEC-01 sets. Tests first | P0 | 2 | SPEC-01 | COL | COL | todo | | Route tests pass. An objective created from a web session reaches `planning` and then `awaiting-approval` against a registered audit merchant | Today objectives come only from a paired device (`POST /v1/objectives`, `czar objective`, macOS) |
 | UX-02 | **"New task" page:** form fields per SPEC-01 (description; paste source or contract address; service type "Smart contract audit"; optional max budget). Linked from Home | P0 | 2 | UX-01 | COL | COL | todo | | Playwright test: submit the form and see the new task with status "Planning" | Keep the copy plain; no jargon |
 | UX-03 | **Task progress in the browser:** a browser-created task shows its state (planning → awaiting approval → paying → delivered) and links to the approval page | P0 | 2 | UX-01 | COL | COL | todo | | Playwright: the state updates without a manual reload (polling is fine) | Check what Home already shows before building |
 | UX-04 | **Result and rating for browser tasks:** the delivered audit shows in the result card (Home and Receipts) with Good and Bad rating | P0 | 2 | UX-01, MR-01 | COL | COL | todo | | Rating a browser-created task writes an effective rating (`/v1/app/ratings`) | `result-card.tsx` and `/v1/app/ratings` already exist; confirm they work for browser tasks |
@@ -244,7 +244,7 @@ OPS-01..05 ──┼─> OPS-06..10 ─> OPS-11 (real payment) ─┐
 |---|---|---|---|---|---|---|---|---|---|---|
 | MR-01 | **Merchant A, "Czar Lab Quick Audit":** x402 route on Arc testnet USDC; takes contract source or address; returns a schema-valid but **shallow** report (generic findings); fast, cheap model | P0 | 2 | SPEC-02 | COL | COL | todo | | Unpaid request → 402 with Arc testnet terms; paid request → schema-valid report in under 30 s | Must be honest-shallow, not broken: the rating judges it |
 | MR-02 | **Merchant B, "Czar Lab Deep Audit":** same interface; a thorough, severity-ranked report with fixes; stronger model | P0 | 2 | SPEC-02 | COL | COL | todo | | Same as MR-01, and the report lists severity, location and fix for each finding | |
-| MR-03 | **Payout addresses:** generate receive-only payout addresses for A and B offline; record only the addresses | P0 | 0 | — | Z | | todo | | Two addresses recorded in the merchant config; no private key on the server | Needs Zaryab's approval (new keys) |
+| MR-03 | **Payout keys:** create signer keys `K10:czar-audit-quick` and `K10:czar-audit-deep` (Cloud KMS on the VM, the local keystore locally); `payTo` comes from the signer (SCR-182 §1) | P0 | 0 | — | Z | | todo | | The signer serves both K10 addresses, and no key material exists outside KMS or the keystore | Needs Zaryab's approval (new keys) |
 | MR-04 | **Register A and B in the Czar market:** catalog entries with the `code-review` capability, probe input, price, and verified service versions | P0 | 2 | MR-01, MR-02, BR-01 | COL | COL | todo | | A planner probe of each returns one valid 402; the ranking decision lists both | |
 | MR-05 | **Prompt safety:** the contract source and any merchant input reach the model only as labelled, JSON-encoded data (`docs/specs/04-components/shared/ai-prompts.md`); output is schema-checked; spend is capped per call | P0 | 2 | MR-01, MR-02 | COL | COL | todo | | A test contract with "ignore previous instructions" in a comment still returns a normal report | Untrusted-text rule in `CLAUDE.md` |
 | MR-06 | **Live on the VM:** merchants container serves A and B behind Caddy; the planner reaches them | P0 | 3 | MR-04, OPS-10 | CL | | todo | | Probe from the VM server succeeds for both | |
@@ -268,8 +268,8 @@ OPS-01..05 ──┼─> OPS-06..10 ─> OPS-11 (real payment) ─┐
 
 | ID | Task | Pri | Phase | Depends on | Suggested owner | Owner | Status | PR | Acceptance check | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|
-| SPEC-01 | **SCR-181: browser "New task."** Covers: session-authenticated objective route (no device token); capability picker; form fields; size limits on pasted source; redaction and privacy rules for server-side intake; rate limits; state shown back to the browser | P0 | 0 | — | CL | | todo | | SCR merged into `build-v1` | Unblocks UX-01..04, BR-02 |
-| SPEC-02 | **SCR-182: audit merchants A and B.** Covers: catalog entries; request shape (POST body with source or address); audit-report result schema; result check; prices; payout key references; task class `smart-contract-audit`; model choice and spend caps; prompt safety | P0 | 0 | — | CL | | todo | | SCR merged | Unblocks MR-*, BR-01, BR-03, BR-04 |
+| SPEC-01 | **SCR-181: browser "New task."** Covers: session-authenticated objective route (no device token); capability picker; form fields; size limits on pasted source; redaction and privacy rules for server-side intake; rate limits; state shown back to the browser | P0 | 0 | — | CL | CL | review | | SCR merged into `build-v1` | Unblocks UX-01..04, BR-02 |
+| SPEC-02 | **SCR-182: audit merchants A and B.** Covers: catalog entries; request shape (POST body with source or address); audit-report result schema; result check; prices; payout key references; task class `smart-contract-audit`; model choice and spend caps; prompt safety | P0 | 0 | — | CL | CL | review | | SCR merged | Unblocks MR-*, BR-01, BR-03, BR-04 |
 | SPEC-03 | **SCR-183: demo seeding, timing and reset.** Covers: a cloud-safe controlled seed (testnet-only guard plus an explicit demo flag); exact seed history for A and B; the "Czar test agent" label; demo timing overlay keys and values; reset scope | P0 | 0 | — | CL | | todo | | SCR merged | Unblocks SOC-02, SOC-06, SEL-01, SEL-04, DEMO-01, DEMO-03, UX-07 |
 | SPEC-04 | Production spec-gap bundle: lab seed name vs secret rule, second payee key reference, per-service lab price, RPC URLs as pointers, credential-list format, proxy body-cap key | P2 | — | — | CL | | todo | | SCR merged | Recorded in PR #227 |
 
@@ -338,3 +338,4 @@ OPS-01..05 ──┼─> OPS-06..10 ─> OPS-11 (real payment) ─┐
 |---|---|---|
 | 2026-11-05 | Tracker created from the Demo v1 plan and decisions DD-01 to DD-06 | CL |
 | 2026-11-05 | Packages 1 and 2 delegated to COL (12 rows); SPEC-01 to SPEC-03 reserved as SCR-181, SCR-182, SCR-183 | CL |
+| 2026-11-05 | SCR-181 and SCR-182 filed; UX-01 delegated to COL so Package 2 needs nothing from CL; MR-03 is now the two K10 signer keys | CL |
