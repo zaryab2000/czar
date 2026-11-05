@@ -18,7 +18,9 @@
     "social:worker": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/social/worker-main.ts",
     "social:fixture-merchants": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/fixture-merchants.ts",
     "social:seed-controlled": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/seed-controlled-representatives.ts",
-    "social:replay-fixtures": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/replay-fixtures.ts"
+    "social:replay-fixtures": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/replay-fixtures.ts",
+    "social:demo-seed": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/demo-seed.ts",
+    "social:demo-check": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/demo-check.ts"
   },
   "dependencies": {
     "@circle-fin/modular-wallets-core": "1.0.16",
