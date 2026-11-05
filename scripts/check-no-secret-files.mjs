@@ -3,15 +3,7 @@
 // `.env.example` is the one allowed env file: it holds placeholder names only.
 import { execFileSync } from "node:child_process";
 import process from "node:process";
-
-const FORBIDDEN = [
-  /\.key$/,
-  /\.key\.json$/,
-  /(^|\/)\.env(?!\.example$)/,
-  /(^|\/)keystore\//,
-  /\.pem$/,
-  /\.p12$/,
-];
+import { FORBIDDEN } from "./secret-file-patterns.mjs";
 
 const tracked = execFileSync("git", ["ls-files", "-z"], { encoding: "utf8" })
   .split("\0")

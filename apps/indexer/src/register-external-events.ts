@@ -39,6 +39,7 @@ import {
   type PocketBalanceRow,
 } from "#src/gateway-balances";
 import { createAlertReporter } from "#src/alerts/reporter";
+import { cloudConfigPointer, guardCloudIndexer, loadCloudIndexerConfig } from "#src/cloud-config";
 import { haltPaths, type PinnedProxy } from "#src/alerts/rules";
 
 type Context = Parameters<Parameters<typeof ponder.on>[1]>[0]["context"];
@@ -62,17 +63,24 @@ function configuredEnvironment(): Record<string, string> {
 }
 
 const localConfigPath = process.env["CZAR_LOCAL_CONFIG"];
-const config = loadConfig({
-  ...(localConfigPath === undefined
-    ? {}
-    : { envFile: parseParameterToml(readFileSync(localConfigPath, "utf8")) }),
-  env: configuredEnvironment(),
-});
-await validateLocalOnlyConfig({
-  config,
-  overlayPath: localConfigPath ?? "",
-  arcRpcUrl: resolveIndexerRpcUrl(process.env["CZAR_INDEXER_RPC_URL"]),
-});
+// SCR-170 §3 (b): taken only when the pointer CZAR_CLOUD_CONFIG is set; unset, the local guard runs
+// exactly as before. The handler logic below is the same either way.
+const cloudConfigPath = cloudConfigPointer(process.env);
+const config =
+  cloudConfigPath === undefined
+    ? loadConfig({
+        ...(localConfigPath === undefined
+          ? {}
+          : { envFile: parseParameterToml(readFileSync(localConfigPath, "utf8")) }),
+        env: configuredEnvironment(),
+      })
+    : loadCloudIndexerConfig(cloudConfigPath, process.env);
+if (cloudConfigPath === undefined)
+  await validateLocalOnlyConfig({
+    config,
+    overlayPath: localConfigPath ?? "",
+    arcRpcUrl: resolveIndexerRpcUrl(process.env["CZAR_INDEXER_RPC_URL"]),
+  });
 const payoutAddresses = config.get("indexer.merchantPayoutAddresses") as string[];
 for (const address of payoutAddresses) {
   if (!/^0x[\da-f]{40}$/.test(address)) {
@@ -83,6 +91,12 @@ const normalizedPayoutAddresses = payoutAddresses.map((address) => address.toLow
 const deploymentPath =
   process.env["CZAR_INDEXER_DEPLOYMENT_PATH"] ??
   new URL("../../../deployments/arc-testnet.json", import.meta.url).pathname;
+if (cloudConfigPath !== undefined)
+  await guardCloudIndexer({
+    config,
+    rpcUrl: resolveIndexerRpcUrl(process.env["CZAR_INDEXER_RPC_URL"]),
+    deploymentPath,
+  });
 const deployment = JSON.parse(readFileSync(deploymentPath, "utf8")) as {
   gatewayWallet?: string;
   usdc?: string;

@@ -9,11 +9,15 @@ import {
   type Hex,
   type TransactionSerializableEIP1559,
 } from "viem";
+import { ARC_TESTNET_CHAIN_ID } from "@czar/config";
 import {
   addressToBytes32,
   autonomyRaiseDigest,
+  briefRequestDigest,
   burnIntentDigest,
+  deliverableUploadDigest,
   derivedNonce,
+  jobKey as jobKeyOf,
   KIND_TAGS,
   POCKET_STEP_INDEX,
   receiptAttestationDigest,
@@ -34,6 +38,7 @@ import {
   GATEWAY_MINTER_ABI,
   GATEWAY_WALLET_ABI,
   JOB_ESCROW_ABI,
+  JOB_ESCROW_PROVIDER_ABI,
   K3_ALLOWED,
   K3_NEVER,
   K3_SPENDING,
@@ -44,10 +49,17 @@ import {
   VAULT_ABI,
   type VaultFunctionName,
 } from "./abi.ts";
-import type { Kind } from "./kinds.ts";
+import { PROVIDER_KEY_IDS, type KeyId, type Kind, type ProviderKeyId } from "./kinds.ts";
+import type { SpendRecord } from "./pending.ts";
 import type { OverdueManualReturnFacts, Projection } from "./projection.ts";
 import type { PaymentRef } from "@czar/schemas";
-import { coerceArgs, type ShapeError } from "./requests.ts";
+import { coerceArgs, type ProviderAction, type ShapeError } from "./requests.ts";
+
+/** The key a request is signed with, as the service resolved it (its id and its backend address). */
+export interface SigningKey {
+  readonly keyId: KeyId;
+  readonly address: Address;
+}
 
 export class Denied extends Error {
   readonly rule: string;
@@ -170,6 +182,8 @@ export type Decision =
       /** Wraps the 65-byte signature in the vault envelope (02 §6.3), when the kind has one. */
       readonly wrap?: (signature: Hex) => Hex;
       readonly purpose: PurposeIds;
+      /** SCR-180 §2: what the signed audit row records so the signature counts as pending. */
+      readonly spend?: SpendRecord;
     }
   | {
       readonly type: "transaction";
@@ -193,6 +207,7 @@ export interface WriteOffAlert {
 
 /** Parsed request fields (requests.ts); each kind uses a subset. */
 type Req = {
+  readonly action?: unknown;
   readonly target?: unknown;
   readonly step?: unknown;
   readonly selector?: unknown;
@@ -276,6 +291,14 @@ async function planLeaf(
   envelopeId: bigint,
   match: { stepIndex: number; payee: Address; kind: number; stepCap?: bigint },
 ) {
+  // SCR-180 §2: calls this signer signed that the indexer has not seen used yet. Read before the indexed
+  // count, so an authorization indexed in between is counted twice (refuses) rather than not at all.
+  const pendingCalls = await ctx.projection.pendingCalls(
+    vault,
+    envelopeId,
+    match.stepIndex,
+    ctx.now(),
+  );
   const envelope = await ctx.projection.envelope(vault, envelopeId);
   if (envelope === undefined || envelope.state !== "Open") deny("envelope-not-open");
   const leaf = (envelope as NonNullable<typeof envelope>).leaves.find(
@@ -287,7 +310,7 @@ async function planLeaf(
   );
   if (leaf === undefined) deny("leaf-not-in-plan");
   const found = leaf as NonNullable<typeof leaf>;
-  if (found.usedCalls >= found.expectedCalls) deny("expected-calls-used");
+  if (found.usedCalls + pendingCalls >= found.expectedCalls) deny("expected-calls-used");
   return found;
 }
 
@@ -473,7 +496,23 @@ async function usdc3009(ctx: PolicyContext, req: Req): Promise<Decision> {
       ].map((type) => ({ type })),
       [KIND_TAGS.USDC_3009, reservationId, index, to, value, 0n, validBefore, nonce, agentSig],
     );
-  return { type: "digest", digest, wrap, purpose: { reservationId: reservationId.toString() } };
+  // SCR-180 §2: one call of the reservation's step, pending until the indexer sees the nonce used.
+  const spend: SpendRecord = {
+    kind: "usdc-3009",
+    vault,
+    nonce,
+    validBefore,
+    envelopeId: r.envelopeId,
+    stepIndex: r.stepIndex,
+    amount: value,
+  };
+  return {
+    type: "digest",
+    digest,
+    wrap,
+    purpose: { reservationId: reservationId.toString() },
+    spend,
+  };
 }
 
 async function gatewayBurn(ctx: PolicyContext, req: Req): Promise<Decision> {
@@ -728,9 +767,15 @@ async function gatewayNano(ctx: PolicyContext, req: Req): Promise<Decision> {
       candidate.kind === 1 && candidate.stepKind === "gateway-nano" && eq(candidate.payee, payTo),
   );
   if (leaf === undefined) deny("payee-not-in-plan");
+  const found = leaf as NonNullable<typeof leaf>;
+  const validBefore = req.validBefore as bigint;
+  const nonce = req.nonce as Hash32;
+  // SCR-180 §2: spent = indexed + pending. Pending is read first, so a transfer indexed between the two reads
+  // is counted twice (refuses) rather than not at all.
+  const pending = await ctx.projection.pendingNanoSpent(pocket, payTo, ctx.now());
   const spent = await ctx.projection.nanoSpent(pocket, payTo);
-  if (spent.step + amount > (leaf as NonNullable<typeof leaf>).stepCap) deny("step-cap");
-  if (spent.pocket + amount > view.funded) deny("pocket-funded");
+  if (spent.step + pending.step + amount > found.stepCap) deny("step-cap");
+  if (spent.pocket + pending.pocket + amount > view.funded) deny("pocket-funded");
   const digest = toTypedDataHash(
     domainSeparator(ctx.network.nanoDomain),
     transferWithAuthorizationStructHash({
@@ -738,11 +783,21 @@ async function gatewayNano(ctx: PolicyContext, req: Req): Promise<Decision> {
       to: payTo,
       value: amount,
       validAfter: 0n,
-      validBefore: req.validBefore as bigint,
-      nonce: req.nonce as Hash32,
+      validBefore,
+      nonce,
     }),
   );
-  return { type: "digest", digest, purpose: { envelopeRef: view.envelopeId.toString() } };
+  const spend: SpendRecord = {
+    kind: "gateway-nano",
+    pocket,
+    payTo,
+    nonce,
+    validBefore,
+    envelopeId: view.envelopeId,
+    stepIndex: found.stepIndex,
+    amount,
+  };
+  return { type: "digest", digest, purpose: { envelopeRef: view.envelopeId.toString() }, spend };
 }
 
 async function pocketDelegate(ctx: PolicyContext, req: Req): Promise<Decision> {
@@ -890,7 +945,81 @@ async function gasRefill(ctx: PolicyContext, req: Req): Promise<Decision> {
   return { type: "transaction", to: target, data: "0x", value, purpose: {} };
 }
 
-const HANDLERS: Readonly<Record<Kind, (ctx: PolicyContext, req: Req) => Promise<Decision>>> = {
+/** The local arc-anvil chain the run-2 and job tests use; `@czar/config` also counts it as a test chain. */
+const LOCAL_ARC_ANVIL_CHAIN_ID = 31337;
+
+/**
+ * Chains `provider-call` signs on (CZ-27 §5.1 K21 row: "testnet only"; CZ-20 §5.11: "never mainnet"). The same
+ * test chains `@czar/config`'s cloud guard names; every other chain id counts as mainnet and is refused.
+ */
+const PROVIDER_TEST_CHAIN_IDS: readonly number[] = [ARC_TESTNET_CHAIN_ID, LOCAL_ARC_ANVIL_CHAIN_ID];
+
+/**
+ * `provider-call` (K21a/K21b, CZ-27 §5.2): `setBudget`/`submit` on the configured escrow and the `BriefRequest`/
+ * `DeliverableUpload` digests, only for the key's own job, only when that job's evaluator is K7, and `submit`
+ * only with a `contentHash` the server's `uploadJobDeliverable` already accepted for that job.
+ */
+async function providerCall(ctx: PolicyContext, req: Req, key?: SigningKey): Promise<Decision> {
+  if (key === undefined || !PROVIDER_KEY_IDS.includes(key.keyId as ProviderKeyId))
+    deny("kind-not-allowed");
+  const signing = key as SigningKey;
+  if (!PROVIDER_TEST_CHAIN_IDS.includes(ctx.network.chainId)) deny("testnet-only");
+  const escrow = req.escrow as Address;
+  const jobId = req.jobId as bigint;
+  const action = req.action as ProviderAction;
+  const args = req.args as Readonly<Record<string, unknown>>;
+  if (!eq(escrow, ctx.network.jobEscrow)) deny("unknown-escrow");
+  const job = await ctx.projection.job(escrow, jobId);
+  if (job === undefined) deny("unknown-job");
+  const j = job as NonNullable<typeof job>;
+  if (!eq(j.evaluator, ctx.keyAddress("K7"))) deny("evaluator-not-k7");
+  if (!eq(j.provider, signing.address)) deny("not-job-provider");
+  const key32 = jobKeyOf(ctx.network.jobEscrow, jobId);
+  const purpose: PurposeIds = { jobKey: key32 };
+  switch (action) {
+    case "setBudget": {
+      const data = encodeFunctionData({
+        abi: JOB_ESCROW_PROVIDER_ABI,
+        functionName: "setBudget",
+        args: [jobId, ctx.network.usdc, args["amount"] as bigint, "0x"],
+      });
+      return { type: "transaction", to: ctx.network.jobEscrow, data, value: 0n, purpose };
+    }
+    case "submit": {
+      const contentHash = args["contentHash"] as Hash32;
+      const accepted = ctx.projection.deliverableAccepted;
+      if (accepted === undefined || !(await accepted(key32, contentHash)))
+        deny("deliverable-not-accepted");
+      const data = encodeFunctionData({
+        abi: JOB_ESCROW_PROVIDER_ABI,
+        functionName: "submit",
+        args: [jobId, contentHash, "0x"],
+      });
+      return { type: "transaction", to: ctx.network.jobEscrow, data, value: 0n, purpose };
+    }
+    case "brief-request": {
+      const digest = briefRequestDigest(ctx.network.chainId, {
+        jobKey: key32,
+        issuedAt: args["issuedAt"] as bigint,
+      });
+      return { type: "digest", digest, purpose };
+    }
+    case "deliverable-upload": {
+      const digest = deliverableUploadDigest(ctx.network.chainId, {
+        jobKey: key32,
+        contentHash: args["contentHash"] as Hash32,
+        issuedAt: args["issuedAt"] as bigint,
+      });
+      return { type: "digest", digest, purpose };
+    }
+    default:
+      return deny("shape");
+  }
+}
+
+const HANDLERS: Readonly<
+  Record<Kind, (ctx: PolicyContext, req: Req, key?: SigningKey) => Promise<Decision>>
+> = {
   "vault-call": vaultCall,
   "usdc-3009": usdc3009,
   "gateway-burn": gatewayBurn,
@@ -906,7 +1035,13 @@ const HANDLERS: Readonly<Record<Kind, (ctx: PolicyContext, req: Req) => Promise<
   "pocket-delegate": pocketDelegate,
   "pocket-return": pocketReturn,
   "pocket-slow-withdraw": pocketSlowWithdraw,
+  "provider-call": providerCall,
 };
 
-export const decide = (ctx: PolicyContext, kind: Kind, req: Req): Promise<Decision> =>
-  HANDLERS[kind](ctx, req);
+/** `key` is the signing key; only kinds whose checks name it (`provider-call`) read it, and refuse without it. */
+export const decide = (
+  ctx: PolicyContext,
+  kind: Kind,
+  req: Req,
+  key?: SigningKey,
+): Promise<Decision> => HANDLERS[kind](ctx, req, key);

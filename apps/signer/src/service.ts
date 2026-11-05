@@ -34,8 +34,30 @@ import {
   type PurposeIds,
   type SignerNetwork,
 } from "./policy.ts";
+import type { SpendRecord } from "./pending.ts";
 import type { Projection } from "./projection.ts";
 import { parseRequest } from "./requests.ts";
+
+/**
+ * SCR-180 §3: the scope whose read pending → check → record sequence must not interleave. `gateway-nano`
+ * spends and checks per pocket; `usdc-3009` records the calls that `vault-call` (`reserve`,
+ * `reserveWithDigests`, `openJob`, `registerPocket`) checks, so both run per vault. Other kinds neither record
+ * nor read pending.
+ */
+function spendScope(kind: Kind, parsed: Record<string, unknown>): string | undefined {
+  switch (kind) {
+    case "gateway-nano":
+      return `pocket:${String(parsed["pocket"]).toLowerCase()}`;
+    case "usdc-3009":
+    case "vault-call":
+      return `vault:${String(parsed["vault"]).toLowerCase()}`;
+    default:
+      return undefined;
+  }
+}
+
+/** The release of a spend lock that was never taken. */
+const NOT_HELD = (): void => undefined;
 
 /** One row per request; ids, digests and outcome only, never payloads or text (CZ-27 §5.2, §8). */
 export interface AuditRow {
@@ -47,6 +69,11 @@ export interface AuditRow {
   readonly purpose: PurposeIds;
   readonly outcome: "signed" | "kms_denied" | "backend-error";
   readonly rule?: string;
+  /**
+   * SCR-180 §2, signed `gateway-nano` and `usdc-3009` rows only: the fields pending spend is computed from
+   * (stored in `object_ids` and `amount_atomic`). Ids and amounts, never payloads.
+   */
+  readonly spend?: SpendRecord;
 }
 
 export interface AuditSink {
@@ -162,6 +189,7 @@ export function createSigner(options: SignerOptions): Signer {
   const keyAddressWindows = new Map<string, number[]>();
   const retiring = new Map<string, number>();
   const nonceLocks = new Map<string, Promise<unknown>>();
+  const spendLocks = new Map<string, Promise<unknown>>();
   const lastNonces = new Map<string, number>();
 
   const keyAddress = (key: "K3" | "K7" | "K8"): Address => {
@@ -249,6 +277,28 @@ export function createSigner(options: SignerOptions): Signer {
     }
   }
 
+  /**
+   * SCR-180 §3: one request per spend scope at a time, from the policy's pending read to the signed audit row.
+   * One signer process runs (SCR-170 §1), so an in-process lock is enough. Resolves once every earlier holder
+   * of the scope has released it, and returns the release. It is taken before, and released after, the per-key
+   * nonce lock; the nonce lock never takes it.
+   */
+  async function acquireSpendLock(scope: string | undefined): Promise<() => void> {
+    if (scope === undefined) return NOT_HELD;
+    const previous = spendLocks.get(scope) ?? Promise.resolve();
+    let release: () => void = NOT_HELD;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const tail = previous.then(() => held);
+    spendLocks.set(scope, tail);
+    await previous;
+    return () => {
+      release();
+      if (spendLocks.get(scope) === tail) spendLocks.delete(scope);
+    };
+  }
+
   /** `nonce = max(pending count from the RPC, last nonce assigned to this key + 1)` (SCR-159 §2). */
   /** Hands back a signed transaction's nonce while it is still the key's last one (SCR-159 §2). */
   function releaseNonce(keyRef: string, signedTransaction: Hex): Promise<void> {
@@ -271,6 +321,7 @@ export function createSigner(options: SignerOptions): Signer {
     let keyRef = String(request.keyId);
     let digest: Hash32 | undefined;
     let purpose: PurposeIds = {};
+    let releaseSpend: () => void = NOT_HELD;
     try {
       if (!KEY_IDS.includes(request.keyId as KeyId)) throw new Denied("unknown-key");
       if (!KINDS.includes(request.kind as Kind)) throw new Denied("unknown-kind");
@@ -297,13 +348,17 @@ export function createSigner(options: SignerOptions): Signer {
       if (from === undefined) throw new Denied("unknown-key");
       if (retiring.has(keyRef)) throw new Denied("pocket-key-retiring");
 
-      const decision = await decide(ctx, kind, parsed);
+      // SCR-180 §3: the pending read inside `decide`, the check and the signed audit row run under one lock,
+      // released in `finally` below whatever the outcome.
+      releaseSpend = await acquireSpendLock(spendScope(kind, parsed));
+      const decision = await decide(ctx, kind, parsed, { keyId, address: from });
       purpose = decision.purpose;
       takeRateSlot(keyId, keyRef);
 
       if (decision.type === "digest") {
         digest = decision.digest;
         const raw = await backend.signDigest(keyRef, decision.digest);
+        // Written before the signature is returned: a signature without its row is never handed out.
         await audit.write({
           at: nowMs(),
           caller,
@@ -312,6 +367,7 @@ export function createSigner(options: SignerOptions): Signer {
           digest,
           purpose,
           outcome: "signed",
+          ...(decision.spend === undefined ? {} : { spend: decision.spend }),
         });
         return { signature: decision.wrap ? decision.wrap(raw) : raw, digest };
       }
@@ -394,6 +450,8 @@ export function createSigner(options: SignerOptions): Signer {
         rule: denied ? error.rule : "backend",
       });
       throw error;
+    } finally {
+      releaseSpend();
     }
   }
 

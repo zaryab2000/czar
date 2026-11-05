@@ -1,0 +1,8 @@
+gcloud beta monitoring channels create --project=p --display-name=czar-alpha-ops-email --type=email --channel-labels=email_address=OPERATOR_EMAIL_ADDRESS --format='value(name)'
+gcloud monitoring uptime create czar-alpha-app-health --project=p --resource-type=uptime-url --resource-labels=host=app.d.example,project_id=p --protocol=https --path=/health --period=1 --regions=usa-oregon,europe,asia-pacific --timeout=10 --validate-ssl=true --status-classes=2xx
+gcloud monitoring uptime create czar-alpha-merchants-health --project=p --resource-type=uptime-url --resource-labels=host=merchants.d.example,project_id=p --protocol=https --path=/health --period=1 --regions=usa-oregon,europe,asia-pacific --timeout=10 --validate-ssl=true --status-classes=2xx
+gcloud logging metrics create czar_signer_gas_low_events --project=p --config-from-file=ops/cloud/monitoring/metrics/signer-gas-low.json
+gcloud monitoring policies create --project=p --policy-from-file=ops/cloud/monitoring/policies/uptime-failing.json --notification-channels=@CHANNEL_NAME@
+gcloud monitoring policies create --project=p --policy-from-file=ops/cloud/monitoring/policies/disk-high.json --notification-channels=@CHANNEL_NAME@
+gcloud monitoring policies create --project=p --policy-from-file=ops/cloud/monitoring/policies/memory-high.json --notification-channels=@CHANNEL_NAME@
+gcloud monitoring policies create --project=p --policy-from-file=ops/cloud/monitoring/policies/signer-gas-low.json --notification-channels=@CHANNEL_NAME@

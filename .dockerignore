@@ -1,0 +1,57 @@
+# Build context exclusions for the cloud images (PM-013, SCR-170 §4).
+#
+# Two jobs:
+#   1. keep the context small, so a build does not ship build output or history
+#   2. keep every secret-shaped file out of the context, so no layer, cache entry
+#      or build argument can ever carry one (CLAUDE.md, D70, D78)
+#
+# Credentials reach a container only as files mounted from deploy.credentialFilesDir
+# at run time. Nothing here is a substitute for that rule; this file is the second
+# fence behind it.
+
+# History and installed dependencies (each image installs its own from the lockfile).
+.git
+.gitmodules
+node_modules
+**/node_modules
+
+# Contract build output.
+contracts/out
+contracts/cache
+contracts/broadcast
+
+# Secret-shaped paths. The first four come from the PM-013 scope; the rest are the
+# remaining patterns scripts/check-no-secret-files.mjs refuses, so the two lists agree.
+deployments/local-keys.json
+env/*.local.*
+.env*
+**/.env*
+*.key
+**/*.key
+*.key.json
+**/*.key.json
+*.pem
+**/*.pem
+*.p12
+**/*.p12
+keystore
+**/keystore
+*.keystore
+**/*.keystore
+
+# Internal notes, generated reports and run logs.
+docs-internal
+reports
+.czar-run-logs
+
+# Local build and test output that must never reach an image.
+**/.next
+**/.ponder
+coverage
+**/coverage
+playwright-report
+**/playwright-report
+test-results
+**/test-results
+**/e2e-results
+**/*.tsbuildinfo

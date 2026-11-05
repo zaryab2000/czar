@@ -19,6 +19,14 @@ const SERVICE_ID = `svc_${"3".repeat(32)}`;
 const ENVELOPE_REF = `eip155:5042002:${VAULT}:1`;
 const AT = new Date();
 
+// A clearing settlement must land after the health fact's `at`, which the database sets to now()
+// when the fact is written (health.ts clearFacts: `h.at < o.settled_at`). AT is read once when this
+// file loads, so deriving the clearing time from it made these tests fail whenever the file took
+// more than its one-second offset to reach them — which happens whenever the machine is busy.
+// Read the clock at the call instead, with a margin no realistic test run can cross.
+const CLEARS_AFTER_MS = 60_000;
+const clearingTime = (offsetMs = 0) => new Date(Date.now() + CLEARS_AFTER_MS + offsetMs);
+
 async function sign(index: number, payTo: `0x${string}` = PAYEE) {
   return insertAtSign(getPool(), {
     userId: TEST_USER_ID,
@@ -151,7 +159,7 @@ describe("persisted supplier health", () => {
     ]);
     const paid = await sign(4);
     await fillResponse(getPool(), paid, AT, 1);
-    await markSettled(getPool(), paid, new Date(AT.getTime() + 1_000));
+    await markSettled(getPool(), paid, clearingTime());
     expect(await openOwnerFacts(getPool(), TEST_USER_ID, "eip155:5042002", SERVICE_ID)).toEqual([]);
     const later = await sign(5);
     await markReleased(getPool(), later, AT);
@@ -184,7 +192,7 @@ describe("persisted supplier health", () => {
     await markSettled(getPool(), failed, AT);
     const success = await sign(2);
     await fillResponse(getPool(), success, AT, 1);
-    await markSettled(getPool(), success, new Date(AT.getTime() + 1_000));
+    await markSettled(getPool(), success, clearingTime());
     await clearFacts(getPool(), success);
     expect(await openOwnerFacts(getPool(), TEST_USER_ID, "eip155:5042002", SERVICE_ID)).toEqual([]);
     const cleared = await getPool().query<{ cleared_by_obs_id: string }>(
@@ -198,7 +206,7 @@ describe("persisted supplier health", () => {
     const failed = await openJob(1);
     await writeFacts(getPool(), [{ fact: "job-failed", obsId: failed }]);
     const firstSuccess = await openJob(2);
-    await markSettled(getPool(), firstSuccess, new Date(AT.getTime() + 1_000));
+    await markSettled(getPool(), firstSuccess, clearingTime());
     await setJobState(getPool(), firstSuccess, "Completed", AT);
     expect(await openOwnerFacts(getPool(), TEST_USER_ID, "eip155:5042002", SERVICE_ID)).toEqual([]);
 
@@ -206,7 +214,7 @@ describe("persisted supplier health", () => {
     await writeFacts(getPool(), [{ fact: "job-failed", obsId: laterFailure }]);
     const secondSuccess = await openJob(4);
     await setJobState(getPool(), secondSuccess, "Completed", AT);
-    await markSettled(getPool(), secondSuccess, new Date(AT.getTime() + 2_000));
+    await markSettled(getPool(), secondSuccess, clearingTime(1_000));
     expect(await openOwnerFacts(getPool(), TEST_USER_ID, "eip155:5042002", SERVICE_ID)).toEqual([]);
   });
 

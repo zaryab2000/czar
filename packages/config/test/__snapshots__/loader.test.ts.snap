@@ -434,6 +434,56 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": "~/Library/Application Support/Czar/czar.sock",
   },
   {
+    "key": "deploy.allowedRpcHosts",
+    "source": "default",
+    "unit": "",
+    "value": [
+      "rpc.testnet.arc.io",
+    ],
+  },
+  {
+    "key": "deploy.backupRetentionDays",
+    "source": "default",
+    "unit": "days",
+    "value": 14,
+  },
+  {
+    "key": "deploy.credentialFilesDir",
+    "source": "default",
+    "unit": "path",
+    "value": "/run/czar/secrets",
+  },
+  {
+    "key": "deploy.deploymentFile",
+    "source": "default",
+    "unit": "path",
+    "value": "deployments/arc-testnet.json",
+  },
+  {
+    "key": "deploy.environment",
+    "source": "default",
+    "unit": "",
+    "value": "local",
+  },
+  {
+    "key": "deploy.indexerUrl",
+    "source": "default",
+    "unit": "url",
+    "value": "http://127.0.0.1:42069",
+  },
+  {
+    "key": "deploy.metadataTokenUrl",
+    "source": "default",
+    "unit": "url",
+    "value": "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token",
+  },
+  {
+    "key": "deploy.objectStorePath",
+    "source": "default",
+    "unit": "path",
+    "value": "/var/lib/czar/objects",
+  },
+  {
     "key": "drives.capabilityTaxonomy",
     "source": "default",
     "unit": "taxonomy",
@@ -869,6 +919,18 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 300,
   },
   {
+    "key": "kms.maxSignaturesPerMin.K21a",
+    "source": "default",
+    "unit": "count",
+    "value": 60,
+  },
+  {
+    "key": "kms.maxSignaturesPerMin.K21b",
+    "source": "default",
+    "unit": "count",
+    "value": 60,
+  },
+  {
     "key": "kms.maxSignaturesPerMin.K3",
     "source": "default",
     "unit": "count",
@@ -1085,6 +1147,78 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": true,
   },
   {
+    "key": "merchants.lab.lab-extract-drift.driftBps",
+    "source": "default",
+    "unit": "bps",
+    "value": 2000,
+  },
+  {
+    "key": "merchants.lab.lab-extract-drift.driftRate",
+    "source": "default",
+    "unit": "fraction of 402s",
+    "value": 0.33,
+  },
+  {
+    "key": "merchants.lab.lab-extract-drift.enabled",
+    "source": "default",
+    "unit": "",
+    "value": true,
+  },
+  {
+    "key": "merchants.lab.lab-extract-schemabreak.enabled",
+    "source": "default",
+    "unit": "",
+    "value": true,
+  },
+  {
+    "key": "merchants.lab.lab-extract-schemabreak.schemaBreakRate",
+    "source": "default",
+    "unit": "fraction of calls",
+    "value": 0.2,
+  },
+  {
+    "key": "merchants.lab.lab-search-flaky.enabled",
+    "source": "default",
+    "unit": "",
+    "value": true,
+  },
+  {
+    "key": "merchants.lab.lab-search-flaky.failRate",
+    "source": "default",
+    "unit": "fraction of calls",
+    "value": 0.3,
+  },
+  {
+    "key": "merchants.lab.lab-search-slow.delayMs",
+    "source": "default",
+    "unit": "ms",
+    "value": 6000,
+  },
+  {
+    "key": "merchants.lab.lab-search-slow.enabled",
+    "source": "default",
+    "unit": "",
+    "value": true,
+  },
+  {
+    "key": "merchants.lab.lab-search-steady.enabled",
+    "source": "default",
+    "unit": "",
+    "value": true,
+  },
+  {
+    "key": "merchants.lab.lab-spot-payee-swap.enabled",
+    "source": "default",
+    "unit": "",
+    "value": true,
+  },
+  {
+    "key": "merchants.lab.lab-spot-payee-swap.payeeSwapEveryDays",
+    "source": "default",
+    "unit": "days",
+    "value": 7,
+  },
+  {
     "key": "merchants.lab.priceAtomic",
     "source": "default",
     "unit": "atomic",
@@ -1127,10 +1261,46 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 600,
   },
   {
+    "key": "merchants.provider.czar-provider-a.minWorkSeconds",
+    "source": "default",
+    "unit": "s",
+    "value": 60,
+  },
+  {
+    "key": "merchants.provider.czar-provider-a.modes",
+    "source": "default",
+    "unit": "",
+    "value": [
+      "placeholder",
+      "honest",
+    ],
+  },
+  {
+    "key": "merchants.provider.czar-provider-b.minWorkSeconds",
+    "source": "default",
+    "unit": "s",
+    "value": 60,
+  },
+  {
+    "key": "merchants.provider.czar-provider-b.modes",
+    "source": "default",
+    "unit": "",
+    "value": [
+      "placeholder",
+      "honest",
+    ],
+  },
+  {
     "key": "merchants.provider.enabled",
     "source": "default",
     "unit": "",
     "value": true,
+  },
+  {
+    "key": "merchants.provider.pollMs",
+    "source": "default",
+    "unit": "ms",
+    "value": 2000,
   },
   {
     "key": "merchants.publicOrigin",
@@ -1163,6 +1333,16 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 30,
   },
   {
+    "key": "merchants.spotPairs",
+    "source": "default",
+    "unit": "",
+    "value": [
+      "BTC-USD",
+      "ETH-USD",
+      "USDC-USD",
+    ],
+  },
+  {
     "key": "merchants.spotPriceAtomic",
     "source": "default",
     "unit": "atomic",
@@ -1175,10 +1355,40 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 300,
   },
   {
+    "key": "merchants.spotSourceUrl",
+    "source": "default",
+    "unit": "url",
+    "value": "https://api.coinbase.com/v2/prices/{pair}/spot",
+  },
+  {
     "key": "merchants.sweepMaxFeeAtomic",
     "source": "default",
     "unit": "atomic",
     "value": 10000,
+  },
+  {
+    "key": "models.anthropic.apiKeyFile",
+    "source": "default",
+    "unit": "path",
+    "value": "anthropic-api-key",
+  },
+  {
+    "key": "models.anthropic.baseUrl",
+    "source": "default",
+    "unit": "url",
+    "value": "https://api.anthropic.com",
+  },
+  {
+    "key": "models.anthropic.maxPromptTokens",
+    "source": "default",
+    "unit": "tokens",
+    "value": 100000,
+  },
+  {
+    "key": "models.anthropic.model",
+    "source": "default",
+    "unit": "",
+    "value": "claude-haiku-5-5",
   },
   {
     "key": "models.drives-helper.maxTokensPerCall",
@@ -1215,6 +1425,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "source": "default",
     "unit": "tokens",
     "value": 500000,
+  },
+  {
+    "key": "models.provider",
+    "source": "default",
+    "unit": "",
+    "value": "none",
   },
   {
     "key": "models.reader.maxTokensPerCall",
@@ -2234,6 +2450,42 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": "~/Library/Application Support/Czar/signer/keystore/",
   },
   {
+    "key": "signer.kms.apiBaseUrl",
+    "source": "default",
+    "unit": "url",
+    "value": "https://cloudkms.googleapis.com",
+  },
+  {
+    "key": "signer.kms.keyRing",
+    "source": "default",
+    "unit": "",
+    "value": "czar-alpha",
+  },
+  {
+    "key": "signer.kms.keyVersions",
+    "source": "default",
+    "unit": "",
+    "value": {},
+  },
+  {
+    "key": "signer.kms.location",
+    "source": "default",
+    "unit": "",
+    "value": "asia-south1",
+  },
+  {
+    "key": "signer.kms.pocketKeyRing",
+    "source": "default",
+    "unit": "",
+    "value": "czar-alpha-pockets",
+  },
+  {
+    "key": "signer.kms.projectId",
+    "source": "default",
+    "unit": "",
+    "value": null,
+  },
+  {
     "key": "signer.local.dbPort",
     "source": "default",
     "unit": "port",
@@ -2274,6 +2526,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "source": "default",
     "unit": "hours",
     "value": 24,
+  },
+  {
+    "key": "signer.socketGroupGid",
+    "source": "default",
+    "unit": "count",
+    "value": null,
   },
   {
     "key": "signer.socketPath",

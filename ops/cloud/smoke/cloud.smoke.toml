@@ -1,0 +1,40 @@
+# Cloud parameters for the PM-014 smoke run only (ops/cloud/compose.smoke.yaml). NO SECRETS: every
+# credential is a file the smoke-prepare job generates at random under deploy.credentialFilesDir.
+#
+# It is a production-shaped file: the cloud guard (validateCloudConfig) runs unchanged against it.
+# deploy.environment is cloud-testnet, the RPC allowlist is the production one, and both origins
+# are https. What differs from env/cloud.toml is where the signer finds Cloud KMS and the metadata
+# server: the loopback fake on 127.0.0.1:8931 (ops/cloud/smoke/kms-fake.ts). The .invalid origins
+# can never resolve (RFC 2606), so nothing the server derives from them can reach a real host.
+
+# ── Deployment ────────────────────────────────────────────────────────────────
+"deploy.environment" = "cloud-testnet"
+"deploy.allowedRpcHosts" = ["rpc.testnet.arc.io"]
+"deploy.credentialFilesDir" = "/run/czar/secrets"
+"deploy.deploymentFile" = "deployments/arc-testnet.json"
+"deploy.objectStorePath" = "/var/lib/czar/objects"
+"deploy.indexerUrl" = "http://127.0.0.1:42069"
+"deploy.metadataTokenUrl" = "http://127.0.0.1:8931/computeMetadata/v1/instance/service-accounts/default/token"
+
+# ── Public origins ────────────────────────────────────────────────────────────
+"app.origin" = "https://app.czar-smoke.invalid"
+"merchants.publicOrigin" = "https://merchants.czar-smoke.invalid"
+"app.arcRpcUrl" = "https://rpc.testnet.arc.io"
+"app.circleClientUrl" = "https://modular-sdk.czar-smoke.invalid"
+"app.circleClientKey" = "smoke-public-client-key"
+"merchants.lab.enabled" = false
+"selection.paymentNetwork" = "eip155:5042002"
+
+# ── Signer: the Cloud KMS fake ────────────────────────────────────────────────
+"signer.backend" = "gcp-kms"
+"signer.kms.apiBaseUrl" = "http://127.0.0.1:8931"
+"signer.kms.projectId" = "czar-smoke"
+"signer.kms.location" = "asia-south1"
+"signer.kms.keyRing" = "czar-alpha"
+"signer.kms.pocketKeyRing" = "czar-alpha-pockets"
+"signer.kms.keyVersions" = { "relayer" = "projects/czar-smoke/locations/asia-south1/keyRings/czar-alpha/cryptoKeys/relayer/cryptoKeyVersions/1" }
+"signer.socketPath" = "/run/czar/signer/signer.sock"
+"signer.socketGroupGid" = 10010
+
+# ── Model provider: off ───────────────────────────────────────────────────────
+"models.provider" = "none"

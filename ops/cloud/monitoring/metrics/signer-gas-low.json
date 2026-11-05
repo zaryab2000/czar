@@ -1,0 +1,19 @@
+{
+  "description": "Count of signer_gas_low log events (a signer gas key found low or not refilled). Labelled with the key id only: K3, K7, K8 or relayer.",
+  "filter": "jsonPayload.event=\"signer_gas_low\"",
+  "metricDescriptor": {
+    "metricKind": "DELTA",
+    "valueType": "INT64",
+    "unit": "1",
+    "labels": [
+      {
+        "key": "key_id",
+        "valueType": "STRING",
+        "description": "The signer key id from the log line's keyId field."
+      }
+    ]
+  },
+  "labelExtractors": {
+    "key_id": "EXTRACT(jsonPayload.keyId)"
+  }
+}

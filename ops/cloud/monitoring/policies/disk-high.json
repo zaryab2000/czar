@@ -1,0 +1,27 @@
+{
+  "displayName": "czar-alpha: disk usage above 80%",
+  "combiner": "OR",
+  "conditions": [
+    {
+      "displayName": "A disk is more than 80% used for 5 minutes",
+      "conditionThreshold": {
+        "filter": "metric.type=\"agent.googleapis.com/disk/percent_used\" AND resource.type=\"gce_instance\" AND metric.label.state=\"used\"",
+        "aggregations": [
+          {
+            "alignmentPeriod": "60s",
+            "perSeriesAligner": "ALIGN_MEAN",
+            "crossSeriesReducer": "REDUCE_NONE"
+          }
+        ],
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 80,
+        "duration": "300s",
+        "trigger": { "count": 1 }
+      }
+    }
+  ],
+  "documentation": {
+    "mimeType": "text/markdown",
+    "content": "A disk on the Czar VM is more than 80% used. Postgres data, Docker images and the json-file container logs share the 30 GB boot disk.\n\n- Check `df -h` and `docker system df` over IAP SSH.\n- Container logs are capped by the Docker daemon settings."
+  }
+}

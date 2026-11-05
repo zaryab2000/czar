@@ -7,9 +7,15 @@ export function createSellerProofSigner(options: {
   readonly signer: Pick<SignerClient, "sign">;
   readonly network: string;
   readonly payTo: string;
+  /**
+   * The service this proof is for; the signer sets `SellerRequest.payTo` to that service's K10 address
+   * (CZ-20 §5.8). Left out, it is `czar-search`, the one service the local stack serves.
+   */
+  readonly service?: string;
   readonly now?: () => number;
 }): SellerProofSigner {
   const now = options.now ?? Date.now;
+  const service = options.service ?? "czar-search";
   return async ({ purpose, method, bodyHash }) => {
     const nonce = toHex(randomBytes(32));
     const expiry = Math.floor(now() / 1000) + 300;
@@ -17,7 +23,7 @@ export function createSellerProofSigner(options: {
       keyId: "K10",
       kind: "merchant-seller-proof",
       payload: {
-        service: "czar-search",
+        service,
         purpose,
         method,
         bodyHash,
