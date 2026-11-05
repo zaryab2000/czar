@@ -20,6 +20,7 @@
     "./results": "./src/results/ack-result.ts"
   },
   "scripts": {
+    "build:npm": "node scripts/build-npm.mjs",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run"
   },
@@ -36,6 +37,7 @@
   "devDependencies": {
     "@czar/server": "workspace:*",
     "@types/pg": "8.23.1",
+    "esbuild": "0.28.2",
     "pg": "8.23.1"
   }
 }

@@ -1,0 +1,13 @@
+{
+  "description": "Czar background app: the local daemon and the czar command.",
+  "type": "module",
+  "bin": {
+    "czar": "./czar.mjs"
+  },
+  "files": ["czar.mjs", "spec/", "README.md", "LICENSE"],
+  "engines": {
+    "node": ">=22.18 <23"
+  },
+  "os": ["darwin", "linux"],
+  "license": "UNLICENSED"
+}
