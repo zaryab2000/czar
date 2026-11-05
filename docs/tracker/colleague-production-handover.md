@@ -76,7 +76,7 @@
 | B5 | **⚠ On-chain registration (read §4.1)** | The contracts were deployed on 30 Oct with **local** keys. New KMS keys have **new addresses**. They must be registered on chain before the cloud signer's signatures are accepted |
 | B6 | **OPS-05** | Testnet USDC from the faucet (20 USDC per address every 2 hours) for: K3, K7 and K8 gas, the Bob and Alice demo wallets, and any operator address. On Arc, USDC is the gas |
 
-### Phase C: deploy (after 8–9 pm IST company rule, if it still applies)
+### Phase C: deploy
 
 | # | Task | What |
 |---|---|---|
