@@ -5,7 +5,7 @@
 | ID | SCR-185 |
 | Filed by | Claude (builder, BR-02), 2026-11-05 |
 | Spec and section | `docs/specs/02-data-and-protocol/schemas/plan.schema.json`: `steps[].inputTemplate.inputKeys[].maxLength` and `approvalReasons`; `docs/specs/02-data-and-protocol/data-and-protocol.md` §4.5 |
-| Status | Open |
+| Status | Applied |
 
 ## Problem
 - **SCR-182 §5 needs a 2000-character input key,** but `plan.schema.json` caps `inputKeys[].maxLength` at 1000. The planner validates every plan it builds, so a `code-review` plan at the SCR-182 default (`planner.inputMaxChars["code-review"]` = 2000) is rejected with "Planner created an invalid Plan". SCR-182 §2.1 of the builder brief lists the schema edits a builder may make; this one is not on it.
@@ -28,4 +28,4 @@
 - BR-02 (blocked until this is accepted and applied), BR-03, BR-04.
 
 ## Decision
-- <filled in by Zaryab>
+- Accepted by the architect on Zaryab's instruction, 2026-11-05, and applied in PR #238.

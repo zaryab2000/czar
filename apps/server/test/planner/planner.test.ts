@@ -812,8 +812,8 @@ describe("planner fallback", () => {
 describe("planner audit path (SCR-182 §5)", () => {
   const CONTRACT = "contract Vault { function pay() external {} }";
   const ADDRESS = `0x${"ab".repeat(20)}`;
-  // plan.schema.json caps inputKeys[].maxLength at 1000 until SCR-185 is applied, so these tests run
-  // at that cap. The default of 2000 is covered by the `it.fails` test below.
+  // These tests pin the cap at 1000 to prove the planner reads planner.inputMaxChars; the default of
+  // 2000 (SCR-185 raised the schema maximum) is covered by the last test below.
   const SCHEMA_CAP = { "planner.inputMaxChars": { default: 1000, "code-review": 1000 } };
   const auditService: PlannerService = {
     ...fakeService(),
@@ -925,10 +925,8 @@ describe("planner audit path (SCR-182 §5)", () => {
     expect(built?.plan.approvalReasons ?? []).not.toContain("contract-sent");
   });
 
-  // Blocked on SCR-185 (plan.schema.json caps inputKeys[].maxLength at 1000). It passes in the body
-  // once the schema allows 2000; `it.fails` then reports a failure, which is the cue to make this a
-  // plain `it` and drop SCHEMA_CAP from the tests above.
-  it.fails("plans a code-review step at the default cap of 2000 characters", async () => {
+  // SCR-185: the schema allows a 2000-character input key, the SCR-182 default for code-review.
+  it("plans a code-review step at the default cap of 2000 characters", async () => {
     const built = await makePlanner({
       capabilities: ["code-review"],
       service: auditService,

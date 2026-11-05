@@ -193,7 +193,7 @@ export interface Plan {
   /**
    * Why this plan needs the owner's explicit approval (SCR-160 §9.3): a paid step uses an unrated supplier, or one with an uncleared health fact for this owner, or the N1 exploration slot; incident-open (SCR-164 §3.13.1): the chosen supplier has an open incident; contract-sent (SCR-182 §5): a code-review step sends the owner's contract to the merchant. Not in planHash. A plan with a non-empty list is never opened under earned allowance.
    *
-   * @maxItems 4
+   * @maxItems 5
    *
    * Items: Reason.
    */

@@ -261,7 +261,7 @@
     },
     "approvalReasons": {
       "type": "array",
-      "maxItems": 4,
+      "maxItems": 5,
       "uniqueItems": true,
       "items": {
         "type": "string",
@@ -463,7 +463,7 @@
                   "maxLength": {
                     "type": "integer",
                     "minimum": 1,
-                    "maximum": 1000,
+                    "maximum": 2000,
                     "description": "Maximum string length (strings only).",
                     "x-privacyClass": "server-only"
                   },
