@@ -146,6 +146,8 @@ async function buildPlan(
   if (healthByStep.some((facts) => facts.length > 0)) approvalReasons.push("health-fact");
   if (collected.hasExploration) approvalReasons.push("exploration-slot");
   if (collected.incidentStepIndices.size > 0) approvalReasons.push("incident-open");
+  if (steps.some((step) => step.contextNotice === "contract-sent"))
+    approvalReasons.push("contract-sent");
   if (steps.length === 0 && droppedSteps.length === 0) return null;
   const hasPocket = steps.some((step) => step.kind === "gateway-nano");
   const pocket = hasPocket ? await ports.pocketKeys.createPocketKey(planId) : undefined;
@@ -168,6 +170,7 @@ async function buildPlan(
   const partial = {
     schemaVersion:
       collected.incidentStepIndices.size > 0 ||
+      approvalReasons.includes("contract-sent") ||
       steps.some((step) => (step.why?.lessons?.length ?? 0) > 0)
         ? ("1.4" as const)
         : ("1.3" as const),
@@ -217,6 +220,30 @@ interface StepCollection {
   readonly jobExpiresMs: number;
 }
 
+/**
+ * The paid-call input each capability's step renders, by capability. A capability with no entry here
+ * has no template: its step is planned only for a job provider, or dropped (`no-template`).
+ */
+const CALL_TEMPLATES: Readonly<Record<string, string>> = {
+  "web-search": "{{subject}} {{topic}} {{field}}",
+  "page-extract": "{{dep.0.url}}",
+  "code-review": "{{contract}}",
+};
+
+/** The capability whose step sends the owner's contract source to the merchant (SCR-182 §5). */
+const CONTRACT_SENT_CAPABILITY = "code-review";
+
+const hasCallTemplate = (capability: string): boolean => Object.hasOwn(CALL_TEMPLATES, capability);
+
+/** `planner.inputMaxChars` for a capability: its own entry, else `default`. */
+function inputMaxCharsFor(capability: string, config: Config): number {
+  const limits = config.get("planner.inputMaxChars") as Record<string, number>;
+  const limit = limits[capability] ?? limits["default"];
+  if (typeof limit !== "number" || !Number.isSafeInteger(limit) || limit < 1)
+    throw new Error(`planner.inputMaxChars has no usable entry for ${capability} or default`);
+  return limit;
+}
+
 async function collectSteps(args: {
   readonly input: PlannerRequest;
   readonly config: Config;
@@ -250,19 +277,14 @@ async function collectSteps(args: {
     const result = await selectCandidate(capability, input, config, ports, network, social);
     rankingIds.push(result.decision.query_id);
     if (!result.selected) {
-      if (capability !== "web-search" && capability !== "page-extract")
-        droppedSteps.push({ capability, reason: "no-template" });
+      if (!hasCallTemplate(capability)) droppedSteps.push({ capability, reason: "no-template" });
       continue;
     }
-    if (
-      !result.selected.jobProvider &&
-      capability !== "web-search" &&
-      capability !== "page-extract"
-    ) {
+    if (!result.selected.jobProvider && !hasCallTemplate(capability)) {
       droppedSteps.push({ capability, reason: "no-template" });
       continue;
     }
-    const prepared = preparePaidStep(result.selected, capability, input.taskSpec);
+    const prepared = preparePaidStep(result.selected, capability, input.taskSpec, config);
     if (!prepared) continue;
     entries.push({
       kind: "paid",
@@ -342,20 +364,16 @@ function preparePaidStep(
   candidate: Candidate,
   capability: string,
   taskSpec: TaskSpec,
+  config: Config,
 ): Omit<PaidStepDraft, "kind" | "candidate" | "capability"> | null {
   const fields = candidate.service.extensions.czar.card["inputFields"];
   const oneStringKey = getSingleStringInput(fields);
-  const template =
-    capability === "web-search"
-      ? "{{subject}} {{topic}} {{field}}"
-      : capability === "page-extract"
-        ? "{{dep.0.url}}"
-        : null;
+  const template = CALL_TEMPLATES[capability];
   const jobCandidate = candidate.jobProvider === true;
   if ((!template || !oneStringKey) && !jobCandidate) return null;
   const callInputs =
     template && oneStringKey
-      ? renderCalls(template, oneStringKey, taskSpec)
+      ? renderCalls(template, oneStringKey, taskSpec, inputMaxCharsFor(capability, config))
       : renderJobCalls(taskSpec);
   return {
     callInputs,
@@ -698,13 +716,23 @@ async function makePaidStep(args: {
       ? {
           inputTemplate: {
             [oneStringKey]: template,
-            inputKeys: [{ name: oneStringKey, type: "string" as const, maxLength: 1000 }],
+            inputKeys: [
+              {
+                name: oneStringKey,
+                type: "string" as const,
+                maxLength: inputMaxCharsFor(capability, config),
+              },
+            ],
           },
         }
       : {}),
     fanOut: subjects.length ? "subjects" : "none",
     callInputs,
-    ...(job ? { contextNotice: "task-description-only" as const } : {}),
+    ...(job
+      ? { contextNotice: "task-description-only" as const }
+      : capability === CONTRACT_SENT_CAPABILITY && template
+        ? { contextNotice: "contract-sent" as const }
+        : {}),
     why: {
       fills: matchedFields(
         input.taskSpec.fields,
@@ -824,14 +852,25 @@ function jobExpiry(service: PlannerService, now: Date, config: Config): number {
   );
 }
 
+/** SCR-182 §5: the contract is the TaskSpec context when present, else the first subject's label. */
+function contractFor(task: TaskSpec): string {
+  return task.context !== undefined && task.context !== ""
+    ? task.context
+    : (task.subjects[0]?.label ?? "");
+}
+
 function renderCalls(
   template: string,
   key: string,
   task: TaskSpec,
+  maxChars: number,
 ): NonNullable<Step["callInputs"]> {
   const subjects = task.subjects.length ? task.subjects : [{ label: "" }];
   return subjects.map((subject, subjectIndex) => {
     const input = template
+      // A replacer function, not a string: a contract may contain `$&` or `$1`, which a replacement
+      // string would expand, so the text sent would no longer be the text the owner approved.
+      .replaceAll("{{contract}}", () => contractFor(task))
       .replaceAll("{{subject}}", subject.label)
       .replaceAll("{{topic}}", task.topic)
       .replaceAll("{{field}}", task.fields[0] ?? "")
@@ -839,7 +878,7 @@ function renderCalls(
     return {
       callIndex: subjectIndex,
       ...(task.subjects.length ? { subjectIndex } : {}),
-      input: { [key]: input.trim().slice(0, 1000) },
+      input: { [key]: input.trim().slice(0, maxChars) },
     };
   });
 }
