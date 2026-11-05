@@ -77,6 +77,7 @@ function makePlanner(
     readonly health?: PlannerPorts["health"];
     readonly remaining?: string;
     readonly unrated?: boolean;
+    readonly explorationId?: string;
     readonly failedProbeIds?: readonly string[];
     readonly social?: PlannerDependencies["social"];
   } = {},
@@ -124,23 +125,24 @@ function makePlanner(
                 explanation: "ranked",
               }),
             ),
-            unverified: options.unrated
-              ? [
-                  {
-                    service_id: fakeService().serviceId,
-                    version_id: `ver_${"0".repeat(32)}`,
-                    reason: "unrated",
-                    n_eff: 0,
-                  },
-                ]
-              : [],
+            unverified:
+              options.unrated || options.explorationId
+                ? [
+                    {
+                      service_id: options.explorationId ?? fakeService().serviceId,
+                      version_id: `ver_${"0".repeat(32)}`,
+                      reason: "unrated",
+                      n_eff: 0,
+                    },
+                  ]
+                : [],
             missing_dimensions_for_class: [],
             insufficient_evidence: options.unrated ?? false,
-            ...(options.unrated
+            ...(options.unrated || options.explorationId
               ? {
                   exploration_slot: {
-                    service_id: fakeService().serviceId,
-                    reason: "no-ranked-candidate",
+                    service_id: options.explorationId ?? fakeService().serviceId,
+                    reason: options.explorationId ? "explicit-exploration" : "no-ranked-candidate",
                   },
                 }
               : {}),
@@ -448,6 +450,33 @@ describe("planner fallback", () => {
       proposition: "prefer",
       serviceId: preferred,
     });
+  });
+
+  it("does not let a lesson promote a probed unverified exploration supplier", async () => {
+    const explorationId = `svc_${"c".repeat(32)}`;
+    const probes: Array<{ resource: PlannerService["resource"] }> = [];
+    const social: NonNullable<PlannerDependencies["social"]> = {
+      lessonsFor: async () => [
+        {
+          lessonId: "les_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
+          serviceId: explorationId,
+          handle: "Rep-ABCD",
+          proposition: "prefer",
+          taskClass: "data-json.search",
+          strength: 1,
+        },
+      ],
+      openIncidentsFor: async () => [],
+    };
+    const built = await makePlanner({
+      candidateCount: 2,
+      explorationId,
+      social,
+      probeCalls: probes,
+    });
+    expect(probes.map((probe) => probe.resource.url.split("/").at(-1))).toContain(explorationId);
+    expect(built?.plan.steps[0]?.serviceId).toBe(serviceId);
+    expect(built?.plan.steps[0]?.why?.lessons).toBeUndefined();
   });
 
   it("does not promote a preferred supplier outside the top three probes", async () => {

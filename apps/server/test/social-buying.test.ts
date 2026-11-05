@@ -53,6 +53,36 @@ describe("SN-4 routes into buying", () => {
     });
   });
 
+  it("badges every ranked version of a supplier with an unknown-version incident", () => {
+    const secondVersion = `ver_${"b".repeat(32)}`;
+    const rows = [
+      ranked(A, 1, 0.9),
+      { ...ranked(A, 2, 0.85), version_id: secondVersion },
+      ranked(B, 3, 0.8),
+    ];
+    const overlaid = overlayIncidents(rows, [
+      {
+        incidentId: "inc_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
+        serviceId: A,
+        versionId: "ver_unknown",
+        distinctOwners: 3,
+        negativeUnits: 3,
+        openedAt: "2026-11-04T00:00:00.000Z",
+      },
+    ]);
+    expect(overlaid.map((row) => row.service_id)).toEqual([B, A, A]);
+    expect(overlaid.filter((row) => row.service_id === A).map((row) => row.version_id)).toEqual([
+      VERSION,
+      secondVersion,
+    ]);
+    expect(
+      overlaid
+        .filter((row) => row.service_id === A)
+        .every((row) => row.badges.includes("incident-open")),
+    ).toBe(true);
+    expect(overlaid.map((row) => row.score)).toEqual([0.8, 0.9, 0.85]);
+  });
+
   it("matches an exploration pick against its stored verified version", () => {
     const incident = {
       incidentId: "inc_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
