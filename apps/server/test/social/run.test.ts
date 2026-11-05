@@ -180,6 +180,27 @@ describe("representative run", () => {
     expect((await runSocialInbox(pool(), loadConfig(), context.random, now))?.stopReason).toBe(
       "done",
     );
+    const original = await pool().query<{ post_id: string }>(
+      "SELECT post_id FROM social_posts WHERE kind='experience' AND author_id=$1",
+      [representativeId],
+    );
+    const lessonId = `les_${"C".repeat(26)}`;
+    const lessonOwner = `usr_${"C".repeat(26)}`;
+    await pool().query("INSERT INTO users(user_id) VALUES($1)", [lessonOwner]);
+    await pool().query(
+      `INSERT INTO social_lessons(lesson_id,user_id,network,service_id,version_id,task_class,
+         proposition,strength,source_post_id,source_obs_id,expires_at)
+       VALUES($1,$2,'eip155:5042002',$3,$4,'data-json.search','avoid',0.5,$5,$6,$7)`,
+      [
+        lessonId,
+        lessonOwner,
+        serviceId,
+        versionId,
+        original.rows[0]!.post_id,
+        obsId,
+        new Date("2026-12-05T12:00:00Z"),
+      ],
+    );
     const ratingId = `rtg_${"A".repeat(26)}`;
     await pool().query(
       `INSERT INTO ratings(rating_id,user_id,vault,objective_id,step_index,network,service_id,
@@ -228,6 +249,11 @@ describe("representative run", () => {
       .filter((item) => posts.rows.some((post) => post.post_id === item.postId))
       .map(({ postId, revision }) => ({ postId, revision }));
     expect(visibleRevisions).toEqual([{ postId: posts.rows[1]!.post_id, revision: 2 }]);
+    const lesson = await pool().query<{ state: string }>(
+      "SELECT state FROM social_lessons WHERE lesson_id=$1",
+      [lessonId],
+    );
+    expect(lesson.rows[0]?.state).toBe("superseded");
     const routedEvents = await pool().query(
       `SELECT 1 FROM outbox_events e WHERE e.name='social.post.published'
        AND e.payload->>'postId' IN (SELECT post_id FROM social_posts WHERE kind='experience')`,
