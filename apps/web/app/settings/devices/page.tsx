@@ -132,6 +132,9 @@ function PairingCodePanel({ pairingCode }: { readonly pairingCode: PairingCode }
   );
 }
 
+/** SCR-181 §1: the browser device is listed with this label; it cannot be paired. */
+const WEB_DEVICE_LABEL = "Browser (tasks you start on the web)";
+
 function DeviceRow({
   device,
   onRevoke,
@@ -142,9 +145,11 @@ function DeviceRow({
   const revoked = device.revokedAt !== undefined;
   return (
     <article className="panel">
-      <h3>{device.deviceName}</h3>
+      <h3>{device.platform === "web" ? WEB_DEVICE_LABEL : device.deviceName}</h3>
       <p>{device.platform}</p>
-      <time dateTime={device.createdAt}>Paired {device.createdAt}</time>
+      <time dateTime={device.createdAt}>
+        {device.platform === "web" ? "Added" : "Paired"} {device.createdAt}
+      </time>
       {revoked ? (
         <p>Revoked</p>
       ) : (

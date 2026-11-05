@@ -11,7 +11,7 @@ import {
   SchemaValidationError,
   validateEnvelope,
 } from "@czar/schemas";
-import type { ObjectiveSubmission, ResultAck } from "@czar/schemas";
+import type { AppObjectiveRequest, ObjectiveSubmission, ResultAck } from "@czar/schemas";
 import type { Plan, SubjectsRevision } from "@czar/schemas";
 import type { Pool } from "pg";
 import { appSessionVerifier, authenticateDevice, digest, type Principal } from "#src/http/auth";
@@ -53,6 +53,7 @@ import {
   type AppReadOptions,
 } from "#src/app/reads";
 import { getAppWalletConfigRoute, resolveAppWalletConfig } from "#src/app/wallet-config";
+import { createAppObjective, getAppObjective, listAppObjectives } from "#src/app/objectives";
 import { acknowledgeResult, getResult } from "#src/results/service";
 import { getRatingPromptRoute, listAppResultsRoute, postRatingRoute } from "#src/ratings-routes";
 import { socialRoutes } from "#src/social/routes";
@@ -272,6 +273,24 @@ export function createApp(dependencies: AppDependencies): Hono {
     appSessionVerifier(dependencies.pool, dependencies.config),
     (context, next) => appRateLimit(context, next, dependencies),
     (context) => listAppResultsRoute(context, dependencies),
+  );
+  app.post(
+    "/v1/app/objectives",
+    appSessionVerifier(dependencies.pool, dependencies.config),
+    (context, next) => appRateLimit(context, next, dependencies),
+    (context) => createAppObjectiveRoute(context, dependencies),
+  );
+  app.get(
+    "/v1/app/objectives",
+    appSessionVerifier(dependencies.pool, dependencies.config),
+    (context, next) => appRateLimit(context, next, dependencies),
+    (context) => listAppObjectivesRoute(context, dependencies),
+  );
+  app.get(
+    "/v1/app/objectives/:objectiveId",
+    appSessionVerifier(dependencies.pool, dependencies.config),
+    (context, next) => appRateLimit(context, next, dependencies),
+    (context) => getAppObjectiveRoute(context, dependencies),
   );
   app.get(
     "/v1/me",
@@ -657,6 +676,58 @@ async function modelRoute(context: ServerContext, deps: AppDependencies): Promis
     return problemResponse(context, result.status, result.code, result.status === 503);
   }
   return jsonResponse(context, 200, result.body);
+}
+
+/** Starts a task from the web app (SCR-181 §2); the submission is built server-side. */
+async function createAppObjectiveRoute(
+  context: ServerContext,
+  deps: AppDependencies,
+): Promise<Response> {
+  const key = parseIdempotencyKey(context.req.header("Idempotency-Key"));
+  const raw = await readJson(context, "createAppObjective");
+  const token = /^Bearer (\S+)$/.exec(context.req.header("Authorization") ?? "")?.[1] ?? "";
+  const outcome = await createAppObjective(deps.pool, deps.config, {
+    userId: context.get("appUserId") as string,
+    sessionTokenHash: digest(token),
+    request: raw.value as AppObjectiveRequest,
+    rawBody: raw.bytes,
+    key,
+    now: deps.clock.now(),
+    random: deps.random,
+  });
+  if (outcome.kind === "problem")
+    return problemResponse(context, outcome.status, outcome.code, outcome.code === "rate-limited");
+  assertExchange("createAppObjective", raw.value, 201, outcome.body);
+  if (!outcome.replayed)
+    deps.logger.info("app_objective_received", {
+      objectiveId: outcome.body.objectiveId,
+      removedCount: outcome.removed,
+    });
+  return jsonResponse(context, 201, outcome.body);
+}
+
+async function listAppObjectivesRoute(
+  context: ServerContext,
+  deps: AppDependencies,
+): Promise<Response> {
+  const page = await listAppObjectives(
+    deps.pool,
+    context.get("appUserId") as string,
+    new URL(context.req.url),
+  );
+  assertExchange("listAppObjectives", undefined, 200, page);
+  return jsonResponse(context, 200, page);
+}
+
+async function getAppObjectiveRoute(
+  context: ServerContext,
+  deps: AppDependencies,
+): Promise<Response> {
+  const objectiveId = parseObjectiveId(context.req.param("objectiveId") ?? "");
+  const found = await getAppObjective(deps.pool, context.get("appUserId") as string, objectiveId);
+  if (!found) return problemResponse(context, 404, "validation");
+  assertExchange("getAppObjective", undefined, 200, found);
+  return jsonResponse(context, 200, found);
 }
 
 async function listRoute(context: ServerContext, deps: AppDependencies): Promise<Response> {

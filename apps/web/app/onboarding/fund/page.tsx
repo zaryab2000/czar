@@ -45,9 +45,17 @@ export default function FundOnboardingPage() {
       <button onClick={copyAddress} type="button">
         {copied ? "Address copied" : "Copy vault address"}
       </button>
-      <a href={FAUCET_URL} rel="noreferrer" target="_blank">
-        Open the test network faucet
-      </a>
+      <section aria-label="Get testnet USDC" className="panel page-stack">
+        <h2>Get testnet USDC</h2>
+        <ol>
+          <li>Copy your vault address above.</li>
+          <li>Open the Circle faucet, choose Arc Testnet and paste the address.</li>
+          <li>The faucet sends 20 USDC every 2 hours per address.</li>
+        </ol>
+        <a href={FAUCET_URL} rel="noreferrer" target="_blank">
+          Open the Circle faucet
+        </a>
+      </section>
       {fundMscaFirst && (
         <section className="panel">
           <h2>Network fee reserve</h2>

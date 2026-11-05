@@ -242,6 +242,18 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 1,
   },
   {
+    "key": "app.objectiveMaxSourceChars",
+    "source": "default",
+    "unit": "chars",
+    "value": 2000,
+  },
+  {
+    "key": "app.objectivePollSeconds",
+    "source": "default",
+    "unit": "s",
+    "value": 3,
+  },
+  {
     "key": "app.origin",
     "source": "default",
     "unit": "origin",
@@ -276,6 +288,24 @@ exports[`registry > matches the dump snapshot 1`] = `
     "source": "default",
     "unit": "s",
     "value": 120,
+  },
+  {
+    "key": "app.webObjectiveHourlyBand",
+    "source": "default",
+    "unit": "band",
+    "value": "C",
+  },
+  {
+    "key": "app.webObjectiveMinutesSaved",
+    "source": "default",
+    "unit": "minutes",
+    "value": 60,
+  },
+  {
+    "key": "app.webObjectivesPerUserPerHour",
+    "source": "default",
+    "unit": "count",
+    "value": 10,
   },
   {
     "key": "autonomy.baseAtomic",
