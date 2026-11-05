@@ -639,7 +639,7 @@ FROM steps s;   -- never inputs, call inputs, resource URLs or payees
 - **Planner:**
   - A step whose chosen supplier has an open incident (a `ranked[]` entry with the badge, or an exploration pick checked with `openIncidentsFor`) adds `"incident-open"` to the plan's `approvalReasons`.
   - The existing rule then guarantees earned autonomy never opens it.
-  - Approval screen line: "{n} other owners reported bad outcomes with this supplier recently. Czar still ranks it as the best available. Approve to use it anyway."
+  - Approval screen line (amended by SCR-165 §1): "This supplier has an open incident: several owners recently reported bad outcomes with it. Czar still ranks it as the best available. Approve to use it anyway." No owner count is shown.
 - **An incident never** excludes a supplier and never writes counts, health facts or ratings.
 - **The stored `RankingDecision`** is what the version-drift guard reads (it checks the selected version against the live one). Moving entries keeps each entry's `version_id`, so that guard keeps working; add a test that proves it.
 
@@ -669,7 +669,7 @@ FROM steps s;   -- never inputs, call inputs, resource URLs or payees
   - The chosen entry's `version_id` comes from `ranked[]`, as the drift guard requires.
 - **Explanation:**
   - The step's `why` gains `lessons: [{lessonId, handle, proposition, taskClass}]`.
-  - Approval screen line: "Your representative learned from {handle} that {serviceId} {did / did not} do this kind of task well; it {chose / avoided} it within Czar's ranking margin."
+  - Approval screen line: "Your representative learned from {handle} that {serviceId} {did / did not} do this kind of task well; it {chose / avoided} it within Czar's ranking margin." `{serviceId}` is the lesson's own `why.lessons[].serviceId`, never the step's chosen supplier (amended by SCR-165 §2).
 - **Owner control:** `/social/me` lists active lessons with "Dismiss" (`state = dismissed`).
 
 #### 3.13.3 Service leads
@@ -690,7 +690,7 @@ FROM steps s;   -- never inputs, call inputs, resource URLs or payees
   - a 402 that `readPaymentRequired` cannot parse → `rejected` `probe-failed`
   - a parsed 402 with no offer whose `network` equals `selection.paymentNetwork` → `rejected` `wrong-network`
   - otherwise → `probed-ok`
-  - A duplicate `(network, origin, path_hint)` → `duplicate` (no probe).
+  - A duplicate `(network, origin, path_hint)` resolves to the existing lead: no second row, post or probe (amended by SCR-165 §3). The `duplicate` state value is reserved and never written.
   - Post `system.lead.probed` in the lead's thread.
 - **Tests** inject a `Transport` into `createSafeFetch` (the `transport` dependency that already exists). The running worker always uses the real transport; there is no config switch that bypasses safe-fetch.
 - **Not in this iteration:** turning a `probed-ok` lead into a buyable candidate. Today candidates come only from config `selection.czarRegisteredServices`, and supplier discovery is a separate future feature. Leave a clear seam: `leads.ts` exports `probedLeads(network, capabilityTag)` for discovery to read later.
@@ -895,7 +895,7 @@ FROM steps s;   -- never inputs, call inputs, resource URLs or payees
     - An owner-suggested lead with a valid 402 on the payment network becomes `probed-ok` with a system post.
     - An http origin not in `fetch.localMerchantOrigins`, an origin with a port, a private address or a cross-host redirect is `rejected` `unsafe-origin` (or `400 validation` at the API, for the forms the schema rejects).
     - A wrong-network 402 is `rejected` `wrong-network`; a 200 is `rejected` `not-402`; a DNS failure is `rejected` `probe-failed`.
-    - A repeat of an origin-only lead is `duplicate`.
+    - A repeat of an origin-only lead returns `202` with the existing `leadId` and `postId`, and writes no second lead row, post or probe (amended by SCR-165 §3).
 11. **Consent race.** Turning sharing off after a run loaded its context and before it commits yields `rejected-consent-changed` and no post.
 12. **Lease race.** Two workers claiming the same inbox row produce one post.
 13. **Crash replay.** A fault injected inside the commit transaction after the post insert (a test hook that throws before the run insert) rolls the whole commit back. After the lease expires the item is reclaimed, and the result is one post and one run row. A second variant kills the worker after the commit: the replayed event (test 2) yields no new post.
