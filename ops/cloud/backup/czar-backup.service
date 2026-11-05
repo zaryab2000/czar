@@ -1,0 +1,26 @@
+[Unit]
+Description=Czar: dump the database to Cloud Storage (SCR-170 §5)
+Documentation=https://github.com/zaryab2000/czar/blob/main/ops/cloud/README.md
+# The credential file backup/db-password must exist, and the metadata guard must already be in
+# place: root is one of the two UIDs it lets through, and this unit needs a token as root.
+Requires=czar-secrets.service
+After=czar-secrets.service czar-metadata-guard.service network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# CZAR_BACKUP_BUCKET and the other pointers. Names only: never a password or a token (D70, D78).
+EnvironmentFile=/etc/czar/backup.env
+ExecStart=/opt/czar/ops/backup/pg-backup.sh
+# The dump is staged under /var/lib/czar-backup and removed by the script's EXIT trap.
+StateDirectory=czar-backup
+StateDirectoryMode=0700
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+NoNewPrivileges=yes
+# A dump that has not finished in two hours has failed, not slowed down.
+TimeoutStartSec=7200
+# Do not compete with the database for disk or CPU.
+Nice=10
+IOSchedulingClass=idle
