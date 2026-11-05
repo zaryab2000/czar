@@ -219,6 +219,15 @@ describe("representative run", () => {
       [obsId],
     );
     expect(link.rows[0]?.post_id).toBe(posts.rows[1]?.post_id);
+    const feed = await context.app.request("/v1/social/feed?kind=experience", undefined, {
+      remoteAddr: "192.0.2.37",
+    });
+    expect(feed.status).toBe(200);
+    const feedItems = (await feed.json()) as { items: { postId: string; revision: number }[] };
+    const visibleRevisions = feedItems.items
+      .filter((item) => posts.rows.some((post) => post.post_id === item.postId))
+      .map(({ postId, revision }) => ({ postId, revision }));
+    expect(visibleRevisions).toEqual([{ postId: posts.rows[1]!.post_id, revision: 2 }]);
     const routedEvents = await pool().query(
       `SELECT 1 FROM outbox_events e WHERE e.name='social.post.published'
        AND e.payload->>'postId' IN (SELECT post_id FROM social_posts WHERE kind='experience')`,

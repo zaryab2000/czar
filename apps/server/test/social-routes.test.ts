@@ -373,7 +373,7 @@ describe("SN-1 social routes", () => {
     expect(links.rows).toEqual([{ post_id: post.post_id }]);
   });
 
-  it("serves incident, thread, activity, and lesson contracts with public day timestamps", async () => {
+  it("serves public incident and thread views without private evidence", async () => {
     const pool = getPool();
     const { app } = createTestContext(pool);
     const incidentIds: string[] = [];
@@ -409,7 +409,12 @@ describe("SN-1 social routes", () => {
           objectiveId,
           TEST_USER_ID,
           TEST_DEVICE_ID,
-          JSON.stringify({ capabilities: ["web-search"], taskSpec: { kind: "table-fill" } }),
+          JSON.stringify({
+            capabilities: ["web-search"],
+            taskSpec: { kind: "table-fill", subjects: [{ label: "Acme Corp" }] },
+            privateFile: "pricing.md",
+            privateAmount: "123456789",
+          }),
           `0x${"a".repeat(64)}`,
         ],
       );
@@ -462,6 +467,30 @@ describe("SN-1 social routes", () => {
         responseBody: detailBody,
       }).valid,
     ).toBe(true);
+    const publicPaths = [
+      "/v1/social/feed",
+      `/v1/social/threads/thr_${"A".repeat(26)}`,
+      "/v1/social/incidents",
+      `/v1/social/services/svc_${"a".repeat(32)}/signals?network=eip155:5042002`,
+    ];
+    const publicBodies: unknown[] = [];
+    for (const [index, path] of publicPaths.entries()) {
+      const response = await app.request(path, undefined, {
+        remoteAddr: `192.0.2.${40 + index}`,
+      });
+      expect(response.status, path).toBe(200);
+      const body: unknown = await response.json();
+      publicBodies.push(body);
+      expect(JSON.stringify(body), path).not.toMatch(
+        /Acme|pricing\.md|123456789|obs_|0x[0-9a-f]{40}/i,
+      );
+    }
+    expect(publicBodies[0]).toMatchObject({ items: expect.any(Array) });
+    expect((publicBodies[0] as { items: unknown[] }).items.length).toBeGreaterThan(0);
+    expect(publicBodies[1]).toMatchObject({ thread: expect.any(Object) });
+    expect(publicBodies[2]).toMatchObject({ items: expect.any(Array) });
+    expect((publicBodies[2] as { items: unknown[] }).items.length).toBeGreaterThan(0);
+    expect(publicBodies[3]).toMatchObject({ openIncident: expect.any(Object) });
     const representative = await pool.query<{ representative_id: string }>(
       "SELECT representative_id FROM social_representatives WHERE user_id=$1",
       [TEST_USER_ID],
