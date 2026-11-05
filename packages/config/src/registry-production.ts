@@ -226,4 +226,54 @@ export const PRODUCTION_PARAMETERS = [
     reason: "pairs the cache refreshes",
     source: `${CZ_20}:60`,
   },
+  // Lane E (PM-046): the two CZ-20 §5.11 test-provider instances. Each instance's `modes` is one work mode and
+  // one behaviour mode; only the deterministic `placeholder` work mode ships (OD-41 partial, plan §2.3).
+  {
+    key: "merchants.provider.czar-provider-a.modes",
+    type: "string[]",
+    default: ["placeholder", "honest"],
+    unit: "",
+    reason: "D86: modes, not job types; behaviour honest by default",
+    source: `${CZ_20}:216`,
+    notes:
+      "one work mode (placeholder) and one behaviour mode (honest, junk, silent, early-submit, over-budget, late, no-upload)",
+  },
+  {
+    key: "merchants.provider.czar-provider-b.modes",
+    type: "string[]",
+    default: ["placeholder", "honest"],
+    unit: "",
+    reason: "D86: modes, not job types; behaviour honest by default",
+    source: `${CZ_20}:216`,
+    notes:
+      "one work mode (placeholder) and one behaviour mode (honest, junk, silent, early-submit, over-budget, late, no-upload)",
+  },
+  {
+    key: "merchants.provider.czar-provider-a.minWorkSeconds",
+    type: "integer",
+    default: 60,
+    unit: "s",
+    reason: "refuse jobs it cannot finish before submitBy",
+    source: `${CZ_20}:217`,
+    notes: "per work mode; the placeholder work mode needs no more than the upload and one submit",
+  },
+  {
+    key: "merchants.provider.czar-provider-b.minWorkSeconds",
+    type: "integer",
+    default: 60,
+    unit: "s",
+    reason: "refuse jobs it cannot finish before submitBy",
+    source: `${CZ_20}:217`,
+    notes: "per work mode; the placeholder work mode needs no more than the upload and one submit",
+  },
+  {
+    key: "merchants.provider.pollMs",
+    type: "integer",
+    default: 2000,
+    unit: "ms",
+    reason:
+      "how often an instance reads new JobCreated/JobFunded events and the chain time (step 1, 5)",
+    source: `${CZ_20}:178`,
+    notes: "CZ-20 §5.11 step 1 names the watch, not its cadence; default from the PM-046 task",
+  },
 ] as const satisfies readonly ParameterSpec[];

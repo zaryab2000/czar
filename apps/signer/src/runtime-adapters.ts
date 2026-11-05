@@ -12,12 +12,16 @@ const LOCAL_CALLERS: Readonly<Record<string, readonly KeyId[]>> = {
   "cz-16": ["K7"],
   "cz-17": ["K8"],
   "cz-20": ["K10"],
+  // CZ-20 §5.11 test-provider instances (PM-046): each owns only its own key (CZ-27 §5.1 K21 row).
+  "czar-provider-a": ["K21a"],
+  "czar-provider-b": ["K21b"],
   relayer: ["relayer"],
 };
 
 const ALLOWED_CALLERS: Readonly<Record<string, readonly string[]>> = {
   server: ["cz-15", "cz-16", "cz-17", "cz-24"],
-  merchants: ["cz-20"],
+  // The test provider is part of `apps/merchants` and connects as the merchants service (PM-046).
+  merchants: ["cz-20", "czar-provider-a", "czar-provider-b"],
   "relayer-jobs": ["relayer"],
 };
 
