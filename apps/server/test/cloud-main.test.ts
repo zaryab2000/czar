@@ -8,6 +8,7 @@ import { randomBytes } from "node:crypto";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Client } from "pg";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createLogger } from "@czar/logging";
 import { setupDatabaseConnection } from "#test/db";
@@ -355,10 +356,18 @@ describe("cloud database pool (SCR-170 §4)", () => {
     await writeOwnerOnly(passwordFile, "from-the-file\n");
     const pool = cloudDatabasePool("postgres://czar_api@127.0.0.1:5432/czar", passwordFile);
     cleanups.push(() => pool.end());
-    const options = pool.options as { connectionString?: string; password?: unknown };
-    expect(options.connectionString).toBe("postgres://czar_api@127.0.0.1:5432/czar");
-    expect(typeof options.password).toBe("function");
-    await expect((options.password as () => Promise<string>)()).resolves.toBe("from-the-file");
+    // What node-postgres ends up with, not what the pool was given: a connection string parsed over
+    // the options replaces the password function with null and the login fails with "client
+    // password must be a string".
+    const client = new Client(pool.options) as unknown as {
+      host: string;
+      database: string;
+      user: string;
+      password: unknown;
+    };
+    expect(client).toMatchObject({ host: "127.0.0.1", database: "czar", user: "czar_api" });
+    expect(typeof client.password).toBe("function");
+    await expect((client.password as () => Promise<string>)()).resolves.toBe("from-the-file");
   });
 
   it("refuses a connection string with a password", () => {
