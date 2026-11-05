@@ -57,6 +57,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 15,
   },
   {
+    "key": "acceptance.genericMaxBytes",
+    "source": "default",
+    "unit": "bytes",
+    "value": 1000000,
+  },
+  {
     "key": "acceptance.kmsRetryMax",
     "source": "default",
     "unit": "count",
@@ -2134,6 +2140,99 @@ exports[`registry > matches the dump snapshot 1`] = `
     "source": "default",
     "unit": "s",
     "value": 3600,
+  },
+  {
+    "key": "selection.circleDiscovery.baseUrl",
+    "source": "default",
+    "unit": "url",
+    "value": "https://api.circle.com/v2/x402/discovery/resources",
+  },
+  {
+    "key": "selection.circleDiscovery.cacheSeconds",
+    "source": "default",
+    "unit": "seconds",
+    "value": 3600,
+  },
+  {
+    "key": "selection.circleDiscovery.capabilityMap",
+    "source": "default",
+    "unit": "capability map",
+    "value": {
+      "code-review": {
+        "query": "audit",
+      },
+      "company-lookup": {
+        "category": "DATA_ENRICHMENT",
+      },
+      "data-lookup": {
+        "category": "DATA_ENRICHMENT",
+      },
+      "email-lookup": {
+        "category": "DATA_ENRICHMENT",
+      },
+      "image-generate": {
+        "category": "CREATIVE",
+      },
+      "page-extract": {
+        "category": "WEB_SEARCH_RESEARCH",
+        "query": "extract",
+      },
+      "price-lookup": {
+        "category": "FINANCIAL_ANALYSIS",
+        "query": "price",
+      },
+      "summarize": {
+        "category": "INFERENCE",
+        "query": "summarize",
+      },
+      "transcribe": {
+        "category": "INFERENCE",
+        "query": "transcribe",
+      },
+      "translate": {
+        "category": "INFERENCE",
+        "query": "translate",
+      },
+      "web-search": {
+        "category": "WEB_SEARCH_RESEARCH",
+      },
+    },
+  },
+  {
+    "key": "selection.circleDiscovery.enabled",
+    "source": "default",
+    "unit": "flag",
+    "value": false,
+  },
+  {
+    "key": "selection.circleDiscovery.maxCandidates",
+    "source": "default",
+    "unit": "count per capability",
+    "value": 20,
+  },
+  {
+    "key": "selection.circleDiscovery.maxPages",
+    "source": "default",
+    "unit": "pages",
+    "value": 5,
+  },
+  {
+    "key": "selection.circleDiscovery.maxResponseBytes",
+    "source": "default",
+    "unit": "bytes",
+    "value": 2000000,
+  },
+  {
+    "key": "selection.circleDiscovery.pageLimit",
+    "source": "default",
+    "unit": "items",
+    "value": 200,
+  },
+  {
+    "key": "selection.circleDiscovery.timeoutMs",
+    "source": "default",
+    "unit": "ms",
+    "value": 3000,
   },
   {
     "key": "selection.confidenceZ",
