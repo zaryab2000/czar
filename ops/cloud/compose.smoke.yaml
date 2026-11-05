@@ -2,6 +2,7 @@
 # with no cloud account and no Arc testnet traffic.
 #
 #   scripts/install-arc-foundry.sh        # the checksummed arc-anvil, once
+#   arc-anvil --network arc --chain-id 5042002 --host 127.0.0.1 --port 8545 --mnemonic-random --quiet &
 #   CZAR_IMAGE_TAG=<git-sha> docker compose \
 #     -f ops/cloud/compose.yaml -f ops/cloud/compose.smoke.yaml up --wait
 #   docker run --rm --network host curlimages/curl:8.22.0@sha256:58adaa4e8dca9c988bae2aba4ab3434a0bb2da16bbe3f92dec39ec7785166777 \
@@ -14,9 +15,13 @@
 #
 # What runs: postgres and postgres-init exactly as in production; the server and signer images
 # running their real cloud entries through the smoke wrappers in ops/cloud/smoke/ (they inject a
-# chain client that talks to arc-anvil and nothing else; the cloud guard runs unchanged); the
-# pinned arc-anvil; a loopback Cloud KMS and metadata fake. The indexer, merchants and web are
-# moved to the `full` profile, so `up` leaves them out.
+# chain client that talks to arc-anvil and nothing else; the cloud guard runs unchanged); and a
+# loopback Cloud KMS and metadata fake. The indexer, merchants and web are moved to the `full`
+# profile, so `up` leaves them out.
+#
+# The chain is the pinned arc-anvil you start on the host (the command above), not a container: a
+# macOS binary cannot run in a Linux container, and scripts/arc-foundry.sha256 pins no
+# aarch64-linux archive. The containers reach it at 127.0.0.1:8545 over host networking.
 #
 # What differs from the VM: credentials, the signer socket folder, the object store and the
 # Postgres data live in named volumes that smoke-prepare fills with random values and the VM's
@@ -96,49 +101,6 @@ services:
       smoke-prepare:
         condition: service_completed_successfully
 
-  arc-anvil:
-    # The arc-foundry binary scripts/install-arc-foundry.sh installs and checksums, never upstream
-    # anvil or foundryup. The signer image only supplies a glibc userland and node for the probe.
-    image: czar-signer:${CZAR_IMAGE_TAG:?set CZAR_IMAGE_TAG to the commit build-all.sh tagged}
-    network_mode: host
-    restart: "no"
-    user: "10001:10001"
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    entrypoint: ["/usr/bin/env"]
-    command:
-      - /usr/local/bin/arc-anvil
-      - --network
-      - arc
-      - --chain-id
-      - "5042002"
-      - --host
-      - 127.0.0.1
-      - --port
-      - "8545"
-      - --mnemonic-random
-      - --quiet
-    volumes:
-      - type: bind
-        source: ${CZAR_ARC_ANVIL_BIN:-${HOME}/.local/bin/arc-anvil}
-        target: /usr/local/bin/arc-anvil
-        read_only: true
-    healthcheck:
-      # eth_chainId must be Arc testnet's, 5042002 (0x4cef52).
-      test:
-        - CMD
-        - node
-        - -e
-        - >-
-          fetch("http://127.0.0.1:8545", {method: "POST", headers: {"content-type": "application/json"},
-          body: JSON.stringify({jsonrpc: "2.0", id: 1, method: "eth_chainId", params: []})})
-          .then((r) => r.json()).then((j) => process.exit(j.result === "0x4cef52" ? 0 : 1), () => process.exit(1))
-      interval: 1s
-      timeout: 2s
-      retries: 30
-
   kms-fake:
     image: czar-signer:${CZAR_IMAGE_TAG:?set CZAR_IMAGE_TAG to the commit build-all.sh tagged}
     network_mode: host
@@ -206,8 +168,6 @@ services:
         condition: service_healthy
       postgres-init:
         condition: service_completed_successfully
-      arc-anvil:
-        condition: service_healthy
 
   signer:
     command:
@@ -237,8 +197,6 @@ services:
         condition: service_healthy
       postgres-init:
         condition: service_completed_successfully
-      arc-anvil:
-        condition: service_healthy
       kms-fake:
         condition: service_healthy
       # As in production and ops/local/process-compose.yaml.
