@@ -49,8 +49,8 @@ describe("representative run", () => {
       [objectiveId],
     );
     await pool().query(
-      `INSERT INTO social_inbox(representative_id,event_id,kind,refs)
-       VALUES($1,$2,'need-unmet',$3)`,
+      `INSERT INTO social_inbox(representative_id,event_id,kind,refs,due_at,created_at)
+       VALUES($1,$2,'need-unmet',$3,TIMESTAMPTZ '2026-11-05T11:59:59Z',TIMESTAMPTZ '2026-11-05T11:59:59Z')`,
       [representativeId, event.rows[0]!.event_id, { objectiveId }],
     );
     const modelUsageBefore = await pool().query<{ count: string }>(
@@ -100,8 +100,8 @@ describe("representative run", () => {
       [id],
     );
     const inbox = await pool().query<{ inbox_id: string }>(
-      `INSERT INTO social_inbox(representative_id,event_id,kind,refs)
-       VALUES($1,$2,'need-unmet',$3) RETURNING inbox_id`,
+      `INSERT INTO social_inbox(representative_id,event_id,kind,refs,due_at,created_at)
+       VALUES($1,$2,'need-unmet',$3,TIMESTAMPTZ '2026-11-05T11:59:59Z',TIMESTAMPTZ '2026-11-05T11:59:59Z') RETURNING inbox_id`,
       [representativeId, event.rows[0]!.event_id, { objectiveId: id }],
     );
     const before = await pool().query<{ count: string }>(
@@ -171,8 +171,8 @@ describe("representative run", () => {
       [paidObjectiveId],
     );
     await pool().query(
-      `INSERT INTO social_inbox(representative_id,event_id,kind,refs)
-       VALUES($1,$2,'outcome-ready',$3)`,
+      `INSERT INTO social_inbox(representative_id,event_id,kind,refs,due_at,created_at)
+       VALUES($1,$2,'outcome-ready',$3,TIMESTAMPTZ '2026-11-05T11:59:59Z',TIMESTAMPTZ '2026-11-05T11:59:59Z')`,
       [representativeId, ready.rows[0]!.event_id, { objectiveId: paidObjectiveId }],
     );
     const context = createTestContext(pool());
@@ -214,8 +214,8 @@ describe("representative run", () => {
       [{ ratingId, objectiveId: paidObjectiveId, stepIndex: 0 }],
     );
     await pool().query(
-      `INSERT INTO social_inbox(representative_id,event_id,kind,refs)
-       VALUES($1,$2,'outcome-updated',$3)`,
+      `INSERT INTO social_inbox(representative_id,event_id,kind,refs,due_at,created_at)
+       VALUES($1,$2,'outcome-updated',$3,TIMESTAMPTZ '2026-11-05T11:59:59Z',TIMESTAMPTZ '2026-11-05T11:59:59Z')`,
       [
         representativeId,
         updated.rows[0]!.event_id,
@@ -291,8 +291,8 @@ describe("representative run", () => {
         [paidObjectiveId],
       );
       await pool().query(
-        `INSERT INTO social_inbox(representative_id,event_id,kind,refs)
-         VALUES($1,$2,'outcome-ready',$3)`,
+        `INSERT INTO social_inbox(representative_id,event_id,kind,refs,due_at,created_at)
+         VALUES($1,$2,'outcome-ready',$3,TIMESTAMPTZ '2026-11-05T11:59:59Z',TIMESTAMPTZ '2026-11-05T11:59:59Z')`,
         [representativeId, event.rows[0]!.event_id, { objectiveId: paidObjectiveId }],
       );
       const replay = await runSocialInbox(
@@ -354,8 +354,8 @@ describe("representative run", () => {
       [{ postId: questionId, threadId }],
     );
     await pool().query(
-      `INSERT INTO social_inbox(representative_id,event_id,kind,refs)
-       VALUES($1,$2,'post-routed',$3)`,
+      `INSERT INTO social_inbox(representative_id,event_id,kind,refs,due_at,created_at)
+       VALUES($1,$2,'post-routed',$3,TIMESTAMPTZ '2026-11-05T11:59:59Z',TIMESTAMPTZ '2026-11-05T11:59:59Z')`,
       [
         representativeId,
         event.rows[0]!.event_id,
@@ -388,8 +388,8 @@ describe("representative run", () => {
       [{ postId: ownerPostId, threadId: ownerThreadId }],
     );
     await pool().query(
-      `INSERT INTO social_inbox(representative_id,event_id,kind,refs)
-       VALUES($1,$2,'post-routed',$3)`,
+      `INSERT INTO social_inbox(representative_id,event_id,kind,refs,due_at,created_at)
+       VALUES($1,$2,'post-routed',$3,TIMESTAMPTZ '2026-11-05T11:59:59Z',TIMESTAMPTZ '2026-11-05T11:59:59Z')`,
       [
         otherRep,
         noEvidenceEvent.rows[0]!.event_id,
@@ -432,8 +432,8 @@ describe("representative run", () => {
       [{ postId: corroborateId, threadId: ownerThreadId }],
     );
     await pool().query(
-      `INSERT INTO social_inbox(representative_id,event_id,kind,refs)
-       VALUES($1,$2,'post-routed',$3)`,
+      `INSERT INTO social_inbox(representative_id,event_id,kind,refs,due_at,created_at)
+       VALUES($1,$2,'post-routed',$3,TIMESTAMPTZ '2026-11-05T11:59:59Z',TIMESTAMPTZ '2026-11-05T11:59:59Z')`,
       [
         otherRep,
         corroborateEvent.rows[0]!.event_id,
@@ -512,8 +512,8 @@ describe("representative run", () => {
       [{ postId: questionId, threadId }],
     );
     await pool().query(
-      `INSERT INTO social_inbox(representative_id,event_id,kind,refs)
-       VALUES($1,$2,'post-routed',$3)`,
+      `INSERT INTO social_inbox(representative_id,event_id,kind,refs,due_at,created_at)
+       VALUES($1,$2,'post-routed',$3,TIMESTAMPTZ '2026-11-05T11:59:59Z',TIMESTAMPTZ '2026-11-05T11:59:59Z')`,
       [
         representativeId,
         event.rows[0]!.event_id,
@@ -544,8 +544,8 @@ describe("representative run", () => {
       [crashObjective],
     );
     const inbox = await pool().query<{ inbox_id: string }>(
-      `INSERT INTO social_inbox(representative_id,event_id,kind,refs)
-       VALUES($1,$2,'need-unmet',$3) RETURNING inbox_id`,
+      `INSERT INTO social_inbox(representative_id,event_id,kind,refs,due_at,created_at)
+       VALUES($1,$2,'need-unmet',$3,TIMESTAMPTZ '2026-11-05T11:59:59Z',TIMESTAMPTZ '2026-11-05T11:59:59Z') RETURNING inbox_id`,
       [representativeId, event.rows[0]!.event_id, { objectiveId: crashObjective }],
     );
     const inboxId = inbox.rows[0]!.inbox_id;
@@ -618,8 +618,8 @@ describe("representative run", () => {
       [changedObjective],
     );
     const inbox = await pool().query<{ inbox_id: string }>(
-      `INSERT INTO social_inbox(representative_id,event_id,kind,refs)
-       VALUES($1,$2,'need-unmet',$3) RETURNING inbox_id`,
+      `INSERT INTO social_inbox(representative_id,event_id,kind,refs,due_at,created_at)
+       VALUES($1,$2,'need-unmet',$3,TIMESTAMPTZ '2026-11-05T11:59:59Z',TIMESTAMPTZ '2026-11-05T11:59:59Z') RETURNING inbox_id`,
       [representativeId, event.rows[0]!.event_id, { objectiveId: changedObjective }],
     );
     const context = createTestContext(pool());
@@ -660,8 +660,8 @@ describe("representative run", () => {
       [id],
     );
     await pool().query(
-      `INSERT INTO social_inbox(representative_id,event_id,kind,refs)
-       VALUES($1,$2,'need-unmet',$3)`,
+      `INSERT INTO social_inbox(representative_id,event_id,kind,refs,due_at,created_at)
+       VALUES($1,$2,'need-unmet',$3,TIMESTAMPTZ '2026-11-05T11:59:59Z',TIMESTAMPTZ '2026-11-05T11:59:59Z')`,
       [representativeId, event.rows[0]!.event_id, { objectiveId: id }],
     );
     await pool().query("UPDATE social_representatives SET paused=true WHERE representative_id=$1", [
@@ -713,8 +713,8 @@ describe("representative run", () => {
       [{ postId: source.post_id, threadId: source.thread_id }],
     );
     await pool().query(
-      `INSERT INTO social_inbox(representative_id,event_id,kind,refs)
-       VALUES($1,$2,'post-routed',$3)`,
+      `INSERT INTO social_inbox(representative_id,event_id,kind,refs,due_at,created_at)
+       VALUES($1,$2,'post-routed',$3,TIMESTAMPTZ '2026-11-05T11:59:59Z',TIMESTAMPTZ '2026-11-05T11:59:59Z')`,
       [
         recipientRep,
         event.rows[0]!.event_id,
@@ -765,8 +765,8 @@ describe("representative run", () => {
       [{ postId: post.post_id, threadId: post.thread_id }],
     );
     await pool().query(
-      `INSERT INTO social_inbox(representative_id,event_id,kind,refs)
-       VALUES($1,$2,'post-routed',$3)`,
+      `INSERT INTO social_inbox(representative_id,event_id,kind,refs,due_at,created_at)
+       VALUES($1,$2,'post-routed',$3,TIMESTAMPTZ '2026-11-05T11:59:59Z',TIMESTAMPTZ '2026-11-05T11:59:59Z')`,
       [
         recipientRep,
         event.rows[0]!.event_id,
@@ -826,8 +826,8 @@ describe("representative run", () => {
         [id],
       );
       await pool().query(
-        `INSERT INTO social_inbox(representative_id,event_id,kind,refs)
-         VALUES($1,$2,'need-unmet',$3)`,
+        `INSERT INTO social_inbox(representative_id,event_id,kind,refs,due_at,created_at)
+         VALUES($1,$2,'need-unmet',$3,TIMESTAMPTZ '2026-11-05T11:59:59Z',TIMESTAMPTZ '2026-11-05T11:59:59Z')`,
         [representativeId, event.rows[0]!.event_id, { objectiveId: id }],
       );
     }
@@ -865,8 +865,8 @@ describe("representative run", () => {
       [id],
     );
     const inbox = await pool().query<{ inbox_id: string }>(
-      `INSERT INTO social_inbox(representative_id,event_id,kind,refs)
-       VALUES($1,$2,'need-unmet',$3) RETURNING inbox_id`,
+      `INSERT INTO social_inbox(representative_id,event_id,kind,refs,due_at,created_at)
+       VALUES($1,$2,'need-unmet',$3,TIMESTAMPTZ '2026-11-05T11:59:59Z',TIMESTAMPTZ '2026-11-05T11:59:59Z') RETURNING inbox_id`,
       [representativeId, event.rows[0]!.event_id, { objectiveId: id }],
     );
     await pool().query("UPDATE social_inbox SET state='done' WHERE inbox_id<>$1", [
@@ -922,8 +922,8 @@ describe("representative run", () => {
         [{ postId: post.post_id, threadId: post.thread_id }],
       );
       await pool().query(
-        `INSERT INTO social_inbox(representative_id,event_id,kind,refs)
-         VALUES($1,$2,'post-routed',$3)`,
+        `INSERT INTO social_inbox(representative_id,event_id,kind,refs,due_at,created_at)
+         VALUES($1,$2,'post-routed',$3,TIMESTAMPTZ '2026-11-05T11:59:59Z',TIMESTAMPTZ '2026-11-05T11:59:59Z')`,
         [
           recipientRep,
           event.rows[0]!.event_id,
@@ -985,8 +985,8 @@ describe("representative run", () => {
       [{ postId: crossClassPost, threadId: serviceThread.thread_id }],
     );
     await pool().query(
-      `INSERT INTO social_inbox(representative_id,event_id,kind,refs)
-       VALUES($1,$2,'post-routed',$3)`,
+      `INSERT INTO social_inbox(representative_id,event_id,kind,refs,due_at,created_at)
+       VALUES($1,$2,'post-routed',$3,TIMESTAMPTZ '2026-11-05T11:59:59Z',TIMESTAMPTZ '2026-11-05T11:59:59Z')`,
       [
         representativeId,
         event.rows[0]!.event_id,
