@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://czar.dev/schemas/app-objective-request.schema.json",
+  "title": "AppObjectiveRequest",
+  "description": "Body of POST /v1/app/objectives: a task a signed-in owner starts in the browser (SCR-181 §2). Exactly one of contractSource or contractAddress is present; an empty contractSource counts as absent.",
+  "type": "object",
+  "x-privacyClass": "redacted-to-server",
+  "additionalProperties": false,
+  "required": ["kind", "title", "description"],
+  "properties": {
+    "kind": {
+      "type": "string",
+      "description": "What the task is; one value for Demo v1, extended by SCR.",
+      "x-privacyClass": "server-only",
+      "enum": ["smart-contract-audit"]
+    },
+    "title": {
+      "type": "string",
+      "description": "Short name of the task; becomes taskSpec.topic and the subject label after layer 1.",
+      "x-privacyClass": "redacted-to-server",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "description": {
+      "type": "string",
+      "description": "What the owner wants; becomes the goal after layer 1.",
+      "x-privacyClass": "redacted-to-server",
+      "maxLength": 1000
+    },
+    "contractSource": {
+      "type": "string",
+      "description": "Contract source; becomes taskSpec.context after layer 1. At most app.objectiveMaxSourceChars (2000) characters.",
+      "x-privacyClass": "redacted-to-server",
+      "maxLength": 2000
+    },
+    "contractAddress": {
+      "type": "string",
+      "description": "A verified contract's address, instead of its source.",
+      "x-privacyClass": "redacted-to-server",
+      "pattern": "^0x[0-9a-fA-F]{40}$"
+    },
+    "maxTotal": {
+      "$ref": "common.schema.json#/$defs/Amount6",
+      "description": "Optional budget for the whole task; becomes constraints.maxTotal.",
+      "x-privacyClass": "server-only"
+    }
+  },
+  "oneOf": [{ "required": ["contractSource"] }, { "required": ["contractAddress"] }]
+}

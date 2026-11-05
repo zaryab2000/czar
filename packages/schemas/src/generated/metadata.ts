@@ -2,6 +2,8 @@
 export type SchemaName =
   | "acceptance-report"
   | "activity-event"
+  | "app-objective-request"
+  | "app-objective"
   | "audit-report"
   | "audit-request"
   | "capability-card"
@@ -39,6 +41,8 @@ export type SchemaName =
 export const schemaMetadata = [
   { name: "acceptance-report", typeName: "AcceptanceReport", title: "AcceptanceReport", typeFile: "acceptance-report.d.ts" },
   { name: "activity-event", typeName: "ActivityEvent", title: "ActivityEvent", typeFile: "activity-event.d.ts" },
+  { name: "app-objective-request", typeName: "AppObjectiveRequest", title: "AppObjectiveRequest", typeFile: "app-objective-request.d.ts" },
+  { name: "app-objective", typeName: "AppObjective", title: "AppObjective", typeFile: "app-objective.d.ts" },
   { name: "audit-report", typeName: "AuditReport", title: "AuditReport", typeFile: "audit-report.d.ts" },
   { name: "audit-request", typeName: "AuditRequest", title: "AuditRequest", typeFile: "audit-request.d.ts" },
   { name: "capability-card", typeName: "CapabilityCard", title: "CapabilityCard", typeFile: "capability-card.d.ts" },

@@ -41,6 +41,8 @@
 | `source-scan.schema.json` | §4.26 (D90) |
 | `audit-request.schema.json` | audit merchant request body (SCR-182 §2) |
 | `audit-report.schema.json` | audit merchant report (SCR-182 §3) |
+| `app-objective-request.schema.json` | browser "New task" request body (SCR-181 §2) |
+| `app-objective.schema.json` | one task in the web app's list (SCR-181 §2) |
 | `validate-schemas.mjs` | full Draft 2020-12 check of every schema and of `../examples/` |
 
 ## Checks run
