@@ -1,7 +1,15 @@
 #!/usr/bin/env node
 // `czar` CLI for the local daemon (CZ-02): status, install, update, uninstall, daemon, config dump.
 import { execFile, spawn } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline/promises";
@@ -232,9 +240,30 @@ async function runResult(argv: readonly string[]): Promise<number> {
   }
 }
 
+/**
+ * The package version. The npm bundle sits next to its generated `package.json`; a source checkout
+ * keeps `package.json` one directory above `src/`. Either way it is the first manifest found.
+ */
+function packageVersion(): string {
+  for (const relative of ["./package.json", "../package.json"]) {
+    try {
+      const manifest = JSON.parse(
+        readFileSync(fileURLToPath(new URL(relative, import.meta.url)), "utf8"),
+      ) as { version?: unknown };
+      if (typeof manifest.version === "string") return manifest.version;
+    } catch {
+      // try the next location
+    }
+  }
+  throw new Error("czar version is unavailable");
+}
+
 async function main(argv: readonly string[]): Promise<number> {
   const [command, ...rest] = argv;
   switch (command) {
+    case "--version":
+      process.stdout.write(`${packageVersion()}\n`);
+      return 0;
     case "status": {
       const d = deps();
       const status = await readStatus(serviceManager(d), d.paths.socketPath);
@@ -280,13 +309,27 @@ async function main(argv: readonly string[]): Promise<number> {
       break;
   }
   process.stderr.write(
-    "usage: czar status | install | update | uninstall [--delete-memory] | pair <code> | " +
+    "usage: czar --version | status | install | update | uninstall [--delete-memory] | pair <code> | " +
       "objective <goal> [options] | result <objectiveId> | daemon | config dump\n",
   );
   return 2;
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+/**
+ * True when this file is the script Node was started with. An npm global install runs it through a
+ * symlink in `<prefix>/bin`, and `process.argv[1]` keeps the symlink path, so compare real paths.
+ */
+function isEntryPoint(): boolean {
+  const entry = process.argv[1];
+  if (entry === undefined) return false;
+  try {
+    return realpathSync(entry) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return entry === fileURLToPath(import.meta.url);
+  }
+}
+
+if (isEntryPoint()) {
   main(process.argv.slice(2)).then(
     (code) => process.exit(code),
     (error: unknown) => {
