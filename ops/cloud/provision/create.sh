@@ -123,6 +123,11 @@ readonly SECRETS_UNIT="ops/cloud/systemd/czar-secrets.service"
 readonly SECRETS_MOUNT="ops/cloud/systemd/run-czar-secrets.mount"
 readonly CADDYFILE="ops/cloud/caddy/Caddyfile"
 readonly CADDY_DROPIN="ops/cloud/systemd/caddy.service.d/czar-env.conf"
+readonly BACKUP_SCRIPT="ops/cloud/backup/pg-backup.sh"
+readonly BACKUP_LIB="ops/cloud/backup/lib.sh"
+readonly RESTORE_DRILL="ops/cloud/backup/pg-restore-drill.sh"
+readonly BACKUP_UNIT="ops/cloud/backup/czar-backup.service"
+readonly BACKUP_TIMER="ops/cloud/backup/czar-backup.timer"
 
 # The command list, and a parallel list saying whether a non-zero exit is acceptable. Only the
 # two deletes of the default network's permissive rules are: a fresh project may not have them.
@@ -211,7 +216,7 @@ build_command_list() {
   # Every repository file the image needs is passed as its own metadata attribute, so cloud-init
   # reads them back at boot and the private repository never has to be reachable from the VM.
   # None of them is a credential.
-  add "gcloud compute instances create $INSTANCE_NAME --project=$project --zone=$zone --machine-type=$MACHINE_TYPE --image-family=$IMAGE_FAMILY --image-project=$IMAGE_PROJECT --boot-disk-size=$BOOT_DISK_SIZE --boot-disk-type=$BOOT_DISK_TYPE --boot-disk-device-name=$INSTANCE_NAME --service-account=$service_account --scopes=cloud-platform --tags=$NETWORK_TAG --shielded-secure-boot --shielded-vtpm --shielded-integrity-monitoring --metadata=CZAR_DOMAIN=$domain --metadata-from-file=user-data=$CLOUD_INIT,czar-metadata-guard-sh=$GUARD_SCRIPT,czar-metadata-guard-service=$GUARD_UNIT,czar-fetch-secrets-sh=$SECRETS_SCRIPT,czar-secrets-service=$SECRETS_UNIT,czar-secrets-mount=$SECRETS_MOUNT,czar-secrets-list=$SECRETS_LIST,czar-caddyfile=$CADDYFILE,czar-caddy-dropin=$CADDY_DROPIN"
+  add "gcloud compute instances create $INSTANCE_NAME --project=$project --zone=$zone --machine-type=$MACHINE_TYPE --image-family=$IMAGE_FAMILY --image-project=$IMAGE_PROJECT --boot-disk-size=$BOOT_DISK_SIZE --boot-disk-type=$BOOT_DISK_TYPE --boot-disk-device-name=$INSTANCE_NAME --service-account=$service_account --scopes=cloud-platform --tags=$NETWORK_TAG --shielded-secure-boot --shielded-vtpm --shielded-integrity-monitoring --metadata=CZAR_DOMAIN=$domain,CZAR_BACKUP_BUCKET=$bucket --metadata-from-file=user-data=$CLOUD_INIT,czar-metadata-guard-sh=$GUARD_SCRIPT,czar-metadata-guard-service=$GUARD_UNIT,czar-fetch-secrets-sh=$SECRETS_SCRIPT,czar-secrets-service=$SECRETS_UNIT,czar-secrets-mount=$SECRETS_MOUNT,czar-secrets-list=$SECRETS_LIST,czar-caddyfile=$CADDYFILE,czar-caddy-dropin=$CADDY_DROPIN,czar-backup-sh=$BACKUP_SCRIPT,czar-backup-lib-sh=$BACKUP_LIB,czar-restore-drill-sh=$RESTORE_DRILL,czar-backup-service=$BACKUP_UNIT,czar-backup-timer=$BACKUP_TIMER"
 }
 
 print_command_list() {

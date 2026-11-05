@@ -311,6 +311,7 @@ test("cloud-init pins every third-party package and installs no unpinned one", (
     "docker-compose-plugin",
     "caddy",
     "google-cloud-ops-agent",
+    "postgresql-client-16",
   ];
   for (const name of thirdParty) {
     assert.ok(
@@ -449,4 +450,67 @@ test("both Caddy origins send the security headers the task names", () => {
 
 test("the Caddy admin API is off, so a host-network container cannot reconfigure the proxy", () => {
   assert.match(caddyfile, /^\tadmin off$/m);
+});
+
+// ---- PM-052b: the nightly backup reaches the VM ------------------------------------------------
+
+const BACKUP_FILES = [
+  { attribute: "czar-backup-sh", source: "ops/cloud/backup/pg-backup.sh", target: "/opt/czar/ops/backup/pg-backup.sh" },
+  { attribute: "czar-backup-lib-sh", source: "ops/cloud/backup/lib.sh", target: "/opt/czar/ops/backup/lib.sh" },
+  { attribute: "czar-restore-drill-sh", source: "ops/cloud/backup/pg-restore-drill.sh", target: "/opt/czar/ops/backup/pg-restore-drill.sh" },
+  { attribute: "czar-backup-service", source: "ops/cloud/backup/czar-backup.service", target: "/etc/systemd/system/czar-backup.service" },
+  { attribute: "czar-backup-timer", source: "ops/cloud/backup/czar-backup.timer", target: "/etc/systemd/system/czar-backup.timer" },
+] as const;
+
+test("create.sh passes the backup files and the bucket name to the VM", () => {
+  const run = runCreate(["--project", "p", "--domain", "d.example"]);
+  assert.equal(run.status, 0, run.stderr);
+  const create = run.stdout.split("\n").find((line) => line.includes("compute instances create"));
+  assert.ok(create, "no instances create command");
+  for (const { attribute, source } of BACKUP_FILES)
+    assert.ok(create.includes(`${attribute}=${source}`), `${attribute} is not passed to the VM`);
+  assert.match(create, /--metadata=CZAR_DOMAIN=d\.example,CZAR_BACKUP_BUCKET=czar-alpha-backups-p /);
+});
+
+test("cloud-init fetches each backup file to the path the backup unit runs", () => {
+  for (const { attribute, target } of BACKUP_FILES) {
+    const escaped = target.replace(/[.\\/]/g, "\\$&");
+    assert.match(
+      cloudInit,
+      new RegExp(`attributes/${attribute}",\\s*-o,\\s*${escaped},`),
+      `${attribute} is not fetched to ${target}`,
+    );
+  }
+  // The unit and the scripts agree on where they live: the script finds lib.sh beside itself.
+  const service = cloudFile("backup/czar-backup.service");
+  assert.match(service, /^ExecStart=\/opt\/czar\/ops\/backup\/pg-backup\.sh$/m);
+  assert.match(service, /^EnvironmentFile=\/etc\/czar\/backup\.env$/m);
+  assert.match(cloudInit, /install -d -m 0755 -o root -g root \/opt\/czar\/ops\/backup/);
+  assert.match(
+    cloudInit,
+    /chmod 0755 \/opt\/czar\/ops\/backup\/pg-backup\.sh \/opt\/czar\/ops\/backup\/pg-restore-drill\.sh/,
+  );
+});
+
+test("cloud-init writes only the bucket pointer to backup.env and enables the timer", () => {
+  assert.match(cloudInit, /attributes\/CZAR_BACKUP_BUCKET",\s*-o,\s*\/run\/czar-backup-bucket,/);
+  assert.match(
+    cloudInit,
+    /printf "CZAR_BACKUP_BUCKET=%s\\n" "\$\(cat \/run\/czar-backup-bucket\)" > \/etc\/czar\/backup\.env/,
+  );
+  assert.match(cloudInit, /rm -f \/run\/czar-backup-bucket/);
+  assert.match(cloudInit, /chmod 0644 \/etc\/czar\/backup\.env/);
+  // Enabled for the boot that follows; not started here, because the unit needs the credential
+  // files czar-secrets.service writes once Zaryab has added the Secret Manager versions.
+  assert.match(cloudInit, /^ {2}- systemctl enable czar-backup\.timer$/m);
+  assert.doesNotMatch(cloudInit, /systemctl (enable )?--now czar-backup|systemctl start czar-backup/);
+});
+
+test("cloud-init installs the PostgreSQL 16 client the backup script runs, from PGDG", () => {
+  assert.match(
+    cloudInit,
+    /deb \[arch=amd64 signed-by=\/etc\/apt\/keyrings\/postgresql\.asc\] https:\/\/apt\.postgresql\.org\/pub\/repos\/apt bookworm-pgdg main/,
+  );
+  assert.match(cloudInit, /https:\/\/www\.postgresql\.org\/media\/keys\/ACCC4CF8\.asc/);
+  assert.match(cloudInit, /postgresql-client-16=16\.15-1\.pgdg12\+2/);
 });
