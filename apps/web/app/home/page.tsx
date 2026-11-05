@@ -7,6 +7,7 @@ import { ACCOUNT_REFRESH_EVENT } from "#src/app-shell";
 import { receiptStatusText } from "#src/receipt-status";
 import { ResultCard } from "#src/result-card";
 import { resultsThisWeek, thisWeekHeading } from "#src/result-cards";
+import { taskStateLabel } from "#src/tasks";
 import { useAppData } from "#src/use-app-data";
 import { getStoredPasskey, sendOwnerUserOperation } from "#src/wallet";
 import { formatUsd } from "@czar/web/money-format";
@@ -41,6 +42,7 @@ export default function HomePage() {
       />
       {data.me.mode === "shadow" && <ShadowSummaryCard />}
       <OwnerControls me={data.me} refresh={refresh} />
+      <TasksSection />
       <ThisWeekSection />
       <RepresentativeTile />
       <section className="panel">
@@ -109,6 +111,38 @@ function RepresentativeTile() {
       )}
       {error && <DataError message={error} refresh={refresh} />}
       <a href="/social/me">Manage your representative</a>
+    </section>
+  );
+}
+
+/** SCR-181 §6: browser and device tasks together, each tagged with where it started. */
+function TasksSection() {
+  const load = useCallback(() => appApi.listAppObjectives(), []);
+  const { data, error, loading, refresh } = useAppData(load);
+  return (
+    <section aria-label="Your tasks" className="panel page-stack">
+      <h2>Your tasks</h2>
+      <a className="primary-link" href="/tasks/new">
+        New task
+      </a>
+      {loading && !data && <p role="status">Loading tasks…</p>}
+      {error && <DataError message={error} refresh={refresh} />}
+      {data &&
+        (data.items.length === 0 ? (
+          <p>No tasks yet.</p>
+        ) : (
+          <ul className="rows">
+            {data.items.map((task) => (
+              <li key={task.objectiveId}>
+                <a href={`/tasks/${encodeURIComponent(task.objectiveId)}`}>
+                  {task.title === "" ? "Untitled task" : task.title}
+                </a>
+                <span className="badge">{task.origin === "web" ? "Web" : "Device"}</span>
+                <span>{taskStateLabel(task.state)}</span>
+              </li>
+            ))}
+          </ul>
+        ))}
     </section>
   );
 }

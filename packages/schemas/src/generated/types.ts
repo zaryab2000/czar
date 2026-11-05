@@ -1,5 +1,9 @@
 export type { AcceptanceReport } from "./acceptance-report.d.ts";
 export type { ActivityEvent } from "./activity-event.d.ts";
+export type { AppObjectiveRequest } from "./app-objective-request.d.ts";
+export type { AppObjective } from "./app-objective.d.ts";
+export type { AuditReport } from "./audit-report.d.ts";
+export type { AuditRequest } from "./audit-request.d.ts";
 export type { CapabilityCard } from "./capability-card.d.ts";
 export type { DemandProofLeaf } from "./demand-proof-leaf.d.ts";
 export type { DemandProofLeafV2 } from "./demand-proof-leaf-v2.d.ts";
@@ -79,6 +83,10 @@ export type { SchemaName } from "./metadata.ts";
 export interface SchemaTypes {
   "acceptance-report": import("./acceptance-report.d.ts").AcceptanceReport;
   "activity-event": import("./activity-event.d.ts").ActivityEvent;
+  "app-objective-request": import("./app-objective-request.d.ts").AppObjectiveRequest;
+  "app-objective": import("./app-objective.d.ts").AppObjective;
+  "audit-report": import("./audit-report.d.ts").AuditReport;
+  "audit-request": import("./audit-request.d.ts").AuditRequest;
   "capability-card": import("./capability-card.d.ts").CapabilityCard;
   "demand-proof-leaf": import("./demand-proof-leaf.d.ts").DemandProofLeaf;
   "demand-proof-leaf-v2": import("./demand-proof-leaf-v2.d.ts").DemandProofLeafV2;

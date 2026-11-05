@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://czar.dev/schemas/app-objective.schema.json",
+  "title": "AppObjective",
+  "description": "One of the owner's tasks as the web app lists it, whether started in the browser or on a paired device (SCR-181 §2).",
+  "type": "object",
+  "x-privacyClass": "redacted-to-server",
+  "additionalProperties": false,
+  "required": ["objectiveId", "title", "kind", "state", "createdAt", "updatedAt", "origin"],
+  "properties": {
+    "objectiveId": {
+      "type": "string",
+      "description": "The objective's id.",
+      "x-privacyClass": "server-only",
+      "pattern": "^obj_[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "title": {
+      "type": "string",
+      "description": "The task's taskSpec.topic, after layer 1.",
+      "x-privacyClass": "redacted-to-server",
+      "maxLength": 300
+    },
+    "kind": {
+      "type": "string",
+      "description": "smart-contract-audit for a code-review task; otherwise the task's taskSpec.kind.",
+      "x-privacyClass": "server-only",
+      "maxLength": 64
+    },
+    "state": {
+      "type": "string",
+      "description": "The objective status (RV-027).",
+      "x-privacyClass": "server-only",
+      "enum": [
+        "received",
+        "planning",
+        "no-supplier",
+        "awaiting-approval",
+        "opening",
+        "executing",
+        "replanning",
+        "delivered",
+        "failed",
+        "expired",
+        "dismissed"
+      ]
+    },
+    "planId": {
+      "type": "string",
+      "description": "The objective's plan, once one exists.",
+      "x-privacyClass": "server-only",
+      "pattern": "^pln_[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "createdAt": {
+      "$ref": "common.schema.json#/$defs/Timestamp",
+      "description": "When the objective was received.",
+      "x-privacyClass": "server-only"
+    },
+    "updatedAt": {
+      "$ref": "common.schema.json#/$defs/Timestamp",
+      "description": "When its state last changed.",
+      "x-privacyClass": "server-only"
+    },
+    "origin": {
+      "type": "string",
+      "description": "web for a task started in the browser, device for one from a paired device.",
+      "x-privacyClass": "server-only",
+      "enum": ["web", "device"]
+    }
+  }
+}

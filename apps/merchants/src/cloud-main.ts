@@ -182,6 +182,7 @@ export async function startCloudMerchant(
       host: "127.0.0.1",
       drainTimeoutMs: Number(config.get("merchants.drainTimeoutMs")),
       version: MERCHANT_VERSION,
+      credentialFolder: merchantCredentials,
       ...(options.safeFetch === undefined ? {} : { safeFetch: options.safeFetch }),
       ...(options.fetchFn === undefined ? {} : { fetchFn: options.fetchFn }),
     });

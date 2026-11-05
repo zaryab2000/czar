@@ -29,6 +29,7 @@
     "@czar/config": "workspace:*",
     "@czar/hashing": "workspace:*",
     "@czar/logging": "workspace:*",
+    "@czar/redaction": "workspace:*",
     "@czar/schemas": "workspace:*",
     "@czar/signer": "workspace:*",
     "@czar/vault-client": "workspace:*",
