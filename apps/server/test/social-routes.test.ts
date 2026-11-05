@@ -215,6 +215,81 @@ describe("SN-1 social routes", () => {
     expect(threadsNext.items).toHaveLength(1);
   });
 
+  it("returns the original lead for a repeated origin-only suggestion", async () => {
+    const { app } = createTestContext(getPool());
+    const enabled = await app.request("/v1/social/me", {
+      method: "PUT",
+      headers: { ...auth, "Content-Type": "application/json", "Idempotency-Key": randomUUID() },
+      body: JSON.stringify({ sharing: "structured", consentTextVersion: "2026-11-05" }),
+    });
+    expect(enabled.status).toBe(200);
+    const requestBody = {
+      network: "eip155:5042002",
+      origin: "https://repeat.example",
+      capabilityTag: "web-search",
+    };
+    expect(apiContracts.get("suggestSocialLead")?.request?.(requestBody)).toBe(true);
+    const suggest = () =>
+      app.request("/v1/social/leads", {
+        method: "POST",
+        headers: { ...auth, "Content-Type": "application/json", "Idempotency-Key": randomUUID() },
+        body: JSON.stringify(requestBody),
+      });
+    const first = await suggest();
+    expect(first.status, JSON.stringify(await first.clone().json())).toBe(202);
+    const ids = (await first.json()) as { leadId: string; postId: string };
+    const budgetBefore = await getPool().query<{ posts: number }>(
+      `SELECT b.posts FROM social_budgets b
+       JOIN social_representatives r USING(representative_id)
+       WHERE r.user_id=$1 ORDER BY b.day DESC LIMIT 1`,
+      [TEST_USER_ID],
+    );
+    const repeated = await Promise.all([suggest(), suggest()]);
+    for (const response of repeated) {
+      expect(response.status).toBe(202);
+      const body = await response.json();
+      expect(body).toEqual(ids);
+      expect(
+        validateRecordedExchange("suggestSocialLead", {
+          requestBody,
+          responseStatus: 202,
+          responseBody: body,
+        }).valid,
+      ).toBe(true);
+    }
+    const rows = await getPool().query<{
+      lead_id: string;
+      post_id: string;
+      state: string;
+      attempts: number;
+    }>(
+      `SELECT lead_id,post_id,state,attempts FROM social_leads
+       WHERE network=$1 AND origin=$2 AND path_hint IS NULL`,
+      [requestBody.network, requestBody.origin],
+    );
+    expect(rows.rows).toEqual([
+      { lead_id: ids.leadId, post_id: ids.postId, state: "queued", attempts: 0 },
+    ]);
+    const posts = await getPool().query(
+      "SELECT post_id FROM social_posts WHERE kind='lead' AND card->>'origin'=$1",
+      [requestBody.origin],
+    );
+    expect(posts.rows).toEqual([{ post_id: ids.postId }]);
+    const events = await getPool().query(
+      `SELECT 1 FROM outbox_events WHERE name='social.post.published'
+       AND payload->>'postId'=$1`,
+      [ids.postId],
+    );
+    expect(events.rowCount).toBe(1);
+    const budgetAfter = await getPool().query<{ posts: number }>(
+      `SELECT b.posts FROM social_budgets b
+       JOIN social_representatives r USING(representative_id)
+       WHERE r.user_id=$1 ORDER BY b.day DESC LIMIT 1`,
+      [TEST_USER_ID],
+    );
+    expect(budgetAfter.rows).toEqual(budgetBefore.rows);
+  });
+
   it("tombstones every revision and supersedes lessons from the chain", async () => {
     const pool = getPool();
     const { app } = createTestContext(pool);
