@@ -97,12 +97,14 @@ async function checkAcceptance(
   } else {
     const declaredSchema = await dependencies.ports.outputSchema.forService(input.serviceId);
     const outputSchema = hasOutputSchema(declaredSchema) ? declaredSchema : null;
-    const historyShapeHash = outputSchema
-      ? null
-      : await dependencies.ports.shapeHistory.forService(input.serviceId);
+    const genericDelivery = isGenericProfile(profile);
+    const historyShapeHash =
+      outputSchema || genericDelivery
+        ? null
+        : await dependencies.ports.shapeHistory.forService(input.serviceId);
     const sandbox = await runSandboxedChecks({
       executorSource,
-      input: sandboxInput(input, historyShapeHash, isGenericProfile(profile)),
+      input: sandboxInput(input, historyShapeHash, genericDelivery),
       outputSchema,
       config: dependencies.config,
     });

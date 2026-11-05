@@ -126,6 +126,20 @@ describe("acceptance checker", () => {
     });
   });
 
+  it("does not let prior shape history reject a generic delivery", async () => {
+    const checker = await makeChecker({
+      outputSchema: async () => null,
+      history: async () => `0x${"f".repeat(64)}`,
+    });
+    const result = await checker.check(genericInputFor(checker, 27));
+    expect(result.report.decision).toBe("pass");
+    expect(result.report.checks[1]).toMatchObject({
+      name: "structural",
+      result: "inconclusive",
+      detail: { parseOk: true },
+    });
+  });
+
   it.each([
     { statusCode: 201, mimeType: "text/plain", bodyText: "ok", reason: "http-status" },
     { statusCode: 200, mimeType: "application/xml", bodyText: "<ok/>", reason: "content-type" },
