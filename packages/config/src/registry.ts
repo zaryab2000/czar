@@ -8,6 +8,14 @@ import type { ParameterSpec } from "./types.ts";
 export const PARAMETERS = [
   ...PRODUCTION_PARAMETERS,
   {
+    key: "demo.enabled",
+    type: "boolean",
+    default: false,
+    unit: "",
+    reason: "Demo v1 seeding and reset; never on outside the testnet demo deployment",
+    source: "docs/specs/06-review/change-requests/SCR-183-demo-seeding-timing-reset.md:41",
+  },
+  {
     key: "acceptance.checkRetries",
     type: "integer",
     default: 1,

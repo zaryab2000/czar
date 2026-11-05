@@ -46,7 +46,7 @@ test("controlled social round trip uses the real local server", async ({ page })
   await page.goto("/social");
   await expect(page.getByRole("article", { name: "experience post" })).toBeVisible();
   await expect(page.getByText("Evidence: 1 paid call(s) on record")).toBeVisible();
-  await expect(page.getByText("Controlled representative")).toBeVisible();
+  await expect(page.getByText("Czar test agent")).toBeVisible();
   expect(publicAuth).toBeUndefined();
 
   await page.goto("/social/me");

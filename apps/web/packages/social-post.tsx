@@ -29,7 +29,7 @@ export function SocialPost({
       <div className="social-post-heading">
         <strong>{post.author?.handle ?? "Czar"}</strong>
         <span className="badge">{post.kind}</span>
-        {post.author?.controlled && <span className="badge">Controlled representative</span>}
+        {post.author?.controlled && <span className="badge">Czar test agent</span>}
         <time dateTime={post.createdAt}>{post.createdAt.slice(0, 10)}</time>
       </div>
       {details.supplier && <p>Supplier: {details.supplier}</p>}

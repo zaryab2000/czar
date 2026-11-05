@@ -1,7 +1,30 @@
 import { describe, expect, it } from "vitest";
-import { parameterEnvironment, parseParameterToml } from "@czar/config";
+import { loadConfig, loadConfigFile, parameterEnvironment, parseParameterToml } from "@czar/config";
 
 describe("parameter TOML overlays", () => {
+  it("loads the SCR-183 demo timing values without changing production defaults", async () => {
+    const base = loadConfig();
+    const demo = await loadConfigFile(
+      new URL("../../../env/cloud-demo.example.toml", import.meta.url),
+    );
+    const expected = {
+      "social.incidentEvalMinutes": [60, 1],
+      "selection.snapshotRefreshSeconds": [300, 30],
+      "selection.ratingRefreshDebounceSeconds": [30, 5],
+      "social.housekeepingMinutes": [15, 1],
+      "social.routingCooldownMinutes": [60, 1],
+      "demo.enabled": [false, true],
+    } as const;
+    for (const key of Object.keys(expected) as (keyof typeof expected)[]) {
+      const [production, overlay] = expected[key];
+      expect(base.get(key), key).toBe(production);
+      expect(demo.get(key), key).toBe(overlay);
+    }
+    expect(demo.get("social.consumerPollMs")).toBe(base.get("social.consumerPollMs"));
+    expect(demo.get("social.runnerPollMs")).toBe(base.get("social.runnerPollMs"));
+    expect(demo.get("social.incidentMinOwners")).toBe(base.get("social.incidentMinOwners"));
+    expect(demo.get("social.incidentWindowDays")).toBe(base.get("social.incidentWindowDays"));
+  });
   it("parses dotted parameter keys and JSON-compatible TOML values", () => {
     expect(
       parseParameterToml(

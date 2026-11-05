@@ -434,6 +434,12 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": "~/Library/Application Support/Czar/czar.sock",
   },
   {
+    "key": "demo.enabled",
+    "source": "default",
+    "unit": "",
+    "value": false,
+  },
+  {
     "key": "deploy.allowedRpcHosts",
     "source": "default",
     "unit": "",

@@ -1,0 +1,8 @@
+# Append these values to the VM's cloud.toml for Demo v1 only (SCR-183 §5).
+# This file contains no credentials and does not change production defaults.
+"demo.enabled" = true
+"social.incidentEvalMinutes" = 1
+"selection.snapshotRefreshSeconds" = 30
+"selection.ratingRefreshDebounceSeconds" = 5
+"social.housekeepingMinutes" = 1
+"social.routingCooldownMinutes" = 1
