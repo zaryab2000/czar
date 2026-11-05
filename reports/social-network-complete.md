@@ -14,11 +14,11 @@ No post, reply count, handle, or model-written note is itself a supplier score.
 | Package | Current evidence | Final state |
 |---|---|---|
 | SN-1 foundation | PR #195 merged at `4c9195d`; public and owner routes, migration and role. | Recheck on final merged head. |
-| SN-2 events and worker | Worker, local seed/replay scripts and controlled fixture merchants are on the integration branch through `9938e49`; key-free tests passed. | Final PR/head review, authorized demo and merge pending. |
+| SN-2 events and worker | Worker, local seed/replay scripts and controlled fixture merchants are integrated and validated. | Final PR/head review and merge pending. |
 | SN-3 questions and replies | Implementation and focused tests are on the integration branch. | Final PR/head review and merge pending. |
-| SN-4 buying routes | Incident, lesson and lead changes, plus payer version and unpaid lead rejection regressions, are on the integration branch through `9938e49`. | Final PR/head review and merge pending. |
-| SN-5 web | UI, direct template parity and the real-server case-18 browser test are on the integration branch through `f3c6884`. | Final PR/head review and merge pending. |
-| SN-6 controlled demo and report | Controlled fixture, local seed/replay support and this draft report are on the integration branch. | Authorized local-chain demo, final report and merge pending. |
+| SN-4 buying routes | Incident, lesson and lead changes, plus payer version and unpaid lead rejection regressions, are integrated and validated. | Final PR/head review and merge pending. |
+| SN-5 web | UI, template parity, web build and real-server Chromium case 18 passed. | Final PR/head review and merge pending. |
+| SN-6 controlled demo and report | Controlled local seed/replay, 18 Playwright screenshots, virtual-device pairing, live incident and lesson plans, 100 duplicate replays and this report are integrated. | Final PR-head review and merge pending. |
 
 The combined integration branch is draft PR #208 into `build-v1`; Zaryab has not merged it.
 Record its final reviewed head, merge commit, and review status here before sign-off.
@@ -39,14 +39,31 @@ Run 2 passed 20/20 at both exact SCR-165 base `c8f7af1` (133.22s) and integratio
 `da569bb` (133.65s). The chief brief had identified four base failures from an earlier
 environment; neither run reproduced them here. No regression was observed in this pair.
 
-The controlled local stack has not reached readiness. The installed Process Compose 1.122.0
-rejected the old YAML shape; `b6a0941` fixes it and its dry run validates 11 processes.
-The full stack then exited with unsuccessful Arc Anvil/Postgres process states. Direct
-`arc-anvil --network arc` answered chain ID 5042002 and direct Docker Postgres started,
-but the local deploy exited before writing a manifest. Those services were stopped and no
-seed/replay or screenshots were claimed. The raw process/deploy logs were not read because
-they may contain key material; automatic approval review rejected the proposed log read.
-The fixture-origin lead source also awaits an architect ruling under the brief's §6.
+The authorized local stack is now ready with all 11 Process Compose processes. The first
+attempt failed because Process Compose treated `{{.CZAR_ROOT}}` literally, the local deploy
+needed an external Foundry configuration allowing a read-only signer reference, the server
+needed its local public Circle and Arc URLs, and root-run K10 readiness needed workspace
+links. The fixes are committed through `3f523de`. The architect authorized inspection of
+error lines only through a redaction filter; raw logs were not read. Before the successful
+local deploy retry, `contracts/broadcast/Deploy.s.sol/5042002/run-latest.json` was backed up
+to `/private/tmp/czar-social-broadcast-run-latest-pre-retry.json` and its hash checked.
+After deployment, the local overwrite was restored from that backup; both files matched
+SHA-256 `f42b6462fa42afb51d4b1814a0fc25b66957f09de9b81deb20d2848f4d03e8b7`.
+The controlled seed created three representatives; replay emitted nine outcomes and nine
+ratings. Restarting the worker opened one incident. A controlled lead was added to the
+already-seeded demo database using a temporary task script after the seed code gained the
+same lead insertion. The local merchant's bare `GET /v1/search` returned 400, so the unpaid
+lead probe correctly reached `rejected/not-402`, SCR-164 §3.19's documented fallback.
+The captured demo and its live/fixture limits are recorded below.
+
+SCR-166's binding ruling forbids a representative from inventing a lead origin. In this
+iteration leads come only from the owner's `POST /v1/social/leads` or the controlled-fixture
+seed; a representative run without a vetted origin ends `abstain-no-rule`.
+
+Local demo commits through `00aaa11` add the virtual-device pairing and the two live
+planner-built approval captures. This report records their exact input boundaries. The
+local branch and PR head must be synchronized before final review; the final pushed SHA
+and subsequent merged SHA are not yet known.
 
 ## Key-free evidence already collected
 
@@ -88,6 +105,15 @@ The fixture-origin lead source also awaits an architect ruling under the brief's
 | Same draft head | `pnpm typecheck`, `pnpm lint`, schemas-directory `python3 -I check-schemas.py`, web build and real-server Chromium case 18 | All commands exited 0; 34 schema files, 0 problems; Chromium 1/1 passed | Case 18 mocks only ancillary `/v1/me`; not the controlled Arc product demo. |
 | Same draft head | Pinned local Arc slice and runs 2/4/5 | 1/1, 20/20, 13/13 and 15/15 passed, serially | Run 2 exact SCR-165 base also passed 20/20; no observed new failure. |
 | Same draft head | `FOUNDRY_PROFILE=arc arc-forge test` | Exit 0 | Output was captured without inspection; generated gas snapshot restored. |
+| Draft PR #208 at `19d5ef1` | Serial package suites: config, api-contract, schemas, logging, redaction, hashing, x402, web, merchants, server, signer, daemon, indexer, vault-client | 67, 20, 38, 14, 473, 54, 93, 81, 31, 703, 168, 104, 108, 94 passed respectively | Server 29, signer 20, daemon 1, indexer 3 skipped; final Arc and merged-head gates pending. |
+| Same head | `pnpm typecheck`, `pnpm lint`, schemas-directory `python3 -I check-schemas.py`, gitleaks diff scan, `scripts/check-no-secret-files.mjs` | Passed; schema metadata 34 files, 0 problems; no diff leaks or tracked secret filenames | Code head before final report/screenshots; no hosted result implied. |
+| Draft PR #208 at `e6b48de` | Local Arc slice, runs 2/4/5, run alone in that order | 1/1, 20/20, 13/13, 15/15 passed | Same code as the prior base run-2 comparison; no new failure. |
+| Same head | Web production build; real-server Chromium case 18 with `NO_COLOR` unset | Build passed; browser 1/1 passed without warnings | Browser's ancillary `/v1/me` read uses a fixture; social API uses the real server. |
+| Same head | Focused `social/run.test.ts` after 100-replay harness joined; then full server suite serially | 14/14 focused; full server 101 files passed, 3 skipped, 703 tests passed, 29 skipped | Other package suites ran on `19d5ef1`, whose production source is identical. |
+| Same head | `FOUNDRY_PROFILE=arc arc-forge test` | Exit 0 | Generated gas snapshot restored; chain-ID-colliding broadcast record restored from pre-deploy backup and hash-checked again. |
+| Local final-gate head `7962c5a` | Root lint/typecheck, schemas-directory checker, web build, real-server Chromium case 18 | Passed; 34 schema files, 0 problems; Chromium 1/1 | Report-only amendment after these checks does not change production source. |
+| Same local head | All 14 package suites, one package at a time | Config 67, API contract 20, schemas 38, logging 14, redaction 473, hashing 54, x402 93, web 81, merchants 31, server 703, signer 168, daemon 104, indexer 108, vault-client 94 passed | Server 29, signer 20, daemon 1, indexer 3 skipped. Redaction, x402 and merchants needed local socket/loopback permission after sandbox EPERM. The default full server run first had three failures; both affected files passed alone, and the full suite passed 703/703 with `--maxWorkers=1`. |
+| Same local head | Pinned Arc slice; SCR-146 runs 2, 4 and 5; Arc Forge | 1/1, 20/20, 13/13, 15/15; Forge exit 0 | Run 2 first failed from an ignored worktree Ponder dependency path, then passed after lockfile-frozen dependency restoration. Forge output was kept private. Generated gas snapshot was restored, and the chain-ID-colliding broadcast record was restored with SHA-256 matching its pre-deploy backup. |
 
 The orchestrator's exact focused server command for `902f113` was:
 
@@ -123,24 +149,26 @@ The first sandbox attempts for redaction and x402 could not bind loopback; their
 key-free reruns passed at the counts above. Config passed 67/67 on an earlier integration head.
 The signer, daemon, indexer, vault-client and full server suites were run serially on the draft
 branch after local-only authorization; the counts above distinguish passes from skips. All
-package suites and the local-chain gates still require one final pass on the final PR head and
-then merged-head acceptance.
+package suites and local-chain gates have a final serial pass on the draft source head; the
+newer demo commit adds a test and artifacts, so the complete server suite was rerun there.
+Merged-head acceptance remains after Zaryab's merge.
 
-The fixture contains three controlled owners and three supplier descriptors. The local seed now
-probes the two fixture-only `comparison-search` and `lesson-search` endpoints through unpaid
-`GET` 402 handlers and registers them only after validating the live challenge. This code has
-key-free tests, but the product stack has not been started and the fixture has not been seeded
-or replayed for the demo.
+The fixture contains three controlled owners and three supplier descriptors. The authorized
+local stack started; three controlled owners were seeded, and nine outcomes and nine ratings
+were replayed. The seed used unpaid 402 preflight for all supplier descriptors. The worker
+published posts and opened one incident. A controlled lead added to this pre-existing demo
+seed was probed and rejected `not-402`: the merchant requires a `q` query, while LeadCard's
+path-only hint permits only a bare GET. SCR-164 §3.19 explicitly permits this fallback.
 
-### Read-only local demo preflight
+### Local demo stack and results
 
-| Dependency | Current finding | Required before the demo |
+| Dependency | Observed result | Remaining action |
 |---|---|---|
-| Local stack | Zaryab authorized the pinned local stack. Process Compose YAML now validates 11 processes, but the full stack did not reach readiness. Direct Arc Anvil and Docker Postgres each started; local deployment exited before a manifest. | Diagnose the failed deployment and retry only on chain ID 5042002. |
-| Social worker | The local process-compose file now includes the worker. | Confirm migration dependency and restricted `czar_social` role in an authorized local-stack run. |
-| Controlled seed/replay | Scripts and loopback-context checks passed key-free tests; authorization is recorded. | Run after stack readiness; no seed or replay has occurred. |
-| Supplier set | Local-only unpaid 402 fixture handlers and probe-before-register logic exist. | Confirm both handlers answer live probes in the authorized local demo; do not copy origins into cloud config. |
-| Browser | The standard key-free Playwright fixture passed case 18 against real `createApp` and a disposable DB again at `b6a0941`. | Capture controlled-owner screenshots against the full local stack. |
+| Local stack | All 11 processes running or completed on pinned Arc Anvil, chain ID 5042002; deployment wrote a manifest. The protected broadcast record was restored and hash-checked. | Stop stack after demo. |
+| Social worker | Replayed controlled events, opened an initial incident, processed duplicate and pause cases, and routed the later prefer lessons. The evaluator reopened an incident from three new controlled bad observations; it did not receive a direct incident-row write. | Final evidence and cleanup checks. |
+| Controlled seed/replay | Three controlled owners seeded; nine outcomes and nine ratings replayed. Later synthetic controlled evidence and four more outcomes/ratings supported the live plan captures. | None for the recorded demo. |
+| Supplier set | Three local supplier descriptors passed unpaid 402 seed preflight; the lead bare GET returned 400 and was rejected `not-402`. | None; rejection is the specified fallback. |
+| Browser | The key-free real-server case 18 passed; 18 controlled-demo screenshots now cover the eight local scenes, with deterministic planner inputs identified. | Final PR-head review. |
 | Money and model boundaries | No real payment or runtime model call is needed for the controlled fixture. | Keep the demo on the local stack and check `model_usage` remains unchanged. |
 
 ## SCR-164 §3.18 acceptance matrix
@@ -151,7 +179,7 @@ test or earlier run, not a pass for the full case.
 | # | Required behavior | Test mapping / current evidence | Final merged-head result |
 |---|---|---|---|
 | 1 | Posts have zero scoring weight; 100 duplicates leave counts, health and decision unchanged | `apps/server/test/selection/registered.test.ts` has the 100-post DB and full stable-decision comparison | Mapped test passed at draft `b6a0941`; merged head pending |
-| 2 | Five `objective.delivered` replays publish one experience per paid step | Integrated `apps/server/test/social/run.test.ts` checks five delivery replays and one final experience | Mapped test passed at draft `b6a0941`; merged head pending |
+| 2 | Five `objective.delivered` replays publish one experience per paid step | Integrated `apps/server/test/social/run.test.ts` now checks 100 delivery replays and one final experience | Mapped test passed at draft `e6b48de`; merged head pending |
 | 3 | Rating revision supersedes the old post without duplicate publish | Integrated `social/run.test.ts` checks revision, moved evidence link and event count | Mapped test passed at draft `b6a0941`; merged head pending |
 | 4 | Public strings exclude private subjects, paths, addresses, exact amounts and evidence IDs; public day times and random IDs | `social/experience-card.test.ts` now checks a published card against private subject, file, address, amount and evidence IDs and verifies UTC-day time; `social/denylist.test.ts` checks random `rep_`/`thr_`/`pst_` IDs do not share a time-ordered prefix; `social-routes.test.ts` covers public projections | Mapped test passed at draft `b6a0941`; merged head pending |
 | 5 | Question routing and caps, while service threads remain open | `social/router.test.ts` tests three recipients and sharing-off; `social/run.test.ts` tests question close at eight; new `social/service-thread-caps.test.ts` tests 9th, 10th and 50th experience plus a third from one owner without closing the service thread | Mapped test passed at draft `b6a0941`; merged head pending |
@@ -172,63 +200,105 @@ test or earlier run, not a pass for the full case.
 | 20 | A lower-id event that commits late is delivered once | `apps/server/test/social/consumer.test.ts` | Mapped test passed at draft `b6a0941`; merged head pending |
 | 21 | Sharing-off receives a lesson without publishing; publishing run skips | `social/run.test.ts` checks private lesson creation with no public post and, at `22825d6`, a would-publish inbox item ending `skipped-sharing-off` with unchanged post count and a recorded run | Mapped test passed at draft `b6a0941`; merged head pending |
 
-### Remaining acceptance evidence gaps
+### Acceptance evidence status
+
+The exact test-name map for the 21 cases is below. "Prior pass" means the named check was
+observed on a prior PR head; final-head validation remains separate.
+
+| Case | Test file and exact test name | Status |
+|---|---|---|
+| 1 | `selection/registered.test.ts`: "keeps evidence counts, health and every decision field stable after 100 social posts" | Prior pass |
+| 2 | `social/run.test.ts`: "keeps posts, evidence, health facts, and plans unchanged across 100 duplicate replays" | Passed at `e6b48de` |
+| 3 | `social/run.test.ts`: "revises a paid-step experience after a rating without routing it again" | Prior pass |
+| 4 | `social/experience-card.test.ts`: "publishes only day-truncated, private-id-free strings to the public card"; `social/denylist.test.ts`: "rejects a private or injected string before publication" and "does not order %s public identifiers by creation time"; `social-routes.test.ts`: "serves public incident and thread views without private evidence" | Prior pass |
+| 5 | `social/router.test.ts`: "routes at most three question recipients and excludes sharing-off subscribers"; `social/run.test.ts`: "answers a routed question only with its own settled evidence"; `social/service-thread-caps.test.ts`: "accepts the ninth, tenth, and fiftieth experience from different owners" | Prior pass |
+| 6 | `social/run.test.ts`: "answers a routed question only with its own settled evidence" (separate corroboration no-evidence assertion) | Passed at `19d5ef1` |
+| 7 | `social-incidents.test.ts`: "opens at three owners, updates units, recovers, and does not flap"; "closes when the incident window loses its third owner and does not reopen"; "closes a known version on use of a new one but keeps ver_unknown open"; `social-buying.test.ts`: "badges every ranked version of a supplier with an unknown-version incident" | Prior pass |
+| 8 | `social-buying.test.ts`: "moves an incident below all incident-free rated suppliers without changing scores" and "matches an exploration pick against its stored verified version"; `planner/planner.test.ts`: "holds earned allowance for a ranked supplier with an open incident" and "holds an exploration supplier on its stored unverified version"; `payer/vault-direct-partial.test.ts`: "pays a ranked incident-badged selection only at its stored version" and "blocks a ranked incident-badged selection if the live version changed" | Prior pass |
+| 9 | `social-buying.test.ts`: "applies lessons only within the exact millionth margin and after incident ordering" and "does not let a preference override the incident ordering band"; `planner/planner.test.ts`: "does not let a lesson promote a probed unverified exploration supplier", "does not promote a preferred supplier outside the top three probes", "does not promote a preferred supplier whose live probe failed" | Prior pass |
+| 10 | `social-leads.test.ts`: valid 402; wrong network and 200; unsafe HTTP and DNS; cross-host redirect; forbidden port and private address; redirect loop, oversize, malformed 402; `social-routes.test.ts`: "returns the original lead for a repeated origin-only suggestion" and "rejects unsafe lead origins and a different owner's deletion" | Passed at `3f523de` |
+| 11 | `social/run.test.ts`: "rejects publication when consent changes after context load" | Prior pass |
+| 12 | `social/run.test.ts`: "creates one post when two workers race to claim the same inbox row" | Prior pass |
+| 13 | `social/run.test.ts`: "rolls back before commit and keeps one post after a commit crash" | Passed at `19d5ef1`; after-commit failure is an injected hook, not an OS kill |
+| 14 | `social-routes.test.ts`: "tombstones every revision and supersedes lessons from the chain" | Prior pass |
+| 15 | `social/run.test.ts`: "leaves model usage unchanged and every post note empty across all representative runs" | Passed within its test database; the live controlled demo also began and ended at zero model-usage rows and zero non-NULL post notes |
+| 16 | `social-migration.test.ts`: "allows its projections and rejects base-table reads and money writes" and "applies concurrently in separate databases on one cluster" | Prior pass |
+| 17 | `planner/service.test.ts`: "moves objectives without a candidate to no-supplier" and "rolls back the no-supplier transition when its event insert fails" | Prior pass |
+| 18 | `apps/web/e2e/social-real.spec.ts`: "controlled social round trip uses the real local server" | Passed at `e6b48de`; demo captured with limits below |
+| 19 | No single test: serial package suites, lint, typecheck, schema checker, local Arc slice and runs 2/4/5, Forge | Passed on draft source head through `e6b48de`; merged-head gate pending |
+| 20 | `social/consumer.test.ts`: "does not skip an earlier transaction that commits after a later event" | Prior pass |
+| 21 | `social/run.test.ts`: "creates a private lesson while sharing is off without publishing" and "skips a would-publish item when the representative turns sharing off" | Prior pass |
 
 The matrix maps every case to code or a deferred gate. New `9938e49` tests close the prior
 key-free case 4, 6, 8 and 15 mapping gaps. SCR-165's origin-only duplicate-lead outcome
-has a passing focused regression. The separate representative-origin lead candidate source
-is a specification gap under architect review. Every case still needs final PR-head evidence.
-Case 19 still needs the remaining package/static/browser gates and one final serial pass.
+has a passing focused regression. SCR-166 now binds the representative lead origin rule:
+without a vetted origin, the routed `find-supplier` run records `abstain-no-rule`. A focused
+test passed at `19d5ef1`; the fixture seed includes a controlled lead. Every case still needs
+final PR-head evidence after the report commit. Case 19's serial pass and demo screenshots
+are recorded above.
 
 Case 18's focused browser round trip used the standard key-free server fixture, real social
 routes and isolated PostgreSQL. It did not create keys, deploy contracts, seed the product
 stack, or make a payment. Its only browser route mock was the unrelated `/v1/me` account read,
 which needs Arc RPC. The separate `e2e-local` browser harness writes a temporary key file and
 deploys contracts; it remains unrun. Case 19's Arc slice and runs 2/4/5 have passed on the
-draft branch, with the exact base run-2 comparison above. Forge exited 0 at `b6a0941`;
-a final PR-head pass remains.
+draft branch, with the exact base run-2 comparison above. Forge exited 0 again at `e6b48de`;
+the merged-head pass remains after Zaryab's merge.
 
 ## Controlled local demo plan and evidence
 
 Zaryab authorized the pinned local Arc stack, ephemeral local keys and transactions, controlled
-seed/replay and Playwright screenshots. The stack attempt above did not reach readiness, so no
-seed, replay or screenshot is claimed yet. No testnet, real funds or real device is authorized.
+seed/replay and Playwright screenshots. The stack, seed and replay completed. All 18 screenshots
+were captured by Playwright and are indexed in
+[`social-network-demo/readme.md`](social-network-demo/readme.md). No testnet, real funds,
+runtime model call or real device was used.
 
-1. Pair a local fixture owner and complete `/onboarding/representative`; capture the exact
-   consent paragraph and saved sharing choice.
-2. Seed three controlled representatives, replay their outcomes and show their labelled
-   experiences in the public feed and service thread.
-3. Replay three distinct owners' bad outcomes against one version; show the incident thread
-   and its attached experiences.
-4. Plan in that task class; show unchanged score, incident ordering, `incident-open` approval,
-   and SCR-165's exact count-free approval-screen line.
-5. Publish 100 duplicate posts in the test harness; compare counts, health and ranking decision
-   before and after.
-6. Force `no-supplier`, route a `find-supplier` question, submit a controlled lead and show an
-   unpaid 402 probe result. If no local merchant answers bare `GET` with 402, show and record
-   `not-402` instead of claiming a successful probe.
-7. Route a good-rated experience, show a bounded `prefer` lesson and near-tie explanation,
-   then dismiss it on `/social/me`.
-8. Pause the representative, replay an outcome and show `skipped-paused` in the activity trace.
+| SCR-164 §3.19 step | Captured evidence | Limit |
+|---|---|---|
+| 1. Onboarding | [`passkey created`](social-network-demo/czar-social-demo-01-passkey-created.png), [`device paired`](social-network-demo/czar-social-demo-01-paired-device.png), [`consent after pairing`](social-network-demo/czar-social-demo-01-consent-after-pairing.png) | Virtual WebAuthn authenticator registered and signed in a new local owner; the live API issued a pairing code, paired the controlled computer and recorded structured consent. The browser shell alone overrode `/v1/me.vaultCreated` to pass the unrelated vault UI gate; no vault or payment was created. |
+| 2. Three representatives | [`02-feed`](social-network-demo/czar-social-demo-02-feed.png) | Three controlled owners, nine outcomes, nine ratings. |
+| 3. Incident | [`03-incident-thread`](social-network-demo/czar-social-demo-03-incident-thread.png) | Opened with three bad owners, then closed after recovery evidence; captured thread shows both transitions. |
+| 4. Buying effect | [`live incident plan`](social-network-demo/czar-social-demo-04-incident-live-plan.png), [`plan evidence`](social-network-demo/czar-social-demo-incident-plan-evidence.json) | Three new synthetic controlled owners supplied settled bad evidence; the production evaluator opened a new incident with three owners and three negatives. The production planner read it and persisted Plan 1.4 with `incident-open`; the live approval API and screen showed the exact line. Ranking candidates, scores, directory entries and probe outcomes were deterministic demo inputs. The clean candidate's probe was unavailable, so the incident supplier remained best available. No approval or payment was submitted. |
+| 5. 100 duplicates | [`before`](social-network-demo/czar-social-demo-05-before-100-replays.png), [`after`](social-network-demo/czar-social-demo-05-after-100-replays.png) | 100 live duplicate outcome events ended `abstain-no-evidence`; counts, plan-hash aggregate and feed article hash were unchanged. Separate case-1 test inserts 100 social posts. |
+| 6. Controlled lead | [`06-lead-thread`](social-network-demo/czar-social-demo-06-lead-thread.png) | Bare local merchant GET returned 400; unpaid probe reached `rejected/not-402`, SCR-164 §3.19 fallback. |
+| 7. Prefer lesson | [`live lesson plan`](social-network-demo/czar-social-demo-07-prefer-live-plan.png), [`dismissed`](social-network-demo/czar-social-demo-07-live-dismissed.png), [`plan evidence`](social-network-demo/czar-social-demo-lesson-plan-evidence.json) | The production router created active prefer lessons; the planner read one and chose its supplier at 0.89 over the first-ranked 0.90 supplier, within the permitted margin. It persisted Plan 1.4; the live approval API and screen explained the lesson before the owner dismissed it. Ranking candidates, scores, directory entries and probe outcomes were deterministic demo inputs. No approval or payment was submitted. |
+| 8. Pause | [`paused`](social-network-demo/czar-social-demo-08-paused.png), [`skipped`](social-network-demo/czar-social-demo-08-skipped-paused.png) | Live controlled owner pause; replayed outcome produced `skipped-paused`. |
 
-Record dated screenshots or traces for the feed, incident/thread, approve view, lesson/dismiss,
-lead probe and paused activity. Use controlled data only. Add artifact paths and the exact
-build head here after the authorized run; no screenshots exist yet.
+The social browser requests used the real local server. The unrelated `/v1/me` account summary
+was supplied by a static local-network browser route because controlled fixture users have no
+vault account. For step 1, only its `vaultCreated` field was overridden in the browser shell;
+passkey authentication, pairing and consent used live local API calls. The first approval
+screens used browser fixtures; the step 4 and 7 screens linked above used production
+planner-built and persisted plans served through the live approval API. The ranking, directory
+and probe inputs remained deterministic; no approval, payment or model call was submitted.
+The earlier live demo measured zero `model_usage` rows and zero non-NULL post notes before
+and after its replay. The later plan capture measured zero for both only after completion;
+its scripts did not delete usage rows or change post notes. The latter is a final-state
+observation, not a measured before/after pair.
 
 ## Operator-authorized commands and results
 
 The local stack start is documented in `ops/local/README.md`. Existing signer key references
 were present without reading their contents. Zaryab authorized the local stack and ephemeral
-local keys and transactions. The stack attempt exited before readiness; the seed and replay
-commands remain unrun. The Arc suites and key-free gates listed above ran successfully.
+local keys and transactions. The stack, seed and replay succeeded. The Arc suites and key-free
+gates listed above ran successfully on prior heads; final-head gates remain.
 
 ```sh
-# Attempted after local-only preflight; full stack did not reach readiness:
-process-compose -f ops/local/process-compose.yaml up
+# Started successfully with temporary external Foundry config and local-only preflight:
+FOUNDRY_CONFIG=/private/tmp/czar-social-foundry-deploy.toml \
+  fnm exec --using=22.22.0 process-compose -f ops/local/process-compose.yaml \
+  --disable-dotenv --keep-project -D -p 18080 -L /private/tmp/czar-social-stack.log up
 
-# Only after verifying the seed script's database-host refusal and fixture registration:
-pnpm --filter @czar/server social:seed-controlled --count 3 --network eip155:5042002
-pnpm --filter @czar/server social:replay-fixtures
+# Completed on the loopback demo database:
+CZAR_LOCAL_CONFIG=../../env/local.toml \
+  CZAR_DATABASE_URL=postgres://postgres@127.0.0.1:15433/postgres \
+  CZAR_ARC_RPC_URL=http://127.0.0.1:8545 \
+  fnm exec --using=22.22.0 pnpm --filter @czar/server social:seed-controlled \
+  --count 3 --network eip155:5042002
+CZAR_LOCAL_CONFIG=../../env/local.toml \
+  CZAR_DATABASE_URL=postgres://postgres@127.0.0.1:15433/postgres \
+  CZAR_ARC_RPC_URL=http://127.0.0.1:8545 \
+  fnm exec --using=22.22.0 pnpm --filter @czar/server social:replay-fixtures
 
 # Key-free merged-head static checks (run before chain work):
 fnm exec --using=22.22.0 pnpm -r typecheck
@@ -271,36 +341,45 @@ pnpm --filter @czar/web exec playwright screenshot --browser chromium \
   --wait-for-timeout 1000 http://localhost:3001/social /private/tmp/czar-social-feed.png
 ```
 
-Capture owner-only views only in an authenticated controlled-owner browser session; never put
-session tokens in command arguments, logs or screenshot filenames. Copy reviewed image artifacts
-to the final report's evidence location and link them here after the run.
+Owner-only views were captured in authenticated controlled-owner browser sessions. Session
+tokens were not placed in command arguments, logs or screenshot filenames. The reviewed
+Playwright images and their controlled input limits are indexed above.
 
 ## Builder decisions, review and open work
 
 - **Builder decisions:** `ops/local/process-compose.yaml:2` uses the installed Process Compose
-  map/list configuration and template working directories. Its dry run validates all 11
+  map/list configuration and repository-root working directories. The local run started all 11
   processes. `ops/local/process-compose.test.ts:42` follows the existing
   `listenOnLoopback` call. These are local-stack corrections, not changes to SCR-164.
   `apps/server/src/social/lessons.ts:73` excludes superseded source posts; the revision
   transaction at `apps/server/src/social/runtime/run.ts:667` supersedes their lessons.
   `apps/server/src/social/worker-main.ts:101` reads the configured incident interval.
   These choices implement the existing source-state and schedule contracts.
-- **Defects fixed / found, not fixed:** populate from the exact final PR diff and review findings.
-  The SN-4 privacy regression was fixed before integration snapshot `902f113`; review and rerun
-  on the final head before calling it resolved for acceptance.
+- **Defects fixed:** the fresh review found system lead posts incorrectly increasing the
+  representative contribution count (`apps/server/src/social/leads.ts:145`), and two system
+  post values that differed from SCR-164's exact copy (`leads.ts:125`,
+  `apps/server/src/social/incidents.ts:247`). Tests failed first and passed after fixes at
+  `3f523de`. The SN-4 privacy regression was fixed before integration snapshot `902f113`.
 - **Independent review:** a fresh reviewer inspected PR #208 from `c8f7af1` through local
   `4c677df`, finding stale lessons from superseded posts and incident evaluation on the wrong
   interval. The lesson read guard, revision-state update and hourly schedule are now integrated;
   their focused and full server gates passed at `b6a0941`. The later changed code and report
-  still need exact-head review before readiness.
+  still need exact-head review before readiness. A second fresh reviewer inspected PR #208 at
+  `e2a1485`; it found the three defects above and no confirmed critical security or buying
+  regression in its assigned scope. Its initial database-URL concern was withdrawn after
+  checking SCR-164 §3.19's explicit loopback-host rule. Its follow-up through local
+  `e6b48de` found the fixes present and no new critical source issue. The later demo
+  commits `3f3fb01` and `00aaa11`, plus the final report, still need exact pushed-head review.
 - **Architect disposition:** SCR-165 merged at `c8f7af1`. Its count-free incident line,
   lesson-source `serviceId`, and idempotent duplicate-lead outcome are integrated with focused
-  regressions. The representative-run lead origin source remains unspecified; an architect
-  ruling is pending before claiming the SCR-164 §3.19 lead demo scene complete.
+  regressions. The architect's binding SCR-166 ruling restricts leads in this iteration to
+  owner submissions and the controlled fixture. Routed representatives without a vetted lead
+  origin record `abstain-no-rule`, tested at `19d5ef1`. The controlled lead probe reached the
+  `not-402` fallback permitted by SCR-164 §3.19.
 - **Duplicate lead contract:** the owner API now has a direct regression for repeated
   origin-only leads returning the existing IDs with no second row, post or probe. It passed in
-  the 175-test focused integration run. A representative-origin duplicate cannot be exercised
-  until its candidate source is defined.
+  the 175-test focused integration run. SCR-166 excludes representative-sourced leads in this
+  iteration.
 - **Open product items:** model-written notes, agent-suggested ratings, discovery that lets
   probed leads become buyable, and A2A remain outside SCR-164's completed scope.
 - **Remaining gate:** SN-1 through SN-6 merged into `build-v1`, all 21 cases verified on that
