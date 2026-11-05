@@ -1,7 +1,9 @@
 // T-042 acceptance corpus (02 §11.2, §11.3).
 import { describe, expect, it } from "vitest";
+import { loadConfig } from "@czar/config";
 import {
   buildExactPaymentPayload,
+  classifyOffer,
   encodePaymentSignature,
   readPaymentRequired,
   readSettlement,
@@ -72,7 +74,83 @@ const policy = (overrides: Partial<OfferPolicy> = {}): OfferPolicy => ({
   stepCap: 200000n,
   payees: [PAY_TO],
   trustedPayees: [],
+  config: loadConfig(),
+  extensions402: { dropped: [] },
   ...overrides,
+});
+
+describe("SCR-187 Gateway offer classification", () => {
+  const config = loadConfig();
+
+  it("recognizes a BotPay-shaped Gateway offer and vanilla USDC", () => {
+    expect(classifyOffer(gateway, { dropped: [] }, config)).toBe("gateway");
+    expect(
+      classifyOffer(
+        {
+          ...gateway,
+          extra: {
+            ...gateway.extra,
+            verifyingContract: gateway.extra.verifyingContract.toUpperCase(),
+          },
+        },
+        { dropped: [] },
+        config,
+      ),
+    ).toBe("gateway");
+    expect(classifyOffer(exact, { dropped: [] }, config)).toBe("vanilla");
+  });
+
+  it("rejects a mismatched Gateway contract, batch marker and SIWX", () => {
+    expect(
+      classifyOffer(
+        { ...gateway, extra: { ...gateway.extra, verifyingContract: PAY_TO } },
+        { dropped: [] },
+        config,
+      ),
+    ).toBe("unsupported");
+    expect(
+      classifyOffer(
+        { ...exact, extra: { ...exact.extra, paymentFlow: "batch-settlement" } },
+        { dropped: [] },
+        config,
+      ),
+    ).toBe("unsupported");
+    expect(classifyOffer(gateway, { dropped: ["sign-in-with-x"] }, config)).toBe("unsupported");
+    expect(
+      classifyOffer(
+        { ...gateway, extra: { ...gateway.extra, siwx: true } },
+        { dropped: [] },
+        config,
+      ),
+    ).toBe("unsupported");
+  });
+
+  it("keeps Gateway off the vanilla rail and rejects Quicknode SIWX at pay time", () => {
+    expect(selectOffer(read([gateway]), policy({ payees: [gateway.payTo] }))).toMatchObject({
+      ok: false,
+      code: "unsupported-offer",
+    });
+    expect(
+      selectOffer(
+        read([gateway]),
+        policy({
+          rail: "gateway",
+          payees: [gateway.payTo],
+          extensions402: { dropped: ["sign-in-with-x", "quicknode-session"] },
+        }),
+      ),
+    ).toMatchObject({ ok: false, code: "unsupported-offer" });
+  });
+
+  it("accepts the batch marker only on a verified Gateway offer", () => {
+    const batched = {
+      ...gateway,
+      extra: { ...gateway.extra, paymentFlow: "batch-settlement" },
+    };
+    expect(
+      selectOffer(read([batched]), policy({ rail: "gateway", payees: [gateway.payTo] })),
+    ).toMatchObject({ ok: true, offer: { extra: batched.extra } });
+  });
 });
 
 describe("readPaymentRequired", () => {
