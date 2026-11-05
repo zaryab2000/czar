@@ -17,8 +17,32 @@ export class ShapeError extends Error {
 
 type Field = "address" | "bytes32" | "uint" | "uint8" | "uint16" | "uint32" | "uint64" | "string";
 type Shape = Readonly<
-  Record<string, Field | readonly string[] | "object" | "receipt" | "paymentRef" | "args">
+  Record<
+    string,
+    Field | readonly string[] | "object" | "receipt" | "paymentRef" | "args" | "providerArgs"
+  >
 >;
+
+/** `provider-call` actions (CZ-27 §5.2). */
+export const PROVIDER_ACTIONS = [
+  "setBudget",
+  "submit",
+  "brief-request",
+  "deliverable-upload",
+] as const;
+export type ProviderAction = (typeof PROVIDER_ACTIONS)[number];
+
+/**
+ * `provider-call` `args` per action (PM-058). Only the values the provider chooses: the signer itself fixes the
+ * escrow and job id (top-level fields), `jobKey = keccak256(abi.encode(escrow, jobId))`, the payment token (the
+ * configured USDC) and `optParams` (empty, as CZ-20 §5.11 steps 4 and 7 call them).
+ */
+const PROVIDER_ARGS: Readonly<Record<ProviderAction, Readonly<Record<string, Field>>>> = {
+  setBudget: { amount: "uint" },
+  submit: { contentHash: "bytes32" },
+  "brief-request": { issuedAt: "uint64" },
+  "deliverable-upload": { contentHash: "bytes32", issuedAt: "uint64" },
+};
 
 const RECEIPT_FIELDS: Readonly<Record<string, Field>> = {
   paymentRefHash: "bytes32",
@@ -100,6 +124,13 @@ export const SHAPES: Readonly<Record<Kind, Shape>> = {
   "pocket-delegate": { pocket: "address", vault: "address" },
   "pocket-return": { pocket: "address", kind: ["usdc", "native"], amount: "uint" },
   "pocket-slow-withdraw": { pocket: "address", step: ["initiate", "withdraw"], value: "uint" },
+  // `action` comes before `args`: the args are checked against the action already parsed.
+  "provider-call": {
+    escrow: "address",
+    jobId: "uint",
+    action: PROVIDER_ACTIONS,
+    args: "providerArgs",
+  },
 };
 
 /** Fields a request may omit. */
@@ -182,6 +213,10 @@ export function parseRequest(kind: Kind, payload: unknown): Record<string, unkno
       out[key] = fixed(REPORT_FIELDS, value, key);
     } else if (type === "args") {
       out[key] = record(value, key);
+    } else if (type === "providerArgs") {
+      const fields = PROVIDER_ARGS[out["action"] as ProviderAction];
+      if (fields === undefined) throw new ShapeError(key);
+      out[key] = fixed(fields, value, key);
     } else {
       out[key] = scalar(type as Field, value, key);
     }

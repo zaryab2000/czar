@@ -33,6 +33,8 @@ export interface MerchantService {
   readonly method: RouteMethod;
   /** The live 402 this route answers an unpaid request with; index entries are derived from it (p1-D7). */
   readonly paymentRequired: PaymentRequiredV2;
+  /** Set on the lab's services (CZ-20 §5.8a): the index entry is labelled `czar-test-merchant`. */
+  readonly testMerchant?: true;
   handle(request: Request): Promise<Response>;
 }
 

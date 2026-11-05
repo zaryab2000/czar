@@ -82,6 +82,8 @@ export interface AutonomyView {
 export interface JobView {
   readonly evaluator: Address;
   readonly clientVault: Address;
+  /** The job's ERC-8183 `provider`, from the indexer's job mirror (CZ-27 `provider-call`). */
+  readonly provider: Address;
 }
 
 export interface PocketBalances {
@@ -125,9 +127,31 @@ export interface Projection {
   pocketBalances(pocket: Address): Promise<PocketBalances>;
   /** The paying step's `stepIndex` the pocket pays for, cumulative nanopayment totals. */
   nanoSpent(pocket: Address, payTo: Address): Promise<{ step: bigint; pocket: bigint }>;
+  /**
+   * SCR-180 §2: what this signer signed for the pocket that the indexer has not seen yet: signed `gateway-nano`
+   * audit rows with no indexed transfer of the same EIP-3009 nonce and `now < validBefore` (`now` in Unix
+   * seconds); `step` for this `payTo`, `pocket` for every payee. Throws when it cannot be computed.
+   */
+  pendingNanoSpent(
+    pocket: Address,
+    payTo: Address,
+    now: number,
+  ): Promise<{ step: bigint; pocket: bigint }>;
+  /**
+   * SCR-180 §2: calls of one step this signer signed (`usdc-3009`) that the indexer has not seen used yet, with
+   * `now < validBefore`; added to `PlanLeaf.usedCalls` for the expected-calls check. Throws when it cannot be
+   * computed.
+   */
+  pendingCalls(vault: Address, envelopeId: bigint, stepIndex: number, now: number): Promise<number>;
   settledPayment(vault: Address, paymentRef: PaymentRef): Promise<boolean>;
   autonomy(vault: Address, categoryId: Hash32): Promise<AutonomyView | undefined>;
   job(escrow: Address, jobId: bigint): Promise<JobView | undefined>;
+  /**
+   * Whether the server's `uploadJobDeliverable` accepted a deliverable with this `contentHash` for this
+   * `jobKey` (a `payer_job_deliverables` row; CZ-27 `provider-call`, D87). A projection without this read
+   * denies every `submit` (fail closed).
+   */
+  deliverableAccepted?(jobKey: Hash32, contentHash: Hash32): Promise<boolean>;
   reportExists(reportHash: Hash32): Promise<boolean>;
   checksCommitExists(checksCommit: Hash32): Promise<boolean>;
   latestEvidenceRoot(publisher: Address, kind: number): Promise<Hash32>;

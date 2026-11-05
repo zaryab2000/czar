@@ -21,7 +21,8 @@ Caddy on the host as the only public listener, and every credential a file on a 
 | `systemd/run-czar-secrets.mount` | The dedicated `tmpfs` for `deploy.credentialFilesDir`: `nosuid,nodev,noexec`. |
 | `systemd/caddy.service.d/czar-env.conf` | Hands Caddy `CZAR_DOMAIN` from `/etc/czar/caddy.env`. A pointer, not a credential. |
 | `caddy/Caddyfile` | The public front door: `app.<domain>` and `merchants.<domain>`, automatic HTTPS, security headers, body caps. |
-| `test/` | The three test files, run with `node --test --experimental-strip-types`. |
+| `verify-deployment.ts` | PM-010. Read-only: builds the contracts with the `deploy` profile and the recorded library links, then compares the code at every address in `deployments/arc-testnet.json` with that build (immutables masked). Prints `match`, `mismatch` or `no-code` per contract; exits non-zero unless all match. Sends only `eth_chainId` and `eth_getCode`. |
+| `test/` | The test files, run with `node --test --experimental-strip-types`. |
 
 ## Run order
 
@@ -174,6 +175,25 @@ The third command needs a `caddy` binary of the pinned version. Where Docker Hub
 docker run --rm -e CZAR_DOMAIN=example.com -v "$PWD/ops/cloud/caddy:/etc/caddy:ro" \
   caddy:2.10.0 caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 ```
+
+`test/verify-deployment.test.ts` deploys to a local pinned `arc-anvil --network arc`, so it needs
+Arc Foundry (`scripts/install-arc-foundry.sh`) on `PATH`, or `ARC_ANVIL` and `ARC_FORGE` set, and
+the contract submodules checked out (`git submodule update --init contracts/lib/forge-std
+contracts/lib/openzeppelin-contracts`). It writes its Foundry broadcast record to a scratch
+folder, never to `contracts/broadcast/`, where the real testnet record lives on the machine that
+deployed.
+
+## Checking the testnet deployment
+
+From the repository root, on a machine that can reach Arc testnet, with Arc Foundry on `PATH`:
+
+```sh
+node --experimental-strip-types ops/cloud/verify-deployment.ts --rpc-url https://rpc.testnet.arc.io
+```
+
+A deployment that matches this checkout prints ten lines ending in `match`, then
+`10 of 10 contracts match`, and exits 0. Any `mismatch` or `no-code` means testnet does not run
+this checkout's code at that address; the exit code is then 1.
 
 ## Not here
 
