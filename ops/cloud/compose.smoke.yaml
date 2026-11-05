@@ -4,7 +4,8 @@
 #   scripts/install-arc-foundry.sh        # the checksummed arc-anvil, once
 #   CZAR_IMAGE_TAG=<git-sha> docker compose \
 #     -f ops/cloud/compose.yaml -f ops/cloud/compose.smoke.yaml up --wait
-#   docker run --rm --network host curlimages/curl:<pinned> http://127.0.0.1:3000/health
+#   docker run --rm --network host curlimages/curl:8.22.0@sha256:58adaa4e8dca9c988bae2aba4ab3434a0bb2da16bbe3f92dec39ec7785166777 \
+#     http://127.0.0.1:3000/health
 #   CZAR_IMAGE_TAG=<git-sha> docker compose \
 #     -f ops/cloud/compose.yaml -f ops/cloud/compose.smoke.yaml down --volumes
 #
