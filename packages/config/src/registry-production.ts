@@ -7,6 +7,7 @@ import type { ParameterSpec } from "./types.ts";
 
 const SCR_170 = "docs/specs/06-review/change-requests/SCR-170-public-alpha-cloud-deployment.md";
 const CZ_20 = "docs/specs/04-components/server/server-supply-side.md";
+const CZ_27 = "docs/specs/04-components/server/server-autonomy-roi-keys.md";
 
 export const PRODUCTION_PARAMETERS = [
   // Lane A: deploy — the cloud machine, its files and the recorded deployment.
@@ -138,6 +139,26 @@ export const PRODUCTION_PARAMETERS = [
     reason:
       "key reference → full cryptoKeyVersions/N resource name; filled after key creation (tracker PM-018)",
     source: `${SCR_170}:211`,
+  },
+  // Lane B (PM-058): the K21a/K21b test-provider keys' per-key rate limits, read by the signer's
+  // `rateLimitFor` as kms.maxSignaturesPerMin.<keyId>.
+  {
+    key: "kms.maxSignaturesPerMin.K21a",
+    type: "integer",
+    default: 60,
+    unit: "count",
+    reason: "one test provider, one job at a time",
+    source: `${CZ_27}:418`,
+    notes: "CZ-27 §5.2's per-key list does not name K21 yet; default from the PM-058 task",
+  },
+  {
+    key: "kms.maxSignaturesPerMin.K21b",
+    type: "integer",
+    default: 60,
+    unit: "count",
+    reason: "one test provider, one job at a time",
+    source: `${CZ_27}:418`,
+    notes: "CZ-27 §5.2's per-key list does not name K21 yet; default from the PM-058 task",
   },
 
   // Lane C: server — the model provider, off until Zaryab connects it.

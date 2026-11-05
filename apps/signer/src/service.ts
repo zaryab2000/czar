@@ -297,7 +297,7 @@ export function createSigner(options: SignerOptions): Signer {
       if (from === undefined) throw new Denied("unknown-key");
       if (retiring.has(keyRef)) throw new Denied("pocket-key-retiring");
 
-      const decision = await decide(ctx, kind, parsed);
+      const decision = await decide(ctx, kind, parsed, { keyId, address: from });
       purpose = decision.purpose;
       takeRateSlot(keyId, keyRef);
 

@@ -9,11 +9,15 @@ import {
   type Hex,
   type TransactionSerializableEIP1559,
 } from "viem";
+import { ARC_TESTNET_CHAIN_ID } from "@czar/config";
 import {
   addressToBytes32,
   autonomyRaiseDigest,
+  briefRequestDigest,
   burnIntentDigest,
+  deliverableUploadDigest,
   derivedNonce,
+  jobKey as jobKeyOf,
   KIND_TAGS,
   POCKET_STEP_INDEX,
   receiptAttestationDigest,
@@ -34,6 +38,7 @@ import {
   GATEWAY_MINTER_ABI,
   GATEWAY_WALLET_ABI,
   JOB_ESCROW_ABI,
+  JOB_ESCROW_PROVIDER_ABI,
   K3_ALLOWED,
   K3_NEVER,
   K3_SPENDING,
@@ -44,10 +49,16 @@ import {
   VAULT_ABI,
   type VaultFunctionName,
 } from "./abi.ts";
-import type { Kind } from "./kinds.ts";
+import { PROVIDER_KEY_IDS, type KeyId, type Kind, type ProviderKeyId } from "./kinds.ts";
 import type { OverdueManualReturnFacts, Projection } from "./projection.ts";
 import type { PaymentRef } from "@czar/schemas";
-import { coerceArgs, type ShapeError } from "./requests.ts";
+import { coerceArgs, type ProviderAction, type ShapeError } from "./requests.ts";
+
+/** The key a request is signed with, as the service resolved it (its id and its backend address). */
+export interface SigningKey {
+  readonly keyId: KeyId;
+  readonly address: Address;
+}
 
 export class Denied extends Error {
   readonly rule: string;
@@ -193,6 +204,7 @@ export interface WriteOffAlert {
 
 /** Parsed request fields (requests.ts); each kind uses a subset. */
 type Req = {
+  readonly action?: unknown;
   readonly target?: unknown;
   readonly step?: unknown;
   readonly selector?: unknown;
@@ -890,7 +902,81 @@ async function gasRefill(ctx: PolicyContext, req: Req): Promise<Decision> {
   return { type: "transaction", to: target, data: "0x", value, purpose: {} };
 }
 
-const HANDLERS: Readonly<Record<Kind, (ctx: PolicyContext, req: Req) => Promise<Decision>>> = {
+/** The local arc-anvil chain the run-2 and job tests use; `@czar/config` also counts it as a test chain. */
+const LOCAL_ARC_ANVIL_CHAIN_ID = 31337;
+
+/**
+ * Chains `provider-call` signs on (CZ-27 §5.1 K21 row: "testnet only"; CZ-20 §5.11: "never mainnet"). The same
+ * test chains `@czar/config`'s cloud guard names; every other chain id counts as mainnet and is refused.
+ */
+const PROVIDER_TEST_CHAIN_IDS: readonly number[] = [ARC_TESTNET_CHAIN_ID, LOCAL_ARC_ANVIL_CHAIN_ID];
+
+/**
+ * `provider-call` (K21a/K21b, CZ-27 §5.2): `setBudget`/`submit` on the configured escrow and the `BriefRequest`/
+ * `DeliverableUpload` digests, only for the key's own job, only when that job's evaluator is K7, and `submit`
+ * only with a `contentHash` the server's `uploadJobDeliverable` already accepted for that job.
+ */
+async function providerCall(ctx: PolicyContext, req: Req, key?: SigningKey): Promise<Decision> {
+  if (key === undefined || !PROVIDER_KEY_IDS.includes(key.keyId as ProviderKeyId))
+    deny("kind-not-allowed");
+  const signing = key as SigningKey;
+  if (!PROVIDER_TEST_CHAIN_IDS.includes(ctx.network.chainId)) deny("testnet-only");
+  const escrow = req.escrow as Address;
+  const jobId = req.jobId as bigint;
+  const action = req.action as ProviderAction;
+  const args = req.args as Readonly<Record<string, unknown>>;
+  if (!eq(escrow, ctx.network.jobEscrow)) deny("unknown-escrow");
+  const job = await ctx.projection.job(escrow, jobId);
+  if (job === undefined) deny("unknown-job");
+  const j = job as NonNullable<typeof job>;
+  if (!eq(j.evaluator, ctx.keyAddress("K7"))) deny("evaluator-not-k7");
+  if (!eq(j.provider, signing.address)) deny("not-job-provider");
+  const key32 = jobKeyOf(ctx.network.jobEscrow, jobId);
+  const purpose: PurposeIds = { jobKey: key32 };
+  switch (action) {
+    case "setBudget": {
+      const data = encodeFunctionData({
+        abi: JOB_ESCROW_PROVIDER_ABI,
+        functionName: "setBudget",
+        args: [jobId, ctx.network.usdc, args["amount"] as bigint, "0x"],
+      });
+      return { type: "transaction", to: ctx.network.jobEscrow, data, value: 0n, purpose };
+    }
+    case "submit": {
+      const contentHash = args["contentHash"] as Hash32;
+      const accepted = ctx.projection.deliverableAccepted;
+      if (accepted === undefined || !(await accepted(key32, contentHash)))
+        deny("deliverable-not-accepted");
+      const data = encodeFunctionData({
+        abi: JOB_ESCROW_PROVIDER_ABI,
+        functionName: "submit",
+        args: [jobId, contentHash, "0x"],
+      });
+      return { type: "transaction", to: ctx.network.jobEscrow, data, value: 0n, purpose };
+    }
+    case "brief-request": {
+      const digest = briefRequestDigest(ctx.network.chainId, {
+        jobKey: key32,
+        issuedAt: args["issuedAt"] as bigint,
+      });
+      return { type: "digest", digest, purpose };
+    }
+    case "deliverable-upload": {
+      const digest = deliverableUploadDigest(ctx.network.chainId, {
+        jobKey: key32,
+        contentHash: args["contentHash"] as Hash32,
+        issuedAt: args["issuedAt"] as bigint,
+      });
+      return { type: "digest", digest, purpose };
+    }
+    default:
+      return deny("shape");
+  }
+}
+
+const HANDLERS: Readonly<
+  Record<Kind, (ctx: PolicyContext, req: Req, key?: SigningKey) => Promise<Decision>>
+> = {
   "vault-call": vaultCall,
   "usdc-3009": usdc3009,
   "gateway-burn": gatewayBurn,
@@ -906,7 +992,13 @@ const HANDLERS: Readonly<Record<Kind, (ctx: PolicyContext, req: Req) => Promise<
   "pocket-delegate": pocketDelegate,
   "pocket-return": pocketReturn,
   "pocket-slow-withdraw": pocketSlowWithdraw,
+  "provider-call": providerCall,
 };
 
-export const decide = (ctx: PolicyContext, kind: Kind, req: Req): Promise<Decision> =>
-  HANDLERS[kind](ctx, req);
+/** `key` is the signing key; only kinds whose checks name it (`provider-call`) read it, and refuse without it. */
+export const decide = (
+  ctx: PolicyContext,
+  kind: Kind,
+  req: Req,
+  key?: SigningKey,
+): Promise<Decision> => HANDLERS[kind](ctx, req, key);

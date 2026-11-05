@@ -39,7 +39,8 @@ export interface KeystoreFile {
   };
 }
 
-const KEY_REF = /^(K3|K5|K6|K7|K8|K20|relayer|K4:0x[0-9a-f]{40}|K10:[a-z0-9]+(?:-[a-z0-9]+)*)$/;
+const KEY_REF =
+  /^(K3|K5|K6|K7|K8|K20|K21a|K21b|relayer|K4:0x[0-9a-f]{40}|K10:[a-z0-9]+(?:-[a-z0-9]+)*)$/;
 
 const deriveKey = (passphrase: string, salt: Buffer, kdf: KdfParams) =>
   scryptSync(passphrase.normalize("NFKC"), salt, 32, {

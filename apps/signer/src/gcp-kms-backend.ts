@@ -27,7 +27,8 @@ const CRYPTO_KEY_ID = /^[a-zA-Z0-9_-]{1,63}$/;
 const VERSION_NAME =
   /^projects\/[^/]+\/locations\/[^/]+\/keyRings\/[^/]+\/cryptoKeys\/[^/]+\/cryptoKeyVersions\/[0-9]+$/;
 /** The same key references the local keystore accepts (`local-backend.ts:42`). */
-const KEY_REF = /^(K3|K5|K6|K7|K8|K20|relayer|K4:0x[0-9a-f]{40}|K10:[a-z0-9]+(?:-[a-z0-9]+)*)$/;
+const KEY_REF =
+  /^(K3|K5|K6|K7|K8|K20|K21a|K21b|relayer|K4:0x[0-9a-f]{40}|K10:[a-z0-9]+(?:-[a-z0-9]+)*)$/;
 const MERCHANT_SERVICE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 /**
  * A new version is read at most this many times before the creation fails. The task spec fixes the

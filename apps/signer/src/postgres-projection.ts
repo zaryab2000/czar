@@ -553,6 +553,7 @@ function serverProjection(
   | "storedPlan"
   | "settledPayment"
   | "job"
+  | "deliverableAccepted"
   | "reportExists"
   | "checksCommitExists"
   | "latestEvidenceRoot"
@@ -578,6 +579,7 @@ function serverProjection(
     },
     settledPayment: (vault, paymentRef) => hasSettledPayment(sql, vault, paymentRef),
     job: (escrow, id) => readJob(sql, escrow, id),
+    deliverableAccepted: (key, contentHash) => deliverableAccepted(sql, key, contentHash),
     reportExists: (hash) => exists(sql, "acceptance_reports", "report_hash", hash),
     checksCommitExists: (hash) => checksCommitExists(sql, hash),
     latestEvidenceRoot: (publisher, kind) => latestEvidenceRoot(sql, publisher, kind),
@@ -643,7 +645,18 @@ async function readJob(sql: Sql, escrow: Address, jobId: bigint) {
   return {
     evaluator: String(mirror["evaluator"]) as Address,
     clientVault: String(mirror["vault"]) as Address,
+    provider: String(mirror["provider"]) as Address,
   };
+}
+
+/** A deliverable the server's `uploadJobDeliverable` stored for this job (D87); never caller-supplied. */
+async function deliverableAccepted(sql: Sql, key: Hash32, contentHash: Hash32): Promise<boolean> {
+  const result = await sql(
+    `SELECT 1 FROM payer_job_deliverables
+     WHERE lower(job_key)=lower($1) AND lower(content_hash)=lower($2) LIMIT 1`,
+    [key, contentHash],
+  );
+  return result.rows.length > 0;
 }
 
 async function exists(sql: Sql, table: string, column: string, value: string): Promise<boolean> {

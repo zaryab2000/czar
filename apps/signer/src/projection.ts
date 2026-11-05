@@ -82,6 +82,8 @@ export interface AutonomyView {
 export interface JobView {
   readonly evaluator: Address;
   readonly clientVault: Address;
+  /** The job's ERC-8183 `provider`, from the indexer's job mirror (CZ-27 `provider-call`). */
+  readonly provider: Address;
 }
 
 export interface PocketBalances {
@@ -128,6 +130,12 @@ export interface Projection {
   settledPayment(vault: Address, paymentRef: PaymentRef): Promise<boolean>;
   autonomy(vault: Address, categoryId: Hash32): Promise<AutonomyView | undefined>;
   job(escrow: Address, jobId: bigint): Promise<JobView | undefined>;
+  /**
+   * Whether the server's `uploadJobDeliverable` accepted a deliverable with this `contentHash` for this
+   * `jobKey` (a `payer_job_deliverables` row; CZ-27 `provider-call`, D87). A projection without this read
+   * denies every `submit` (fail closed).
+   */
+  deliverableAccepted?(jobKey: Hash32, contentHash: Hash32): Promise<boolean>;
   reportExists(reportHash: Hash32): Promise<boolean>;
   checksCommitExists(checksCommit: Hash32): Promise<boolean>;
   latestEvidenceRoot(publisher: Address, kind: number): Promise<Hash32>;

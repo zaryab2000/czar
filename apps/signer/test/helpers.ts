@@ -20,6 +20,7 @@ import {
   type StoredPlan,
   type TransactionPreparer,
   type AuditSink,
+  type JobView,
 } from "../src/index.ts";
 
 export const VAULT: Address = "0x00000000000000000000000000000000000c2a21";
@@ -136,7 +137,10 @@ export interface State {
   nanoSpent: { step: bigint; pocket: bigint };
   settled: Set<string>;
   autonomy: Awaited<ReturnType<Projection["autonomy"]>>;
-  job: Awaited<ReturnType<Projection["job"]>>;
+  /** A job fixture; a missing `provider` reads as the zero address, which no key holds (PM-058). */
+  job: (Omit<JobView, "provider"> & { provider?: Address }) | undefined;
+  /** `${jobKey}:${contentHash}` pairs accepted by `uploadJobDeliverable` (PM-058). */
+  deliverables: Set<string>;
   reports: Set<string>;
   checksCommits: Set<string>;
   latestRoot: Hash32;
@@ -252,6 +256,7 @@ export function defaultState(pocket: Address): State {
       nonce: 7n,
     },
     job: { evaluator: "0x0000000000000000000000000000000000000000", clientVault: VAULT },
+    deliverables: new Set(),
     reports: new Set([h("9")]),
     checksCommits: new Set([h("8")]),
     latestRoot: h("0"),
@@ -300,7 +305,12 @@ export function fakeProjection(state: State): Projection {
     nanoSpent: async () => state.nanoSpent,
     settledPayment: async (_vault, paymentRef) => state.settled.has(paymentRefHash(paymentRef)),
     autonomy: async () => state.autonomy,
-    job: async () => state.job,
+    job: async () =>
+      state.job === undefined
+        ? undefined
+        : { provider: "0x0000000000000000000000000000000000000000", ...state.job },
+    deliverableAccepted: async (jobKey, contentHash) =>
+      state.deliverables.has(`${jobKey.toLowerCase()}:${contentHash.toLowerCase()}`),
     reportExists: async (hash) => state.reports.has(hash),
     checksCommitExists: async (hash) => state.checksCommits.has(hash),
     latestEvidenceRoot: async () => state.latestRoot,
@@ -320,6 +330,9 @@ export const CALLERS = {
   "cz-20": ["K10"],
   relayer: ["relayer"],
   ops: ["K6", "K20"],
+  // PM-058: one caller identity per CZ-20 §5.11 test-provider instance, owning only its own key.
+  "czar-provider-a": ["K21a"],
+  "czar-provider-b": ["K21b"],
 } as const;
 
 /** Wraps a backend so a test can see whether it was ever asked to sign. */
@@ -357,6 +370,8 @@ export async function harness(
     nowMs?: () => number;
     /** Another backend in place of the local keystore (PM-017). */
     openBackend?: HarnessBackendFactory;
+    /** Also create the K21a and K21b test-provider keys (PM-058). Off by default: today's key set. */
+    providerKeys?: boolean;
   } = {},
 ) {
   const fs = memoryFs();
@@ -374,6 +389,8 @@ export async function harness(
   for (const id of ["K3", "K5", "K6", "K7", "K8", "K20", "relayer"] as const)
     await inner.createKey(id);
   await inner.createKey("K10", "czar-search");
+  if (options.providerKeys === true)
+    for (const id of ["K21a", "K21b"] as const) await inner.createKey(id);
   const { address: pocket } = await inner.createKey("K4");
   const { backend, calls } = spyBackend(inner);
   const state = defaultState(pocket);

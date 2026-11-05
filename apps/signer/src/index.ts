@@ -17,7 +17,7 @@ export {
   SELLER_PROOF_LIFETIME_SEC,
   usdcPaysGas,
 } from "./policy.ts";
-export type { Decision, PolicyContext, PurposeIds, SignerNetwork } from "./policy.ts";
+export type { Decision, PolicyContext, PurposeIds, SignerNetwork, SigningKey } from "./policy.ts";
 export type * from "./projection.ts";
 export { coerceArgs, parseRequest, SHAPES, ShapeError } from "./requests.ts";
 export * from "./service.ts";

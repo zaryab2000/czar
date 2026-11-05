@@ -919,6 +919,18 @@ exports[`registry > matches the dump snapshot 1`] = `
     "value": 300,
   },
   {
+    "key": "kms.maxSignaturesPerMin.K21a",
+    "source": "default",
+    "unit": "count",
+    "value": 60,
+  },
+  {
+    "key": "kms.maxSignaturesPerMin.K21b",
+    "source": "default",
+    "unit": "count",
+    "value": 60,
+  },
+  {
     "key": "kms.maxSignaturesPerMin.K3",
     "source": "default",
     "unit": "count",

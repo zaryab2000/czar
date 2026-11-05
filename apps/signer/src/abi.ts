@@ -56,6 +56,12 @@ export const JOB_ESCROW_ABI = parseAbi([
   "function reject(uint256 jobId, bytes32 reason, bytes optParams)",
 ]);
 
+/** The provider's ERC-8183 calls (`ICzarJobEscrow.sol`, base signatures unchanged), for `provider-call`. */
+export const JOB_ESCROW_PROVIDER_ABI = parseAbi([
+  "function setBudget(uint256 jobId, address token, uint256 amount, bytes optParams)",
+  "function submit(uint256 jobId, bytes32 deliverable, bytes optParams)",
+]);
+
 export const OEL_ABI = parseAbi([
   "function commit(uint8 kind, bytes32 root, bytes32 prev, bytes32 uriHash, string uri)",
   "function reveal(bytes32 intentRoot, bytes32 batchRoot, bytes32 uriHash, string uri)",
