@@ -1,0 +1,11 @@
+{
+  "_comment": "PM-014 smoke run only. Placeholder addresses on a local arc-anvil reporting chain 5042002; no contract is deployed at any of them and nothing is ever sent to them.",
+  "chainId": 5042002,
+  "CzarVaultFactory": "0x1111111111111111111111111111111111111111",
+  "OpenEvidenceLog": "0x2222222222222222222222222222222222222222",
+  "usdc": "0x3333333333333333333333333333333333333333",
+  "gatewayWallet": "0x4444444444444444444444444444444444444444",
+  "gatewayMinter": "0x5555555555555555555555555555555555555555",
+  "gatewayDomain": 26,
+  "jobEscrow": "0x6666666666666666666666666666666666666666"
+}

@@ -381,8 +381,16 @@ test("the shipped list names files only, with the signer's own UID on the signer
     const [name, service, , rowUid, requirement] = row;
     assert.match(name ?? "", /^czar-alpha-[a-z0-9-]+$/, `secret name: ${name}`);
     assert.ok(["required", "optional"].includes(requirement ?? ""), `requirement: ${requirement}`);
-    // SCR-170 §4: the signer image runs as 10002, every other Czar image as 10001.
-    const expected = service === "signer" ? "10002" : service === "backup" ? "0" : "10001";
+    // SCR-170 §4: the signer image runs as 10002, every other Czar image as 10001, and Postgres
+    // as its image's own user (999), which reads postgres-init's role passwords (PM-014).
+    const expected =
+      service === "signer"
+        ? "10002"
+        : service === "backup"
+          ? "0"
+          : service === "postgres-init"
+            ? "999"
+            : "10001";
     assert.equal(rowUid, expected, `wrong UID for ${service}: ${rowUid}`);
   }
   // The list holds names, never values: no row may carry anything that looks like one.

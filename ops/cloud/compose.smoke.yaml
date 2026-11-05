@@ -1,0 +1,256 @@
+# PM-014 smoke override: the cloud stack's start order and healthchecks on a developer machine,
+# with no cloud account and no Arc testnet traffic.
+#
+#   scripts/install-arc-foundry.sh        # the checksummed arc-anvil, once
+#   CZAR_IMAGE_TAG=<git-sha> docker compose \
+#     -f ops/cloud/compose.yaml -f ops/cloud/compose.smoke.yaml up --wait
+#   docker run --rm --network host curlimages/curl:<pinned> http://127.0.0.1:3000/health
+#   CZAR_IMAGE_TAG=<git-sha> docker compose \
+#     -f ops/cloud/compose.yaml -f ops/cloud/compose.smoke.yaml down --volumes
+#
+# Linux or OrbStack only: host networking must reach the host's loopback (Docker Desktop on macOS
+# does not).
+#
+# What runs: postgres and postgres-init exactly as in production; the server and signer images
+# running their real cloud entries through the smoke wrappers in ops/cloud/smoke/ (they inject a
+# chain client that talks to arc-anvil and nothing else; the cloud guard runs unchanged); the
+# pinned arc-anvil; a loopback Cloud KMS and metadata fake. The indexer, merchants and web are
+# moved to the `full` profile, so `up` leaves them out.
+#
+# What differs from the VM: credentials, the signer socket folder, the object store and the
+# Postgres data live in named volumes that smoke-prepare fills with random values and the VM's
+# owners and modes, in place of the host tmpfs and persistent disk. Each mount keeps its
+# production target, so every app reads the paths it reads on the VM.
+name: czar-smoke
+
+x-smoke-tools: &smoke-tools
+  type: bind
+  source: ./smoke
+  target: /app/ops/cloud/smoke
+  read_only: true
+
+x-smoke-config: &smoke-config
+  type: bind
+  source: ./smoke/cloud.smoke.toml
+  target: /etc/czar/cloud.toml
+  read_only: true
+
+x-smoke-deployment: &smoke-deployment
+  type: bind
+  source: ./smoke/deployment.smoke.json
+  target: /app/deployments/arc-testnet.json
+  read_only: true
+
+x-smoke-run: &smoke-run
+  type: volume
+  source: smoke-state
+  target: /run/czar/signer
+  volume:
+    subpath: run/signer
+
+services:
+  smoke-prepare:
+    image: czar-signer:${CZAR_IMAGE_TAG:?set CZAR_IMAGE_TAG to the commit build-all.sh tagged}
+    network_mode: host
+    restart: "no"
+    # Root, to create files owned by 999, 10001 and 10002 as secrets.list lists them.
+    user: "0:0"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+    entrypoint: ["/usr/bin/env"]
+    command:
+      - node
+      - --experimental-strip-types
+      - --disable-warning=ExperimentalWarning
+      - /app/ops/cloud/smoke/prepare.ts
+    healthcheck:
+      disable: true
+    volumes:
+      - *smoke-tools
+      - type: volume
+        source: smoke-state
+        target: /smoke
+
+  postgres:
+    volumes:
+      - type: volume
+        source: smoke-pgdata
+        target: /var/lib/postgresql/data
+
+  postgres-init:
+    volumes:
+      - type: volume
+        source: smoke-state
+        target: /run/czar/secrets/postgres-init
+        read_only: true
+        volume:
+          subpath: secrets/postgres-init
+    depends_on:
+      smoke-prepare:
+        condition: service_completed_successfully
+
+  arc-anvil:
+    # The arc-foundry binary scripts/install-arc-foundry.sh installs and checksums, never upstream
+    # anvil or foundryup. The signer image only supplies a glibc userland and node for the probe.
+    image: czar-signer:${CZAR_IMAGE_TAG:?set CZAR_IMAGE_TAG to the commit build-all.sh tagged}
+    network_mode: host
+    restart: "no"
+    user: "10001:10001"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    entrypoint: ["/usr/bin/env"]
+    command:
+      - /usr/local/bin/arc-anvil
+      - --network
+      - arc
+      - --chain-id
+      - "5042002"
+      - --host
+      - 127.0.0.1
+      - --port
+      - "8545"
+      - --mnemonic-random
+      - --quiet
+    volumes:
+      - type: bind
+        source: ${CZAR_ARC_ANVIL_BIN:-${HOME}/.local/bin/arc-anvil}
+        target: /usr/local/bin/arc-anvil
+        read_only: true
+    healthcheck:
+      # eth_chainId must be Arc testnet's, 5042002 (0x4cef52).
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          fetch("http://127.0.0.1:8545", {method: "POST", headers: {"content-type": "application/json"},
+          body: JSON.stringify({jsonrpc: "2.0", id: 1, method: "eth_chainId", params: []})})
+          .then((r) => r.json()).then((j) => process.exit(j.result === "0x4cef52" ? 0 : 1), () => process.exit(1))
+      interval: 1s
+      timeout: 2s
+      retries: 30
+
+  kms-fake:
+    image: czar-signer:${CZAR_IMAGE_TAG:?set CZAR_IMAGE_TAG to the commit build-all.sh tagged}
+    network_mode: host
+    restart: "no"
+    user: "10001:10001"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    entrypoint: ["/usr/bin/env"]
+    command:
+      - node
+      - --experimental-strip-types
+      - --disable-warning=ExperimentalWarning
+      - /app/ops/cloud/smoke/kms-fake.ts
+    environment:
+      # Its key list comes from this file, the one the signer reads.
+      CZAR_CLOUD_CONFIG: /etc/czar/cloud.toml
+      CZAR_SMOKE_KMS_PORT: "8931"
+    volumes:
+      - *smoke-tools
+      - *smoke-config
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          fetch("http://127.0.0.1:8931/health").then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))
+      interval: 1s
+      timeout: 2s
+      retries: 30
+
+  server:
+    command:
+      [
+        node,
+        --experimental-strip-types,
+        --disable-warning=ExperimentalWarning,
+        ops/cloud/smoke/server-smoke.ts,
+      ]
+    environment:
+      CZAR_SMOKE_ANVIL_URL: http://127.0.0.1:8545
+    volumes:
+      - *smoke-tools
+      - *smoke-config
+      - *smoke-deployment
+      - *smoke-run
+      - type: volume
+        source: smoke-state
+        target: /run/czar/secrets/server
+        read_only: true
+        volume:
+          subpath: secrets/server
+      - type: volume
+        source: smoke-state
+        target: /var/lib/czar/objects
+        volume:
+          subpath: objects
+    # No indexer in the smoke run; arc-anvil stands in for Arc testnet.
+    depends_on: !override
+      smoke-prepare:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
+      arc-anvil:
+        condition: service_healthy
+
+  signer:
+    command:
+      [
+        node,
+        --experimental-strip-types,
+        --disable-warning=ExperimentalWarning,
+        ops/cloud/smoke/signer-smoke.ts,
+      ]
+    environment:
+      CZAR_SMOKE_ANVIL_URL: http://127.0.0.1:8545
+    volumes:
+      - *smoke-tools
+      - *smoke-config
+      - *smoke-deployment
+      - *smoke-run
+      - type: volume
+        source: smoke-state
+        target: /run/czar/secrets/signer
+        read_only: true
+        volume:
+          subpath: secrets/signer
+    depends_on: !override
+      smoke-prepare:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
+      arc-anvil:
+        condition: service_healthy
+      kms-fake:
+        condition: service_healthy
+      # As in production and ops/local/process-compose.yaml.
+      server:
+        condition: service_healthy
+
+  indexer:
+    profiles: ["full"]
+  merchants:
+    profiles: ["full"]
+  web:
+    profiles: ["full"]
+
+volumes:
+  smoke-state:
+  smoke-pgdata:

@@ -13,8 +13,20 @@
 // The path itself is never printed: file paths are not in the logging allowlist
 // (cross-cutting §4).
 import { statSync } from "node:fs";
+import { createRequire } from "node:module";
 import process from "node:process";
-import { loadConfigFile, parameterEnvironment } from "@czar/config";
+import { pathToFileURL } from "node:url";
+
+// @czar/config is resolved through apps/signer's own dependencies. pnpm links workspace packages
+// only into the node_modules of the package that depends on them, so a bare import from this
+// folder (ops/cloud/docker/healthcheck/) fails with ERR_MODULE_NOT_FOUND on every run, and the
+// signer could never become healthy (PM-014).
+const signerRequire = createRequire(
+  new URL("../../../../apps/signer/package.json", import.meta.url),
+);
+const { loadConfigFile, parameterEnvironment } = await import(
+  pathToFileURL(signerRequire.resolve("@czar/config")).href
+);
 
 const pointer = process.env["CZAR_CLOUD_CONFIG"];
 if (pointer === undefined || pointer === "") {

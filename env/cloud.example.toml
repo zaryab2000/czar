@@ -16,6 +16,7 @@
 # tmpfs folder holding one file per credential, each 0400 and owned by the process that reads it.
 "deploy.credentialFilesDir" = "/run/czar/secrets"
 "deploy.backupRetentionDays" = 14
+# Relative to the images' working folder /app, where ops/cloud/compose.yaml mounts the file.
 "deploy.deploymentFile" = "deployments/arc-testnet.json"
 "deploy.objectStorePath" = "/var/lib/czar/objects"
 "deploy.indexerUrl" = "http://127.0.0.1:42069"
@@ -32,9 +33,14 @@
 "signer.kms.keyRing" = "czar-alpha"
 "signer.kms.pocketKeyRing" = "czar-alpha-pockets"
 # Key reference → full cryptoKeyVersions/N resource name. Filled after key creation (PM-018).
-# "signer.kms.keyVersions" = { K3 = "projects/.../cryptoKeyVersions/1" }
-# Group that may open the signer socket. Leave unset for today's owner-only socket.
-# "signer.socketGroupGid" = 10010
+# The key names inside the braces must be quoted: the parameter loader reads inline tables as JSON.
+# "signer.kms.keyVersions" = { "K3" = "projects/.../cryptoKeyVersions/1" }
+# The signer socket, in the host folder /run/czar/signer (0750, 10002:10010) that
+# ops/cloud/compose.yaml bind-mounts into the signer, the server and the merchants.
+"signer.socketPath" = "/run/czar/signer/signer.sock"
+# Group that may open the signer socket (czar-signer-clients, which UID 10001 joins). Unset keeps
+# today's owner-only socket, which no other container could open.
+"signer.socketGroupGid" = 10010
 
 # ── Model provider: off until it is connected deliberately ────────────────────
 "models.provider" = "none"
