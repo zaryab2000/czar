@@ -61,5 +61,9 @@ deployments/local-keys.json
 deployments/.vault-client-test*.json
 contracts/broadcast
 deployments/.run6-*
+# Signer local-chain harness files (run 2 writes per-key files such as .signer-k8-local.json;
+# an aborted run leaves them behind). They can hold key material: never commit them (PM-067).
+deployments/.signer-*
+
 # PM-010 verifier test: a local arc-anvil manifest, removed after the run
 deployments/.pm-010-test-*

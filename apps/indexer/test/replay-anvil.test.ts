@@ -211,10 +211,15 @@ async function installGatewayMocks(): Promise<void> {
     ["MockGatewayWallet", GATEWAY_WALLET],
     ["MockGatewayMinter", GATEWAY_MINTER],
   ] as const) {
-    const bytecode = execFileSync("arc-forge", ["inspect", name, "deployedBytecode"], {
-      cwd: CONTRACTS,
-      encoding: "utf8",
-    }).trim() as Hex;
+    // Honour ARC_FORGE so the pinned binary is used even when it is not on PATH (PM-067).
+    const bytecode = execFileSync(
+      process.env["ARC_FORGE"] ?? "arc-forge",
+      ["inspect", name, "deployedBytecode"],
+      {
+        cwd: CONTRACTS,
+        encoding: "utf8",
+      },
+    ).trim() as Hex;
     await test.setCode({ address, bytecode });
   }
   const supportedSlot = keccak256(
