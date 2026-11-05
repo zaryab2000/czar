@@ -66,4 +66,9 @@ describe("local process composition", () => {
   it("documents the single local stack start command", () => {
     expect(readme).toContain("process-compose -f ops/local/process-compose.yaml up");
   });
+
+  it("resolves the root-run K10 readiness script dependencies", () => {
+    expect(import.meta.resolve("@czar/config")).toContain("packages/config");
+    expect(import.meta.resolve("@czar/signer")).toContain("apps/signer");
+  });
 });

@@ -1,10 +1,8 @@
 version: "0.5"
-vars:
-  CZAR_ROOT: .
 processes:
   arc-anvil:
     command: arc-anvil --network arc --chain-id 5042002 --mnemonic-random --quiet --port 8545
-    working_dir: "{{.CZAR_ROOT}}"
+    working_dir: .
     readiness_probe:
       exec:
         command: >-
@@ -16,7 +14,7 @@ processes:
       timeout_seconds: 2
   circle-standins:
     command: node --disable-warning=ExperimentalWarning --experimental-strip-types ops/local/circle-standins/server.ts
-    working_dir: "{{.CZAR_ROOT}}"
+    working_dir: .
     environment:
       - CZAR_LOCAL_CONFIG=env/local.toml
       - CZAR_ARC_RPC_URL=http://127.0.0.1:8545
@@ -35,7 +33,7 @@ processes:
       timeout_seconds: 2
   postgres:
     command: docker compose -f ops/local/compose.yaml up postgres
-    working_dir: "{{.CZAR_ROOT}}"
+    working_dir: .
     readiness_probe:
       exec:
         command: docker compose -f ops/local/compose.yaml exec -T postgres pg_isready -U postgres
@@ -44,13 +42,13 @@ processes:
       timeout_seconds: 2
   deploy:
     command: bash ops/local/deploy.sh
-    working_dir: "{{.CZAR_ROOT}}"
+    working_dir: .
     depends_on:
       arc-anvil:
         condition: process_healthy
   indexer:
     command: pnpm --filter @czar/indexer start:local
-    working_dir: "{{.CZAR_ROOT}}"
+    working_dir: .
     environment:
       - CZAR_LOCAL_CONFIG=../../env/local.toml
       - CZAR_INDEXER_DEPLOYMENT_PATH=../../deployments/arc-local.json
@@ -75,13 +73,17 @@ processes:
       timeout_seconds: 2
   server:
     command: pnpm --filter @czar/server start:local
-    working_dir: "{{.CZAR_ROOT}}"
+    working_dir: .
     environment:
       - CZAR_LOCAL_CONFIG=../../env/local.toml
       - CZAR_DATABASE_URL=postgres://postgres@127.0.0.1:15433/postgres
       - CZAR_SERVER_PORT=3000
       - CZAR_ARC_RPC_URL=http://127.0.0.1:8545
       - CZAR_INDEXER_URL=http://127.0.0.1:42069
+      - CZAR_APP_CIRCLE_CLIENT_URL=http://127.0.0.1:4999
+      - CZAR_APP_CIRCLE_CLIENT_KEY=local-standin-public-client-key
+      - CZAR_APP_ARC_RPC_URL=http://127.0.0.1:8545
+      - CZAR_APP_ORIGIN=http://localhost:3001
     depends_on:
       postgres:
         condition: process_healthy
@@ -101,7 +103,7 @@ processes:
       timeout_seconds: 2
   social-worker:
     command: pnpm --filter @czar/server social:worker
-    working_dir: "{{.CZAR_ROOT}}"
+    working_dir: .
     environment:
       - CZAR_LOCAL_CONFIG=../../env/local.toml
       - CZAR_DATABASE_URL=postgres://postgres@127.0.0.1:15433/postgres
@@ -113,7 +115,7 @@ processes:
         condition: process_healthy
   signer:
     command: pnpm --filter @czar/signer start:local
-    working_dir: "{{.CZAR_ROOT}}"
+    working_dir: .
     environment:
       - CZAR_LOCAL_CONFIG=../../env/local.toml
       - CZAR_SIGNER_RPC_URL=http://127.0.0.1:8545
@@ -139,7 +141,7 @@ processes:
       timeout_seconds: 2
   merchant-k10-ready:
     command: node --disable-warning=ExperimentalWarning --experimental-strip-types ops/local/check-signer-k10.ts
-    working_dir: "{{.CZAR_ROOT}}"
+    working_dir: .
     environment:
       - CZAR_LOCAL_CONFIG=env/local.toml
     depends_on:
@@ -151,7 +153,7 @@ processes:
         condition: process_healthy
   merchants:
     command: pnpm --filter @czar/merchants start:local
-    working_dir: "{{.CZAR_ROOT}}"
+    working_dir: .
     environment:
       - CZAR_MERCHANT_PORT=8787
       - CZAR_LOCAL_CONFIG=../../env/local.toml
@@ -176,7 +178,7 @@ processes:
       timeout_seconds: 2
   social-fixture-merchants:
     command: pnpm --filter @czar/server social:fixture-merchants
-    working_dir: "{{.CZAR_ROOT}}"
+    working_dir: .
     depends_on:
       postgres:
         condition: process_healthy
