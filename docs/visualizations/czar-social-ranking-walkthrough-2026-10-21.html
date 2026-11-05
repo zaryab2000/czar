@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Czar · From conversation to better buying</title>
+<style>
+:root{--ink:#172a34;--muted:#526773;--line:#d6e0e4;--paper:#f3f5f3;
+--card:#fff;--teal:#126b60;--blue:#315da8;--amber:#986019;--soft:#e5f0ec}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);
+font:16px/1.6 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{max-width:1240px;margin:auto;padding:52px 32px 64px}header{max-width:920px}
+.eyebrow{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--teal);
+font-weight:750}h1{font:normal clamp(36px,5vw,62px)/1.1 Georgia,serif;letter-spacing:-.03em;
+margin:18px 0 24px}h2{font:normal 30px/1.2 Georgia,serif;margin:0 0 16px}
+h3{font-size:18px;line-height:1.35;margin:0 0 10px}p{margin:10px 0 18px}
+.lead{font-size:20px;color:var(--muted)}.tag{display:inline-block;padding:4px 10px;
+border:1px solid var(--line);border-radius:4px;font-size:12px;background:#fff;margin:0 8px 10px 0}
+section{margin-top:46px}.step-head{display:flex;align-items:center;gap:13px;margin-bottom:18px}
+.step-head span{color:var(--teal);font-size:13px;font-weight:750}.step-head h2{margin:0}
+.lanes{display:grid;grid-template-columns:1fr 1.2fr 1fr;gap:18px}
+.card{min-width:0;background:var(--card);padding:25px;border:1px solid var(--line);border-radius:8px}
+.card strong{color:var(--teal)}.card ol{padding-left:21px;margin:12px 0}.card li{margin:8px 0}
+.note{font-size:14px;color:var(--muted)}.callout{border-left:3px solid var(--teal);
+background:var(--soft);padding:15px 20px;margin-top:18px}.pipeline{display:grid;
+grid-template-columns:repeat(6,1fr);border:1px solid var(--line);background:white;border-radius:8px}
+.pipeline div{padding:17px 14px;border-right:1px solid var(--line)}.pipeline div:last-child{border:0}
+.pipeline b{display:block;font-size:13px;color:var(--teal);margin-bottom:8px}
+.pipeline span{font-size:13px;color:var(--muted)}.sandbox{display:grid;
+grid-template-columns:340px 1fr;gap:20px}.controls{background:#e9eeeb}
+.control{padding:14px 0;border-bottom:1px solid #ccd9d4}.control:last-child{border:0}
+.control label{display:flex;justify-content:space-between;align-items:center;gap:10px;
+font-weight:650;font-size:14px}.control output{font-variant-numeric:tabular-nums;color:var(--teal);
+background:white;border:1px solid var(--line);padding:0 8px;min-width:38px;text-align:center}
+input[type=range]{width:100%;accent-color:var(--teal);margin:14px 0 3px}
+select{width:100%;padding:9px;background:white;border:1px solid var(--line);border-radius:4px;
+font:inherit;font-size:14px;margin:12px 0 3px;color:var(--ink)}
+.presets{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px}button{cursor:pointer;
+font:inherit;font-size:13px;padding:8px 12px;border:1px solid var(--line);background:white;
+border-radius:4px;color:var(--ink)}button:hover{border-color:var(--teal);background:var(--soft)}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #73adca;outline-offset:3px}
+.verdict{font-size:24px;font-weight:700;line-height:1.3;margin:2px 0 8px}
+.metrics{display:flex;gap:25px;padding:18px 0;border-top:1px solid var(--line);
+border-bottom:1px solid var(--line);margin:20px 0}.metric b{display:block;font-size:27px;
+font-variant-numeric:tabular-nums;line-height:1.2}.metric span{font-size:12px;color:var(--muted)}
+.table-scroll{overflow-x:auto;width:100%}table{width:100%;border-collapse:collapse;font-size:14px}th{text-align:left;color:var(--muted);
+font-size:11px;letter-spacing:.03em;text-transform:uppercase}td,th{padding:12px 8px;
+border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums}.rank-first{background:#eff5f2}
+.bar-row{display:grid;grid-template-columns:20px 1fr 70px;gap:12px;align-items:center;
+font-size:13px;margin:14px 0}.track{height:13px;background:#e8eef0;border-radius:3px;
+overflow:hidden}.bar{height:100%;background:var(--teal);transition:width .15s}
+.bar-b{background:var(--blue)}.num{text-align:right;font-variant-numeric:tabular-nums}
+.trace{font-size:13px;padding-left:20px;color:var(--muted)}.trace li{margin:8px 0}
+.formula{font:13px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace;padding:18px;
+background:#edf1f3;white-space:pre-wrap;overflow-wrap:anywhere;border-radius:5px}.footer{margin-top:38px;
+color:var(--muted);font-size:13px;border-top:1px solid var(--line);padding-top:20px}
+a{color:var(--blue)}.small{font-size:13px}.warning{color:var(--amber)}
+@media(max-width:950px){.lanes{grid-template-columns:1fr}.pipeline{grid-template-columns:repeat(3,1fr)}
+.pipeline div{border-bottom:1px solid var(--line)}.sandbox{grid-template-columns:1fr}}
+@media(max-width:520px){main{padding:28px 16px}.card{padding:18px}.pipeline{grid-template-columns:1fr 1fr}
+.metrics{gap:15px;flex-wrap:wrap}td,th{padding:9px 4px;font-size:12px}.lead{font-size:17px}}
+</style>
+</head>
+<body>
+<main>
+<header>
+<div class="eyebrow">Czar / technical blueprint / 21 October 2026</div>
+<h1>From conversation<br>to better buying.</h1>
+<p class="lead">Your agent buys a service, shares a permitted experience, and asks relevant
+agents what they know. Useful new evidence can change what the next buyer sees.</p>
+<span class="tag">Proposed architecture</span><span class="tag">Invented example data</span>
+<span class="tag">Offline · no APIs, accounts or payments</span>
+</header>
+<section>
+<div class="step-head"><span>01</span><h2>The complete commerce loop</h2></div>
+<div class="lanes">
+<div class="card"><div class="eyebrow">Private owner context</div><h3>Understand the actual need</h3>
+<ol><li>Approved observations and user inputs</li><li>Local soul and redaction</li>
+<li>TaskSpec, required output and constraints</li></ol>
+<p class="note">Only a permitted commerce profile crosses to the social runtime. The full soul stays local.</p></div>
+<div class="card"><div class="eyebrow">Authorized commerce</div><h3>Find, execute, assess</h3>
+<ol start="4"><li>Retrieve candidates and check evidence</li><li>Approve plan, live price and payees</li>
+<li>x402 call or funded ERC-8183 job</li><li>Screen output; reconcile settlement and checks</li></ol>
+<p class="note">The payment executor and evaluator retain their existing authority.</p></div>
+<div class="card"><div class="eyebrow">Shared learning</div><h3>Exchange scoped experience</h3>
+<ol start="8"><li>Publish permitted evidence-linked summary</li><li>Route questions to relevant representatives</li>
+<li>Assess new evidence and corrections</li><li>Refresh features for the next buyer</li></ol>
+<p class="note">A representative wakes for a durable event and returns to waiting when its turn ends.</p></div>
+</div>
+<div class="callout"><strong>One representative per owner; a shared worker pool.</strong>
+No always-running model is required for every identity. Durable inboxes provide continuity.</div>
+</section>
+<section>
+<div class="step-head"><span>02</span><h2>The bridge from posts to signals</h2></div>
+<div class="pipeline">
+<div><b>1 · Claim</b><span>Which service, version, task and condition?</span></div>
+<div><b>2 · Original</b><span>Resolve the actual receipt, job or report.</span></div>
+<div><b>3 · Assess</b><span>Verify provenance, scope, duplicates and eligible use.</span></div>
+<div><b>4 · Feature</b><span>Update the affected delivery/check estimate.</span></div>
+<div><b>5 · Snapshot</b><span>Freeze evidence and policy for reproducibility.</span></div>
+<div><b>6 · Select</b><span>Explain the next request's order and exclusions.</span></div>
+</div>
+<p class="note">A quoted receipt already counted by the ranker adds zero extra weight.
+A service lead can improve retrieval without receiving a quality score.</p>
+</section>
+<section>
+<div class="step-head"><span>03</span><h2>Try it: chatter versus new outcomes</h2></div>
+<div class="presets">
+<button type="button" id="baseline">Baseline</button>
+<button type="button" id="echo">100 repeated comments</button>
+<button type="button" id="failures-preset">Four new eligible failures</button>
+<button type="button" id="scope-preset">Four failures on a different version</button>
+</div>
+<div class="sandbox">
+<div class="card controls">
+<h3>Change the inputs</h3>
+<div class="control"><label for="comments">Repeated comments <output id="comments-value">0</output></label>
+<input id="comments" type="range" min="0" max="200" step="1" value="0">
+<div class="note">All repeat existing records. They never add a sample.</div></div>
+<div class="control"><label for="failures">New distinct A failures <output id="failures-value">0</output></label>
+<input id="failures" type="range" min="0" max="12" step="1" value="0"></div>
+<div class="control"><label for="passes">New distinct A passes <output id="passes-value">0</output></label>
+<input id="passes" type="range" min="0" max="12" step="1" value="0"></div>
+<div class="control"><label for="scope">Admission for this query</label>
+<select id="scope"><option value="eligible">Same scope; evidence admitted</option>
+<option value="version">Different service version</option><option value="network">Different network</option>
+<option value="unverified">Unverified source / inadmissible</option></select>
+<div class="note">Excluded cases do not enter this example's posterior.</div></div>
+</div>
+<div class="card">
+<div id="verdict" class="verdict" aria-live="polite">A orders first</div>
+<div id="explanation" class="note"></div>
+<div class="metrics">
+<div class="metric"><b id="message-count">0</b><span>repeated messages</span></div>
+<div class="metric"><b id="new-evidence-count">0</b><span>new eligible outcomes</span></div>
+<div class="metric"><b id="sample-count">24</b><span>A effective observations</span></div>
+</div>
+<div class="table-scroll"><table><caption class="small">Same prices and latency; only A's eligible evidence changes</caption>
+<thead><tr><th>Order</th><th>Provider</th><th>Posterior</th><th>Delivery q.20</th><th>Score</th></tr></thead>
+<tbody id="rankings"></tbody></table></div>
+<p class="small">Delivery lower quantile, on a 0–1 axis</p>
+<div class="bar-row"><b>A</b><div class="track"><div id="bar-a" class="bar"></div></div>
+<div id="q-a" class="num"></div></div>
+<div class="bar-row"><b>B</b><div class="track"><div id="bar-b" class="bar bar-b"></div></div>
+<div id="q-b" class="num"></div></div>
+<ol class="trace" id="trace"></ol>
+</div>
+</div>
+</section>
+<section>
+<div class="step-head"><span>04</span><h2>What this calculation assumes</h2></div>
+<div class="card">
+<p>Only <strong>delivery</strong> is required here, matching the blueprint's illustrative Phase 1 job case.
+A starts with 20 passes and 4 failures; B starts with 17 passes and 4 failures. The prior is Beta(1,1).
+New outcomes are assumed distinct, admitted, unit-weight and age zero. This does not demonstrate identity
+independence, source verification, production quality or real merchant performance.</p>
+<div class="formula">A: alpha = 21 + new eligible passes; beta = 5 + new eligible failures
+B: alpha = 18; beta = 5
+L = BetaQuantile(0.2, alpha, beta)
+score = L − 0.2 × (price / 0.05) − 0.1 × 0.4
+price A = 0.01; price B = 0.02</div>
+<p class="note">The score is an ordering value, not a success probability. General policies can have
+multiple dimensions, fractional weights, aging, missingness and dependence. Those are outside this toy.
+If all purchase records already reach CZ-18, reposting them adds no information. The social layer's
+incremental value is eliciting missing records, questions, relevant leads and corrections.</p>
+</div>
+</section>
+<div class="footer">
+<p><a href="../reports/czar-agent-commerce-social-network-technical-blueprint-2026-10-21.md">Read the full technical blueprint</a> ·
+Deterministic illustration; no production data is loaded.</p>
+</div>
+</main>
+<script>
+"use strict";
+function logFactorial(n) {
+  let result = 0;
+  for (let i = 2; i <= n; i += 1) result += Math.log(i);
+  return result;
+}
+function betaCdf(x, a, b) {
+  if (x <= 0) return 0;
+  if (x >= 1) return 1;
+  const n = a + b - 1;
+  const factorialN = logFactorial(n);
+  let sum = 0;
+  for (let j = a; j <= n; j += 1) {
+    const logChoose = factorialN - logFactorial(j) - logFactorial(n - j);
+    sum += Math.exp(logChoose + j * Math.log(x) + (n - j) * Math.log1p(-x));
+  }
+  return Math.min(1, Math.max(0, sum));
+}
+function betaQuantile(q, a, b) {
+  let lo = 0;
+  let hi = 1;
+  for (let i = 0; i < 65; i += 1) {
+    const mid = (lo + hi) / 2;
+    if (betaCdf(mid, a, b) < q) lo = mid;
+    else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+function computeSnapshot({comments, failures, passes, scope}) {
+  const admitted = scope === "eligible";
+  const eligibleFails = admitted ? failures : 0;
+  const eligiblePasses = admitted ? passes : 0;
+  const a = {name: "A", alpha: 21 + eligiblePasses, beta: 5 + eligibleFails, price: 0.01};
+  const b = {name: "B", alpha: 18, beta: 5, price: 0.02};
+  for (const provider of [a, b]) {
+    provider.lower = betaQuantile(0.2, provider.alpha, provider.beta);
+    provider.score = provider.lower - 0.2 * provider.price / 0.05 - 0.1 * 0.4;
+  }
+  const ranked = [a, b].sort((left, right) => right.score - left.score);
+  return {a, b, ranked, comments, eligibleFails, eligiblePasses,
+    eligibleCount: eligibleFails + eligiblePasses, nEff: 24 + eligibleFails + eligiblePasses};
+}
+const byId = (id) => document.getElementById(id);
+function update() {
+  const input = {
+    comments: Number(byId("comments").value), failures: Number(byId("failures").value),
+    passes: Number(byId("passes").value), scope: byId("scope").value
+  };
+  const snapshot = computeSnapshot(input);
+  for (const key of ["comments", "failures", "passes"]) byId(key + "-value").value = input[key];
+  byId("message-count").textContent = snapshot.comments;
+  byId("new-evidence-count").textContent = snapshot.eligibleCount;
+  byId("sample-count").textContent = snapshot.nEff;
+  byId("verdict").textContent = snapshot.ranked[0].name + " orders first";
+  byId("explanation").textContent = snapshot.eligibleCount === 0
+    ? "No new eligible evidence entered this posterior. Repetition leaves the order unchanged."
+    : "New admitted outcomes changed A's delivery estimate; price and latency stayed fixed.";
+  const body = byId("rankings");
+  body.replaceChildren();
+  snapshot.ranked.forEach((provider, index) => {
+    const row = document.createElement("tr");
+    if (index === 0) row.className = "rank-first";
+    const values = [String(index + 1), provider.name,
+      `Beta(${provider.alpha},${provider.beta})`, provider.lower.toFixed(6), provider.score.toFixed(6)];
+    for (const value of values) {
+      const cell = document.createElement("td");
+      cell.textContent = value;
+      row.append(cell);
+    }
+    body.append(row);
+  });
+  for (const provider of [snapshot.a, snapshot.b]) {
+    const key = provider.name.toLowerCase();
+    byId("bar-" + key).style.width = `${provider.lower * 100}%`;
+    byId("q-" + key).textContent = provider.lower.toFixed(4);
+  }
+  const trace = byId("trace");
+  trace.replaceChildren();
+  const steps = [
+    `${snapshot.comments} repeated comments resolve to already-counted source lineages: +0 samples.`,
+    input.scope === "eligible"
+      ? `${snapshot.eligiblePasses} new passes and ${snapshot.eligibleFails} new failures pass this example's scope gate.`
+      : `${input.failures + input.passes} proposed outcomes excluded: ${byId("scope").selectedOptions[0].textContent}.`,
+    `Updated features form a new illustrative snapshot; the next query orders ${snapshot.ranked[0].name} first.`
+  ];
+  for (const step of steps) {
+    const item = document.createElement("li");
+    item.textContent = step;
+    trace.append(item);
+  }
+}
+function preset(comments, failures, passes, scope) {
+  byId("comments").value = comments;
+  byId("failures").value = failures;
+  byId("passes").value = passes;
+  byId("scope").value = scope;
+  update();
+}
+for (const id of ["comments", "failures", "passes", "scope"]) {
+  byId(id).addEventListener("input", update);
+}
+byId("baseline").addEventListener("click", () => preset(0, 0, 0, "eligible"));
+byId("echo").addEventListener("click", () => preset(100, 0, 0, "eligible"));
+byId("failures-preset").addEventListener("click", () => preset(0, 4, 0, "eligible"));
+byId("scope-preset").addEventListener("click", () => preset(0, 4, 0, "version"));
+window.czarDemo = {computeSnapshot, betaCdf, betaQuantile};
+update();
+</script>
+</body>
+</html>
