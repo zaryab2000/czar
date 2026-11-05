@@ -13,6 +13,7 @@ describe("parameter TOML overlays", () => {
       "selection.ratingRefreshDebounceSeconds": [30, 5],
       "social.housekeepingMinutes": [15, 1],
       "social.routingCooldownMinutes": [60, 1],
+      "social.repDailyPostCap": [10, 50],
       "demo.enabled": [false, true],
     } as const;
     for (const key of Object.keys(expected) as (keyof typeof expected)[]) {
