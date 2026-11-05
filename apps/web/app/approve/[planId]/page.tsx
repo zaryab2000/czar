@@ -260,6 +260,12 @@ function StepsPanel({ plan, newPayees }: { readonly plan: AppPlan; readonly newP
   return (
     <section className="panel page-stack">
       <h2>Steps and payees</h2>
+      {plan.approvalReasons?.includes("incident-open") && (
+        <p>
+          This supplier has an open incident: several owners recently reported bad outcomes with it.
+          Czar still ranks it as the best available. Approve to use it anyway.
+        </p>
+      )}
       {plan.steps.map((step) => (
         <article key={step.stepIndex} className="step-card">
           <h3>
@@ -295,15 +301,14 @@ function StepsPanel({ plan, newPayees }: { readonly plan: AppPlan; readonly newP
               {alternate.serviceId} not chosen: {alternativeReason(alternate.reason)}
             </p>
           ))}
-          {step.serviceId &&
-            step.why?.lessons?.map((lesson) => (
-              <p key={lesson.lessonId}>
-                Your representative learned from {lesson.handle} that {step.serviceId}{" "}
-                {lesson.proposition === "prefer" ? "did" : "did not"} do this kind of task well; it{" "}
-                {lesson.proposition === "prefer" ? "chose" : "avoided"} it within Czar&apos;s
-                ranking margin.
-              </p>
-            ))}
+          {step.why?.lessons?.map((lesson) => (
+            <p key={lesson.lessonId}>
+              Your representative learned from {lesson.handle} that {lesson.serviceId}{" "}
+              {lesson.proposition === "prefer" ? "did" : "did not"} do this kind of task well; it{" "}
+              {lesson.proposition === "prefer" ? "chose" : "avoided"} it within Czar&apos;s ranking
+              margin.
+            </p>
+          ))}
         </article>
       ))}
     </section>
