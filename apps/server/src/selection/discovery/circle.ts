@@ -119,6 +119,7 @@ export function createCircleDiscovery(options: CircleDiscoveryOptions) {
       if (!isObject(mapping)) return [];
       const items = await listings(capability, mapping);
       const maximum = Number(config.get("selection.circleDiscovery.maxCandidates"));
+      const probeLimit = Number(config.get("planner.probeTopK"));
       const selected: {
         listing: CircleListing;
         service: PlannerService;
@@ -130,7 +131,7 @@ export function createCircleDiscovery(options: CircleDiscoveryOptions) {
           report(mapped.reason, capability);
           continue;
         }
-        if (selected.length >= maximum) {
+        if (selected.length >= Math.min(maximum, probeLimit)) {
           report("cap", capability);
           continue;
         }
@@ -149,7 +150,7 @@ export function createCircleDiscovery(options: CircleDiscoveryOptions) {
             url: entry.service.resource.url,
             method: entry.listing.metadata.method === "POST" ? "POST" : "GET",
           },
-          schema: null,
+          schema: probed.extensions.bazaar?.schema ?? null,
         });
         try {
           await recordVersion({
@@ -196,6 +197,7 @@ async function fetchListings(input: {
   let offset = 0;
   let etag: string | null = null;
   let cacheControl = "";
+  let pagesRead = 0;
   for (let pageNumber = 0; pageNumber < maxPages; pageNumber += 1) {
     const url = discoveryUrl(
       input.baseUrl,
@@ -225,7 +227,8 @@ async function fetchListings(input: {
     if (response.status !== 200) throw new Error("Circle discovery did not return 200");
     const body = JSON.parse(Buffer.from(response.body).toString("utf8")) as unknown;
     const page = parsePage(body);
-    etag = response.headers["etag"] ?? etag;
+    pagesRead += 1;
+    if (pageNumber === 0) etag = response.headers["etag"] ?? null;
     cacheControl = response.headers["cache-control"] ?? cacheControl;
     for (const item of page.items) {
       const key = `${item.type}\0${item.resource}\0${item.metadata.method ?? "GET"}`;
@@ -234,7 +237,7 @@ async function fetchListings(input: {
     offset += page.pagination.limit;
     if (offset >= page.pagination.total) break;
   }
-  return refreshCache([...items.values()], etag, cacheControl, input);
+  return refreshCache([...items.values()], pagesRead === 1 ? etag : null, cacheControl, input);
 }
 
 function discoveryUrl(
