@@ -270,7 +270,7 @@ OPS-01..05 ──┼─> OPS-06..10 ─> OPS-11 (real payment) ─┐
 |---|---|---|---|---|---|---|---|---|---|---|
 | SPEC-01 | **SCR-181: browser "New task."** Covers: session-authenticated objective route (no device token); capability picker; form fields; size limits on pasted source; redaction and privacy rules for server-side intake; rate limits; state shown back to the browser | P0 | 0 | — | CL | CL | review | | SCR merged into `build-v1` | Unblocks UX-01..04, BR-02 |
 | SPEC-02 | **SCR-182: audit merchants A and B.** Covers: catalog entries; request shape (POST body with source or address); audit-report result schema; result check; prices; payout key references; task class `smart-contract-audit`; model choice and spend caps; prompt safety | P0 | 0 | — | CL | CL | review | | SCR merged | Unblocks MR-*, BR-01, BR-03, BR-04 |
-| SPEC-03 | **SCR-183: demo seeding, timing and reset.** Covers: a cloud-safe controlled seed (testnet-only guard plus an explicit demo flag); exact seed history for A and B; the "Czar test agent" label; demo timing overlay keys and values; reset scope | P0 | 0 | — | CL | | todo | | SCR merged | Unblocks SOC-02, SOC-06, SEL-01, SEL-04, DEMO-01, DEMO-03, UX-07 |
+| SPEC-03 | **SCR-183: demo seeding, timing and reset.** Covers: a cloud-safe controlled seed (testnet-only guard plus an explicit demo flag); exact seed history for A and B; the "Czar test agent" label; demo timing overlay keys and values; reset scope | P0 | 0 | — | CL | CL | review | | SCR merged | Unblocks SOC-02, SOC-06, SEL-01, SEL-04, DEMO-01, DEMO-03, UX-07 |
 | SPEC-04 | Production spec-gap bundle: lab seed name vs secret rule, second payee key reference, per-service lab price, RPC URLs as pointers, credential-list format, proxy body-cap key | P2 | — | — | CL | | todo | | SCR merged | Recorded in PR #227 |
 
 ### C10. Optional: live merchant ranking UI
@@ -339,3 +339,4 @@ OPS-01..05 ──┼─> OPS-06..10 ─> OPS-11 (real payment) ─┐
 | 2026-11-05 | Tracker created from the Demo v1 plan and decisions DD-01 to DD-06 | CL |
 | 2026-11-05 | Packages 1 and 2 delegated to COL (12 rows); SPEC-01 to SPEC-03 reserved as SCR-181, SCR-182, SCR-183 | CL |
 | 2026-11-05 | SCR-181 and SCR-182 filed; UX-01 delegated to COL so Package 2 needs nothing from CL; MR-03 is now the two K10 signer keys | CL |
+| 2026-11-05 | SCR-183 filed (demo seeding, timing, reset) | CL |
