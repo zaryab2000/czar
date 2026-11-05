@@ -104,6 +104,18 @@ body {
   gap: 24px;
 }
 
+.social-post-heading,
+.social-post-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.social-post-heading time {
+  margin-left: auto;
+}
+
 .balance-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);

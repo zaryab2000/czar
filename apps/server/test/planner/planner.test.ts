@@ -7,6 +7,7 @@ import {
   computeObjectiveGatewayVolume,
   createPlanner,
   recomputePlanHash,
+  type PlannerDependencies,
 } from "#src/planner/index";
 import { createSafeProber } from "#src/planner/probe";
 import { createRegisteredSelection } from "#src/selection/registered/index";
@@ -76,6 +77,9 @@ function makePlanner(
     readonly health?: PlannerPorts["health"];
     readonly remaining?: string;
     readonly unrated?: boolean;
+    readonly explorationId?: string;
+    readonly failedProbeIds?: readonly string[];
+    readonly social?: PlannerDependencies["social"];
   } = {},
 ) {
   const spec = {
@@ -91,13 +95,14 @@ function makePlanner(
   });
   const planner = createPlanner({
     config,
+    ...(options.social ? { social: options.social } : {}),
     ports: {
       ranking: {
         rank: async (query) => {
           options.rankingQueries?.push(query);
           return {
             schemaVersion: "1.3",
-            query_id: "query-1",
+            query_id: "00000000-0000-4000-8000-000000000001",
             received_at: "2026-10-21T00:00:00Z",
             policy_version: "test",
             snapshot_id: "snap_1",
@@ -110,7 +115,7 @@ function makePlanner(
               (_, index) => ({
                 rank: index + 1,
                 service_id: `svc_${String.fromCharCode(97 + index).repeat(32)}`,
-                version_id: "svcver_1",
+                version_id: `ver_${"a".repeat(32)}`,
                 score: 0.9,
                 features: {},
                 evidence_refs: [],
@@ -120,23 +125,24 @@ function makePlanner(
                 explanation: "ranked",
               }),
             ),
-            unverified: options.unrated
-              ? [
-                  {
-                    service_id: fakeService().serviceId,
-                    version_id: `ver_${"0".repeat(32)}`,
-                    reason: "unrated",
-                    n_eff: 0,
-                  },
-                ]
-              : [],
+            unverified:
+              options.unrated || options.explorationId
+                ? [
+                    {
+                      service_id: options.explorationId ?? fakeService().serviceId,
+                      version_id: `ver_${"0".repeat(32)}`,
+                      reason: "unrated",
+                      n_eff: 0,
+                    },
+                  ]
+                : [],
             missing_dimensions_for_class: [],
             insufficient_evidence: options.unrated ?? false,
-            ...(options.unrated
+            ...(options.unrated || options.explorationId
               ? {
                   exploration_slot: {
-                    service_id: fakeService().serviceId,
-                    reason: "no-ranked-candidate",
+                    service_id: options.explorationId ?? fakeService().serviceId,
+                    reason: options.explorationId ? "explicit-exploration" : "no-ranked-candidate",
                   },
                 }
               : {}),
@@ -164,6 +170,8 @@ function makePlanner(
         probe: async (resource, probeInput) => {
           options.probeCalls?.push({ resource, ...(probeInput ? { probeInput } : {}) });
           const id = resource.url.split("/").at(-1) ?? serviceId;
+          if (options.failedProbeIds?.includes(id))
+            return { ok: false as const, reason: "unavailable" as const };
           const live = {
             ...offer,
             amount: options.amount ?? offer.amount,
@@ -354,6 +362,167 @@ describe("planner fallback", () => {
     const built = await makePlanner({ remaining: "999999999" });
     expect(built?.plan.approvalReasons).toBeUndefined();
     expect(built?.approvalNeeded).toBe(false);
+  });
+
+  it("holds earned allowance for a ranked supplier with an open incident", async () => {
+    const social: NonNullable<PlannerDependencies["social"]> = {
+      lessonsFor: async () => [],
+      openIncidentsFor: async () => [
+        {
+          incidentId: "inc_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
+          serviceId,
+          versionId: `ver_${"a".repeat(32)}`,
+          distinctOwners: 3,
+          negativeUnits: 3,
+          openedAt: "2026-10-20T00:00:00.000Z",
+        },
+      ],
+    };
+    const built = await makePlanner({ remaining: "999999999", social });
+    expect(built?.plan.schemaVersion).toBe("1.4");
+    expect(built?.plan.approvalReasons).toEqual(["incident-open"]);
+    expect(built?.approvalNeeded).toBe(true);
+    expect(built?.plan.rankingDecisionIds).toEqual(["00000000-0000-4000-8000-000000000001"]);
+  });
+
+  it("holds an exploration supplier on its stored unverified version", async () => {
+    const social: NonNullable<PlannerDependencies["social"]> = {
+      lessonsFor: async () => [],
+      openIncidentsFor: async () => [
+        {
+          incidentId: "inc_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
+          serviceId,
+          versionId: `ver_${"0".repeat(32)}`,
+          distinctOwners: 3,
+          negativeUnits: 3,
+          openedAt: "2026-10-20T00:00:00.000Z",
+        },
+      ],
+    };
+    const built = await makePlanner({ remaining: "999999999", unrated: true, social });
+    expect(built?.plan.approvalReasons).toContain("incident-open");
+    expect(built?.approvalNeeded).toBe(true);
+  });
+
+  it("names the passed-over supplier in an avoid lesson explanation", async () => {
+    const social: NonNullable<PlannerDependencies["social"]> = {
+      lessonsFor: async () => [
+        {
+          lessonId: "les_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
+          serviceId,
+          handle: "Rep-ABCD",
+          proposition: "avoid",
+          taskClass: "data-json.search",
+          strength: 1,
+        },
+      ],
+      openIncidentsFor: async () => [],
+    };
+    const built = await makePlanner({ candidateCount: 2, social });
+    const step = built?.plan.steps[0];
+    expect(step?.serviceId).toBe(`svc_${"b".repeat(32)}`);
+    expect(step?.why?.lessons?.[0]).toMatchObject({
+      proposition: "avoid",
+      serviceId,
+    });
+    expect(step?.why?.lessons?.[0]?.serviceId).not.toBe(step?.serviceId);
+  });
+
+  it("names the selected supplier in a prefer lesson explanation", async () => {
+    const preferred = `svc_${"b".repeat(32)}`;
+    const social: NonNullable<PlannerDependencies["social"]> = {
+      lessonsFor: async () => [
+        {
+          lessonId: "les_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
+          serviceId: preferred,
+          handle: "Rep-ABCD",
+          proposition: "prefer",
+          taskClass: "data-json.search",
+          strength: 1,
+        },
+      ],
+      openIncidentsFor: async () => [],
+    };
+    const built = await makePlanner({ candidateCount: 2, social });
+    const step = built?.plan.steps[0];
+    expect(step?.serviceId).toBe(preferred);
+    expect(step?.why?.lessons?.[0]).toMatchObject({
+      proposition: "prefer",
+      serviceId: preferred,
+    });
+  });
+
+  it("does not let a lesson promote a probed unverified exploration supplier", async () => {
+    const explorationId = `svc_${"c".repeat(32)}`;
+    const probes: Array<{ resource: PlannerService["resource"] }> = [];
+    const social: NonNullable<PlannerDependencies["social"]> = {
+      lessonsFor: async () => [
+        {
+          lessonId: "les_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
+          serviceId: explorationId,
+          handle: "Rep-ABCD",
+          proposition: "prefer",
+          taskClass: "data-json.search",
+          strength: 1,
+        },
+      ],
+      openIncidentsFor: async () => [],
+    };
+    const built = await makePlanner({
+      candidateCount: 2,
+      explorationId,
+      social,
+      probeCalls: probes,
+    });
+    expect(probes.map((probe) => probe.resource.url.split("/").at(-1))).toContain(explorationId);
+    expect(built?.plan.steps[0]?.serviceId).toBe(serviceId);
+    expect(built?.plan.steps[0]?.why?.lessons).toBeUndefined();
+  });
+
+  it("does not promote a preferred supplier outside the top three probes", async () => {
+    const outside = `svc_${"d".repeat(32)}`;
+    const probes: Array<{ resource: PlannerService["resource"] }> = [];
+    const social: NonNullable<PlannerDependencies["social"]> = {
+      lessonsFor: async () => [
+        {
+          lessonId: "les_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
+          serviceId: outside,
+          handle: "Rep-ABCD",
+          proposition: "prefer",
+          taskClass: "data-json.search",
+          strength: 1,
+        },
+      ],
+      openIncidentsFor: async () => [],
+    };
+    const built = await makePlanner({ candidateCount: 4, social, probeCalls: probes });
+    expect(probes.map((probe) => probe.resource.url.split("/").at(-1))).toEqual([
+      serviceId,
+      `svc_${"b".repeat(32)}`,
+      `svc_${"c".repeat(32)}`,
+    ]);
+    expect(built?.plan.steps[0]?.serviceId).toBe(serviceId);
+    expect(built?.plan.steps[0]?.why?.lessons).toBeUndefined();
+  });
+
+  it("does not promote a preferred supplier whose live probe failed", async () => {
+    const failed = `svc_${"b".repeat(32)}`;
+    const social: NonNullable<PlannerDependencies["social"]> = {
+      lessonsFor: async () => [
+        {
+          lessonId: "les_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
+          serviceId: failed,
+          handle: "Rep-ABCD",
+          proposition: "prefer",
+          taskClass: "data-json.search",
+          strength: 1,
+        },
+      ],
+      openIncidentsFor: async () => [],
+    };
+    const built = await makePlanner({ candidateCount: 2, social, failedProbeIds: [failed] });
+    expect(built?.plan.steps[0]?.serviceId).toBe(serviceId);
+    expect(built?.plan.steps[0]?.why?.lessons).toBeUndefined();
   });
 
   it("adds a health reason for the owner and excludes H4-blocked suppliers", async () => {

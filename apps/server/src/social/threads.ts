@@ -1,6 +1,7 @@
 import type { Pool } from "pg";
 import { validateSocialThreadProjection, type SocialThreadProjection } from "@czar/schemas";
 import { day } from "#src/social/posts";
+import { isPublicContentSafe } from "#src/social/projection/denylist";
 
 interface ThreadRow {
   thread_id: string;
@@ -38,6 +39,47 @@ export function projectThread(row: ThreadRow): SocialThreadProjection {
   return thread;
 }
 
+async function incidentSubjectLabels(
+  pool: Pool,
+  incidentIds: readonly string[],
+): Promise<Map<string, string[]>> {
+  const labels = new Map<string, string[]>();
+  const invalid = new Set<string>();
+  if (incidentIds.length === 0) return labels;
+  const result = await pool.query<{
+    incident_id: string;
+    labels: unknown;
+  }>(
+    `SELECT DISTINCT i.incident_id,o.objective_id,
+       social_objective_subject_labels(o.objective_id) AS labels
+     FROM social_incidents i JOIN social_observation_projection o
+       ON o.network=i.network AND o.service_id=i.service_id
+       AND o.version_id=i.version_id AND o.task_class=i.task_class
+     WHERE i.incident_id=ANY($1::text[]) AND o.objective_id IS NOT NULL
+       AND o.settled_at IS NOT NULL AND o.released_at IS NULL`,
+    [incidentIds],
+  );
+  for (const row of result.rows) {
+    if (!Array.isArray(row.labels) || !row.labels.every((label) => typeof label === "string")) {
+      invalid.add(row.incident_id);
+      labels.delete(row.incident_id);
+      continue;
+    }
+    if (invalid.has(row.incident_id)) continue;
+    labels.set(row.incident_id, [...(labels.get(row.incident_id) ?? []), ...row.labels]);
+  }
+  return labels;
+}
+
+function publicThreadSafe(
+  thread: SocialThreadProjection,
+  incidentLabels: Map<string, string[]>,
+): boolean {
+  const labels = thread.incidentId ? incidentLabels.get(thread.incidentId) : [];
+  if (!labels) return false;
+  return isPublicContentSafe([thread.serviceId, thread.taskClass, thread.capabilityTag], labels);
+}
+
 export async function getThread(
   pool: Pool,
   threadId: string,
@@ -45,7 +87,11 @@ export async function getThread(
   const result = await pool.query<ThreadRow>("SELECT * FROM social_threads WHERE thread_id=$1", [
     threadId,
   ]);
-  return result.rows[0] ? projectThread(result.rows[0]) : null;
+  const row = result.rows[0];
+  if (!row) return null;
+  const thread = projectThread(row);
+  const labels = await incidentSubjectLabels(pool, thread.incidentId ? [thread.incidentId] : []);
+  return publicThreadSafe(thread, labels) ? thread : null;
 }
 
 export async function listThreads(
@@ -73,8 +119,13 @@ export async function listThreads(
     ],
   );
   const rows = result.rows.slice(0, options.limit);
+  const threads = rows.map(projectThread);
+  const labels = await incidentSubjectLabels(
+    pool,
+    threads.flatMap((thread) => (thread.incidentId ? [thread.incidentId] : [])),
+  );
   return {
-    items: rows.map(projectThread),
+    items: threads.filter((thread) => publicThreadSafe(thread, labels)),
     nextCursor: result.rows.length > options.limit ? (rows.at(-1)?.thread_id ?? null) : null,
   };
 }
@@ -113,6 +164,15 @@ export function projectIncident(row: IncidentRow): Record<string, unknown> {
   };
 }
 
+function publicIncidentSafe(
+  incident: Record<string, unknown>,
+  incidentLabels: Map<string, string[]>,
+): boolean {
+  const labels = incidentLabels.get(String(incident["incidentId"]));
+  if (!labels) return false;
+  return isPublicContentSafe([incident["serviceId"], incident["taskClass"]], labels);
+}
+
 export async function listIncidents(
   pool: Pool,
   options: {
@@ -132,8 +192,13 @@ export async function listIncidents(
     [options.state ?? null, options.network ?? null, options.cursor ?? null, options.limit + 1],
   );
   const rows = result.rows.slice(0, options.limit);
+  const incidents = rows.map(projectIncident);
+  const labels = await incidentSubjectLabels(
+    pool,
+    rows.map((row) => row.incident_id),
+  );
   return {
-    items: rows.map(projectIncident),
+    items: incidents.filter((incident) => publicIncidentSafe(incident, labels)),
     nextCursor: result.rows.length > options.limit ? (rows.at(-1)?.incident_id ?? null) : null,
   };
 }
@@ -146,5 +211,9 @@ export async function getIncident(
     "SELECT * FROM social_incidents WHERE incident_id=$1 AND thread_id IS NOT NULL",
     [incidentId],
   );
-  return result.rows[0] ? projectIncident(result.rows[0]) : null;
+  const row = result.rows[0];
+  if (!row) return null;
+  const incident = projectIncident(row);
+  const labels = await incidentSubjectLabels(pool, [row.incident_id]);
+  return publicIncidentSafe(incident, labels) ? incident : null;
 }

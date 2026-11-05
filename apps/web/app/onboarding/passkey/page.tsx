@@ -71,7 +71,7 @@ export default function PasskeyOnboardingPage() {
 
   return (
     <section className="welcome-card page-stack">
-      <p className="eyebrow">Step 1 of 4</p>
+      <p className="eyebrow">Step 1 of 5</p>
       <h1 className="czar-title">Create your account</h1>
       <p>Your passkey stays with your browser. Czar never receives a password or seed phrase.</p>
       {error && <p role="alert">{error}</p>}

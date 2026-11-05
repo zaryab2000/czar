@@ -22,6 +22,7 @@ export function AppShell({ children }: { readonly children: React.ReactNode }) {
   const publishPendingCount = useCallback((count: number) => setPendingCount(count), []);
   const isWelcome = pathname === "/" || pathname.startsWith("/onboarding/");
   const setupRequired = signedIn && me !== undefined && !me.vaultCreated;
+  const isSocial = pathname === "/social" || pathname.startsWith("/social/");
 
   const refreshAccount = useCallback(async () => {
     try {
@@ -82,6 +83,7 @@ export function AppShell({ children }: { readonly children: React.ReactNode }) {
             <a href="/approvals">Approvals</a>
             <a href="/envelopes">Envelopes</a>
             <a href="/receipts">Receipts</a>
+            <a href="/social">Social</a>
             <a href="/settings/privacy">Settings</a>
           </nav>
           {signedIn && (
@@ -109,7 +111,7 @@ export function AppShell({ children }: { readonly children: React.ReactNode }) {
       )}
       <PendingCountContext.Provider value={publishPendingCount}>
         <main className="czar-main">
-          {setupRequired && !pathname.startsWith("/onboarding/") ? (
+          {setupRequired && !isWelcome && !isSocial ? (
             <section className="welcome-card">
               <h1 className="czar-title">Finish setting up your vault</h1>
               <p>Payments and approvals stay unavailable until your vault is ready.</p>

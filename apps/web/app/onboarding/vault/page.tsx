@@ -53,7 +53,7 @@ export default function VaultOnboardingPage() {
   const hasNetworkFees = canCreateVault(data);
   return (
     <section className="welcome-card page-stack">
-      <p className="eyebrow">Step 2 of 4</p>
+      <p className="eyebrow">Step 2 of 5</p>
       <h1 className="czar-title">Create your vault</h1>
       <p>Setting up your vault on Arc. This takes a few seconds.</p>
       {data.vaultCreated ? (

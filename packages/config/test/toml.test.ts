@@ -35,6 +35,16 @@ describe("parameter TOML overlays", () => {
     });
   });
 
+  it("parses formatter-produced multiline arrays with a trailing comma", () => {
+    expect(
+      parseParameterToml(
+        '"fetch.localMerchantOrigins" = [\n"http://127.0.0.1:8787",\n"http://127.0.0.1:8788",\n]',
+      ),
+    ).toEqual({
+      "fetch.localMerchantOrigins": ["http://127.0.0.1:8787", "http://127.0.0.1:8788"],
+    });
+  });
+
   it("rejects malformed, duplicate, and non-JSON-compatible values", () => {
     expect(() => parseParameterToml("fetch.localMerchantOrigins = []")).toThrow(/line 1/);
     expect(() => parseParameterToml('"api.pageMinLimit" = 1\n"api.pageMinLimit" = 2')).toThrow(

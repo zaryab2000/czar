@@ -1,0 +1,25 @@
+{
+  "mode": "incident",
+  "controlled": true,
+  "injected": ["ranking candidates and scores", "directory entries", "probe outcomes"],
+  "live": ["incident and lesson reads", "planner build", "persisted plan", "approval API"],
+  "ranked": [
+    {
+      "rank": 1,
+      "serviceId": "svc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "score": 0.9,
+      "badges": []
+    },
+    {
+      "rank": 2,
+      "serviceId": "svc_223349701b9428c8a6dc42d8a7c99c4a",
+      "score": 0.95,
+      "badges": ["incident-open"]
+    }
+  ],
+  "selectedServiceId": "svc_223349701b9428c8a6dc42d8a7c99c4a",
+  "approvalReasons": ["incident-open"],
+  "lessons": [],
+  "planId": "pln_01M6N0M8BZ71N3WBP23VFQJCEZ",
+  "planHash": "0xee7847f858b34861094dfbac85aead35f8d6881a5f5fd1af66b57c56844b6633"
+}

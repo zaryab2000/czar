@@ -170,6 +170,43 @@ describe("planner persistence", () => {
       OBJECTIVE,
     ]);
     expect(row.rows[0]?.state).toBe("no-supplier");
+    const event = await pool().query<{ name: string; objective_id: string; payload: object }>(
+      "SELECT name,objective_id,payload FROM outbox_events WHERE name='objective.no-supplier'",
+    );
+    expect(event.rows).toEqual([
+      { name: "objective.no-supplier", objective_id: OBJECTIVE, payload: {} },
+    ]);
+  });
+
+  it("rolls back the no-supplier transition when its event insert fails", async () => {
+    await seedObjective();
+    await pool().query(
+      `CREATE FUNCTION reject_social_no_supplier() RETURNS trigger LANGUAGE plpgsql AS $$
+         BEGIN IF NEW.name = 'objective.no-supplier' THEN
+           RAISE EXCEPTION 'injected no-supplier insert failure';
+         END IF; RETURN NEW; END $$`,
+    );
+    await pool().query(
+      `CREATE TRIGGER reject_social_no_supplier BEFORE INSERT ON outbox_events
+       FOR EACH ROW EXECUTE FUNCTION reject_social_no_supplier()`,
+    );
+    try {
+      await expect(operations(async () => null).planObjective(OBJECTIVE)).rejects.toThrow(
+        "injected no-supplier insert failure",
+      );
+      const state = await pool().query<{ state: string }>(
+        "SELECT state FROM objectives WHERE objective_id=$1",
+        [OBJECTIVE],
+      );
+      expect(state.rows[0]?.state).toBe("planning");
+      const events = await pool().query(
+        "SELECT 1 FROM outbox_events WHERE name='objective.no-supplier'",
+      );
+      expect(events.rowCount).toBe(0);
+    } finally {
+      await pool().query("DROP TRIGGER reject_social_no_supplier ON outbox_events");
+      await pool().query("DROP FUNCTION reject_social_no_supplier()");
+    }
   });
 
   it("moves to opening when the plan needs no approval", async () => {

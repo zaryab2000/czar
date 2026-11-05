@@ -1,0 +1,502 @@
+{
+  "network": "eip155:5042002",
+  "owners": [
+    {
+      "key": "owner-one",
+      "controlled": true,
+      "sharing": "structured"
+    },
+    {
+      "key": "owner-two",
+      "controlled": true,
+      "sharing": "structured"
+    },
+    {
+      "key": "owner-three",
+      "controlled": true,
+      "sharing": "structured"
+    }
+  ],
+  "suppliers": [
+    {
+      "key": "incident-search",
+      "serviceId": "svc_223349701b9428c8a6dc42d8a7c99c4a",
+      "registration": "env/local.toml",
+      "resource": {
+        "url": "http://127.0.0.1:8787/v1/search",
+        "method": "GET"
+      },
+      "capability": "web-search",
+      "taskClass": "data-json.search",
+      "serviceName": "incident-search",
+      "probeInput": {
+        "query": {
+          "q": "czar probe"
+        }
+      },
+      "capabilities": ["web-search"]
+    },
+    {
+      "key": "comparison-search",
+      "serviceId": "svc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "registration": "fixture-only",
+      "resource": {
+        "url": "http://127.0.0.1:8788/v1/search",
+        "method": "GET"
+      },
+      "capability": "web-search",
+      "taskClass": "data-json.search",
+      "serviceName": "comparison-search",
+      "probeInput": {
+        "query": {
+          "q": "czar probe"
+        }
+      },
+      "capabilities": ["web-search"]
+    },
+    {
+      "key": "lesson-search",
+      "serviceId": "svc_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "registration": "fixture-only",
+      "resource": {
+        "url": "http://127.0.0.1:8789/v1/search",
+        "method": "GET"
+      },
+      "capability": "web-search",
+      "taskClass": "data-json.search",
+      "serviceName": "lesson-search",
+      "probeInput": {
+        "query": {
+          "q": "czar probe"
+        }
+      },
+      "capabilities": ["web-search"]
+    }
+  ],
+  "experiences": [
+    {
+      "key": "incident-one",
+      "phase": "initial",
+      "owner": "owner-one",
+      "supplier": "incident-search",
+      "objectiveState": "failed",
+      "taskSpec": {
+        "kind": "table-fill",
+        "subjects": [
+          {
+            "label": "Acme Corp"
+          }
+        ],
+        "fileName": "pricing.md",
+        "output": {
+          "format": "markdown-table",
+          "formatSource": "file"
+        },
+        "schemaVersion": "1.1",
+        "topic": "Controlled search fixture",
+        "fields": ["Result"],
+        "sourceTrust": "user-file"
+      },
+      "step": {
+        "stepIndex": 0,
+        "kind": "x402-exact",
+        "unitAmount": "100000"
+      },
+      "observations": [
+        {
+          "callIndex": 0,
+          "delivered": 0,
+          "settledDaysAgo": 3
+        }
+      ],
+      "rating": {
+        "value": "bad",
+        "surface": "web"
+      }
+    },
+    {
+      "key": "incident-two",
+      "phase": "initial",
+      "owner": "owner-two",
+      "supplier": "incident-search",
+      "objectiveState": "failed",
+      "taskSpec": {
+        "kind": "table-fill",
+        "output": {
+          "format": "markdown-table",
+          "formatSource": "default"
+        },
+        "schemaVersion": "1.1",
+        "topic": "Controlled search fixture",
+        "subjects": [
+          {
+            "label": "Synthetic example"
+          }
+        ],
+        "fields": ["Result"],
+        "sourceTrust": "user-prompt"
+      },
+      "step": {
+        "stepIndex": 0,
+        "kind": "x402-exact",
+        "unitAmount": "100000"
+      },
+      "observations": [
+        {
+          "callIndex": 0,
+          "delivered": 0,
+          "settledDaysAgo": 3
+        }
+      ],
+      "rating": {
+        "value": "bad",
+        "surface": "web"
+      }
+    },
+    {
+      "key": "incident-three",
+      "phase": "initial",
+      "owner": "owner-three",
+      "supplier": "incident-search",
+      "objectiveState": "failed",
+      "taskSpec": {
+        "kind": "table-fill",
+        "output": {
+          "format": "markdown-table",
+          "formatSource": "default"
+        },
+        "schemaVersion": "1.1",
+        "topic": "Controlled search fixture",
+        "subjects": [
+          {
+            "label": "Synthetic example"
+          }
+        ],
+        "fields": ["Result"],
+        "sourceTrust": "user-prompt"
+      },
+      "step": {
+        "stepIndex": 0,
+        "kind": "x402-exact",
+        "unitAmount": "100000"
+      },
+      "observations": [
+        {
+          "callIndex": 0,
+          "delivered": 0,
+          "settledDaysAgo": 3
+        }
+      ],
+      "rating": {
+        "value": "bad",
+        "surface": "web"
+      }
+    },
+    {
+      "key": "comparison-two",
+      "phase": "initial",
+      "owner": "owner-two",
+      "supplier": "comparison-search",
+      "objectiveState": "delivered",
+      "taskSpec": {
+        "kind": "table-fill",
+        "output": {
+          "format": "markdown-table",
+          "formatSource": "default"
+        },
+        "schemaVersion": "1.1",
+        "topic": "Controlled search fixture",
+        "subjects": [
+          {
+            "label": "Synthetic example"
+          }
+        ],
+        "fields": ["Result"],
+        "sourceTrust": "user-prompt"
+      },
+      "step": {
+        "stepIndex": 0,
+        "kind": "x402-exact",
+        "unitAmount": "100000"
+      },
+      "observations": [
+        {
+          "callIndex": 0,
+          "delivered": 1,
+          "settledDaysAgo": 2
+        },
+        {
+          "callIndex": 1,
+          "delivered": 1,
+          "settledDaysAgo": 2
+        },
+        {
+          "callIndex": 2,
+          "delivered": 1,
+          "settledDaysAgo": 2
+        }
+      ],
+      "rating": {
+        "value": "good",
+        "surface": "web"
+      }
+    },
+    {
+      "key": "comparison-three",
+      "phase": "initial",
+      "owner": "owner-three",
+      "supplier": "comparison-search",
+      "objectiveState": "delivered",
+      "taskSpec": {
+        "kind": "table-fill",
+        "output": {
+          "format": "markdown-table",
+          "formatSource": "default"
+        },
+        "schemaVersion": "1.1",
+        "topic": "Controlled search fixture",
+        "subjects": [
+          {
+            "label": "Synthetic example"
+          }
+        ],
+        "fields": ["Result"],
+        "sourceTrust": "user-prompt"
+      },
+      "step": {
+        "stepIndex": 0,
+        "kind": "x402-exact",
+        "unitAmount": "100000"
+      },
+      "observations": [
+        {
+          "callIndex": 0,
+          "delivered": 1,
+          "settledDaysAgo": 2
+        },
+        {
+          "callIndex": 1,
+          "delivered": 1,
+          "settledDaysAgo": 2
+        }
+      ],
+      "rating": {
+        "value": "good",
+        "surface": "web"
+      }
+    },
+    {
+      "key": "lesson-two",
+      "phase": "initial",
+      "owner": "owner-two",
+      "supplier": "lesson-search",
+      "objectiveState": "delivered",
+      "taskSpec": {
+        "kind": "table-fill",
+        "output": {
+          "format": "markdown-table",
+          "formatSource": "default"
+        },
+        "schemaVersion": "1.1",
+        "topic": "Controlled search fixture",
+        "subjects": [
+          {
+            "label": "Synthetic example"
+          }
+        ],
+        "fields": ["Result"],
+        "sourceTrust": "user-prompt"
+      },
+      "step": {
+        "stepIndex": 0,
+        "kind": "x402-exact",
+        "unitAmount": "100000"
+      },
+      "observations": [
+        {
+          "callIndex": 0,
+          "delivered": 1,
+          "settledDaysAgo": 2
+        },
+        {
+          "callIndex": 1,
+          "delivered": 1,
+          "settledDaysAgo": 2
+        },
+        {
+          "callIndex": 2,
+          "delivered": 1,
+          "settledDaysAgo": 2
+        }
+      ],
+      "rating": {
+        "value": "good",
+        "surface": "web"
+      }
+    },
+    {
+      "key": "lesson-three",
+      "phase": "initial",
+      "owner": "owner-three",
+      "supplier": "lesson-search",
+      "objectiveState": "delivered",
+      "taskSpec": {
+        "kind": "table-fill",
+        "output": {
+          "format": "markdown-table",
+          "formatSource": "default"
+        },
+        "schemaVersion": "1.1",
+        "topic": "Controlled search fixture",
+        "subjects": [
+          {
+            "label": "Synthetic example"
+          }
+        ],
+        "fields": ["Result"],
+        "sourceTrust": "user-prompt"
+      },
+      "step": {
+        "stepIndex": 0,
+        "kind": "x402-exact",
+        "unitAmount": "100000"
+      },
+      "observations": [
+        {
+          "callIndex": 0,
+          "delivered": 1,
+          "settledDaysAgo": 2
+        },
+        {
+          "callIndex": 1,
+          "delivered": 1,
+          "settledDaysAgo": 2
+        }
+      ],
+      "rating": {
+        "value": "good",
+        "surface": "web"
+      }
+    },
+    {
+      "key": "recovery-one",
+      "phase": "recovery",
+      "owner": "owner-one",
+      "supplier": "incident-search",
+      "objectiveState": "delivered",
+      "taskSpec": {
+        "kind": "table-fill",
+        "output": {
+          "format": "markdown-table",
+          "formatSource": "default"
+        },
+        "schemaVersion": "1.1",
+        "topic": "Controlled search fixture",
+        "subjects": [
+          {
+            "label": "Synthetic example"
+          }
+        ],
+        "fields": ["Result"],
+        "sourceTrust": "user-prompt"
+      },
+      "step": {
+        "stepIndex": 0,
+        "kind": "x402-exact",
+        "unitAmount": "100000"
+      },
+      "observations": [
+        {
+          "callIndex": 0,
+          "delivered": 1,
+          "settledDaysAgo": 1
+        },
+        {
+          "callIndex": 1,
+          "delivered": 1,
+          "settledDaysAgo": 1
+        },
+        {
+          "callIndex": 2,
+          "delivered": 1,
+          "settledDaysAgo": 1
+        }
+      ],
+      "rating": {
+        "value": "good",
+        "surface": "web"
+      }
+    },
+    {
+      "key": "recovery-two",
+      "phase": "recovery",
+      "owner": "owner-two",
+      "supplier": "incident-search",
+      "objectiveState": "delivered",
+      "taskSpec": {
+        "kind": "table-fill",
+        "output": {
+          "format": "markdown-table",
+          "formatSource": "default"
+        },
+        "schemaVersion": "1.1",
+        "topic": "Controlled search fixture",
+        "subjects": [
+          {
+            "label": "Synthetic example"
+          }
+        ],
+        "fields": ["Result"],
+        "sourceTrust": "user-prompt"
+      },
+      "step": {
+        "stepIndex": 0,
+        "kind": "x402-exact",
+        "unitAmount": "100000"
+      },
+      "observations": [
+        {
+          "callIndex": 0,
+          "delivered": 1,
+          "settledDaysAgo": 1
+        },
+        {
+          "callIndex": 1,
+          "delivered": 1,
+          "settledDaysAgo": 1
+        }
+      ],
+      "rating": {
+        "value": "good",
+        "surface": "web"
+      }
+    }
+  ],
+  "noSupplier": {
+    "owner": "owner-one",
+    "objectiveState": "no-supplier",
+    "capability": "web-search",
+    "taskClass": "data-json.search",
+    "taskSpec": {
+      "kind": "table-fill",
+      "output": {
+        "format": "markdown-table",
+        "formatSource": "default"
+      },
+      "schemaVersion": "1.1",
+      "topic": "Controlled search fixture",
+      "subjects": [
+        {
+          "label": "Synthetic example"
+        }
+      ],
+      "fields": ["Result"],
+      "sourceTrust": "user-prompt"
+    },
+    "lead": {
+      "origin": "http://127.0.0.1:8787",
+      "pathHint": "/v1/search",
+      "source": "controlled-fixture"
+    }
+  }
+}

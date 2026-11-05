@@ -215,6 +215,81 @@ describe("SN-1 social routes", () => {
     expect(threadsNext.items).toHaveLength(1);
   });
 
+  it("returns the original lead for a repeated origin-only suggestion", async () => {
+    const { app } = createTestContext(getPool());
+    const enabled = await app.request("/v1/social/me", {
+      method: "PUT",
+      headers: { ...auth, "Content-Type": "application/json", "Idempotency-Key": randomUUID() },
+      body: JSON.stringify({ sharing: "structured", consentTextVersion: "2026-11-05" }),
+    });
+    expect(enabled.status).toBe(200);
+    const requestBody = {
+      network: "eip155:5042002",
+      origin: "https://repeat.example",
+      capabilityTag: "web-search",
+    };
+    expect(apiContracts.get("suggestSocialLead")?.request?.(requestBody)).toBe(true);
+    const suggest = () =>
+      app.request("/v1/social/leads", {
+        method: "POST",
+        headers: { ...auth, "Content-Type": "application/json", "Idempotency-Key": randomUUID() },
+        body: JSON.stringify(requestBody),
+      });
+    const first = await suggest();
+    expect(first.status, JSON.stringify(await first.clone().json())).toBe(202);
+    const ids = (await first.json()) as { leadId: string; postId: string };
+    const budgetBefore = await getPool().query<{ posts: number }>(
+      `SELECT b.posts FROM social_budgets b
+       JOIN social_representatives r USING(representative_id)
+       WHERE r.user_id=$1 ORDER BY b.day DESC LIMIT 1`,
+      [TEST_USER_ID],
+    );
+    const repeated = await Promise.all([suggest(), suggest()]);
+    for (const response of repeated) {
+      expect(response.status).toBe(202);
+      const body = await response.json();
+      expect(body).toEqual(ids);
+      expect(
+        validateRecordedExchange("suggestSocialLead", {
+          requestBody,
+          responseStatus: 202,
+          responseBody: body,
+        }).valid,
+      ).toBe(true);
+    }
+    const rows = await getPool().query<{
+      lead_id: string;
+      post_id: string;
+      state: string;
+      attempts: number;
+    }>(
+      `SELECT lead_id,post_id,state,attempts FROM social_leads
+       WHERE network=$1 AND origin=$2 AND path_hint IS NULL`,
+      [requestBody.network, requestBody.origin],
+    );
+    expect(rows.rows).toEqual([
+      { lead_id: ids.leadId, post_id: ids.postId, state: "queued", attempts: 0 },
+    ]);
+    const posts = await getPool().query(
+      "SELECT post_id FROM social_posts WHERE kind='lead' AND card->>'origin'=$1",
+      [requestBody.origin],
+    );
+    expect(posts.rows).toEqual([{ post_id: ids.postId }]);
+    const events = await getPool().query(
+      `SELECT 1 FROM outbox_events WHERE name='social.post.published'
+       AND payload->>'postId'=$1`,
+      [ids.postId],
+    );
+    expect(events.rowCount).toBe(1);
+    const budgetAfter = await getPool().query<{ posts: number }>(
+      `SELECT b.posts FROM social_budgets b
+       JOIN social_representatives r USING(representative_id)
+       WHERE r.user_id=$1 ORDER BY b.day DESC LIMIT 1`,
+      [TEST_USER_ID],
+    );
+    expect(budgetAfter.rows).toEqual(budgetBefore.rows);
+  });
+
   it("tombstones every revision and supersedes lessons from the chain", async () => {
     const pool = getPool();
     const { app } = createTestContext(pool);
@@ -298,7 +373,7 @@ describe("SN-1 social routes", () => {
     expect(links.rows).toEqual([{ post_id: post.post_id }]);
   });
 
-  it("serves incident, thread, activity, and lesson contracts with public day timestamps", async () => {
+  it("serves public incident and thread views without private evidence", async () => {
     const pool = getPool();
     const { app } = createTestContext(pool);
     const incidentIds: string[] = [];
@@ -324,6 +399,43 @@ describe("SN-1 social routes", () => {
           new Date("2026-11-05T01:00:00Z"),
           threadId,
           new Date(`2026-11-05T09:14:${String(index).padStart(2, "0")}Z`),
+        ],
+      );
+      const objectiveId = `obj_${digit.repeat(25)}Q`;
+      await pool.query(
+        `INSERT INTO objectives(objective_id,user_id,device_id,submission,objective_hash,state)
+         VALUES($1,$2,$3,$4,$5,'planning')`,
+        [
+          objectiveId,
+          TEST_USER_ID,
+          TEST_DEVICE_ID,
+          JSON.stringify({
+            capabilities: ["web-search"],
+            taskSpec: { kind: "table-fill", subjects: [{ label: "Acme Corp" }] },
+            privateFile: "pricing.md",
+            privateAmount: "123456789",
+          }),
+          `0x${"a".repeat(64)}`,
+        ],
+      );
+      await pool.query(
+        `INSERT INTO observations(obs_id,user_id,vault,network,rail,service_id,version_id,
+          task_class,objective_id,envelope_ref,step_index,call_index,payment_ref_hash,
+          payment_id,dedup_key,delivered,settled_at)
+         VALUES($1,$2,$3,'eip155:5042002','x402-exact',$4,'ver_unknown',$5,$6,$7,0,$8,$9,$10,$11,0,$12)`,
+        [
+          `obs_${(index + 101).toString(16).padStart(32, "0")}`,
+          TEST_USER_ID,
+          `0x${"1".repeat(40)}`,
+          `svc_${"a".repeat(32)}`,
+          `task-${index}`,
+          objectiveId,
+          `eip155:5042002:0x${"1".repeat(40)}:1`,
+          index,
+          `0x${String(index + 1).padStart(64, "0")}`,
+          `pay_${digit.repeat(26)}`,
+          `dedup_${digit.repeat(26)}`,
+          new Date("2026-11-05T00:00:00Z"),
         ],
       );
     }
@@ -355,6 +467,30 @@ describe("SN-1 social routes", () => {
         responseBody: detailBody,
       }).valid,
     ).toBe(true);
+    const publicPaths = [
+      "/v1/social/feed",
+      `/v1/social/threads/thr_${"A".repeat(26)}`,
+      "/v1/social/incidents",
+      `/v1/social/services/svc_${"a".repeat(32)}/signals?network=eip155:5042002`,
+    ];
+    const publicBodies: unknown[] = [];
+    for (const [index, path] of publicPaths.entries()) {
+      const response = await app.request(path, undefined, {
+        remoteAddr: `192.0.2.${40 + index}`,
+      });
+      expect(response.status, path).toBe(200);
+      const body: unknown = await response.json();
+      publicBodies.push(body);
+      expect(JSON.stringify(body), path).not.toMatch(
+        /Acme|pricing\.md|123456789|obs_|0x[0-9a-f]{40}/i,
+      );
+    }
+    expect(publicBodies[0]).toMatchObject({ items: expect.any(Array) });
+    expect((publicBodies[0] as { items: unknown[] }).items.length).toBeGreaterThan(0);
+    expect(publicBodies[1]).toMatchObject({ thread: expect.any(Object) });
+    expect(publicBodies[2]).toMatchObject({ items: expect.any(Array) });
+    expect((publicBodies[2] as { items: unknown[] }).items.length).toBeGreaterThan(0);
+    expect(publicBodies[3]).toMatchObject({ openIncident: expect.any(Object) });
     const representative = await pool.query<{ representative_id: string }>(
       "SELECT representative_id FROM social_representatives WHERE user_id=$1",
       [TEST_USER_ID],

@@ -6,6 +6,9 @@
     "moduleResolution": "Bundler",
     "jsx": "preserve",
     "allowJs": false,
+    "paths": {
+      "#server-social-templates": ["../server/src/social/runtime/templates.ts"]
+    },
     "incremental": true,
     "plugins": [{ "name": "next" }]
   },

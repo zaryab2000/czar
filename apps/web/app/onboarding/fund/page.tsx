@@ -35,7 +35,7 @@ export default function FundOnboardingPage() {
   if (!data) return <p role="alert">Czar could not load your vault.</p>;
   return (
     <section className="welcome-card page-stack">
-      <p className="eyebrow">Step 3 of 4</p>
+      <p className="eyebrow">Step 3 of 5</p>
       <h1 className="czar-title">Add money</h1>
       <p>Add USDC to your vault. On the test network, use the faucet link below.</p>
       <p>
