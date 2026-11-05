@@ -15,10 +15,11 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   ARC_TESTNET_CHAIN_ID,
+  cloudPoolOptions,
+  type Config,
   loadConfigFile,
   parameterEnvironment,
   validateCloudConfig,
-  type Config,
 } from "@czar/config";
 import { createLogger, type Logger } from "@czar/logging";
 import { assertNoSecretInProcess, createSignerClient, fileSignerIdentity } from "@czar/signer";
@@ -122,10 +123,7 @@ export function cloudDatabasePool(connectionString: string, passwordFile: string
   }
   if (url.password !== "")
     throw new Error(`refusing to start: ${DATABASE_URL_POINTER} must not carry a password`);
-  return new Pool({
-    connectionString,
-    password: async () => (await readFile(passwordFile, "utf8")).trim(),
-  });
+  return new Pool(cloudPoolOptions(url, passwordFile));
 }
 
 async function readCloudDeployment(path: string): Promise<CloudDeployment> {

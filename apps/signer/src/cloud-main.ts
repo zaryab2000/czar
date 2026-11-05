@@ -10,10 +10,11 @@ import { createPublicClient, http, type PublicClient } from "viem";
 import { Pool } from "pg";
 import {
   ARC_TESTNET_CHAIN_ID,
+  cloudPoolOptions,
+  type Config,
   loadConfigFile,
   parameterEnvironment,
   validateCloudConfig,
-  type Config,
 } from "@czar/config";
 import type { Address, Domain } from "@czar/hashing";
 import { createLogger, type Logger } from "@czar/logging";
@@ -163,13 +164,12 @@ export async function startCloudSigner(
   const signerCredentials = resolve(credentialFilesDir, SIGNER_CREDENTIAL_FOLDER);
   const database: CloudSignerDatabase =
     options.database ??
-    new Pool({
-      connectionString: requireEnv(env, DATABASE_URL_POINTER),
-      // node-postgres reads the password through this function, so it is never a URL, a parameter
-      // or a variable (SCR-170 §4).
-      password: async () =>
-        (await readFile(resolve(signerCredentials, DB_PASSWORD_FILE), "utf8")).trim(),
-    });
+    new Pool(
+      cloudPoolOptions(
+        new URL(requireEnv(env, DATABASE_URL_POINTER)),
+        resolve(signerCredentials, DB_PASSWORD_FILE),
+      ),
+    );
 
   const gatewayWallet = requireAddress(deployment["gatewayWallet"], "gatewayWallet");
   const network = {
