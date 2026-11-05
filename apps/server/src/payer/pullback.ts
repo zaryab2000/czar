@@ -1471,7 +1471,13 @@ async function obtainAttestation(
       await recordGatewayPullbackFailure(input, pullback, dependencies, attempt);
     throw new Error(`Gateway transfer API failed with HTTP ${response.status}.`);
   }
-  const result = parseTransferAttestation(response.body);
+  let result: ReturnType<typeof parseTransferAttestation>;
+  try {
+    result = parseTransferAttestation(response.body);
+  } catch (error) {
+    await recordGatewayPullbackFailure(input, pullback, dependencies, attempt);
+    throw error;
+  }
   await writePullbackPhase(dependencies, input, attempt, "pullback.transfer.result", {
     pullbackId: pullback.pullbackId.toString(),
     transferId: result.transferId,

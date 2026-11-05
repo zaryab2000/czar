@@ -568,6 +568,8 @@ async function precheckCalls(input: VaultDirectInput, dependencies: VaultDirectD
       stepCap: BigInt(input.step.stepCap),
       payees: [input.step.payee, ...(input.step.alternates ?? [])].filter(isAddress),
       trustedPayees: [],
+      config: dependencies.config,
+      extensions402: read.extensions,
     });
     if (!choice.ok || BigInt(choice.offer.amount) > BigInt(input.step.stepCap) / BigInt(maxCount))
       return { calls: prepared, errorCode: "price-or-payee-drift" };
