@@ -18,6 +18,9 @@ COPY packages/vault-client packages/vault-client
 COPY packages/x402         packages/x402
 COPY apps/signer           apps/signer
 COPY apps/merchants        apps/merchants
+# apps/merchants/src/migrate.ts applies this one server migration by reading it relative to its own
+# file (../../server/migrations/), so without it the cloud merchants fail at start (PM-014).
+COPY apps/server/migrations/0012-merchant-payment-identifiers.sql apps/server/migrations/
 
 COPY ops/cloud/docker/healthcheck/http-health.mjs ops/cloud/docker/healthcheck/
 

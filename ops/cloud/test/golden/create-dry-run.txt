@@ -12,6 +12,7 @@ gcloud secrets create czar-alpha-db-password-merchants --project=p --replication
 gcloud secrets create czar-alpha-db-password-backup --project=p --replication-policy=automatic
 gcloud secrets create czar-alpha-signer-token-server --project=p --replication-policy=automatic
 gcloud secrets create czar-alpha-signer-token-merchants --project=p --replication-policy=automatic
+gcloud secrets create czar-alpha-signer-token-relayer-jobs --project=p --replication-policy=automatic
 gcloud secrets create czar-alpha-anthropic-api-key --project=p --replication-policy=automatic
 gcloud secrets add-iam-policy-binding czar-alpha-db-password-server --project=p --member=serviceAccount:czar-alpha-vm@p.iam.gserviceaccount.com --role=roles/secretmanager.secretAccessor
 gcloud secrets add-iam-policy-binding czar-alpha-db-password-signer --project=p --member=serviceAccount:czar-alpha-vm@p.iam.gserviceaccount.com --role=roles/secretmanager.secretAccessor
@@ -20,6 +21,7 @@ gcloud secrets add-iam-policy-binding czar-alpha-db-password-merchants --project
 gcloud secrets add-iam-policy-binding czar-alpha-db-password-backup --project=p --member=serviceAccount:czar-alpha-vm@p.iam.gserviceaccount.com --role=roles/secretmanager.secretAccessor
 gcloud secrets add-iam-policy-binding czar-alpha-signer-token-server --project=p --member=serviceAccount:czar-alpha-vm@p.iam.gserviceaccount.com --role=roles/secretmanager.secretAccessor
 gcloud secrets add-iam-policy-binding czar-alpha-signer-token-merchants --project=p --member=serviceAccount:czar-alpha-vm@p.iam.gserviceaccount.com --role=roles/secretmanager.secretAccessor
+gcloud secrets add-iam-policy-binding czar-alpha-signer-token-relayer-jobs --project=p --member=serviceAccount:czar-alpha-vm@p.iam.gserviceaccount.com --role=roles/secretmanager.secretAccessor
 gcloud secrets add-iam-policy-binding czar-alpha-anthropic-api-key --project=p --member=serviceAccount:czar-alpha-vm@p.iam.gserviceaccount.com --role=roles/secretmanager.secretAccessor
 gcloud storage buckets create gs://czar-alpha-backups-p --project=p --location=asia-south1 --uniform-bucket-level-access --public-access-prevention --default-storage-class=STANDARD
 gcloud storage buckets update gs://czar-alpha-backups-p --project=p --lifecycle-file=ops/cloud/provision/backup-lifecycle.json
