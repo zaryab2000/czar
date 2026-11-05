@@ -115,7 +115,17 @@ describe("SCR-187 Gateway offer classification", () => {
         config,
       ),
     ).toBe("unsupported");
-    expect(classifyOffer(gateway, { dropped: ["sign-in-with-x"] }, config)).toBe("unsupported");
+    const quicknode = readPaymentRequired(
+      v2([gateway], {
+        "sign-in-with-x": { info: { required: true } },
+        "quicknode-session": { info: { required: true } },
+      }),
+    );
+    expect(quicknode.ok).toBe(true);
+    if (!quicknode.ok) return;
+    expect(classifyOffer(quicknode.paymentRequired.accepts[0]!, quicknode.extensions, config)).toBe(
+      "unsupported",
+    );
     expect(
       classifyOffer(
         { ...gateway, extra: { ...gateway.extra, siwx: true } },
@@ -130,13 +140,21 @@ describe("SCR-187 Gateway offer classification", () => {
       ok: false,
       code: "unsupported-offer",
     });
+    const quicknode = readPaymentRequired(
+      v2([gateway], {
+        "sign-in-with-x": { info: { required: true } },
+        "quicknode-session": { info: { required: true } },
+      }),
+    );
+    expect(quicknode.ok).toBe(true);
+    if (!quicknode.ok) return;
     expect(
       selectOffer(
-        read([gateway]),
+        quicknode.paymentRequired,
         policy({
           rail: "gateway",
           payees: [gateway.payTo],
-          extensions402: { dropped: ["sign-in-with-x", "quicknode-session"] },
+          extensions402: quicknode.extensions,
         }),
       ),
     ).toMatchObject({ ok: false, code: "unsupported-offer" });
