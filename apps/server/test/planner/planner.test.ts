@@ -1,7 +1,12 @@
 import { createServer } from "node:http";
 import { loadConfig } from "@czar/config";
 import { buildTree, payeeLeaf, verifyProof } from "@czar/hashing";
-import { encodeBase64Json, USDC_ADDRESS, type PaymentRequirements } from "@czar/x402";
+import {
+  encodeBase64Json,
+  USDC_ADDRESS,
+  type PaymentRequirements,
+  type SanitizedExtensions,
+} from "@czar/x402";
 import { describe, expect, it } from "vitest";
 import {
   computeObjectiveGatewayVolume,
@@ -39,6 +44,10 @@ const offer: PaymentRequirements = {
   maxTimeoutSeconds: 60,
   extra: {},
 };
+const gatewayExtra = {
+  name: "GatewayWalletBatched",
+  verifyingContract: loadConfig().get("chain.gatewayWalletAddress"),
+};
 
 function fakeService(id = serviceId, accepted = offer): PlannerService {
   return {
@@ -63,6 +72,7 @@ function makePlanner(
     readonly gatewayEnabled?: boolean;
     readonly jobEnabled?: boolean;
     readonly proberOffers?: readonly PaymentRequirements[];
+    readonly proberExtensions?: SanitizedExtensions;
     readonly hasAgent?: boolean;
     readonly service?: PlannerService;
     readonly candidateCount?: number;
@@ -184,7 +194,11 @@ function makePlanner(
             amount: options.amount ?? offer.amount,
             payTo: `0x${id.slice(4, 5).repeat(40)}`,
           };
-          return { ok: true as const, offers: options.proberOffers ?? [live] };
+          return {
+            ok: true as const,
+            offers: options.proberOffers ?? [live],
+            ...(options.proberExtensions ? { extensions402: options.proberExtensions } : {}),
+          };
         },
       },
     },
@@ -244,7 +258,7 @@ describe("planner fallback", () => {
   it("computes V from every selected paid step's live Gateway offer", async () => {
     const gatewayOffers = [
       { ...offer, amount: "8000" },
-      { ...offer, amount: "8000", extra: { name: "GatewayWalletBatched" } },
+      { ...offer, amount: "8000", extra: gatewayExtra },
     ];
     const built = await makePlanner({
       capabilities: ["web-search", "page-extract", "web-search", "page-extract"],
@@ -334,8 +348,15 @@ describe("planner fallback", () => {
     expect(built).toBeNull();
   });
 
+  it("does not plan a seller requiring 402-level sign-in", async () => {
+    const built = await makePlanner({
+      proberExtensions: { dropped: ["sign-in-with-x"] },
+    });
+    expect(built).toBeNull();
+  });
+
   it("adds a kind-4 pocket leaf and enables pocket cap for gateway steps", async () => {
-    const gateway = { ...offer, extra: { name: "GatewayWalletBatched" } };
+    const gateway = { ...offer, extra: gatewayExtra };
     const built = await makePlanner({ proberOffers: [gateway], gatewayEnabled: true });
     expect(built?.plan.steps[0]?.kind).toBe("gateway-nano");
     expect(built?.plan.pocketCapBps).toBe(2500);
@@ -344,8 +365,38 @@ describe("planner fallback", () => {
     ).toBe(true);
   });
 
+  it("plans a verified Circle Gateway batch offer", async () => {
+    const gateway = {
+      ...offer,
+      extra: {
+        ...gatewayExtra,
+        paymentFlow: "batch-settlement",
+      },
+    };
+    const built = await makePlanner({ proberOffers: [gateway], gatewayEnabled: true });
+    expect(built?.plan.steps[0]?.kind).toBe("gateway-nano");
+  });
+
+  it("commits the payee of the classified Gateway offer", async () => {
+    const wrongContract = {
+      ...offer,
+      payTo: `0x${"4".repeat(40)}`,
+      extra: { ...gatewayExtra, verifyingContract: `0x${"5".repeat(40)}` },
+    };
+    const verified = {
+      ...offer,
+      extra: { ...gatewayExtra, paymentFlow: "batch-settlement" },
+    };
+    const built = await makePlanner({
+      proberOffers: [wrongContract, verified],
+      gatewayEnabled: true,
+    });
+    expect(built?.plan.steps[0]?.kind).toBe("gateway-nano");
+    expect(built?.plan.steps[0]?.payee).toBe(verified.payTo);
+  });
+
   it("does not plan a Gateway-only offer while routing.gatewayEnabled is false", async () => {
-    const gateway = { ...offer, extra: { name: "GatewayWalletBatched" } };
+    const gateway = { ...offer, extra: gatewayExtra };
     await expect(makePlanner({ proberOffers: [gateway] })).resolves.toBeNull();
   });
 
@@ -770,9 +821,7 @@ describe("planner fallback", () => {
       const amount = BigInt((state % 5_000_000) + 1);
       const volume = BigInt((Math.imul(state, 2_246_822_519) >>> 0) % 20_000_000);
       const gatewayOnly = index % 2 === 0;
-      const offers = gatewayOnly
-        ? [{ ...offer, extra: { name: "GatewayWalletBatched" } }]
-        : [offer];
+      const offers = gatewayOnly ? [{ ...offer, extra: gatewayExtra }] : [offer];
       const step = {
         stepIndex: 0,
         stepId: "stp_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",

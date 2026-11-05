@@ -1,4 +1,4 @@
-import type { PaymentRequirements } from "@czar/x402";
+import type { PaymentRequirements, SanitizedExtensions } from "@czar/x402";
 import type { RankingDecision, TaskSpec } from "@czar/schemas";
 
 export interface RankingQuery {
@@ -39,7 +39,11 @@ export interface PlannerService {
 }
 
 export type ProbeResult =
-  | { readonly ok: true; readonly offers: readonly PaymentRequirements[] }
+  | {
+      readonly ok: true;
+      readonly offers: readonly PaymentRequirements[];
+      readonly extensions402?: SanitizedExtensions;
+    }
   | { readonly ok: false; readonly reason: "timeout" | "malformed" | "unavailable" };
 
 export interface PlannerPorts {
