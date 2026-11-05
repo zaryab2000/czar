@@ -2,6 +2,8 @@
 export type SchemaName =
   | "acceptance-report"
   | "activity-event"
+  | "audit-report"
+  | "audit-request"
   | "capability-card"
   | "demand-proof-leaf"
   | "demand-proof-leaf-v2"
@@ -37,6 +39,8 @@ export type SchemaName =
 export const schemaMetadata = [
   { name: "acceptance-report", typeName: "AcceptanceReport", title: "AcceptanceReport", typeFile: "acceptance-report.d.ts" },
   { name: "activity-event", typeName: "ActivityEvent", title: "ActivityEvent", typeFile: "activity-event.d.ts" },
+  { name: "audit-report", typeName: "AuditReport", title: "AuditReport", typeFile: "audit-report.d.ts" },
+  { name: "audit-request", typeName: "AuditRequest", title: "AuditRequest", typeFile: "audit-request.d.ts" },
   { name: "capability-card", typeName: "CapabilityCard", title: "CapabilityCard", typeFile: "capability-card.d.ts" },
   { name: "demand-proof-leaf", typeName: "DemandProofLeaf", title: "DemandProofLeaf", typeFile: "demand-proof-leaf.d.ts" },
   { name: "demand-proof-leaf-v2", typeName: "DemandProofLeafV2", title: "DemandProofLeaf (version 2)", typeFile: "demand-proof-leaf-v2.d.ts" },

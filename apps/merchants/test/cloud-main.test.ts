@@ -295,8 +295,12 @@ describe("merchants cloud entry point starts (SCR-170 §3)", () => {
     cleanups.push(() => running.stop());
     expect(running.chainId).toBe(ARC_TESTNET);
     expect(running.runtime.routes).toEqual([SEARCH_PATH, SPOT_PATH, EXTRACT_PATH]);
+    // The audit services are off by default (SCR-182 §1), so their K10 keys are not looked up.
     expect(keyAddress.mock.calls).toEqual(
-      ALPHA_SERVICE_IDS.map((service) => ["cz-20", `K10:${service}`]),
+      ALPHA_SERVICE_IDS.filter((service) => !service.startsWith("czar-audit-")).map((service) => [
+        "cz-20",
+        `K10:${service}`,
+      ]),
     );
     const address = running.runtime.server.address();
     if (address === null || typeof address === "string") throw new Error("not listening");
