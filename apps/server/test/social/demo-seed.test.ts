@@ -51,7 +51,12 @@ const safeFetch: SafeFetch = async (url) => {
 
 describe("SCR-183 demo seed command", () => {
   it("refuses to seed before the audit task-class mapping is installed", async () => {
-    const config = loadConfig({ envFile: { "selection.paymentNetwork": network } });
+    const config = loadConfig({
+      envFile: {
+        "selection.paymentNetwork": network,
+        "planner.capabilityToTaskClass": { "web-search": "data-json.search" },
+      },
+    });
     await expect(runDemoSeed(pool(), config, now, safeFetch)).rejects.toThrow(
       "requires SCR-182 code-review audit task-class mapping",
     );

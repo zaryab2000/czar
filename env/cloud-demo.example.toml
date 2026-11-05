@@ -6,3 +6,4 @@
 "selection.ratingRefreshDebounceSeconds" = 5
 "social.housekeepingMinutes" = 1
 "social.routingCooldownMinutes" = 1
+"social.repDailyPostCap" = 50
