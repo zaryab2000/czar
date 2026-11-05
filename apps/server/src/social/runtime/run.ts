@@ -664,6 +664,11 @@ async function insertPost(context: RunContext, plan: PlannedPost): Promise<strin
     );
     if (revised.rowCount !== 1) throw new SocialStop("abstain-no-rule");
     await context.db.query(
+      `UPDATE social_lessons SET state='superseded'
+       WHERE source_post_id=$1 AND state='active'`,
+      [plan.revisionOf.postId],
+    );
+    await context.db.query(
       `UPDATE social_evidence_links SET post_id=$2 WHERE post_id=$1 AND link_kind='experience'`,
       [plan.revisionOf.postId, postId],
     );
