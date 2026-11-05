@@ -89,6 +89,8 @@ describe("social experience projection", () => {
   });
 
   it("publishes only day-truncated, private-id-free strings to the public card", async () => {
+    const runAt = new Date("2026-11-05T15:00:00Z");
+    const inboxAt = new Date(runAt.getTime() - 1);
     const representativeId = `rep_${"C".repeat(26)}`;
     await pool().query(
       `INSERT INTO social_representatives(representative_id,user_id,handle,sharing)
@@ -101,19 +103,12 @@ describe("social experience projection", () => {
       [objectiveId],
     );
     await pool().query(
-      `INSERT INTO social_inbox(representative_id,event_id,kind,refs)
-       VALUES($1,$2,'outcome-ready',$3)`,
-      [representativeId, event.rows[0]!.event_id, { objectiveId }],
+      `INSERT INTO social_inbox(representative_id,event_id,kind,refs,due_at,created_at)
+       VALUES($1,$2,'outcome-ready',$3,$4,$4)`,
+      [representativeId, event.rows[0]!.event_id, { objectiveId }, inboxAt],
     );
     expect(
-      (
-        await runSocialInbox(
-          pool(),
-          loadConfig(),
-          { bytes: randomBytes },
-          new Date("2026-11-05T15:00:00Z"),
-        )
-      )?.action,
+      (await runSocialInbox(pool(), loadConfig(), { bytes: randomBytes }, runAt))?.action,
     ).toBe("publish-experience");
     const publicPosts = await pool().query<{ card: object; note: string | null }>(
       "SELECT card,note FROM social_posts WHERE author_id=$1 AND kind='experience'",
