@@ -18,7 +18,8 @@ export type CzarCode =
   | "not-your-payment"
   | "window-closed"
   | "supersedes-required"
-  | "bad-supersedes";
+  | "bad-supersedes"
+  | "no-vault";
 
 const TITLES: Record<CzarCode, string> = {
   validation: "Request could not be processed",
@@ -41,6 +42,7 @@ const TITLES: Record<CzarCode, string> = {
   "window-closed": "The rating window is closed",
   "supersedes-required": "Name the rating to correct",
   "bad-supersedes": "This rating cannot be corrected",
+  "no-vault": "Create your wallet first",
 };
 
 export function problem(

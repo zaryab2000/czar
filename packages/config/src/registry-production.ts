@@ -8,6 +8,8 @@ import type { ParameterSpec } from "./types.ts";
 const SCR_170 = "docs/specs/06-review/change-requests/SCR-170-public-alpha-cloud-deployment.md";
 const CZ_20 = "docs/specs/04-components/server/server-supply-side.md";
 const CZ_27 = "docs/specs/04-components/server/server-autonomy-roi-keys.md";
+const SCR_181 = "docs/specs/06-review/change-requests/SCR-181-browser-new-task.md";
+const SCR_182 = "docs/specs/06-review/change-requests/SCR-182-audit-merchants.md";
 
 export const PRODUCTION_PARAMETERS = [
   // Lane A: deploy — the cloud machine, its files and the recorded deployment.
@@ -205,6 +207,48 @@ export const PRODUCTION_PARAMETERS = [
     source: `${SCR_170}:216`,
   },
 
+  // Lane C (UX-01): tasks a signed-in owner starts in the browser (SCR-181 §5).
+  {
+    key: "app.objectiveMaxSourceChars",
+    type: "integer",
+    default: 2000,
+    unit: "chars",
+    reason: "longest pasted contract source; equals the taskSpec.context maximum",
+    source: `${SCR_181}:110`,
+  },
+  {
+    key: "app.webObjectivesPerUserPerHour",
+    type: "integer",
+    default: 10,
+    unit: "count",
+    reason: "stops one account flooding the planner and merchants with browser tasks",
+    source: `${SCR_181}:111`,
+  },
+  {
+    key: "app.webObjectiveMinutesSaved",
+    type: "integer",
+    default: 60,
+    unit: "minutes",
+    reason: "fixed estimate for a manual web task (D82)",
+    source: `${SCR_181}:112`,
+  },
+  {
+    key: "app.webObjectiveHourlyBand",
+    type: "string",
+    default: "C",
+    unit: "band",
+    reason: "neutral default; there is no local soul on the web",
+    source: `${SCR_181}:113`,
+  },
+  {
+    key: "app.objectivePollSeconds",
+    type: "integer",
+    default: 3,
+    unit: "s",
+    reason: "how often the browser polls a task's progress",
+    source: `${SCR_181}:114`,
+  },
+
   // Lane D: daemon — no production keys yet.
 
   // Lane E: merchants — the `czar-spot` public data source (D49, the PM-041 ruling).
@@ -225,6 +269,133 @@ export const PRODUCTION_PARAMETERS = [
     unit: "",
     reason: "pairs the cache refreshes",
     source: `${CZ_20}:60`,
+  },
+  // Lane E (MR-08): the two audit merchants' prices (SCR-182 §1, §6). Both stay at or under
+  // planner.defaultMaxUnitAtomic, which a config test enforces.
+  {
+    key: "merchants.audit.quick.priceAtomic",
+    type: "string",
+    default: "500000",
+    unit: "USDC atomic",
+    reason: "Czar Lab Quick Audit (czar-audit-quick): the cheaper first pass, 0.50 testnet USDC",
+    source: `${SCR_182}:135`,
+  },
+  {
+    key: "merchants.audit.deep.priceAtomic",
+    type: "string",
+    default: "1000000",
+    unit: "USDC atomic",
+    reason:
+      "Czar Lab Deep Audit (czar-audit-deep): the thorough review, 1.00 testnet USDC; at most planner.defaultMaxUnitAtomic",
+    source: `${SCR_182}:136`,
+  },
+  // Lane E (MR-01, MR-02, MR-05): the rest of the audit merchants' keys (SCR-182 §4, §6). Each service is off
+  // until its K10 payout key exists; a disabled service registers no route and looks up no key.
+  {
+    key: "merchants.audit.quick.enabled",
+    type: "boolean",
+    default: false,
+    unit: "flag",
+    reason: "off until K10:czar-audit-quick exists (MR-03)",
+    source: `${SCR_182}:133`,
+  },
+  {
+    key: "merchants.audit.deep.enabled",
+    type: "boolean",
+    default: false,
+    unit: "flag",
+    reason: "off until K10:czar-audit-deep exists (MR-03)",
+    source: `${SCR_182}:134`,
+  },
+  {
+    key: "merchants.audit.quick.model",
+    type: "string",
+    default: "claude-haiku-5-5",
+    unit: "model",
+    reason: "fast, cheap model for the shallow first pass",
+    source: `${SCR_182}:137`,
+  },
+  {
+    key: "merchants.audit.deep.model",
+    type: "string",
+    default: "claude-sonnet-5-5",
+    unit: "model",
+    reason: "stronger model for the thorough review",
+    source: `${SCR_182}:138`,
+  },
+  {
+    key: "merchants.audit.quick.maxFindings",
+    type: "integer",
+    default: 3,
+    unit: "count",
+    reason: "shallow by design: at most three generic findings",
+    source: `${SCR_182}:139`,
+  },
+  {
+    key: "merchants.audit.deep.maxFindings",
+    type: "integer",
+    default: 15,
+    unit: "count",
+    reason: "the audit-report schema maximum",
+    source: `${SCR_182}:140`,
+  },
+  {
+    key: "merchants.audit.maxInputChars",
+    type: "integer",
+    default: 2000,
+    unit: "chars",
+    reason: "longest contract a buyer may send; equals app.objectiveMaxSourceChars",
+    source: `${SCR_182}:141`,
+  },
+  {
+    key: "merchants.audit.maxOutputTokens",
+    type: "integer",
+    default: 2000,
+    unit: "tokens",
+    reason: "bounds the cost of one model call",
+    source: `${SCR_182}:142`,
+  },
+  {
+    key: "merchants.audit.handlerTimeoutMs",
+    type: "integer",
+    default: 45000,
+    unit: "ms",
+    reason: "one model call plus validation; past it the call fails and is not settled",
+    source: `${SCR_182}:143`,
+  },
+  {
+    key: "merchants.audit.dailyModelCallCap",
+    type: "integer",
+    default: 200,
+    unit: "calls/day/service",
+    reason: "hard spend bound; past it the route answers 503 before payment verification",
+    source: `${SCR_182}:144`,
+  },
+  {
+    key: "merchants.audit.anthropicApiKeyFile",
+    type: "string",
+    default: "anthropic-api-key",
+    unit: "file name",
+    reason:
+      "the API key's file name inside the merchants' own folder of deploy.credentialFilesDir; never an env var",
+    source: `${SCR_182}:145`,
+  },
+  {
+    key: "merchants.audit.addressLookupEnabled",
+    type: "boolean",
+    default: false,
+    unit: "flag",
+    reason: "address mode is optional; when off, an address is refused with 400 before payment",
+    source: `${SCR_182}:146`,
+  },
+  {
+    key: "merchants.audit.sourceLookupUrlTemplate",
+    type: "string",
+    default: "",
+    unit: "URL template",
+    reason:
+      "https URL that returns a contract's verified source; {address} is replaced by the address; required when the lookup is on",
+    source: `${SCR_182}:147`,
   },
   // Lane E (PM-046): the two CZ-20 §5.11 test-provider instances. Each instance's `modes` is one work mode and
   // one behaviour mode; only the deterministic `placeholder` work mode ships (OD-41 partial, plan §2.3).

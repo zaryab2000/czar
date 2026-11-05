@@ -57,6 +57,22 @@
 # File NAME inside <deploy.credentialFilesDir>/server, never the key itself.
 "models.anthropic.apiKeyFile" = "anthropic-api-key"
 
+# ── Audit merchants (SCR-182) ─────────────────────────────────────────────────
+# Czar Lab Quick Audit (A) and Czar Lab Deep Audit (B). Switch each on only after its payout key
+# K10:czar-audit-quick / K10:czar-audit-deep exists (tracker MR-03); a switched-on service whose key is
+# missing stops the merchants process at start. The model key is merchants.audit.anthropicApiKeyFile
+# inside <deploy.credentialFilesDir>/merchants (the merchants' own folder), never the key itself.
+# "merchants.audit.quick.enabled" = true
+# "merchants.audit.deep.enabled" = true
+# Catalog entries (SCR-182 §7). Each id follows the SL §5.1 rule (SCR-137): "svc_" + the first 32 hex of
+# keccak256(origin ‖ method ‖ path ‖ registration time). These are for the example origin above,
+# registered 2026-11-05T13:41:25.000Z; derive them again, once, for the real merchants origin.
+"selection.czarRegisteredServices" = { "svc_9ce1cf24007d4800254f04cce952d2ec" = { "serviceName" = "czar-audit-quick", "resource" = { "url" = "https://merchants.example.com/v1/audit/quick", "method" = "POST" }, "probeInput" = { "body" = { "contract" = "contract Probe {}" } }, "capabilities" = [
+  "code-review",
+] }, "svc_891ff515d1c8254f1ff94f1c70dc80c3" = { "serviceName" = "czar-audit-deep", "resource" = { "url" = "https://merchants.example.com/v1/audit/deep", "method" = "POST" }, "probeInput" = { "body" = { "contract" = "contract Probe {}" } }, "capabilities" = [
+  "code-review",
+] } }
+
 # ── Local-only keys that must stay out of this file ───────────────────────────
 # fetch.localStandinOrigins, merchants.facilitatorBaseUrl, chain.gatewayApiBaseUrl,
 # app.circleClientUrl and app.arcRpcUrl are local-stack values. validateCloudConfig refuses to

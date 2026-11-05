@@ -167,6 +167,9 @@ importers:
       '@czar/logging':
         specifier: workspace:*
         version: link:../../packages/logging
+      '@czar/redaction':
+        specifier: workspace:*
+        version: link:../../packages/redaction
       '@czar/schemas':
         specifier: workspace:*
         version: link:../../packages/schemas

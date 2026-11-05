@@ -693,6 +693,15 @@ components:
         value: { type: string, enum: [good, bad] }
         receipts: { type: integer, minimum: 1, description: "Settled receipts bound to this rating." }
         windowClosesAt: { type: string, format: date-time }
+    AppObjectiveAccepted:
+      type: object
+      description: "A task started in the web app was received (SCR-181 §2)."
+      x-privacyClass: server-only
+      additionalProperties: false
+      required: [objectiveId, state]
+      properties:
+        objectiveId: { type: string, pattern: "^obj_[0-9A-HJKMNP-TV-Z]{26}$" }
+        state: { type: string, enum: [received] }
     RatingPromptStep:
       type: object
       description: "One producing supplier of a delivered objective, as shown by the rating prompt (SCR-160 §7.6, §8)."
@@ -745,14 +754,14 @@ components:
 
     Device:
       type: object
-      description: "A paired computer (SCR-134)."
+      description: "A paired computer (SCR-134), or the one browser device a user's web tasks belong to (platform web, SCR-181 §1)."
       x-privacyClass: server-only
       additionalProperties: false
       required: [deviceId, deviceName, platform, createdAt]
       properties:
         deviceId: { type: string, pattern: "^dev_[0-9A-HJKMNP-TV-Z]{26}$" }
         deviceName: { type: string, maxLength: 64 }
-        platform: { type: string, enum: [macos, linux, windows] }
+        platform: { type: string, enum: [macos, linux, windows, web] }
         createdAt: { $ref: "#/components/schemas/Timestamp" }
         revokedAt: { $ref: "#/components/schemas/Timestamp" }
 
@@ -1890,6 +1899,58 @@ paths:
                   - type: object
                     properties:
                       items: { type: array, items: { $ref: "#/components/schemas/AppResultCard" } }
+
+  /v1/app/objectives:
+    post:
+      tags: [app]
+      summary: Start a task from the web app; the server builds the objective submission and runs the same intake as submitObjective (SCR-181 §2, §3).
+      operationId: createAppObjective
+      security: [ { AppSession: [] } ]
+      parameters: [ { $ref: "#/components/parameters/IdempotencyKey" } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "../schemas/app-objective-request.schema.json" } } }
+      responses:
+        "201": { description: Received, content: { application/json: { schema: { $ref: "#/components/schemas/AppObjectiveAccepted" } } } }
+        "4XX": { $ref: "#/components/responses/Problem" }
+    get:
+      tags: [app]
+      summary: The session user's tasks, from the web and from paired devices, newest first (SCR-181 §2).
+      operationId: listAppObjectives
+      security: [ { AppSession: [] } ]
+      parameters:
+        - { $ref: "#/components/parameters/Cursor" }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 50, default: 50 }
+      responses:
+        "4XX": { $ref: "#/components/responses/Problem" }
+        "200":
+          description: Page of AppObjective
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Page" }
+                  - type: object
+                    properties:
+                      items: { type: array, items: { $ref: "../schemas/app-objective.schema.json" } }
+
+  /v1/app/objectives/{objectiveId}:
+    get:
+      tags: [app]
+      summary: One of the session user's tasks (SCR-181 §2); 404 when it is not theirs.
+      operationId: getAppObjective
+      security: [ { AppSession: [] } ]
+      parameters:
+        - name: objectiveId
+          in: path
+          required: true
+          schema: { type: string, pattern: "^obj_[0-9A-HJKMNP-TV-Z]{26}$" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "../schemas/app-objective.schema.json" } } } }
+        "4XX": { $ref: "#/components/responses/Problem" }
 
   /v1/pockets/manual-returns:
     get:
