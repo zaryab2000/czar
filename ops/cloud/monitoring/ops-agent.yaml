@@ -1,0 +1,59 @@
+# Czar public alpha: the Google Cloud Ops Agent configuration (SCR-170 §1; tracker PM-051).
+#
+# This file is code only. It is installed on the VM by hand after create-alerts.sh --apply:
+#
+#   sudo install -m 0644 ops-agent.yaml /etc/google-cloud-ops-agent/config.yaml
+#   sudo systemctl restart google-cloud-ops-agent
+#
+# It does two things:
+#   1. Collects host metrics every 60 s. These are the series the disk and memory alert policies
+#      read (agent.googleapis.com/disk/percent_used and agent.googleapis.com/memory/percent_used).
+#   2. Reads the Docker json-file logs of every container and unwraps them, so the app's own JSON
+#      line arrives in Cloud Logging as jsonPayload (event, keyId, service, ...). The log-based
+#      metric behind the signer_gas_low alert reads jsonPayload.event and jsonPayload.keyId.
+#
+# A Docker json-file line looks like this (the app's line is the escaped string in "log"):
+#   {"log":"{\"event\":\"signer_gas_low\",\"keyId\":\"K7\"}\n","stream":"stdout","time":"2026-11-05T02:49:14.781234567Z"}
+# so two parsers run in order: the first reads the Docker line out of "message", the second reads the
+# app's line out of "log". A line that is not JSON (Postgres, for one) passes the second parser
+# unchanged and is kept as plain text.
+#
+# The agent also keeps its built-in syslog and journal log pipelines; they are not touched here.
+# Everything below stays inside the logging allowlist (cross-cutting §4): the files receiver does
+# not record file paths, and the app's fields were already filtered by @czar/logging.
+
+metrics:
+  receivers:
+    hostmetrics:
+      type: hostmetrics
+      collection_interval: 60s
+  service:
+    pipelines:
+      default_pipeline:
+        receivers:
+          - hostmetrics
+
+logging:
+  receivers:
+    docker_json_files:
+      type: files
+      include_paths:
+        - /var/lib/docker/containers/*/*-json.log
+      record_log_file_path: false
+  processors:
+    docker_unwrap:
+      type: parse_json
+      field: message
+      time_key: time
+      time_format: "%Y-%m-%dT%H:%M:%S.%L%z"
+    czar_json:
+      type: parse_json
+      field: log
+  service:
+    pipelines:
+      czar_containers:
+        receivers:
+          - docker_json_files
+        processors:
+          - docker_unwrap
+          - czar_json
