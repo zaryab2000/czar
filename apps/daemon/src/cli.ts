@@ -2,7 +2,7 @@
 // `czar` CLI for the local daemon (CZ-02): status, install, update, uninstall, daemon, config dump.
 import { execFile, spawn } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import process from "node:process";
@@ -16,8 +16,9 @@ import { openMemoryDatabase, type MemoryDatabase } from "./database.ts";
 import { install, uninstall, update, type InstallDeps } from "./install.ts";
 import { KEYCHAIN_ACCOUNTS, osKeychain, type Keychain } from "./keychain.ts";
 import { Launchctl, type CommandRunner } from "./launchd.ts";
-import { macosPaths, type DaemonPaths } from "./paths.ts";
-import { readStatus } from "./status.ts";
+import { Loginctl, Systemctl } from "./systemd.ts";
+import { linuxPaths, macosPaths, type DaemonPaths } from "./paths.ts";
+import { readStatus, type ServiceManager } from "./status.ts";
 import { pairDevice } from "#src/pairing/pair-device";
 import { runManualObjective, runResultCommand } from "#src/objective-command";
 import { objectivePreflight } from "#src/objective-preflight";
@@ -34,14 +35,32 @@ const runCommand: CommandRunner = (program, args) =>
     });
   });
 
+/**
+ * Linux takes its locations from the XDG variables (CZ-02 §3 Linux row, §4 line 221), not from
+ * `daemon.socketPath`, whose default is the macOS path.
+ */
+function platformPaths(config: Config): DaemonPaths {
+  return process.platform === "linux"
+    ? linuxPaths(homedir(), process.env)
+    : macosPaths(homedir(), config.get("daemon.socketPath") as string);
+}
+
+/** `czar status` reads the installed state from whichever service manager this platform has. */
+function serviceManager(installDeps: InstallDeps): ServiceManager {
+  return installDeps.platform === "linux" ? installDeps.systemctl : installDeps.launchctl;
+}
+
 function deps(): InstallDeps {
   const config = loadConfig({ env: process.env });
-  const paths = macosPaths(homedir(), config.get("daemon.socketPath") as string);
+  const paths = platformPaths(config);
   return {
     platform: process.platform,
     paths,
     launchctl: new Launchctl(runCommand, process.getuid?.() ?? -1),
+    systemctl: new Systemctl(runCommand),
+    loginctl: new Loginctl(runCommand, userInfo().username),
     keychain: createOsKeychain(),
+    print: (line) => void process.stdout.write(`${line}\n`),
     fs: {
       mkdir: (path, mode) => mkdirSync(path, { recursive: true, mode }),
       writeFile: (path, contents, mode) => {
@@ -218,7 +237,7 @@ async function main(argv: readonly string[]): Promise<number> {
   switch (command) {
     case "status": {
       const d = deps();
-      const status = await readStatus(d.launchctl, d.paths.socketPath);
+      const status = await readStatus(serviceManager(d), d.paths.socketPath);
       process.stdout.write(`${status.text}\n`);
       return status.installed ? 0 : 3;
     }

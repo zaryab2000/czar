@@ -76,9 +76,15 @@ function searchInputDeclaration(): unknown {
   return enrich(bazaar, { method: "GET", adapter: { getPath: () => SEARCH_PATH } });
 }
 
-export function createSearchRoute(
-  options: SearchRouteOptions,
-): (request: Request) => Promise<Response> {
+/**
+ * The route handler, with the live 402 it answers an unpaid request with attached so the runtime can
+ * derive this service's discovery-index entry from it rather than typing the fields by hand (p1-D7).
+ */
+export type SearchRoute = ((request: Request) => Promise<Response>) & {
+  readonly paymentRequired: PaymentRequiredV2;
+};
+
+export function createSearchRoute(options: SearchRouteOptions): SearchRoute {
   const offered = buildPaymentRequired({
     url: options.resourceUrl,
     description: "Search a fixed index of protocol documentation",
@@ -116,7 +122,7 @@ export function createSearchRoute(
     }
   }
 
-  return async (request) => {
+  const handle = async (request: Request): Promise<Response> => {
     const url = new URL(request.url);
     if (request.method !== "GET" || url.pathname !== SEARCH_PATH)
       return json(404, { error: "not found" });
@@ -256,4 +262,6 @@ export function createSearchRoute(
       throw error;
     }
   };
+
+  return Object.assign(handle, { paymentRequired });
 }

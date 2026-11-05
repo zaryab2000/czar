@@ -1,0 +1,14 @@
+[Unit]
+Description=Czar daemon (CZ-02)
+
+[Service]
+Type=simple
+ExecStart="/usr/local/bin/node" "/opt/czar/cli.ts" "daemon"
+WorkingDirectory=%h/.local/share/czar
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:%h/.local/share/czar/logs/daemon.out.log
+StandardError=append:%h/.local/share/czar/logs/daemon.err.log
+
+[Install]
+WantedBy=default.target
