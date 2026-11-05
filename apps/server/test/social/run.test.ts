@@ -261,9 +261,30 @@ describe("representative run", () => {
     expect(routedEvents.rowCount).toBe(1);
   });
 
-  it("keeps one experience per settled unit across five delivery replays", async () => {
-    const context = createTestContext(pool());
-    for (let attempt = 0; attempt < 5; attempt += 1) {
+  it("keeps posts, evidence, health facts, and plans unchanged across 100 duplicate replays", async () => {
+    const snapshot = async () => {
+      const result = await pool().query<{
+        posts: string;
+        observations: string;
+        ratings: string;
+        supplier_counts: string;
+        supplier_health: string;
+        incidents: string;
+        plans: string;
+        decisions: string;
+      }>(`SELECT
+        (SELECT count(*) FROM social_posts)::text AS posts,
+        (SELECT count(*) FROM observations)::text AS observations,
+        (SELECT count(*) FROM ratings)::text AS ratings,
+        (SELECT count(*) FROM supplier_counts)::text AS supplier_counts,
+        (SELECT count(*) FROM supplier_health)::text AS supplier_health,
+        (SELECT count(*) FROM social_incidents)::text AS incidents,
+        (SELECT count(*) FROM plans)::text AS plans,
+        (SELECT count(*) FROM ranking_decisions)::text AS decisions`);
+      return result.rows[0];
+    };
+    const before = await snapshot();
+    for (let attempt = 0; attempt < 100; attempt += 1) {
       const event = await pool().query<{ event_id: string }>(
         `INSERT INTO outbox_events(name,objective_id,payload)
          VALUES('objective.delivered',$1,'{}') RETURNING event_id`,
@@ -274,16 +295,13 @@ describe("representative run", () => {
          VALUES($1,$2,'outcome-ready',$3)`,
         [representativeId, event.rows[0]!.event_id, { objectiveId: paidObjectiveId }],
       );
-      expect(
-        (
-          await runSocialInbox(
-            pool(),
-            loadConfig(),
-            context.random,
-            new Date("2026-11-05T12:00:00Z"),
-          )
-        )?.stopReason,
-      ).toBe("abstain-no-evidence");
+      const replay = await runSocialInbox(
+        pool(),
+        loadConfig(),
+        { bytes: randomBytes },
+        new Date("2026-11-05T12:00:00Z"),
+      );
+      expect(replay?.stopReason, `duplicate attempt ${attempt + 1}`).toBe("abstain-no-evidence");
     }
     const posts = await pool().query<{ count: string }>(
       `SELECT count(*) FROM social_posts WHERE kind='experience'
@@ -291,6 +309,7 @@ describe("representative run", () => {
       [representativeId],
     );
     expect(posts.rows[0]?.count).toBe("1");
+    expect(await snapshot()).toEqual(before);
   });
 
   it("answers a routed question only with its own settled evidence", async () => {
