@@ -136,6 +136,53 @@ describe.each(IMAGES)("czar-$app image", ({ app, uid }) => {
     expect(stdout.trim()).toBe(NODE_VERSION);
   }, 120_000);
 
+  it("loads @czar/schemas, which reads the spec schema files at start", async () => {
+    // schema-source.ts reads docs/specs/02-data-and-protocol/schemas/ when it is first imported,
+    // so an image without those files crashes on its first import.
+    const { stdout } = await run(
+      "docker",
+      [
+        "run",
+        "--rm",
+        "--entrypoint",
+        "node",
+        tagFor(app),
+        "--experimental-strip-types",
+        "--disable-warning=ExperimentalWarning",
+        "--input-type=module",
+        "-e",
+        "await import('/app/packages/schemas/src/index.ts'); console.log('loaded')",
+      ],
+      { encoding: "utf8" },
+    );
+    expect(stdout.trim()).toBe("loaded");
+  }, 120_000);
+
+  it("holds the API contract files @czar/api-contract reads, when it ships that package", async () => {
+    // Every image carries packages/api-contract/package.json from the base layer; only an image
+    // that copies the package's source ships it.
+    const { stdout: shipped } = await run(
+      "docker",
+      ["run", "--rm", "--entrypoint", "ls", tagFor(app), "/app/packages/api-contract"],
+      { encoding: "utf8" },
+    );
+    if (!shipped.split("\n").includes("src")) return;
+    const { stdout } = await run(
+      "docker",
+      [
+        "run",
+        "--rm",
+        "--entrypoint",
+        "ls",
+        tagFor(app),
+        "/app/docs/specs/02-data-and-protocol/api/openapi.yaml",
+        "/app/docs/specs/02-data-and-protocol/api/local-openapi.yaml",
+      ],
+      { encoding: "utf8" },
+    );
+    expect(stdout).toContain("openapi.yaml");
+  }, 120_000);
+
   it("holds no file matching a secret-file pattern", async () => {
     const paths = await filesIn(tagFor(app));
     // A sanity check on the listing itself: an empty or truncated export would

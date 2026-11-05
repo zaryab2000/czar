@@ -30,6 +30,11 @@ COPY packages/vault-client packages/vault-client
 COPY packages/x402         packages/x402
 COPY apps/signer           apps/signer
 COPY apps/server           apps/server
+# @czar/schemas reads the spec schema files when it is first imported, so every image that
+# ships the package ships them too.
+COPY docs/specs/02-data-and-protocol/schemas docs/specs/02-data-and-protocol/schemas
+# @czar/api-contract reads the OpenAPI documents at run time.
+COPY docs/specs/02-data-and-protocol/api docs/specs/02-data-and-protocol/api
 
 # The prompt files computePromptHash reads, resolved relative to
 # apps/server/src/models/proxy.ts as ../../../../models/<prompt>.md. The eval
