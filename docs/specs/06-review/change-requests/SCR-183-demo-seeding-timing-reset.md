@@ -101,6 +101,7 @@ This SCR is the normative spec for the tasks above until its content is folded i
 | `selection.ratingRefreshDebounceSeconds` | 30 | 5 | Bob's rating reaches counts quickly |
 | `social.housekeepingMinutes` | 15 | 1 | Subscriptions refresh quickly after seeding |
 | `social.routingCooldownMinutes` | 60 | 1 | Repeated rehearsals still route to the test agents first |
+| `social.repDailyPostCap` | 10 | 50 | Seed-day posts leave room for corroboration and same-day rehearsals (SCR-186) |
 | `demo.enabled` | false | true | Allows the demo commands |
 
 - **Keep at defaults:**
@@ -116,6 +117,7 @@ This SCR is the normative spec for the tasks above until its content is folded i
 - **Deletes, inside one transaction, only Demo v1 rehearsal state (SCR-186):**
   - The three controlled seed owners: their users, devices, representatives, objectives,
     synthetic observations, ratings, rating-receipt bindings, effective-rating projection,
+    social budgets,
     subscriptions, inbox rows and runs.
   - Social threads with subject `service:eip155:5042002:<A>`,
     `service:eip155:5042002:<B>`, or `class:eip155:5042002:smart-contract-audit`;
@@ -131,8 +133,10 @@ This SCR is the normative spec for the tasks above until its content is folded i
 - **Keeps:** Bob's and Alice's accounts, wallets, devices, representatives and sharing
   settings; every real observation, payment ID, settlement transaction, receipt, envelope
   and chain-derived record; every other service or task-class social row; the global social
-  consumer cursor, all outbox events and event deliveries; and all immutable ranking
-  decisions. Never rewind the cursor or replay old events.
+  consumer cursor, all outbox event rows and event deliveries; and all immutable ranking
+  decisions. Before deleting controlled objectives, set only `outbox_events.objective_id`
+  to `NULL` on events referencing those objectives. Change no other event column. Never
+  rewind the cursor or replay old events.
 - **Refreshes:** recompute supplier counts from retained evidence and store a fresh ranking
   snapshot after reset and again after seed. Never edit counts by hand. An unrated delivered
   Bob observation is neither a negative unit nor a rating count.

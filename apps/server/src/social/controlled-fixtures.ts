@@ -9,12 +9,14 @@ interface OwnerFixture {
   key: string;
   controlled: true;
   sharing: "structured";
+  handle?: string;
 }
 
 export interface SupplierFixture {
   key: string;
   serviceId: string;
-  resource: { url: string; method: "GET" };
+  resource: { url: string; method: "GET" | "POST" };
+  payTo?: string;
   capability: string;
   taskClass: string;
   probeInput?: { query?: Record<string, string> };
@@ -44,6 +46,11 @@ export interface ControlledFixture {
     lead: { origin: string; pathHint: string; source: "controlled-fixture" };
   };
 }
+
+/** Demo history omits the local-only no-supplier lead. */
+export type SeedableFixture = Omit<ControlledFixture, "noSupplier"> & {
+  noSupplier?: ControlledFixture["noSupplier"];
+};
 
 interface SeedOptions {
   count: number;
@@ -95,7 +102,7 @@ function submission(
 
 async function seedOwners(
   db: PoolClient,
-  fixture: ControlledFixture,
+  fixture: SeedableFixture,
   options: SeedOptions,
 ): Promise<Map<string, SeedOwner>> {
   const owners = new Map<string, SeedOwner>();
@@ -121,7 +128,7 @@ async function seedOwners(
       [
         representativeId,
         userId,
-        `Rep-${representativeId.slice(-4)}`,
+        owner.handle ?? `Rep-${representativeId.slice(-4)}`,
         owner.sharing,
         options.consentTextVersion,
         options.now,
@@ -135,7 +142,7 @@ async function seedOwners(
 async function seedExperience(
   db: PoolClient,
   experience: ExperienceFixture,
-  fixture: ControlledFixture,
+  fixture: SeedableFixture,
   options: SeedOptions,
   owners: Map<string, SeedOwner>,
   versions: Map<string, string>,
@@ -185,6 +192,7 @@ async function seedExperience(
       serviceId: supplier.serviceId,
       capability: supplier.capability,
       unitAmount: experience.step.unitAmount,
+      ...(supplier.payTo ? { payee: supplier.payTo.toLowerCase() } : {}),
     },
   ]);
   const ratingId = randomId("rtg_", options.random);
@@ -210,6 +218,7 @@ async function seedExperience(
   for (const call of experience.observations) {
     const obsId = `obs_${options.random.bytes(16).toString("hex")}`;
     const settledAt = new Date(options.now.getTime() - call.settledDaysAgo * 86_400_000);
+    const paymentRefHash = hex(`controlled:payment:${experience.key}:${call.callIndex}`);
     await db.query(
       `INSERT INTO observations(obs_id,user_id,vault,network,rail,service_id,version_id,
          task_class,objective_id,envelope_ref,step_index,call_index,payment_ref_hash,
@@ -227,9 +236,11 @@ async function seedExperience(
         envelopeRef,
         experience.step.stepIndex,
         call.callIndex,
-        hex(`controlled:payment:${experience.key}:${call.callIndex}`),
+        paymentRefHash,
         `controlled:${experience.key}:${call.callIndex}`,
-        `controlled:${experience.key}:${call.callIndex}`,
+        supplier.payTo
+          ? `x402-exact:${fixture.network}:${owner.vault}:${supplier.payTo.toLowerCase()}:${paymentRefHash}`
+          : `controlled:${experience.key}:${call.callIndex}`,
         call.delivered,
         settledAt,
       ],
@@ -243,18 +254,20 @@ async function seedExperience(
 
 async function seedNoSupplier(
   db: PoolClient,
-  fixture: ControlledFixture,
+  fixture: SeedableFixture,
   options: SeedOptions,
   owners: Map<string, SeedOwner>,
 ): Promise<void> {
-  const owner = owners.get(fixture.noSupplier.owner);
+  const noSupplier = fixture.noSupplier;
+  if (!noSupplier) throw new Error("Controlled no-supplier fixture is absent.");
+  const owner = owners.get(noSupplier.owner);
   if (!owner) throw new Error("Controlled no-supplier owner is absent.");
   const objectiveId = randomId("obj_", options.random);
   const body = submission(
     objectiveId,
     owner.deviceId,
-    fixture.noSupplier.capability,
-    fixture.noSupplier.taskSpec,
+    noSupplier.capability,
+    noSupplier.taskSpec,
     options.now,
   );
   await db.query(
@@ -268,7 +281,7 @@ async function seedNoSupplier(
      VALUES('objective.no-supplier',$1,'{}',$2)`,
     [objectiveId, options.now],
   );
-  const lead = fixture.noSupplier.lead;
+  const lead = noSupplier.lead;
   const threadId = randomId("thr_", options.random);
   const postId = randomId("pst_", options.random);
   const leadId = randomId("led_", options.random);
@@ -277,7 +290,7 @@ async function seedNoSupplier(
     network: fixture.network,
     origin: lead.origin,
     pathHint: lead.pathHint,
-    capabilityTag: fixture.noSupplier.capability,
+    capabilityTag: noSupplier.capability,
     source: lead.source,
   };
   if (!validateSocialLeadCard(card)) throw new Error("Invalid controlled fixture lead card.");
@@ -288,7 +301,7 @@ async function seedNoSupplier(
     [
       threadId,
       fixture.network,
-      fixture.noSupplier.capability,
+      noSupplier.capability,
       `question:${threadId}`,
       owner.representativeId,
       new Date(options.now.getTime() + 24 * 3_600_000),
@@ -315,16 +328,16 @@ async function seedNoSupplier(
       fixture.network,
       lead.origin,
       lead.pathHint,
-      fixture.noSupplier.capability,
+      noSupplier.capability,
       options.now,
     ],
   );
 }
 
-/** Insert controlled evidence only into a caller-approved isolated local database. */
+/** Insert controlled evidence after the caller validates its deployment and database. */
 export async function seedControlledFixtures(
   pool: Pool,
-  fixture: ControlledFixture,
+  fixture: SeedableFixture,
   options: SeedOptions,
 ): Promise<void> {
   if (options.count !== 3 || fixture.owners.length !== 3 || options.network !== fixture.network) {
@@ -356,7 +369,7 @@ export async function seedControlledFixtures(
     for (const [index, experience] of fixture.experiences.entries()) {
       await seedExperience(db, experience, fixture, options, owners, versions, index + 100);
     }
-    await seedNoSupplier(db, fixture, options, owners);
+    if (fixture.noSupplier) await seedNoSupplier(db, fixture, options, owners);
     await db.query("COMMIT");
   } catch (error) {
     await db.query("ROLLBACK");
