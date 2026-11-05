@@ -61,3 +61,5 @@ deployments/local-keys.json
 deployments/.vault-client-test*.json
 contracts/broadcast
 deployments/.run6-*
+# PM-010 verifier test: a local arc-anvil manifest, removed after the run
+deployments/.pm-010-test-*
