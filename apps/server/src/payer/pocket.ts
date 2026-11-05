@@ -1048,7 +1048,12 @@ function readTransferId(headers: Readonly<Record<string, string>>): string | und
     const value = JSON.parse(
       Buffer.from(headers[key] as string, "base64").toString("utf8"),
     ) as Record<string, unknown>;
-    return typeof value["transferId"] === "string" ? value["transferId"] : undefined;
+    if (typeof value["transferId"] === "string") return value["transferId"];
+    const transaction = value["transaction"];
+    return typeof transaction === "string" &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(transaction)
+      ? transaction
+      : undefined;
   } catch {
     return undefined;
   }
