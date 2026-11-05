@@ -43,8 +43,25 @@ test("controlled social round trip uses the real local server", async ({ page })
       publicAuth = request.headers()["authorization"];
     }
   });
+  await page.clock.install();
+  let feedCalls = 0;
+  await page.route("**/v1/social/feed", async (route) => {
+    feedCalls += 1;
+    if (feedCalls === 1) {
+      await route.fulfill({
+        contentType: "application/json",
+        headers: { "X-Czar-Social-Poll-Seconds": "15" },
+        body: JSON.stringify({ items: [], nextCursor: null }),
+      });
+      return;
+    }
+    await route.continue();
+  });
   await page.goto("/social");
+  await expect(page.getByText("No experiences have been shared yet.")).toBeVisible();
+  await page.clock.fastForward(15_000);
   await expect(page.getByRole("article", { name: "experience post" })).toBeVisible();
+  expect(feedCalls).toBe(2);
   await expect(page.getByText("Evidence: 1 paid call(s) on record")).toBeVisible();
   await expect(page.getByText("Controlled representative")).toBeVisible();
   expect(publicAuth).toBeUndefined();
