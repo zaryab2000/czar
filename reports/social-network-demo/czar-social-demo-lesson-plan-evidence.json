@@ -1,0 +1,33 @@
+{
+  "mode": "lesson",
+  "controlled": true,
+  "injected": ["ranking candidates and scores", "directory entries", "probe outcomes"],
+  "live": ["incident and lesson reads", "planner build", "persisted plan", "approval API"],
+  "ranked": [
+    {
+      "rank": 1,
+      "serviceId": "svc_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "score": 0.9,
+      "badges": []
+    },
+    {
+      "rank": 2,
+      "serviceId": "svc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "score": 0.89,
+      "badges": []
+    }
+  ],
+  "selectedServiceId": "svc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "approvalReasons": [],
+  "lessons": [
+    {
+      "lessonId": "les_K2V3GBZ7PR1GX7A8JSB8ZQHB94",
+      "serviceId": "svc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "handle": "Rep-ERZ6",
+      "proposition": "prefer",
+      "taskClass": "data-json.search"
+    }
+  ],
+  "planId": "pln_01M6N0PVBT33WZGF7ZQMWNJ9AX",
+  "planHash": "0x3032fa9d784bbd0dbd5c6c2cb6a27f1d048f324bffdde05e84886b3e80299ffe"
+}
