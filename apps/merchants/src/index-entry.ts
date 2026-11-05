@@ -16,6 +16,8 @@ import type { RouteMethod } from "./vanilla-route.ts";
 export const RAIL_VANILLA = "x402-exact";
 /** `extensions.czar.source` for a service Czar runs and registered itself (SL-C2 source 1). */
 export const SOURCE_CZAR_REGISTERED = "czar-registered";
+/** `extensions.czar.source` for a Czar-run test merchant of the lab (CZ-20 §5.8a, D83). */
+export const SOURCE_TEST_MERCHANT = "czar-test-merchant";
 
 export interface ProviderMetadata {
   readonly name: string;
@@ -38,6 +40,8 @@ export interface DiscoveryIndexEntryInput {
   readonly supportsCircleGateway: boolean;
   readonly serviceId?: string;
   readonly provider?: ProviderMetadata;
+  /** A lab service (CZ-20 §5.8a): `source` becomes `czar-test-merchant` and `testMerchant` is `true`. */
+  readonly testMerchant?: boolean;
 }
 
 export type DiscoveryIndexEntry = Readonly<Record<string, unknown>>;
@@ -71,7 +75,8 @@ export function discoveryIndexEntry(input: DiscoveryIndexEntryInput): DiscoveryI
       ...(bazaar === undefined ? {} : { bazaar }),
       czar: {
         ...(input.serviceId === undefined ? {} : { serviceId: input.serviceId }),
-        source: SOURCE_CZAR_REGISTERED,
+        source: input.testMerchant === true ? SOURCE_TEST_MERCHANT : SOURCE_CZAR_REGISTERED,
+        ...(input.testMerchant === true ? { testMerchant: true } : {}),
         rail: RAIL_VANILLA,
         routing: {
           vaultDirect: supportsVanillax402,
@@ -153,8 +158,17 @@ export function validateDiscoveryIndexEntry(item: unknown): readonly string[] {
     problems.push("extensions.czar must be an object");
     problems.push('extensions.czar.source must be "czar-registered" for a Czar-run service');
   } else {
-    if (czar["source"] !== SOURCE_CZAR_REGISTERED)
+    const testMerchant = czar["source"] === SOURCE_TEST_MERCHANT;
+    if (czar["source"] !== SOURCE_CZAR_REGISTERED && !testMerchant)
       problems.push('extensions.czar.source must be "czar-registered" for a Czar-run service');
+    if (testMerchant && czar["testMerchant"] !== true)
+      problems.push(
+        'extensions.czar.testMerchant must be true when source is "czar-test-merchant"',
+      );
+    if (!testMerchant && czar["testMerchant"] !== undefined)
+      problems.push(
+        'extensions.czar.testMerchant is only allowed when source is "czar-test-merchant"',
+      );
     if (
       czar["rail"] !== undefined &&
       czar["rail"] !== RAIL_VANILLA &&

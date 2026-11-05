@@ -9,6 +9,7 @@
     "**/.ponder/**",
     "**/generated/**",
     "apps/redact-sidecar/**",
+    "env/cloud.example.toml",
     "apps/daemon/test/fixtures/**",
     "packages/redaction/vendor/**",
     "packages/hashing/test/fixtures/**"

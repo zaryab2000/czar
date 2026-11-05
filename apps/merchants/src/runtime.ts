@@ -192,6 +192,7 @@ export async function createMerchantServer(
           // Gateway routes are T-051 part B (SCR-177); no Gateway route answers a 402 yet.
           supportsCircleGateway: false,
           ...(serviceId === undefined ? {} : { serviceId }),
+          ...(service.testMerchant === true ? { testMerchant: true } : {}),
           ...(entryOptions.provider === undefined ? {} : { provider: entryOptions.provider }),
         });
       });
