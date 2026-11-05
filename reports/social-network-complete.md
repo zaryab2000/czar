@@ -20,9 +20,33 @@ No post, reply count, handle, or model-written note is itself a supplier score.
 | SN-5 web | UI, direct template parity and the real-server case-18 browser test are on the integration branch through `f3c6884`. | Final PR/head review and merge pending. |
 | SN-6 controlled demo and report | Controlled fixture, local seed/replay support and this draft report are on the integration branch. | Authorized local-chain demo, final report and merge pending. |
 
-The combined integration branch is not a merged PR. Record its final PR number, reviewed head,
-merge commit, and review status here before sign-off. Hosted Actions are unavailable due to billing;
+The combined integration branch is draft PR #208 into `build-v1`; Zaryab has not merged it.
+Record its final reviewed head, merge commit, and review status here before sign-off.
+Hosted Actions are unavailable due to billing;
 missing, skipped or zero-step hosted jobs are not passing checks.
+
+### Current checkpoint on draft PR #208
+
+The branch is rebased on SCR-165 (`c8f7af1`), with the incident copy, lesson supplier ID,
+duplicate-origin lead behavior and independent-review fixes pushed through `b6a0941`.
+The 22-file focused server slice passed 175/175 at `da569bb`. Serial full server, signer,
+daemon, indexer and vault-client suites passed at that head, with skips recorded below.
+The pinned local Arc slice passed 1/1, run 4 passed 13/13 and run 5 passed 15/15.
+`FOUNDRY_PROFILE=arc arc-forge test` exited 0 on `b6a0941`; its generated gas snapshot
+was restored and its untracked lock file removed. The captured output has not been read
+because the suite can handle generated keys, so this records the exit code only.
+Run 2 passed 20/20 at both exact SCR-165 base `c8f7af1` (133.22s) and integration
+`da569bb` (133.65s). The chief brief had identified four base failures from an earlier
+environment; neither run reproduced them here. No regression was observed in this pair.
+
+The controlled local stack has not reached readiness. The installed Process Compose 1.122.0
+rejected the old YAML shape; `b6a0941` fixes it and its dry run validates 11 processes.
+The full stack then exited with unsuccessful Arc Anvil/Postgres process states. Direct
+`arc-anvil --network arc` answered chain ID 5042002 and direct Docker Postgres started,
+but the local deploy exited before writing a manifest. Those services were stopped and no
+seed/replay or screenshots were claimed. The raw process/deploy logs were not read because
+they may contain key material; automatic approval review rejected the proposed log read.
+The fixture-origin lead source also awaits an architect ruling under the brief's §6.
 
 ## Key-free evidence already collected
 
@@ -52,6 +76,18 @@ missing, skipped or zero-step hosted jobs are not passing checks.
 | Integration `9938e49`, reported by the orchestrator | Focused server social/buying/planner/selection plus `test/payer/vault-direct-partial.test.ts` | 22 files, 168/168 passed | Key-free integration slice, not all package suites or merged-head evidence. |
 | Integration `9938e49`, reported by the orchestrator | `fnm exec --using=22.22.0 pnpm typecheck`; `fnm exec --using=22.22.0 pnpm lint` | Both passed | Static checks; final PR-head rerun pending. Config 67/67, web 11/11, schema 34/0, web build and case-18 browser evidence remain the prior snapshots above. |
 | Integration `b12c5dc`, reported by the orchestrator | Key-free package suites listed below | Eight additional package suites passed | Does not include the signer, daemon, indexer, vault-client or full server suites. |
+| Draft PR #208 at `da569bb` | Focused social, planner, selection and linked payer Vitest | 22 files, 175/175 passed | Includes SCR-165 producer/copy tests and the first independent review fixes; full suites and final head remain pending. |
+| Draft PR #208, local Arc slice at the preceding integration state | `CZAR_LOCAL_CHAIN=1` Flow 4A slice | 1/1 passed on pinned local Arc Anvil | This is local-chain evidence, not the final merged head. |
+| Same local Arc state | `CZAR_LOCAL_CHAIN=1` run 4 and run 5 | Run 4: 13/13 passed; run 5: 15/15 passed | Run 2 and final-head repeat remain pending. |
+| Draft PR #208 at `da569bb` | Full server suite, run alone | 101 files passed, 3 skipped; 703 tests passed, 29 skipped | Skipped tests are not passes; final PR-head rerun pending. |
+| Same draft head | Full signer suite, run alone | 14 files passed, 1 skipped; 168 tests passed, 20 skipped | Local-chain tests are separate. |
+| Same draft head | Full daemon suite, run alone | 21 files passed, 1 skipped; 104 tests passed, 1 skipped | Local-chain tests are separate. |
+| Same draft head | Full indexer suite, run alone | 16 files passed, 1 skipped; 108 tests passed, 3 skipped | Local-chain tests are separate. |
+| Same draft head | Full vault-client suite, run alone | 9 files, 94/94 tests passed | Final PR-head rerun pending. |
+| Draft PR #208 at `b6a0941` | Serial final local package suites: config, api-contract, schemas, logging, redaction, hashing, x402, web, merchants, server, signer, daemon, indexer and vault-client | 67, 20, 38, 14, 473, 54, 93, 81, 31, 703, 168, 104, 108 and 94 tests passed respectively; server 29, signer 20, daemon 1, indexer 3 tests skipped | Redaction's first sandbox run had two Unix-socket failures; the file and complete 473-test suite passed with local socket access. Skips remain skips. |
+| Same draft head | `pnpm typecheck`, `pnpm lint`, schemas-directory `python3 -I check-schemas.py`, web build and real-server Chromium case 18 | All commands exited 0; 34 schema files, 0 problems; Chromium 1/1 passed | Case 18 mocks only ancillary `/v1/me`; not the controlled Arc product demo. |
+| Same draft head | Pinned local Arc slice and runs 2/4/5 | 1/1, 20/20, 13/13 and 15/15 passed, serially | Run 2 exact SCR-165 base also passed 20/20; no observed new failure. |
+| Same draft head | `FOUNDRY_PROFILE=arc arc-forge test` | Exit 0 | Output was captured without inspection; generated gas snapshot restored. |
 
 The orchestrator's exact focused server command for `902f113` was:
 
@@ -85,9 +121,10 @@ The orchestrator also ran these key-free package suites on integration `b12c5dc`
 
 The first sandbox attempts for redaction and x402 could not bind loopback; their escalated
 key-free reruns passed at the counts above. Config passed 67/67 on an earlier integration head.
-The signer, daemon, indexer, vault-client and full server suites still need source review for
-key-producing harnesses and an authorized run where required. The focused 22-file server slice
-at `9938e49` is not a substitute for the full server suite.
+The signer, daemon, indexer, vault-client and full server suites were run serially on the draft
+branch after local-only authorization; the counts above distinguish passes from skips. All
+package suites and the local-chain gates still require one final pass on the final PR head and
+then merged-head acceptance.
 
 The fixture contains three controlled owners and three supplier descriptors. The local seed now
 probes the two fixture-only `comparison-search` and `lesson-search` endpoints through unpaid
@@ -99,11 +136,11 @@ or replayed for the demo.
 
 | Dependency | Current finding | Required before the demo |
 |---|---|---|
-| Local stack | `ops/local/README.md` specifies `process-compose`; composition starts Arc Anvil, deployment, signer, server, indexer and a merchant. | Operator authorizes and provisions the already specified local key references; confirm loopback endpoints and a clean local chain. |
+| Local stack | Zaryab authorized the pinned local stack. Process Compose YAML now validates 11 processes, but the full stack did not reach readiness. Direct Arc Anvil and Docker Postgres each started; local deployment exited before a manifest. | Diagnose the failed deployment and retry only on chain ID 5042002. |
 | Social worker | The local process-compose file now includes the worker. | Confirm migration dependency and restricted `czar_social` role in an authorized local-stack run. |
-| Controlled seed/replay | The scripts and loopback-context checks exist and passed key-free tests. | Review the final head, then run seed/replay only after local-stack authorization. |
+| Controlled seed/replay | Scripts and loopback-context checks passed key-free tests; authorization is recorded. | Run after stack readiness; no seed or replay has occurred. |
 | Supplier set | Local-only unpaid 402 fixture handlers and probe-before-register logic exist. | Confirm both handlers answer live probes in the authorized local demo; do not copy origins into cloud config. |
-| Browser | The standard key-free Playwright fixture passed case 18 against real `createApp` and a disposable DB. | Capture controlled-owner screenshots and full local-stack evidence separately after authorization. |
+| Browser | The standard key-free Playwright fixture passed case 18 against real `createApp` and a disposable DB again at `b6a0941`. | Capture controlled-owner screenshots against the full local stack. |
 | Money and model boundaries | No real payment or runtime model call is needed for the controlled fixture. | Keep the demo on the local stack and check `model_usage` remains unchanged. |
 
 ## SCR-164 §3.18 acceptance matrix
@@ -113,50 +150,49 @@ test or earlier run, not a pass for the full case.
 
 | # | Required behavior | Test mapping / current evidence | Final merged-head result |
 |---|---|---|---|
-| 1 | Posts have zero scoring weight; 100 duplicates leave counts, health and decision unchanged | `apps/server/test/selection/registered.test.ts` has the 100-post DB and full stable-decision comparison | Pending final head |
-| 2 | Five `objective.delivered` replays publish one experience per paid step | Integrated `apps/server/test/social/run.test.ts` checks five delivery replays and one final experience | Pending final head |
-| 3 | Rating revision supersedes the old post without duplicate publish | Integrated `social/run.test.ts` checks revision, moved evidence link and event count | Pending final head |
-| 4 | Public strings exclude private subjects, paths, addresses, exact amounts and evidence IDs; public day times and random IDs | `social/experience-card.test.ts` now checks a published card against private subject, file, address, amount and evidence IDs and verifies UTC-day time; `social/denylist.test.ts` checks random `rep_`/`thr_`/`pst_` IDs do not share a time-ordered prefix; `social-routes.test.ts` covers public projections | Pending final head |
-| 5 | Question routing and caps, while service threads remain open | `social/router.test.ts` tests three recipients and sharing-off; `social/run.test.ts` tests question close at eight; new `social/service-thread-caps.test.ts` tests 9th, 10th and 50th experience plus a third from one owner without closing the service thread | Pending final head |
-| 6 | No-evidence reply abstains without a post | `social/run.test.ts` now asserts `abstain-no-evidence` and unchanged post count around that run | Pending final head |
-| 7 | Incident open, unit/owner distinction, recovery, no flap, version change, window clear and unknown version | `apps/server/test/social-incidents.test.ts` covers these; local `4105ee0` and `676abe7` add the third-owner expiry and no-reopen boundary (5/5) | Pending final head |
-| 8 | Open incident changes ordering and approval, not score or version guard | `social-buying.test.ts` checks score/version preservation; `planner/planner.test.ts` checks incident approval and stored decision ID; `payer/vault-direct-partial.test.ts` now pays only at that incident-ranked version and blocks a changed live version before reserve/sign | Pending final head |
-| 9 | Lessons obey exact margin and survivor/incident bounds | `social-buying.test.ts` checks exact millionth margin and that a preference cannot cross the incident band; `planner/planner.test.ts` now rejects preferred suppliers outside top-three probes or whose live probe fails | Pending final head |
-| 10 | Lead probe and safe-fetch rejection matrix, with no payment | `social-leads.test.ts` now covers valid 402, wrong network, 200, DNS failure, cross-host redirect, forbidden port, private address, redirect loop, oversize body and malformed 402. Duplicate origin-only behavior awaits architect disposition | Partial; final head pending |
-| 11 | Consent change during a run prevents a post | Integrated `social/run.test.ts` covers context-to-commit consent change | Pending final head |
-| 12 | Two workers on one inbox item publish once | `social/run.test.ts` now races two workers on the same inbox row and checks one post and one run; `social/inbox.test.ts` covers lease claim | Pending final head |
-| 13 | Before-commit rollback and after-commit replay each yield one post/run | Integrated `social/run.test.ts` checks a scoped action ID has zero rows after injected insert fault, then one post and one run after replay | Pending final head |
-| 14 | Delete tombstones every revision and supersedes derived lessons | `apps/server/test/social-routes.test.ts` | Pending |
-| 15 | No model usage and every note stays NULL | `social/run.test.ts` now compares `model_usage` before and after its representative-run suite and counts zero non-NULL notes across every post in that suite's DB | Pending final head |
-| 16 | `czar_social` cannot read base tables or write rating/ranking/money tables; concurrent migration succeeds | `apps/server/test/social-migration.test.ts` | Pending |
-| 17 | `planning → no-supplier` event is transactional and unique | Integrated `planner/service.test.ts` checks success and trigger-induced rollback leaves planning state with zero events | Pending final head |
-| 18 | Onboarding, public feed, owner tombstone and lesson dismiss in Playwright against local server | `apps/web/e2e/social-real.spec.ts` passed 1/1 at integration `f3c6884` with real social API and disposable DB; `/v1/me` was the only mocked ancillary read; DB cleanup verified 0 leftovers | Key-free browser slice passed; final PR-head rerun and controlled demo pending |
-| 19 | All package suites, typecheck, lint, schema checker, Arc slice/runs 2/4/5 and Forge | Integration `9938e49`: focused server plus payer 22 files 168/168 and root typecheck/lint; `b12c5dc`: eight key-free package suites above; earlier config 67/67, schema 34/0, web build and case-18 browser 1/1 | Signer/daemon/indexer/vault-client/full server suites, Arc/Forge and final PR-head gates pending |
-| 20 | A lower-id event that commits late is delivered once | `apps/server/test/social/consumer.test.ts` | Pending |
-| 21 | Sharing-off receives a lesson without publishing; publishing run skips | `social/run.test.ts` checks private lesson creation with no public post and, at `22825d6`, a would-publish inbox item ending `skipped-sharing-off` with unchanged post count and a recorded run | Pending final head |
+| 1 | Posts have zero scoring weight; 100 duplicates leave counts, health and decision unchanged | `apps/server/test/selection/registered.test.ts` has the 100-post DB and full stable-decision comparison | Mapped test passed at draft `b6a0941`; merged head pending |
+| 2 | Five `objective.delivered` replays publish one experience per paid step | Integrated `apps/server/test/social/run.test.ts` checks five delivery replays and one final experience | Mapped test passed at draft `b6a0941`; merged head pending |
+| 3 | Rating revision supersedes the old post without duplicate publish | Integrated `social/run.test.ts` checks revision, moved evidence link and event count | Mapped test passed at draft `b6a0941`; merged head pending |
+| 4 | Public strings exclude private subjects, paths, addresses, exact amounts and evidence IDs; public day times and random IDs | `social/experience-card.test.ts` now checks a published card against private subject, file, address, amount and evidence IDs and verifies UTC-day time; `social/denylist.test.ts` checks random `rep_`/`thr_`/`pst_` IDs do not share a time-ordered prefix; `social-routes.test.ts` covers public projections | Mapped test passed at draft `b6a0941`; merged head pending |
+| 5 | Question routing and caps, while service threads remain open | `social/router.test.ts` tests three recipients and sharing-off; `social/run.test.ts` tests question close at eight; new `social/service-thread-caps.test.ts` tests 9th, 10th and 50th experience plus a third from one owner without closing the service thread | Mapped test passed at draft `b6a0941`; merged head pending |
+| 6 | No-evidence reply abstains without a post | `social/run.test.ts` now asserts `abstain-no-evidence` and unchanged post count around that run | Mapped test passed at draft `b6a0941`; merged head pending |
+| 7 | Incident open, unit/owner distinction, recovery, no flap, version change, window clear and unknown version | `apps/server/test/social-incidents.test.ts` covers these; local `4105ee0` and `676abe7` add the third-owner expiry and no-reopen boundary (5/5) | Mapped test passed at draft `b6a0941`; merged head pending |
+| 8 | Open incident changes ordering and approval, not score or version guard | `social-buying.test.ts` checks score/version preservation; `planner/planner.test.ts` checks incident approval and stored decision ID; `payer/vault-direct-partial.test.ts` now pays only at that incident-ranked version and blocks a changed live version before reserve/sign | Mapped test passed at draft `b6a0941`; merged head pending |
+| 9 | Lessons obey exact margin and survivor/incident bounds | `social-buying.test.ts` checks exact millionth margin and that a preference cannot cross the incident band; `planner/planner.test.ts` now rejects preferred suppliers outside top-three probes or whose live probe fails | Mapped test passed at draft `b6a0941`; merged head pending |
+| 10 | Lead probe and safe-fetch rejection matrix, with no payment | `social-leads.test.ts` covers valid 402, wrong network, 200, DNS failure, cross-host redirect, forbidden port, private address, redirect loop, oversize body, malformed 402 and SCR-165 origin-only 202 deduplication | Mapped test passed at draft `b6a0941`; merged head pending |
+| 11 | Consent change during a run prevents a post | Integrated `social/run.test.ts` covers context-to-commit consent change | Mapped test passed at draft `b6a0941`; merged head pending |
+| 12 | Two workers on one inbox item publish once | `social/run.test.ts` now races two workers on the same inbox row and checks one post and one run; `social/inbox.test.ts` covers lease claim | Mapped test passed at draft `b6a0941`; merged head pending |
+| 13 | Before-commit rollback and after-commit replay each yield one post/run | Integrated `social/run.test.ts` checks a scoped action ID has zero rows after injected insert fault, then one post and one run after replay | Mapped test passed at draft `b6a0941`; merged head pending |
+| 14 | Delete tombstones every revision and supersedes derived lessons | `apps/server/test/social-routes.test.ts` | Mapped test passed at draft `b6a0941`; merged head pending |
+| 15 | No model usage and every note stays NULL | `social/run.test.ts` now compares `model_usage` before and after its representative-run suite and counts zero non-NULL notes across every post in that suite's DB | Mapped test passed at draft `b6a0941`; merged head pending |
+| 16 | `czar_social` cannot read base tables or write rating/ranking/money tables; concurrent migration succeeds | `apps/server/test/social-migration.test.ts` | Mapped test passed at draft `b6a0941`; merged head pending |
+| 17 | `planning → no-supplier` event is transactional and unique | Integrated `planner/service.test.ts` checks success and trigger-induced rollback leaves planning state with zero events | Mapped test passed at draft `b6a0941`; merged head pending |
+| 18 | Onboarding, public feed, owner tombstone and lesson dismiss in Playwright against local server | `apps/web/e2e/social-real.spec.ts` passed 1/1 at integration `f3c6884` with real social API and disposable DB; `/v1/me` was the only mocked ancillary read; DB cleanup verified 0 leftovers | Browser 1/1 passed at draft `b6a0941`; controlled demo pending |
+| 19 | All package suites, typecheck, lint, schema checker, Arc slice/runs 2/4/5 and Forge | Draft `da569bb`: full server, signer, daemon, indexer, vault-client passed serially; local Arc slice 1/1, run 2 20/20, run 4 13/13, run 5 15/15; exact base run 2 20/20; Arc Forge exited 0 at `b6a0941` | All named local gates passed at draft `b6a0941`; controlled demo and merged head pending |
+| 20 | A lower-id event that commits late is delivered once | `apps/server/test/social/consumer.test.ts` | Mapped test passed at draft `b6a0941`; merged head pending |
+| 21 | Sharing-off receives a lesson without publishing; publishing run skips | `social/run.test.ts` checks private lesson creation with no public post and, at `22825d6`, a would-publish inbox item ending `skipped-sharing-off` with unchanged post count and a recorded run | Mapped test passed at draft `b6a0941`; merged head pending |
 
 ### Remaining acceptance evidence gaps
 
 The matrix maps every case to code or a deferred gate. New `9938e49` tests close the prior
-key-free case 4, 6, 8 and 15 mapping gaps and the lead rejection branches in case 10. The
-origin-only duplicate-lead outcome in case 10 still needs the architect's binding ruling and
-test. Every case still needs final PR-head evidence. Case 19 still needs the signer, daemon,
-indexer, vault-client and full server suites after source review and any required authorization,
-plus the authorized Arc/Forge slice and controlled demo.
+key-free case 4, 6, 8 and 15 mapping gaps. SCR-165's origin-only duplicate-lead outcome
+has a passing focused regression. The separate representative-origin lead candidate source
+is a specification gap under architect review. Every case still needs final PR-head evidence.
+Case 19 still needs the remaining package/static/browser gates and one final serial pass.
 
 Case 18's focused browser round trip used the standard key-free server fixture, real social
 routes and isolated PostgreSQL. It did not create keys, deploy contracts, seed the product
 stack, or make a payment. Its only browser route mock was the unrelated `/v1/me` account read,
 which needs Arc RPC. The separate `e2e-local` browser harness writes a temporary key file and
-deploys contracts; it remains unrun. Case 19 additionally requires Arc local-chain suites and
-Forge, plus a final PR-head rerun of all key-free checks. These gates remain pending explicit
-operator authorization where a harness generates keys.
+deploys contracts; it remains unrun. Case 19's Arc slice and runs 2/4/5 have passed on the
+draft branch, with the exact base run-2 comparison above. Forge exited 0 at `b6a0941`;
+a final PR-head pass remains.
 
 ## Controlled local demo plan and evidence
 
-Run only after the local-only seed/replay safeguards, supplier registration and unpaid probe
-handlers are reviewed, and Zaryab authorizes the local stack and its key-producing harnesses.
-No seed, stack, payment, model call or device action was performed to prepare this draft.
+Zaryab authorized the pinned local Arc stack, ephemeral local keys and transactions, controlled
+seed/replay and Playwright screenshots. The stack attempt above did not reach readiness, so no
+seed, replay or screenshot is claimed yet. No testnet, real funds or real device is authorized.
 
 1. Pair a local fixture owner and complete `/onboarding/representative`; capture the exact
    consent paragraph and saved sharing choice.
@@ -165,7 +201,7 @@ No seed, stack, payment, model call or device action was performed to prepare th
 3. Replay three distinct owners' bad outcomes against one version; show the incident thread
    and its attached experiences.
 4. Plan in that task class; show unchanged score, incident ordering, `incident-open` approval,
-   and the exact approval-screen line once its immutable count/wording contract is resolved.
+   and SCR-165's exact count-free approval-screen line.
 5. Publish 100 duplicate posts in the test harness; compare counts, health and ranking decision
    before and after.
 6. Force `no-supplier`, route a `find-supplier` question, submit a controlled lead and show an
@@ -179,15 +215,15 @@ Record dated screenshots or traces for the feed, incident/thread, approve view, 
 lead probe and paused activity. Use controlled data only. Add artifact paths and the exact
 build head here after the authorized run; no screenshots exist yet.
 
-## Operator-authorized commands: not run for this draft
+## Operator-authorized commands and results
 
-The local stack start is documented in `ops/local/README.md`. It requires separately
-provisioned local signer key references and deployments; the command does not provision them.
-The existing `apps/web/e2e-local/local-server-fixture.mjs` writes a temporary run-6 key file
-and deploys contracts, so even a browser test using that configuration needs explicit approval.
+The local stack start is documented in `ops/local/README.md`. Existing signer key references
+were present without reading their contents. Zaryab authorized the local stack and ephemeral
+local keys and transactions. The stack attempt exited before readiness; the seed and replay
+commands remain unrun. The Arc suites and key-free gates listed above ran successfully.
 
 ```sh
-# Only after operator approval and local-only configuration preflight:
+# Attempted after local-only preflight; full stack did not reach readiness:
 process-compose -f ops/local/process-compose.yaml up
 
 # Only after verifying the seed script's database-host refusal and fixture registration:
@@ -201,10 +237,10 @@ cd docs/specs/02-data-and-protocol/schemas
 python3 -I check-schemas.py
 cd ../../../..
 
-# Full package suites only after auditing their harnesses for key generation:
+# Full package suites ran serially with results above:
 fnm exec --using=22.22.0 pnpm -r test
 
-# Pinned local Arc checks; each harness may generate ephemeral keys:
+# Pinned local Arc checks passed with counts above:
 CZAR_LOCAL_CHAIN=1 fnm exec --using=22.22.0 pnpm --filter @czar/server exec vitest run test/local-pocket/flow-4a-slice-arc.test.ts
 CZAR_LOCAL_CHAIN=1 fnm exec --using=22.22.0 pnpm --filter @czar/signer exec vitest run test/local-chain.test.ts
 CZAR_LOCAL_CHAIN=1 fnm exec --using=22.22.0 pnpm --filter @czar/server exec vitest run test/local-pocket/pocket-arc.test.ts
@@ -213,11 +249,11 @@ cd contracts
 FOUNDRY_PROFILE=arc arc-forge test
 cd ..
 
-# Key-free real-server browser round trip, already run on integration f3c6884:
+# Key-free real-server browser round trip also passed at b6a0941:
 CZAR_SERVER_URL=http://127.0.0.1:4310 fnm exec --using=22.22.0 pnpm --filter @czar/web build
 CZAR_SOCIAL_E2E_FIXTURE=1 fnm exec --using=22.22.0 pnpm --filter @czar/web exec playwright test --config playwright.social.config.ts --project chromium-desktop
 
-# The separate e2e-local chain browser harness still requires operator authorization:
+# The separate e2e-local chain browser harness was not run:
 fnm exec --using=22.22.0 pnpm --filter @czar/web e2e:local-server
 ```
 
@@ -241,24 +277,30 @@ to the final report's evidence location and link them here after the run.
 
 ## Builder decisions, review and open work
 
-- **Builder decisions:** record final per-package choices with file and line after the bundled
-  integration review. No unapproved specification change is implied by this draft.
+- **Builder decisions:** `ops/local/process-compose.yaml:2` uses the installed Process Compose
+  map/list configuration and template working directories. Its dry run validates all 11
+  processes. `ops/local/process-compose.test.ts:42` follows the existing
+  `listenOnLoopback` call. These are local-stack corrections, not changes to SCR-164.
+  `apps/server/src/social/lessons.ts:73` excludes superseded source posts; the revision
+  transaction at `apps/server/src/social/runtime/run.ts:667` supersedes their lessons.
+  `apps/server/src/social/worker-main.ts:101` reads the configured incident interval.
+  These choices implement the existing source-state and schedule contracts.
 - **Defects fixed / found, not fixed:** populate from the exact final PR diff and review findings.
   The SN-4 privacy regression was fixed before integration snapshot `902f113`; review and rerun
   on the final head before calling it resolved for acceptance.
-- **Independent review:** pending. Give a fresh reviewer only the combined diff, `CLAUDE.md`,
-  SCR-164 and the bounded defect brief in the orchestrator's definition of done. Record its
-  concrete findings, fixes and final-head rerun.
-- **Architect disposition:** the approval UI currently names the selected supplier for an
-  `avoid` lesson that may concern a different supplier, while `why.lessons[]` lacks an immutable
-  lesson service ID. The specified incident line says “other owners,” but the stored
-  `distinct_owners` can include the approving buyer. The architect must bind the immutable
-  lesson supplier and buyer-relative count or amend the approved wording before these lines
-  are presented as verified. Focused expected-red UI regressions exist at `ee61df2`; they are
-  not passing acceptance evidence.
-- **Duplicate lead contract:** case 10's repeat origin-only lead behavior remains with the
-  architect for a binding ruling and executable test. The unpaid lead rejection matrix has focused
-  key-free coverage, but that does not establish the duplicate outcome.
+- **Independent review:** a fresh reviewer inspected PR #208 from `c8f7af1` through local
+  `4c677df`, finding stale lessons from superseded posts and incident evaluation on the wrong
+  interval. The lesson read guard, revision-state update and hourly schedule are now integrated;
+  their focused and full server gates passed at `b6a0941`. The later changed code and report
+  still need exact-head review before readiness.
+- **Architect disposition:** SCR-165 merged at `c8f7af1`. Its count-free incident line,
+  lesson-source `serviceId`, and idempotent duplicate-lead outcome are integrated with focused
+  regressions. The representative-run lead origin source remains unspecified; an architect
+  ruling is pending before claiming the SCR-164 §3.19 lead demo scene complete.
+- **Duplicate lead contract:** the owner API now has a direct regression for repeated
+  origin-only leads returning the existing IDs with no second row, post or probe. It passed in
+  the 175-test focused integration run. A representative-origin duplicate cannot be exercised
+  until its candidate source is defined.
 - **Open product items:** model-written notes, agent-suggested ratings, discovery that lets
   probed leads become buyable, and A2A remain outside SCR-164's completed scope.
 - **Remaining gate:** SN-1 through SN-6 merged into `build-v1`, all 21 cases verified on that
