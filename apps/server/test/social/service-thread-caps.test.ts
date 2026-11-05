@@ -91,9 +91,14 @@ async function queuePaidExperience(letter: string, digit: string): Promise<void>
     [value.objectiveId],
   );
   await pool().query(
-    `INSERT INTO social_inbox(representative_id,event_id,kind,refs)
-     VALUES($1,$2,'outcome-ready',$3)`,
-    [value.representativeId, event.rows[0]!.event_id, { objectiveId: value.objectiveId }],
+    `INSERT INTO social_inbox(representative_id,event_id,kind,refs,due_at,created_at)
+     VALUES($1,$2,'outcome-ready',$3,$4,$4)`,
+    [
+      value.representativeId,
+      event.rows[0]!.event_id,
+      { objectiveId: value.objectiveId },
+      new Date(now.getTime() - 1),
+    ],
   );
 }
 

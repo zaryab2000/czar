@@ -19,8 +19,9 @@ describe("social inbox leases", () => {
       "INSERT INTO outbox_events(name,payload) VALUES('ignored.fixture','{}') RETURNING event_id",
     );
     await pool().query(
-      "INSERT INTO social_inbox(representative_id,event_id,kind,refs) VALUES($1,$2,'post-routed','{}')",
-      [representativeId, event.rows[0]?.event_id],
+      `INSERT INTO social_inbox(representative_id,event_id,kind,refs,due_at,created_at)
+       VALUES($1,$2,'post-routed','{}',$3,$3)`,
+      [representativeId, event.rows[0]?.event_id, new Date(now.getTime() - 1)],
     );
   });
 
