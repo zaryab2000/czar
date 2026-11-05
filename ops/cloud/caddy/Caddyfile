@@ -1,0 +1,82 @@
+# Czar public alpha: the only public listener on the VM (SCR-170 §1, §2).
+#
+# Caddy runs on the host, on ports 80 and 443, and gets its certificates from Let's Encrypt.
+# Every Czar process binds 127.0.0.1 only, so this file is the whole public surface:
+#
+#   https://app.<domain>        /v1/*  and  /health  -> server     127.0.0.1:3000
+#                              everything else       -> web app    127.0.0.1:3100
+#   https://merchants.<domain>  everything            -> merchants  127.0.0.1:8787
+#
+# There is no api. subdomain on purpose: one app origin keeps the passkey RP ID, the cookies and
+# the daemon's daemon.serverOrigin on one host (SCR-170 §2).
+#
+# CZAR_DOMAIN comes from the instance metadata through /etc/czar/caddy.env. It is a pointer, not
+# a credential (SCR-170 §3). No credential belongs in this file.
+{
+	# The admin API would otherwise listen on 127.0.0.1:2019, which every host-network container
+	# can reach — the same exposure the metadata guard exists to close. A container that could
+	# POST a new config to it would own the public surface. Nothing here needs it: the config is
+	# this file, reloaded with `systemctl reload caddy`.
+	admin off
+
+	# No `email` is set, so Caddy registers an ACME account without one. An unset placeholder
+	# is a parse error here (`caddy validate` rejects `email {$CZAR_ACME_EMAIL}`), and a
+	# placeholder with a made-up default would register a fake address with Let's Encrypt. To
+	# get expiry notices, add one real `email <address>` line and reload.
+}
+
+(czar_security_headers) {
+	header {
+		# One year, subdomains included. Not submitted to the preload list: that is a commitment
+		# the alpha should not make for the whole domain.
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+}
+
+app.{$CZAR_DOMAIN} {
+	import czar_security_headers
+
+	# The job-deliverable upload is the one route that carries a large body, so it is matched
+	# before the general /v1/* cap. The limit is acceptance.deliverableMaxBytes (20 MiB), the
+	# same number apps/server/src/app.ts enforces on POST /v1/jobs/:jobKey/deliverable; a
+	# smaller cap here would reject uploads the server would have accepted (GC-9a).
+	@czar_job_deliverable path_regexp ^/v1/jobs/[^/]+/deliverable$
+	handle @czar_job_deliverable {
+		request_body {
+			max_size 20971520
+		}
+		reverse_proxy 127.0.0.1:3000
+	}
+
+	# Every other owner-API body is 1 MiB at most, which is far above the largest route shape
+	# in @czar/api-contract and keeps a flood of large bodies off the server.
+	@czar_api path /v1/*
+	handle @czar_api {
+		request_body {
+			max_size 1048576
+		}
+		reverse_proxy 127.0.0.1:3000
+	}
+
+	# /health is the server's, not the web app's: the uptime checks in PM-051 read it here.
+	@czar_health path /health
+	handle @czar_health {
+		reverse_proxy 127.0.0.1:3000
+	}
+
+	# Everything else is the web app.
+	handle {
+		reverse_proxy 127.0.0.1:3100
+	}
+}
+
+merchants.{$CZAR_DOMAIN} {
+	import czar_security_headers
+
+	# merchants.publicOrigin. Every Czar service and lab service is reached by path, as CZ-20
+	# §5.8 already specifies, so there is nothing to split here.
+	reverse_proxy 127.0.0.1:8787
+}

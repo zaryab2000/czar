@@ -1,0 +1,241 @@
+#cloud-config
+# Czar public alpha: the cloud machine's image, as code (SCR-170 §1, §4).
+#
+# Passed to the VM as the `user-data` instance metadata key by ops/cloud/provision/create.sh.
+# Nothing in this file runs until Zaryab runs that script with --apply (approval item 15).
+#
+# This file holds NO credential of any kind. Every credential reaches the machine at boot
+# through czar-secrets.service, as a file under /run/czar/secrets (SCR-170 §4, D70, D78).
+#
+# The unit files, scripts, credential list and Caddyfile are NOT duplicated here. create.sh
+# passes each one as its own instance-metadata attribute, straight from the repository, and the
+# runcmd steps below read them back. The repository stays the single source of truth, and the
+# private repository never has to be reachable from the VM.
+#
+# ---------------------------------------------------------------------------------------------
+# PINNED VERSIONS — confirm each one against its vendor index before --apply. None of them could
+# be checked when this file was written (the sandbox has no route to the vendor package indexes),
+# so they are the reviewed intent, not a verified fact. ops/cloud/README.md lists where to look.
+#
+#   docker-ce, docker-ce-cli    5:27.5.1-1~debian.12~bookworm
+#   containerd.io               1.7.25-1
+#   docker-compose-plugin       2.32.4-1~debian.12~bookworm
+#   caddy                       2.10.0
+#   google-cloud-ops-agent      2.53.0~debian12
+#
+# Debian's own packages (curl, jq, gnupg, iptables, ca-certificates) are installed unpinned:
+# they come from the distribution's signed point release, which is itself the pin.
+# ---------------------------------------------------------------------------------------------
+
+package_update: true
+
+write_files:
+  # /run is a tmpfs, so the signer's socket folder has to be recreated at every boot.
+  # Owner: the signer (10002). Group: czar-signer-clients (10010), which UID 10001 joins, so a
+  # client can open the socket while the owner checks still require the signer's own UID
+  # (SCR-170 §4). Never world-anything.
+  - path: /etc/tmpfiles.d/czar.conf
+    permissions: "0644"
+    owner: root:root
+    content: |
+      d /run/czar 0755 root root -
+      d /run/czar/signer 0750 10002 10010 -
+
+  # Docker daemon: loopback-only published ports are the containers' own business (every Czar
+  # container runs with network_mode: host), but Docker must never add its own public listener
+  # and must never manage iptables rules that would outrank the metadata guard's OUTPUT rule.
+  - path: /etc/docker/daemon.json
+    permissions: "0644"
+    owner: root:root
+    content: |
+      {
+        "live-restore": true,
+        "log-driver": "json-file",
+        "log-opts": { "max-size": "32m", "max-file": "4" },
+        "userland-proxy": false,
+        "ip-forward": true,
+        "iptables": true
+      }
+
+runcmd:
+  # ---- 1. the tools the rest of this file needs -----------------------------------------------
+  - apt-get update
+  - DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl gnupg jq iptables
+
+  # ---- 2. the two service users and the shared signer-client group (SCR-170 §4) ---------------
+  # czar (10001) runs every Czar image but the signer; czar-signer (10002) runs the signer, and
+  # is the only non-root UID the metadata guard lets reach the metadata server.
+  - getent group czar >/dev/null || groupadd --system --gid 10001 czar
+  - getent passwd czar >/dev/null || useradd --system --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin czar
+  - getent group czar-signer >/dev/null || groupadd --system --gid 10002 czar-signer
+  - getent passwd czar-signer >/dev/null || useradd --system --uid 10002 --gid 10002 --no-create-home --shell /usr/sbin/nologin czar-signer
+  - getent group czar-signer-clients >/dev/null || groupadd --system --gid 10010 czar-signer-clients
+  - usermod --append --groups czar-signer-clients czar
+  - usermod --append --groups czar-signer-clients czar-signer
+
+  # ---- 3. folders ----------------------------------------------------------------------------
+  - install -d -m 0755 -o root -g root /opt/czar/bin /opt/czar/ops /etc/czar /etc/caddy
+  # deploy.objectStorePath, on the persistent disk, owned by the UID the server runs as.
+  - install -d -m 0750 -o 10001 -g 10001 /var/lib/czar /var/lib/czar/objects
+  - systemd-tmpfiles --create /etc/tmpfiles.d/czar.conf
+  - chown 10002:10010 /run/czar/signer
+  - chmod 0750 /run/czar/signer
+
+  # ---- 4. this task's files, read back from the instance metadata -----------------------------
+  # Every attribute below is repository content, not a credential. The metadata server is still
+  # open to root at this point: Docker is not installed yet and no container exists.
+  #
+  # These entries are argv lists, not shell strings, for two reasons: cloud-init runs a list
+  # without a shell at all, and an unquoted YAML scalar containing a colon followed by a space
+  # (as in a `-H 'Metadata-Flavor: Google'` header) parses as a mapping, not a string.
+  - [
+      curl,
+      -fsS,
+      -H,
+      "Metadata-Flavor: Google",
+      "http://metadata.google.internal/computeMetadata/v1/instance/attributes/czar-metadata-guard-sh",
+      -o,
+      /opt/czar/bin/metadata-guard.sh,
+    ]
+  - [
+      curl,
+      -fsS,
+      -H,
+      "Metadata-Flavor: Google",
+      "http://metadata.google.internal/computeMetadata/v1/instance/attributes/czar-fetch-secrets-sh",
+      -o,
+      /opt/czar/bin/fetch-secrets.sh,
+    ]
+  - chmod 0755 /opt/czar/bin/metadata-guard.sh /opt/czar/bin/fetch-secrets.sh
+  - chown root:root /opt/czar/bin/metadata-guard.sh /opt/czar/bin/fetch-secrets.sh
+  - [
+      curl,
+      -fsS,
+      -H,
+      "Metadata-Flavor: Google",
+      "http://metadata.google.internal/computeMetadata/v1/instance/attributes/czar-secrets-list",
+      -o,
+      /opt/czar/ops/secrets.list,
+    ]
+  - chmod 0644 /opt/czar/ops/secrets.list
+  - [
+      curl,
+      -fsS,
+      -H,
+      "Metadata-Flavor: Google",
+      "http://metadata.google.internal/computeMetadata/v1/instance/attributes/czar-metadata-guard-service",
+      -o,
+      /etc/systemd/system/czar-metadata-guard.service,
+    ]
+  - [
+      curl,
+      -fsS,
+      -H,
+      "Metadata-Flavor: Google",
+      "http://metadata.google.internal/computeMetadata/v1/instance/attributes/czar-secrets-service",
+      -o,
+      /etc/systemd/system/czar-secrets.service,
+    ]
+  - [
+      curl,
+      -fsS,
+      -H,
+      "Metadata-Flavor: Google",
+      "http://metadata.google.internal/computeMetadata/v1/instance/attributes/czar-secrets-mount",
+      -o,
+      /etc/systemd/system/run-czar-secrets.mount,
+    ]
+  - chmod 0644 /etc/systemd/system/czar-metadata-guard.service /etc/systemd/system/czar-secrets.service /etc/systemd/system/run-czar-secrets.mount
+  - systemctl daemon-reload
+
+  # ---- 5. the metadata guard, before Docker exists at all (SCR-170 §4) ------------------------
+  # With network_mode: host, a container that started before this rule was in place could mint a
+  # service-account token and call Cloud KMS asymmetricSign on K3, K7, K8 or K10 directly,
+  # skipping the signer's policy. So the guard is applied before Docker is even installed.
+  - systemctl enable --now czar-metadata-guard.service
+  - systemctl enable run-czar-secrets.mount
+  - systemctl start run-czar-secrets.mount
+
+  # ---- 6. Docker, from its own signed repository, pinned --------------------------------------
+  - install -m 0755 -d /etc/apt/keyrings
+  - curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+  - chmod a+r /etc/apt/keyrings/docker.asc
+  - echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian bookworm stable" > /etc/apt/sources.list.d/docker.list
+  - apt-get update
+  - DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends docker-ce=5:27.5.1-1~debian.12~bookworm docker-ce-cli=5:27.5.1-1~debian.12~bookworm containerd.io=1.7.25-1 docker-compose-plugin=2.32.4-1~debian.12~bookworm
+  - apt-mark hold docker-ce docker-ce-cli containerd.io docker-compose-plugin
+  - systemctl enable docker.service
+
+  # ---- 7. Caddy, the only public listener (SCR-170 §1) ----------------------------------------
+  - curl -1fsSLo /tmp/caddy-stable.gpg.key https://dl.cloudsmith.io/public/caddy/stable/gpg.key
+  - gpg --batch --yes --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg /tmp/caddy-stable.gpg.key
+  - rm -f /tmp/caddy-stable.gpg.key
+  - curl -1fsSLo /etc/apt/sources.list.d/caddy-stable.list https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt
+  - apt-get update
+  - DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends caddy=2.10.0
+  - apt-mark hold caddy
+  - [
+      curl,
+      -fsS,
+      -H,
+      "Metadata-Flavor: Google",
+      "http://metadata.google.internal/computeMetadata/v1/instance/attributes/czar-caddyfile",
+      -o,
+      /etc/caddy/Caddyfile,
+    ]
+  - install -d -m 0755 /etc/systemd/system/caddy.service.d
+  - [
+      curl,
+      -fsS,
+      -H,
+      "Metadata-Flavor: Google",
+      "http://metadata.google.internal/computeMetadata/v1/instance/attributes/czar-caddy-dropin",
+      -o,
+      /etc/systemd/system/caddy.service.d/czar-env.conf,
+    ]
+  # CZAR_DOMAIN is the public host name, a pointer and not a credential (SCR-170 §3).
+  - [
+      curl,
+      -fsS,
+      -H,
+      "Metadata-Flavor: Google",
+      "http://metadata.google.internal/computeMetadata/v1/instance/attributes/CZAR_DOMAIN",
+      -o,
+      /run/czar-domain,
+    ]
+  - sh -c 'printf "CZAR_DOMAIN=%s\n" "$(cat /run/czar-domain)" > /etc/czar/caddy.env'
+  - rm -f /run/czar-domain
+  - chmod 0644 /etc/czar/caddy.env /etc/caddy/Caddyfile /etc/systemd/system/caddy.service.d/czar-env.conf
+  - systemctl daemon-reload
+  # `caddy validate --envfile` only exists from Caddy 2.7, so the environment is sourced instead:
+  # this works on any version, and a bad Caddyfile is caught here rather than at the first boot.
+  - sh -c 'set -a; . /etc/czar/caddy.env; set +a; caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile'
+  - systemctl enable caddy.service
+
+  # ---- 8. the Ops Agent, from Google's signed repository, pinned (PM-051 configures it) -------
+  - curl -fsSLo /usr/share/keyrings/cloud.google.gpg https://packages.cloud.google.com/apt/doc/apt-key.gpg
+  - echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt google-cloud-ops-agent-bookworm-2 main" > /etc/apt/sources.list.d/google-cloud-ops-agent.list
+  - apt-get update
+  - DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends google-cloud-ops-agent=2.53.0~debian12
+  - apt-mark hold google-cloud-ops-agent
+
+  # ---- 9. the credential unit: enabled, deliberately NOT started here -------------------------
+  # Every row of secrets.list marked `required` must already have a version in Secret Manager
+  # before this unit can succeed, and adding those versions is Zaryab's step, not this script's.
+  # So it is enabled for the next boot only. After he adds the versions:
+  #   sudo systemctl start czar-secrets.service
+  - systemctl enable czar-secrets.service
+
+  # ---- 10. no application container starts here ----------------------------------------------
+  # The images and the compose file are PM-013 and PM-014. Caddy is enabled but has nothing
+  # behind it yet, so it answers 502 until those land. That is the intended end state of PM-011.
+  #
+  # Caddy is deliberately not started here: it is enabled, and the reboot below starts it. That
+  # way nothing has to swallow a start failure, and the reboot proves the real boot order.
+
+# A reboot proves the whole boot path, including the metadata guard, the tmpfs and tmpfiles.d.
+power_state:
+  mode: reboot
+  condition: true
+  message: "Czar: rebooting once to prove the boot path"
+  timeout: 120

@@ -1,0 +1,32 @@
+gcloud services enable compute.googleapis.com cloudkms.googleapis.com secretmanager.googleapis.com storage.googleapis.com logging.googleapis.com monitoring.googleapis.com --project=p
+gcloud iam service-accounts create czar-alpha-vm --project=p --display-name=czar-alpha-vm
+gcloud kms keyrings create czar-alpha --project=p --location=asia-south1
+gcloud kms keyrings create czar-alpha-pockets --project=p --location=asia-south1
+gcloud kms keyrings add-iam-policy-binding czar-alpha --project=p --location=asia-south1 --member=serviceAccount:czar-alpha-vm@p.iam.gserviceaccount.com --role=roles/cloudkms.signerVerifier
+gcloud kms keyrings add-iam-policy-binding czar-alpha --project=p --location=asia-south1 --member=serviceAccount:czar-alpha-vm@p.iam.gserviceaccount.com --role=roles/cloudkms.viewer
+gcloud kms keyrings add-iam-policy-binding czar-alpha-pockets --project=p --location=asia-south1 --member=serviceAccount:czar-alpha-vm@p.iam.gserviceaccount.com --role=roles/cloudkms.admin
+gcloud secrets create czar-alpha-db-password-server --project=p --replication-policy=automatic
+gcloud secrets create czar-alpha-db-password-signer --project=p --replication-policy=automatic
+gcloud secrets create czar-alpha-db-password-indexer --project=p --replication-policy=automatic
+gcloud secrets create czar-alpha-db-password-merchants --project=p --replication-policy=automatic
+gcloud secrets create czar-alpha-db-password-backup --project=p --replication-policy=automatic
+gcloud secrets create czar-alpha-signer-token-server --project=p --replication-policy=automatic
+gcloud secrets create czar-alpha-signer-token-merchants --project=p --replication-policy=automatic
+gcloud secrets create czar-alpha-anthropic-api-key --project=p --replication-policy=automatic
+gcloud secrets add-iam-policy-binding czar-alpha-db-password-server --project=p --member=serviceAccount:czar-alpha-vm@p.iam.gserviceaccount.com --role=roles/secretmanager.secretAccessor
+gcloud secrets add-iam-policy-binding czar-alpha-db-password-signer --project=p --member=serviceAccount:czar-alpha-vm@p.iam.gserviceaccount.com --role=roles/secretmanager.secretAccessor
+gcloud secrets add-iam-policy-binding czar-alpha-db-password-indexer --project=p --member=serviceAccount:czar-alpha-vm@p.iam.gserviceaccount.com --role=roles/secretmanager.secretAccessor
+gcloud secrets add-iam-policy-binding czar-alpha-db-password-merchants --project=p --member=serviceAccount:czar-alpha-vm@p.iam.gserviceaccount.com --role=roles/secretmanager.secretAccessor
+gcloud secrets add-iam-policy-binding czar-alpha-db-password-backup --project=p --member=serviceAccount:czar-alpha-vm@p.iam.gserviceaccount.com --role=roles/secretmanager.secretAccessor
+gcloud secrets add-iam-policy-binding czar-alpha-signer-token-server --project=p --member=serviceAccount:czar-alpha-vm@p.iam.gserviceaccount.com --role=roles/secretmanager.secretAccessor
+gcloud secrets add-iam-policy-binding czar-alpha-signer-token-merchants --project=p --member=serviceAccount:czar-alpha-vm@p.iam.gserviceaccount.com --role=roles/secretmanager.secretAccessor
+gcloud secrets add-iam-policy-binding czar-alpha-anthropic-api-key --project=p --member=serviceAccount:czar-alpha-vm@p.iam.gserviceaccount.com --role=roles/secretmanager.secretAccessor
+gcloud storage buckets create gs://czar-alpha-backups-p --project=p --location=asia-south1 --uniform-bucket-level-access --public-access-prevention --default-storage-class=STANDARD
+gcloud storage buckets update gs://czar-alpha-backups-p --project=p --lifecycle-file=ops/cloud/provision/backup-lifecycle.json
+gcloud storage buckets add-iam-policy-binding gs://czar-alpha-backups-p --project=p --member=serviceAccount:czar-alpha-vm@p.iam.gserviceaccount.com --role=roles/storage.objectAdmin
+gcloud compute firewall-rules delete default-allow-ssh --project=p --quiet
+gcloud compute firewall-rules delete default-allow-rdp --project=p --quiet
+gcloud compute firewall-rules create czar-alpha-allow-web --project=p --network=default --direction=INGRESS --action=ALLOW --rules=tcp:80,tcp:443 --source-ranges=0.0.0.0/0 --target-tags=czar-alpha --priority=1000
+gcloud compute firewall-rules create czar-alpha-allow-iap-ssh --project=p --network=default --direction=INGRESS --action=ALLOW --rules=tcp:22 --source-ranges=35.235.240.0/20 --target-tags=czar-alpha --priority=1000
+gcloud compute firewall-rules create czar-alpha-deny-ingress --project=p --network=default --direction=INGRESS --action=DENY --rules=all --source-ranges=0.0.0.0/0 --target-tags=czar-alpha --priority=65000
+gcloud compute instances create czar-alpha --project=p --zone=asia-south1-a --machine-type=e2-medium --image-family=debian-12 --image-project=debian-cloud --boot-disk-size=30GB --boot-disk-type=pd-balanced --boot-disk-device-name=czar-alpha --service-account=czar-alpha-vm@p.iam.gserviceaccount.com --scopes=cloud-platform --tags=czar-alpha --shielded-secure-boot --shielded-vtpm --shielded-integrity-monitoring --metadata=CZAR_DOMAIN=d.example --metadata-from-file=user-data=ops/cloud/provision/cloud-init.yaml,czar-metadata-guard-sh=ops/cloud/systemd/metadata-guard.sh,czar-metadata-guard-service=ops/cloud/systemd/czar-metadata-guard.service,czar-fetch-secrets-sh=ops/cloud/systemd/fetch-secrets.sh,czar-secrets-service=ops/cloud/systemd/czar-secrets.service,czar-secrets-mount=ops/cloud/systemd/run-czar-secrets.mount,czar-secrets-list=ops/cloud/systemd/secrets.list,czar-caddyfile=ops/cloud/caddy/Caddyfile,czar-caddy-dropin=ops/cloud/systemd/caddy.service.d/czar-env.conf
