@@ -70,7 +70,7 @@ export async function lessonsFor(
      FROM social_lessons l JOIN social_posts p ON p.post_id=l.source_post_id
      JOIN social_representatives r ON r.representative_id=p.author_id
      WHERE l.user_id=$1 AND l.network=$2 AND l.task_class=$3 AND l.state='active'
-       AND l.expires_at>$4 AND p.tombstoned_at IS NULL
+       AND l.expires_at>$4 AND p.tombstoned_at IS NULL AND p.superseded_by IS NULL
      ORDER BY l.created_at DESC,l.lesson_id DESC`,
     [userId, network, taskClass, now],
   );
@@ -120,6 +120,7 @@ export async function createLesson(
      JOIN social_evidence_links link ON link.post_id=p.post_id
      JOIN social_observation_projection o ON o.obs_id=link.obs_id
      WHERE p.post_id=$2 AND p.kind IN ('experience','reply') AND p.tombstoned_at IS NULL
+       AND p.superseded_by IS NULL
        AND o.user_id=r.user_id AND o.settled_at IS NOT NULL AND o.released_at IS NULL
        AND o.network=p.card->>'network' AND o.service_id=p.card->>'serviceId'
        AND o.task_class=p.card->>'taskClass'

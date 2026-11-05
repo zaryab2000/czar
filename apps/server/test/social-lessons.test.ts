@@ -134,6 +134,78 @@ describe("SN-4 private lessons", () => {
     expect(await lessonsFor(getPool(), RECIPIENT, NETWORK, TASK_CLASS, AT)).toEqual([]);
   });
 
+  it("stops using an avoid lesson when its source experience is corrected", async () => {
+    await seed();
+    await getPool().query(
+      "UPDATE social_posts SET card=jsonb_set(card,'{rating}',to_jsonb('bad'::text)) WHERE post_id=$1",
+      [POST],
+    );
+    const client = await getPool().connect();
+    try {
+      expect(
+        await createLesson(
+          client,
+          { representativeId: RECIPIENT_REP, postId: POST, now: AT },
+          loadConfig(),
+        ),
+      ).toBe(true);
+    } finally {
+      client.release();
+    }
+    const before = await lessonsFor(getPool(), RECIPIENT, NETWORK, TASK_CLASS, AT);
+    expect(before).toMatchObject([{ serviceId: SERVICE, proposition: "avoid" }]);
+    const ranked = [SERVICE, `svc_${"b".repeat(32)}`].map((serviceId, index) => ({
+      rank: index + 1,
+      service_id: serviceId,
+      version_id: VERSION,
+      score: index === 0 ? 0.9 : 0.88,
+      features: {},
+      evidence_refs: [],
+      evidence_age_days: 0,
+      missing: [],
+      badges: [],
+      explanation: "rated",
+    }));
+    expect(chooseWithLessons(ranked, before, 0.05).selected.service_id).not.toBe(SERVICE);
+    const correctedPost = `pst_${"3".repeat(26)}`;
+    await getPool().query(
+      `INSERT INTO social_posts(post_id,thread_id,author_id,kind,card,action_id)
+       VALUES($1,$2,$3,'experience',$4::jsonb,'experience:corrected')`,
+      [
+        correctedPost,
+        `thr_${"1".repeat(26)}`,
+        SOURCE_REP,
+        JSON.stringify({
+          network: NETWORK,
+          serviceId: SERVICE,
+          versionId: VERSION,
+          taskClass: TASK_CLASS,
+          rating: "good",
+          deliveryOutcome: "delivered",
+        }),
+      ],
+    );
+    await getPool().query("UPDATE social_posts SET superseded_by=$2 WHERE post_id=$1", [
+      POST,
+      correctedPost,
+    ]);
+    const after = await lessonsFor(getPool(), RECIPIENT, NETWORK, TASK_CLASS, AT);
+    expect(after).toEqual([]);
+    expect(chooseWithLessons(ranked, after, 0.05).selected.service_id).toBe(SERVICE);
+    const correctedClient = await getPool().connect();
+    try {
+      expect(
+        await createLesson(
+          correctedClient,
+          { representativeId: RECIPIENT_REP, postId: POST, now: AT },
+          loadConfig(),
+        ),
+      ).toBe(false);
+    } finally {
+      correctedClient.release();
+    }
+  });
+
   it("keeps an older relevant lesson visible after four newer unrelated lessons", async () => {
     await seed();
     for (let index = 0; index < 5; index += 1) {
