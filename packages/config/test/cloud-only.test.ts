@@ -260,4 +260,38 @@ describe("env/cloud.example.toml", () => {
     expect(source).not.toMatch(/0x[0-9a-fA-F]{40}/);
     expect(source).not.toMatch(/sk-[A-Za-z0-9]/);
   });
+
+  it("turns the Anthropic model provider on, naming the model and the key file only (BR-05)", async () => {
+    const config = await loadConfigFile(examplePath);
+    expect(config.get("models.provider")).toBe("anthropic");
+    expect(config.get("models.anthropic.model")).toBe("claude-haiku-5-5");
+    const keyFile = String(config.get("models.anthropic.apiKeyFile"));
+    expect(keyFile).toBe("anthropic-api-key");
+    // A plain file name inside the server's credential folder, never a path or a value.
+    expect(keyFile).not.toMatch(/[\\/]/);
+  });
+
+  it("shows the provider block in a config dump, from the config file and not the defaults (BR-05)", async () => {
+    const dump = (await loadConfigFile(examplePath)).dump();
+    const entry = (key: string) => dump.find((parameter) => parameter.key === key);
+    expect(entry("models.provider")).toMatchObject({ value: "anthropic", source: "env-file" });
+    expect(entry("models.anthropic.model")).toMatchObject({ source: "env-file" });
+    expect(entry("models.anthropic.apiKeyFile")).toMatchObject({ source: "env-file" });
+  });
+
+  it("leaves every per-user model cap at its default, so the provider cannot be switched on uncapped", async () => {
+    const dump = (await loadConfigFile(examplePath)).dump();
+    const caps = dump.filter(
+      (parameter) =>
+        /^models\.(.+Monthly|userMonthly)Tokens$/.test(parameter.key) ||
+        /^models\..+\.(maxTokensPerCall|timeoutMs)$/.test(parameter.key),
+    );
+    expect(caps.length).toBeGreaterThanOrEqual(10);
+    expect(caps.filter((parameter) => parameter.source !== "default")).toEqual([]);
+  });
+
+  it("keeps the job path off (OPS-08)", async () => {
+    const config = await loadConfigFile(examplePath);
+    expect(config.get("routing.jobEnabled")).toBe(false);
+  });
 });
