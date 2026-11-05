@@ -1,5 +1,5 @@
 import { loadConfig } from "@czar/config";
-import { H, jcsString } from "@czar/hashing";
+import { H, jcsString, serviceVersionId } from "@czar/hashing";
 import { encodeBase64Json, type SafeFetch } from "@czar/x402";
 import { validateSchema } from "@czar/schemas";
 import { keccak256, toBytes } from "viem";
@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createAcceptancePorts } from "#src/acceptance/ports";
 import type { RankingQuery } from "#src/planner/ports";
 import { createRegisteredSelection } from "#src/selection/registered/index";
+import type { CircleCandidate } from "#src/selection/discovery/circle";
 import { rankingPolicyVersion } from "#src/selection/ranking/decision";
 import { readRankingDecision } from "#src/selection/ranking/decision-store";
 import { setupDatabase } from "#test/db";
@@ -285,6 +286,64 @@ beforeEach(async () => {
 });
 
 describe("registered selection", () => {
+  it("merges Circle candidates with registered services and keeps registered duplicates", async () => {
+    const registeredUrl = "https://merchant.example/v1/search";
+    const circleUrl = "https://circle-merchant.example/v1/search";
+    const circleOffer = offer("20", "0xbbb");
+    const candidate = (serviceId: string, url: string): CircleCandidate => ({
+      serviceId,
+      resource: { url, method: "GET" },
+      probeInput: { query: { q: "probe" } },
+      accepts: [circleOffer],
+      extensions: {
+        czar: {
+          claim: { status: "unclaimed" },
+          evidence: null,
+          card: { serviceName: "Circle merchant", inputFields: [{ name: "q", type: "string" }] },
+          source: "circle-registry",
+        },
+      },
+      source: "circle-registry",
+      card: { serviceName: "Circle merchant", inputFields: [{ name: "q", type: "string" }] },
+      versionId: serviceVersionId({
+        payTo: circleOffer.payTo.toLowerCase(),
+        resource: { url, method: "GET" },
+        schema: null,
+      }),
+      priceAtomic: "20",
+      probe: { matchedOffer: circleOffer, extensions402: { dropped: [] } },
+    });
+    const fetchImpl = vi.fn<SafeFetch>(async () => response("30", "0xaaa"));
+    const config = loadConfig({
+      envFile: {
+        "selection.czarRegisteredServices": { [SERVICE_A]: registration(registeredUrl) },
+        "selection.circleDiscovery.enabled": true,
+      },
+    });
+    const discovery = {
+      discover: vi.fn(async () => [
+        candidate(SERVICE_B, circleUrl),
+        candidate(SERVICE_RATED, `${registeredUrl}/`),
+      ]),
+    };
+    const selection = createRegisteredSelection({
+      config,
+      safeFetch: fetchImpl,
+      pool: getPool(),
+      now: () => new Date("2026-11-05T12:00:00Z"),
+      circleDiscovery: discovery,
+    });
+    const decision = await selection.rank.rank(query());
+    expect(decision.unverified.map((item) => item.service_id).toSorted()).toEqual([
+      SERVICE_A,
+      SERVICE_B,
+    ]);
+    expect(decision.candidates_considered).toBe(2);
+    expect(await selection.directory.get(SERVICE_B)).toMatchObject({ serviceId: SERVICE_B });
+    expect(await selection.directory.get(SERVICE_RATED)).toBeNull();
+    expect(discovery.discover).toHaveBeenCalledWith("web-search");
+  });
+
   it("excludes a Gateway-only offer while Gateway is off", async () => {
     const gatewayOnly = {
       extra: {

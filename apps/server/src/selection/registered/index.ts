@@ -19,6 +19,7 @@ import { makeRankingDecision, rankingPolicyVersion } from "#src/selection/rankin
 import { saveRankingDecision } from "#src/selection/ranking/decision-store";
 import { orderCandidates } from "#src/selection/ranking/order";
 import { recordServiceVersion } from "#src/selection/service-versions";
+import { createCircleDiscovery, type CircleCandidate } from "#src/selection/discovery/circle";
 import { openIncidentsFor, overlayIncidents } from "#src/social/incidents";
 
 interface ProbeInput {
@@ -118,6 +119,7 @@ interface RegisteredSelectionOptions {
   readonly safeFetch: SafeFetch;
   readonly pool: Pool;
   readonly now?: () => Date;
+  readonly circleDiscovery?: Pick<ReturnType<typeof createCircleDiscovery>, "discover">;
 }
 
 export interface RegisteredSelection {
@@ -138,6 +140,8 @@ export function createRegisteredSelection(
   const pending = new Map<string, Promise<ProbeOutcome>>();
   const now = options.now ?? (() => new Date());
   const registrations = readRegistrations(options.config);
+  const circleDiscovery = options.circleDiscovery ?? createCircleDiscovery(options);
+  const circleDirectory = new Map<string, CircleCandidate>();
   const recrawlMs = Number(options.config.get("selection.registeredRecrawlHours")) * 3600000;
   const timeoutMs = Number(options.config.get("selection.probeTimeoutMs"));
   const network = String(options.config.get("selection.paymentNetwork"));
@@ -170,12 +174,16 @@ export function createRegisteredSelection(
   return {
     directory: {
       async get(serviceId) {
+        const circle = circleDirectory.get(serviceId);
+        if (circle) return { ...circle, probeInput: circle.probeInput ?? {} };
         const outcome = await getProbe(serviceId);
         return outcome?.record ? toPlannerService(outcome.record) : null;
       },
     },
     outputSchema: {
       async forService(serviceId) {
+        const circle = circleDirectory.get(serviceId);
+        if (circle) return objectAt(circle.card, "outputSchema");
         return (await getProbe(serviceId))?.record?.outputSchema ?? null;
       },
     },
@@ -188,6 +196,17 @@ export function createRegisteredSelection(
             outcome: (await getProbe(serviceId))!,
           })),
         );
+        const registeredKeys = new Set(
+          [...registrations.values()].map((registration) => resourceKey(registration.resource)),
+        );
+        const discovered = await circleDiscovery.discover(query.capability);
+        for (const candidate of discovered) {
+          const key = resourceKey(candidate.resource);
+          if (registeredKeys.has(key) || registrations.has(candidate.serviceId)) continue;
+          registeredKeys.add(key);
+          circleDirectory.set(candidate.serviceId, candidate);
+          services.push(circleDecisionService(candidate, query.capability, now()));
+        }
         return createDecision({
           query,
           services,
@@ -199,6 +218,37 @@ export function createRegisteredSelection(
         });
       },
     },
+  };
+}
+
+function resourceKey(resource: { readonly url: string; readonly method: string }): string {
+  return `${resource.url.toLowerCase().replace(/\/+$/, "")}\0${resource.method.toLowerCase()}`;
+}
+
+function circleDecisionService(candidate: CircleCandidate, capability: string, now: Date) {
+  const registration: Registration = {
+    serviceName: String(candidate.card["serviceName"] ?? "Circle merchant"),
+    resource: {
+      url: candidate.resource.url,
+      method: candidate.resource.method as "GET" | "POST",
+    },
+    probeInput: candidate.probeInput ?? {},
+    capabilities: [capability],
+  };
+  const record: RegisteredRecord = {
+    serviceId: candidate.serviceId,
+    registration,
+    accepts: [candidate.probe.matchedOffer],
+    extensions402: candidate.probe.extensions402,
+    outputSchema: objectAt(candidate.card, "outputSchema"),
+    inputFields: [],
+    outputFields: [],
+    versionIds: new Map([[candidate.probe.matchedOffer.payTo.toLowerCase(), candidate.versionId]]),
+  };
+  return {
+    serviceId: candidate.serviceId,
+    registration,
+    outcome: { record, probedAt: now.toISOString() },
   };
 }
 
