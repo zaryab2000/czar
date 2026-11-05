@@ -65,6 +65,15 @@ describe("signer service on the gcp-kms backend", () => {
     );
   });
 
+  it("holds the K21a and K21b test-provider keys in Cloud KMS when the harness asks for them (PM-058)", async () => {
+    const t = await harness({ providerKeys: true });
+    expect(t.backend.name).toBe("gcp-kms");
+    expect(t.backend.keyRefs()).toEqual(expect.arrayContaining(["K21a", "K21b"]));
+    expect(kms.created().map((key) => key.cryptoKeyId)).toEqual(
+      expect.arrayContaining(["K21a", "K21b"]),
+    );
+  });
+
   it("signs, denies and reports a backend error exactly as the local keystore does", async () => {
     const t = await harness();
     const usdc = {
@@ -105,3 +114,4 @@ describe("signer service on the gcp-kms backend", () => {
 // The existing suites, re-collected in this file so they run against the backend set above.
 await import("./service.test.ts");
 await import("./policy.test.ts");
+await import("./provider-call.test.ts");
