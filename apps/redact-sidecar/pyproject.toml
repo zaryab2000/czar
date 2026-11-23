@@ -19,7 +19,7 @@ czar-redact = "czar_redact.server:main"
 dev = ["pytest==8.4.2"]
 
 [build-system]
-requires = ["hatchling==1.32.4"]
+requires = ["hatchling==1.33.0"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
