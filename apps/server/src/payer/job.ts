@@ -1,18 +1,40 @@
+import { taskClassFor } from "#src/selection/task-class";
 import {
   descriptionHash,
   briefRequestDigest,
   deliverableUploadDigest,
   inputCommit,
   jobKey,
+  obsId,
+  dedupKey,
+  serviceId,
   type Hash32,
 } from "@czar/hashing";
-import { validateSchema, type JobBrief, type TaskSpec } from "@czar/schemas";
+import { validateSchema, type JobBrief, type PaymentRef, type TaskSpec } from "@czar/schemas";
 import type { Config } from "@czar/config";
 import type { Signer } from "@czar/signer";
 import type { Pool } from "pg";
-import { decodeErrorResult, keccak256, type Address, type Hex, type PublicClient } from "viem";
+import {
+  decodeErrorResult,
+  keccak256,
+  stringToHex,
+  type Address,
+  type Hex,
+  type PublicClient,
+} from "viem";
 import { randomUUID } from "node:crypto";
 import { czarVaultAbi } from "@czar/vault-client";
+import {
+  fillResponse,
+  getObservation,
+  insertAtSign,
+  markReleased,
+  markSettled,
+  observationOwner,
+  setJobState,
+  type JobState,
+} from "#src/evidence/observations";
+import { healthFacts, writeFacts, type HealthEvidence } from "#src/evidence/health";
 import {
   acquireExecutorLease,
   appendExecutionPhase,
@@ -118,6 +140,12 @@ export interface JobChain {
     transaction: Hex,
   ): Promise<{ readonly jobKey: Hash32; readonly jobId: bigint; readonly txHash: string }>;
   getJob(jobKey: Hash32): Promise<JobChainView>;
+  /** Complete mined escrow history from the JobOpened block through the terminal view. */
+  getJobHistory?(
+    jobKey: Hash32,
+    openedTransaction: Hash32,
+    terminalTransaction?: Hash32,
+  ): Promise<{ readonly submitted: boolean; readonly rejectionReason?: Hash32 } | undefined>;
   waitForResult(jobKey: Hash32, expiredAt: number): Promise<JobChainView>;
   /**
    * The latest block's timestamp in seconds from a fresh read. It is "now" for every job deadline the chain
@@ -313,6 +341,7 @@ interface OpenedJob {
   readonly provider: Address;
   readonly expiredAt: number;
   readonly inputSalt: Hash32;
+  readonly observationId: string;
 }
 
 async function openOrRecoverJob(
@@ -331,7 +360,14 @@ async function openOrRecoverJob(
   const inputSalt = priorSalt(trace) ?? dependencies.randomSalt();
   if (existing) {
     const view = await dependencies.chain.getJob(existing.jobKey);
-    const recovered = { ...existing, provider, expiredAt: view.expiredAt, inputSalt };
+    const observationId = await observeOpenedJob(input, dependencies, provider, existing.jobId);
+    const recovered = {
+      ...existing,
+      provider,
+      expiredAt: view.expiredAt,
+      inputSalt,
+      observationId,
+    };
     await persistBrief(input, dependencies, recovered);
     return recovered;
   }
@@ -382,7 +418,8 @@ async function openOrRecoverJob(
     });
   assertLeaseHeld();
   const opened = await dependencies.chain.openJob(transaction);
-  const job = { ...opened, provider, expiredAt: expiration, inputSalt };
+  const observationId = await observeOpenedJob(input, dependencies, provider, opened.jobId);
+  const job = { ...opened, provider, expiredAt: expiration, inputSalt, observationId };
   await persistBrief(input, dependencies, job);
   await recordJobPhase(dependencies, input, attempt, "job.opened", {
     jobKey: opened.jobKey,
@@ -390,8 +427,151 @@ async function openOrRecoverJob(
     provider,
     txHash: opened.txHash,
     expiredAt: expiration,
+    observationId,
   });
   return job;
+}
+
+/** Persist the open-time identity before budget negotiation or funding can proceed. */
+async function observeOpenedJob(
+  input: JobExecutionInput,
+  dependencies: JobExecutionDependencies,
+  provider: Address,
+  jobId: bigint,
+): Promise<string> {
+  const paymentRef: PaymentRef = {
+    schemaVersion: "1.0",
+    rail: "erc8183-job",
+    network: input.network,
+    contract: input.jobEscrow,
+    jobId: jobId.toString(),
+    client: input.vault,
+    provider,
+    evaluator: input.evaluator,
+    budget: input.targetBudget,
+  };
+  const id = obsId(dedupKey(paymentRef));
+  const owner = await observationOwner(dependencies.pool, input.planId);
+  return insertAtSign(dependencies.pool, {
+    ...owner,
+    vault: input.vault,
+    network: input.network,
+    rail: "erc8183-job",
+    serviceId: serviceId(input.network, provider, input.jobEscrow),
+    versionId: "ver_unknown",
+    taskClass: taskClassFor(input.capability, dependencies.config),
+    envelopeRef: input.envelopeRef,
+    stepIndex: input.stepIndex,
+    paymentRef,
+    paymentId: `pay_${id.slice(4)}`,
+  });
+}
+
+async function observeJobState(
+  dependencies: JobExecutionDependencies,
+  job: Pick<OpenedJob, "observationId">,
+  state: JobChainView["vaultState"],
+  transaction?: string,
+): Promise<void> {
+  const id = job.observationId;
+  const at = dependencies.now();
+  if (["Funded", "Submitted", "Completed"].includes(state))
+    await markSettled(
+      dependencies.pool,
+      id,
+      at,
+      transaction && /^0x[0-9a-f]{64}$/.test(transaction) ? transaction : undefined,
+    );
+  if (state === "Rejected") {
+    const observation = await getObservation(dependencies.pool, id);
+    if (observation?.settledAt) await fillResponse(dependencies.pool, id, undefined, 0);
+    return;
+  }
+  await setJobState(dependencies.pool, id, state as JobState, at);
+  if (state === "Released") await markReleased(dependencies.pool, id, at);
+}
+
+async function observeEscrowRejection(
+  dependencies: JobExecutionDependencies,
+  job: OpenedJob,
+  view: JobChainView,
+): Promise<void> {
+  if (view.escrowState !== "Rejected") return;
+  const observation = await getObservation(dependencies.pool, job.observationId);
+  if (observation?.settledAt)
+    await fillResponse(dependencies.pool, job.observationId, undefined, 0);
+}
+
+async function observeJobHealth(
+  input: Pick<JobExecutionInput, "planId" | "stepIndex">,
+  dependencies: JobExecutionDependencies,
+  job: Pick<OpenedJob, "jobKey" | "observationId">,
+  attempt: number,
+  terminalTransaction?: string,
+): Promise<void> {
+  const row = await getObservation(dependencies.pool, job.observationId);
+  if (!row?.settledAt || !dependencies.chain.getJobHistory) return;
+  const trace = await getExecutionTrace(dependencies.pool, input.planId, input.stepIndex, attempt);
+  const opened = trace.findLast(
+    (item) => item.phase === "job.opened" && item.payload["jobKey"] === job.jobKey,
+  )?.payload["txHash"];
+  if (typeof opened !== "string" || !/^0x[0-9a-f]{64}$/.test(opened)) return;
+  const terminal =
+    typeof terminalTransaction === "string" && /^0x[0-9a-f]{64}$/.test(terminalTransaction)
+      ? (terminalTransaction as Hash32)
+      : undefined;
+  const history = await dependencies.chain.getJobHistory(job.jobKey, opened as Hash32, terminal);
+  if (!history) return;
+  const evidence: HealthEvidence[] = [
+    { kind: "job-history", obsId: row.obsId, submitted: history.submitted },
+  ];
+  if (history.rejectionReason) {
+    const reason = await classifyJobRejection(
+      dependencies.pool,
+      job.jobKey,
+      row.obsId,
+      history.rejectionReason,
+    );
+    evidence.push({ kind: "job-rejected", obsId: row.obsId, reason });
+  }
+  await writeFacts(
+    dependencies.pool,
+    healthFacts([row], evidence, {
+      consecutiveFailures: Number(dependencies.config.get("health.consecutiveFailures")),
+    }),
+  );
+}
+
+async function classifyJobRejection(
+  pool: Pool,
+  jobKeyValue: Hash32,
+  obsIdValue: string,
+  hash: Hash32,
+): Promise<Extract<HealthEvidence, { kind: "job-rejected" }>["reason"]> {
+  if (hash === keccak256(stringToHex("czar:deliverable-missing")))
+    return "czar:deliverable-missing";
+  if (hash === keccak256(stringToHex("czar:late"))) return "czar:late";
+  const report = await pool.query(
+    `SELECT 1 FROM acceptance_reports
+     WHERE job_key=$1 AND obs_id=$2 AND report_hash=$3 AND decision='fail' LIMIT 1`,
+    [jobKeyValue, obsIdValue, hash],
+  );
+  return report.rowCount === 1 ? "report-fail" : "unknown";
+}
+
+async function observeSavedFunding(
+  input: JobExecutionInput,
+  dependencies: JobExecutionDependencies,
+  job: OpenedJob,
+  attempt: number,
+): Promise<void> {
+  const trace = await getExecutionTrace(dependencies.pool, input.planId, input.stepIndex, attempt);
+  const funded = trace.findLast(
+    (row) => row.phase === "job.funded" && row.payload["jobKey"] === job.jobKey,
+  );
+  if (!funded) return;
+  const tx = funded.payload["txHash"];
+  await observeJobState(dependencies, job, "Funded", typeof tx === "string" ? tx : undefined);
 }
 
 export function proofForJobProvider(
@@ -412,18 +592,23 @@ async function awaitAndFundJob(
   assertLeaseHeld: () => void,
 ): Promise<JobExecutionResult | undefined> {
   let view = await dependencies.chain.getJob(job.jobKey);
+  if (view.vaultState === "Expired") await observeSavedFunding(input, dependencies, job, attempt);
+  await observeJobState(dependencies, job, view.vaultState);
+  await observeEscrowRejection(dependencies, job, view);
   let budget = view.budget;
   if (view.vaultState === "Released") return undefined;
   if (
     view.vaultState === "Completed" ||
     view.vaultState === "Rejected" ||
     view.vaultState === "Expired"
-  )
+  ) {
+    await observeJobHealth(input, dependencies, job, attempt);
     return {
       state: view.vaultState,
       jobKey: job.jobKey,
       ...(budget === undefined ? {} : { budget: budget.toString() }),
     };
+  }
   if (
     view.vaultState === "Opened" &&
     (view.escrowState === "Submitted" || view.escrowState === "Completed")
@@ -455,6 +640,7 @@ async function awaitAndFundJob(
     );
     budget = await dependencies.chain.waitForBudget(job.jobKey, timeoutMs);
     view = await dependencies.chain.getJob(job.jobKey);
+    await observeJobState(dependencies, job, view.vaultState);
     budget = view.budget ?? budget;
   }
   if (budget === undefined || budget <= 0n || budget > input.stepCap) {
@@ -515,6 +701,7 @@ async function awaitAndFundJob(
     budget: budget.toString(),
     txHash,
   });
+  await observeJobState(dependencies, job, "Funded", txHash);
   const fundedView = await dependencies.chain.getJob(job.jobKey);
   return await waitForJobResult(input, dependencies, job, fundedView, attempt, assertLeaseHeld);
 }
@@ -553,6 +740,8 @@ async function waitForJobResult(
     });
     await syncJob(input, dependencies, job.jobKey, attempt, assertLeaseHeld);
     const synced = await dependencies.chain.getJob(job.jobKey);
+    await observeJobState(dependencies, job, synced.vaultState);
+    await observeJobHealth(input, dependencies, job, attempt);
     return {
       state: synced.vaultState,
       jobKey: job.jobKey,
@@ -612,6 +801,7 @@ async function cancelOrSyncJob(
       jobKey: job.jobKey,
       txHash,
     });
+    await observeJobState(dependencies, job, "Released");
   } catch (error) {
     if (!isJobNotCancellable(error)) throw error;
     await syncJob(input, dependencies, job.jobKey, attempt, assertLeaseHeld);
@@ -627,6 +817,12 @@ async function syncAndReturn(
   assertLeaseHeld: () => void,
   budget = view.budget,
 ): Promise<JobExecutionResult> {
+  await observeJobState(dependencies, job, view.vaultState);
+  if (
+    view.vaultState === "Submitted" ||
+    (view.vaultState === "Funded" && view.escrowState === "Submitted")
+  )
+    await setJobState(dependencies.pool, job.observationId, "Submitted");
   const transaction =
     (await priorJobTransaction(dependencies, input, attempt, "job.sync.sent", job.jobKey)) ??
     (await signVaultCall(dependencies, "syncJob", { jobKey: job.jobKey }));
@@ -642,6 +838,13 @@ async function syncAndReturn(
     state: synced.state,
     txHash: synced.txHash,
   });
+  if (synced.state === "Expired") await observeSavedFunding(input, dependencies, job, attempt);
+  await observeJobState(dependencies, job, synced.state);
+  const postSyncView =
+    synced.state === "Expired" ? await dependencies.chain.getJob(job.jobKey) : view;
+  await observeEscrowRejection(dependencies, job, postSyncView);
+  if (synced.state === "Expired" || postSyncView.escrowState === "Rejected")
+    await observeJobHealth(input, dependencies, job, attempt, synced.txHash);
   return {
     state: synced.state,
     jobKey: job.jobKey,
@@ -749,6 +952,17 @@ async function runJobRefund(
     phase: "job.synced",
     payload: { jobKey: input.jobKey, state: synced.state, txHash: synced.txHash },
   });
+  const trace = await getExecutionTrace(dependencies.pool, input.planId, input.stepIndex, attempt);
+  const opened = trace.findLast(
+    (row) => row.phase === "job.opened" && row.payload["jobKey"] === input.jobKey,
+  );
+  const observationId = opened?.payload["observationId"];
+  if (typeof observationId === "string") {
+    const job = { jobKey: input.jobKey, observationId };
+    await observeJobState(dependencies, job, synced.state);
+    if (synced.state === "Expired")
+      await observeJobHealth(input, dependencies, job, attempt, synced.txHash);
+  }
   return txHash ?? synced.txHash;
 }
 

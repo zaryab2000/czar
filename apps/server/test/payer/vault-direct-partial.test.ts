@@ -3,10 +3,25 @@
 // `delivery-failed` (settled on chain, no usable body). A step with zero paid calls ends `failed` / `unpaid`.
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadConfig } from "@czar/config";
-import { buildTree, PAYEE_KIND, payeeLeaf } from "@czar/hashing";
+import { AmbiguousTransferError } from "#src/evidence/indexer-settlement";
+import {
+  buildTree,
+  dedupKey,
+  NO_RESPONSE_COMMIT,
+  obsId,
+  PAYEE_KIND,
+  payeeLeaf,
+  paymentRefHash,
+  serviceVersionId,
+} from "@czar/hashing";
 import type { StepResult } from "@czar/schemas";
 import type { SignRequest, SignResult } from "@czar/signer";
-import { buildPaymentRequired, encodeBase64Json, encodePaymentRequired } from "@czar/x402";
+import {
+  buildPaymentRequired,
+  encodeBase64Json,
+  encodePaymentRequired,
+  SafeFetchError,
+} from "@czar/x402";
 import { completeObjective } from "#src/objectives/completion";
 import {
   executeVaultDirectStep,
@@ -44,16 +59,32 @@ const TREE = buildTree([payeeLeaf(PAYEE, PAYEE_KIND.X402_PAY_TO, 0, STEP_CAP)]);
  * - `settled-error`: settles, then returns a 5xx with its PAYMENT-RESPONSE and no usable body.
  * - `settled-empty`: settles and returns a 2xx with an empty body.
  * - `silent-settle`: settles on chain, then returns a 5xx with no PAYMENT-RESPONSE.
+ * - `no-response`: settles on chain, then the transport fails before any response arrives.
+ * - `response-interrupted`: settles on chain, sends headers, then the body stream resets.
+ * - `blocked`: the safe-fetch boundary rejects the target before any merchant request.
  */
-type MerchantMode = "ok" | "error" | "settled-error" | "settled-empty" | "silent-settle";
+type MerchantMode =
+  | "ok"
+  | "error"
+  | "settled-error"
+  | "settled-empty"
+  | "silent-settle"
+  | "no-response"
+  | "response-interrupted"
+  | "dns-failure"
+  | "blocked";
 
 beforeAll(async () => seedDevice(getPool()));
 beforeEach(async () => {
+  schemaLabels = {};
+  await getPool().query("DELETE FROM ranking_decisions");
   await getPool().query("DELETE FROM results");
   await getPool().query("DELETE FROM outbox_events");
   await getPool().query("DELETE FROM executor_leases");
   await getPool().query("DELETE FROM step_executions");
   await getPool().query("DELETE FROM steps");
+  await getPool().query("DELETE FROM supplier_health");
+  await getPool().query("DELETE FROM observations");
   await getPool().query("DELETE FROM plans");
   await getPool().query("DELETE FROM objectives");
   const submission = makeObjectiveSubmission(OBJECTIVE);
@@ -77,8 +108,8 @@ beforeEach(async () => {
     [PLAN_ID, OBJECTIVE, HASH, HASH],
   );
   await getPool().query(
-    "INSERT INTO steps (plan_id,step_index,step,state) VALUES ($1,0,'{}','queued')",
-    [PLAN_ID],
+    "INSERT INTO steps (plan_id,step_index,step,state) VALUES ($1,0,$2::jsonb,'queued')",
+    [PLAN_ID, JSON.stringify({ payee: PAYEE })],
   );
 });
 
@@ -177,6 +208,260 @@ describe("vault-direct partial steps (SCR-159 §3)", () => {
     expect(run.receiptIndices()).toEqual([0]);
   });
 
+  it("reconciles a settled authorization when the merchant returns no response", async () => {
+    const run = partialRun(["ok", "no-response", "error"]);
+
+    await expect(executeVaultDirectStep(stepInput(), run.dependencies)).resolves.toMatchObject({
+      state: "done",
+    });
+
+    expect(run.settledIndices()).toEqual([0, 1]);
+    const observations = await getPool().query<{
+      call_index: number;
+      delivered: number | null;
+      responded_at: Date | null;
+      settled_at: Date | null;
+    }>(
+      `SELECT call_index,delivered,responded_at,settled_at FROM observations
+       WHERE objective_id=$1 ORDER BY call_index`,
+      [OBJECTIVE],
+    );
+    expect(observations.rows[1]).toMatchObject({
+      call_index: 1,
+      delivered: 0,
+      responded_at: null,
+      settled_at: expect.any(Date),
+    });
+    expect(run.receiptIndices()).toEqual([0, 1]);
+    const noResponseReceipt = run.receiptContexts().find((context) => context.index === 1);
+    expect(noResponseReceipt).toMatchObject({ verifiedTransferTx: HASH });
+    expect(noResponseReceipt?.paymentRef).not.toHaveProperty("settlementTx");
+    expect(noResponseReceipt?.obsId).toBe(obsId(dedupKey(noResponseReceipt!.paymentRef)));
+    const trace = await getPool().query<{
+      payload: { status: string; bodyCommit: string; bodyRef?: string };
+    }>(
+      `SELECT payload FROM step_executions WHERE plan_id=$1 AND phase='call.result'
+       AND payload->>'callIndex'='1'`,
+      [PLAN_ID],
+    );
+    expect(trace.rows[0]?.payload).toMatchObject({
+      status: "no-response",
+      bodyCommit: NO_RESPONSE_COMMIT,
+      fields: [],
+      flags: [],
+    });
+    expect(trace.rows[0]?.payload.bodyRef).toBeUndefined();
+  });
+
+  it("keeps an interrupted HTTP response distinct from no response across crash recovery", async () => {
+    const run = partialRun(["response-interrupted", "ok", "ok"], { crashPaidIndex: 1 });
+    await expect(executeVaultDirectStep(stepInput(), run.dependencies)).rejects.toThrow(
+      "simulated worker crash",
+    );
+    const attemptsBefore = await getPool().query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM step_executions
+       WHERE plan_id=$1 AND phase='call.attempt' AND payload->>'index'='0'`,
+      [PLAN_ID],
+    );
+
+    await expect(executeVaultDirectStep(stepInput(), run.dependencies)).resolves.toMatchObject({
+      state: "done",
+    });
+    const attemptsAfter = await getPool().query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM step_executions
+       WHERE plan_id=$1 AND phase='call.attempt' AND payload->>'index'='0'`,
+      [PLAN_ID],
+    );
+    expect(attemptsAfter.rows[0]?.count).toBe(attemptsBefore.rows[0]?.count);
+    expect(run.settledIndices()).toEqual([0, 1, 2]);
+    expect(run.receiptIndices()).toEqual([1, 2]);
+    expect(await healthFactCount()).toBe(0);
+    const observation = await getPool().query<{
+      delivered: number | null;
+      responded_at: Date | null;
+    }>("SELECT delivered,responded_at FROM observations WHERE objective_id=$1 AND call_index=0", [
+      OBJECTIVE,
+    ]);
+    expect(observation.rows[0]).toMatchObject({
+      delivered: null,
+      responded_at: expect.any(Date),
+    });
+    const phases = await getPool().query<{ phase: string }>(
+      `SELECT phase FROM step_executions WHERE plan_id=$1
+       AND phase IN ('call.response-interrupted','call.no-response')
+       AND payload->>'index'='0' ORDER BY execution_id`,
+      [PLAN_ID],
+    );
+    expect(phases.rows.map((row) => row.phase)).toEqual(["call.response-interrupted"]);
+  });
+
+  it("keeps DNS failure unattributed after a paid no-response call", async () => {
+    const run = partialRun(["ok", "dns-failure", "error"]);
+    await executeVaultDirectStep(stepInput(), run.dependencies);
+    const observation = await getPool().query<{ delivered: number | null }>(
+      "SELECT delivered FROM observations WHERE objective_id=$1 AND call_index=1",
+      [OBJECTIVE],
+    );
+    expect(observation.rows[0]?.delivered).toBeNull();
+    expect(await healthFactCount()).toBe(0);
+  });
+
+  it("ends without a receipt or H1 when exact transfer proof misses the reconciliation deadline", async () => {
+    const run = partialRun(["ok", "no-response", "error"]);
+    const findExactTransferTx = vi.fn(async () => null);
+    const dependencies = { ...run.dependencies, findExactTransferTx };
+    await expect(executeVaultDirectStep(stepInput(), dependencies)).resolves.toMatchObject({
+      state: "done",
+    });
+    expect(run.settledIndices()).toEqual([0, 1]);
+    expect(run.receiptIndices()).toEqual([0]);
+    expect(findExactTransferTx.mock.calls.length).toBeGreaterThan(1);
+    expect(await healthFactCount()).toBe(0);
+    const observation = await getPool().query<{ delivered: number | null }>(
+      "SELECT delivered FROM observations WHERE objective_id=$1 AND call_index=1",
+      [OBJECTIVE],
+    );
+    expect(observation.rows[0]?.delivered).toBeNull();
+    const trace = await getPool().query<{ payload: { index: number } }>(
+      "SELECT payload FROM step_executions WHERE plan_id=$1 AND phase='settlement-unproven'",
+      [PLAN_ID],
+    );
+    expect(trace.rows.map((row) => row.payload.index)).toEqual([1]);
+  });
+
+  it("retries a delayed exact transfer proof before signing and attributing the paid call", async () => {
+    const run = partialRun(["ok", "no-response", "error"]);
+    let lookups = 0;
+    const dependencies = {
+      ...run.dependencies,
+      findExactTransferTx: async () => (++lookups === 1 ? null : HASH),
+    };
+    await expect(executeVaultDirectStep(stepInput(), dependencies)).resolves.toMatchObject({
+      state: "done",
+    });
+    expect(lookups).toBe(2);
+    expect(run.receiptIndices()).toEqual([0, 1]);
+    expect(await healthFactCount()).toBe(1);
+  });
+
+  it("fails closed on ambiguous transfer proof: no receipt, no H1, settlement-unproven, step ends (SCR-163 §7)", async () => {
+    const run = partialRun(["ok", "no-response", "error"]);
+    let lookups = 0;
+    const dependencies = {
+      ...run.dependencies,
+      findExactTransferTx: async () => {
+        lookups += 1;
+        throw new AmbiguousTransferError();
+      },
+    };
+    await expect(executeVaultDirectStep(stepInput(), dependencies)).resolves.toMatchObject({
+      state: "done",
+    });
+    expect(lookups).toBe(1);
+    expect(run.settledIndices()).toEqual([0, 1]);
+    expect(run.receiptIndices()).toEqual([0]);
+    expect(await healthFactCount()).toBe(0);
+    const trace = await getPool().query<{ payload: { index: number } }>(
+      "SELECT payload FROM step_executions WHERE plan_id=$1 AND phase='settlement-unproven'",
+      [PLAN_ID],
+    );
+    expect(trace.rows.map((row) => row.payload.index)).toEqual([1]);
+  });
+
+  it("still stops on an indexer error that is not ambiguity", async () => {
+    const run = partialRun(["ok", "no-response", "error"]);
+    const dependencies = {
+      ...run.dependencies,
+      findExactTransferTx: async () => {
+        throw new Error("Indexer exact transfer lookup returned HTTP 400.");
+      },
+    };
+    await expect(executeVaultDirectStep(stepInput(), dependencies)).rejects.toThrow("HTTP 400");
+    expect(run.receiptIndices()).toEqual([0]);
+    expect(await healthFactCount()).toBe(0);
+  });
+
+  it("attributes an uninterrupted settled connection reset and records each retry outcome", async () => {
+    const run = partialRun(["ok", "no-response", "error"]);
+    await executeVaultDirectStep(stepInput(), run.dependencies);
+    const observation = await getPool().query<{ delivered: number | null }>(
+      "SELECT delivered FROM observations WHERE objective_id=$1 AND call_index=1",
+      [OBJECTIVE],
+    );
+    expect(observation.rows[0]?.delivered).toBe(0);
+    expect(await healthFactCount()).toBe(1);
+    const attempts = await getPool().query<{ payload: Record<string, unknown> }>(
+      `SELECT payload FROM step_executions WHERE plan_id=$1 AND phase='call.attempt'
+       AND payload->>'index'='1' ORDER BY execution_id`,
+      [PLAN_ID],
+    );
+    expect(attempts.rows.map((row) => row.payload["outcome"])).toEqual([
+      "connection-reset",
+      "connection-reset",
+      "connection-reset",
+    ]);
+    for (const row of attempts.rows)
+      expect(Object.keys(row.payload).toSorted()).toEqual(["index", "outcome", "retry"]);
+  });
+
+  it("keeps a crash-resumed no-response unattributed", async () => {
+    const run = partialRun(["ok", "no-response", "error"], { crashPaidIndex: 1 });
+    await expect(executeVaultDirectStep(stepInput(), run.dependencies)).rejects.toThrow(
+      "simulated worker crash",
+    );
+    await executeVaultDirectStep(stepInput(), run.dependencies);
+    const observation = await getPool().query<{ delivered: number | null }>(
+      "SELECT delivered FROM observations WHERE objective_id=$1 AND call_index=1",
+      [OBJECTIVE],
+    );
+    expect(observation.rows[0]?.delivered).toBeNull();
+    expect(await healthFactCount()).toBe(0);
+  });
+
+  it("does not attribute a final transport failure after executor lease loss", async () => {
+    const run = partialRun(["ok", "no-response", "error"]);
+    let failures = 0;
+    let leaseLost = false;
+    const safeFetch: typeof run.dependencies.safeFetch = async (url, options) => {
+      try {
+        return await run.dependencies.safeFetch(url, options);
+      } catch (error) {
+        failures += 1;
+        if (failures === 3) leaseLost = true;
+        throw error;
+      }
+    };
+    await expect(
+      executeVaultDirectStep(
+        {
+          ...stepInput(),
+          dispatchLease: {
+            assertHeld: () => {
+              if (leaseLost) throw new Error("simulated executor lease loss");
+            },
+          },
+        },
+        { ...run.dependencies, safeFetch },
+      ),
+    ).rejects.toThrow("simulated executor lease loss");
+    await executeVaultDirectStep(stepInput(), run.dependencies);
+    const observation = await getPool().query<{ delivered: number | null }>(
+      "SELECT delivered FROM observations WHERE objective_id=$1 AND call_index=1",
+      [OBJECTIVE],
+    );
+    expect(observation.rows[0]?.delivered).toBeNull();
+    expect(await healthFactCount()).toBe(0);
+  });
+
+  it("does not retry a blocked fetch target", async () => {
+    const run = partialRun(["blocked", "ok", "ok"]);
+
+    await expect(executeVaultDirectStep(stepInput(), run.dependencies)).rejects.toThrow(
+      "fetch-blocked: url",
+    );
+    expect(run.settledIndices()).toEqual([]);
+  });
+
   it("stays pending without a terminal state while a paid call's receipt is not yet stored", async () => {
     const run = partialRun(["ok", "error", "ok"], { receiptStored: false });
 
@@ -189,13 +474,238 @@ describe("vault-direct partial steps (SCR-159 §3)", () => {
   });
 });
 
-function partialRun(modes: readonly MerchantMode[], options: { receiptStored?: boolean } = {}) {
+describe("vault-direct service-version drift (SCR-163 §5–§6)", () => {
+  it("writes the probed service version on every observation", async () => {
+    schemaLabels = { 0: "a", 1: "a", 2: "a" };
+    const run = partialRun(["ok", "ok", "ok"]);
+    await executeVaultDirectStep(stepInput(), run.dependencies);
+    const versions = await observationVersions();
+    expect(versions).toHaveLength(3);
+    expect(new Set(versions).size).toBe(1);
+    expect(versions[0]).toMatch(/^ver_[0-9a-f]{32}$/);
+  });
+
+  it("writes the selection task class, not the raw capability, on every observation (SCR-160 §9.1)", async () => {
+    const run = partialRun(["ok", "ok", "ok"]);
+    await executeVaultDirectStep(stepInput(), run.dependencies);
+    const classes = await getPool().query<{ task_class: string }>(
+      "SELECT DISTINCT task_class FROM observations WHERE objective_id=$1",
+      [OBJECTIVE],
+    );
+    expect(classes.rows).toEqual([{ task_class: "data-json.search" }]);
+  });
+
+  it("stops before reserving when pre-checks within one step produce different versions", async () => {
+    schemaLabels = { 0: "a", 1: "b", 2: "a" };
+    const run = partialRun(["ok", "ok", "ok"]);
+    const result = await executeVaultDirectStep(stepInput(), run.dependencies);
+    expect(result).toMatchObject({ state: "failed", errorCode: "service-version-drift" });
+    expect(run.chain.reserve).not.toHaveBeenCalled();
+    expect(run.signedAuthorizations()).toBe(0);
+    expect(await driftEvidence()).toMatchObject({ reason: "precheck" });
+  });
+
+  it("stops before reserving when the live version differs from the selected version", async () => {
+    schemaLabels = { 0: "b", 1: "b", 2: "b" };
+    const selected = await storeSelection("a");
+    const run = partialRun(["ok", "ok", "ok"]);
+    const result = await executeVaultDirectStep(
+      stepInput({ rankingDecisionIds: [selected.queryId] }),
+      run.dependencies,
+    );
+    expect(result).toMatchObject({ state: "failed", errorCode: "service-version-drift" });
+    expect(run.chain.reserve).not.toHaveBeenCalled();
+    expect(await driftEvidence()).toMatchObject({
+      reason: "selection",
+      selectionVersionId: selected.versionId,
+      rankingDecisionId: selected.queryId,
+    });
+  });
+
+  it("pays when the live version equals the selected version", async () => {
+    schemaLabels = { 0: "a", 1: "a", 2: "a" };
+    const selected = await storeSelection("a");
+    const run = partialRun(["ok", "ok", "ok"]);
+    const result = await executeVaultDirectStep(
+      stepInput({ rankingDecisionIds: [selected.queryId] }),
+      run.dependencies,
+    );
+    expect(result.state).toBe("done");
+    expect(await observationVersions()).toEqual([
+      selected.versionId,
+      selected.versionId,
+      selected.versionId,
+    ]);
+  });
+
+  it("pays a ranked incident-badged selection only at its stored version", async () => {
+    schemaLabels = { 0: "a", 1: "a", 2: "a" };
+    const selected = await storeSelection("a", true);
+    const run = partialRun(["ok", "ok", "ok"]);
+    const result = await executeVaultDirectStep(
+      incidentStepInput(selected.queryId),
+      run.dependencies,
+    );
+    expect(result.state).toBe("done");
+    expect(run.chain.reserve).toHaveBeenCalledTimes(1);
+    expect(await observationVersions()).toEqual([
+      selected.versionId,
+      selected.versionId,
+      selected.versionId,
+    ]);
+  });
+
+  it("blocks a ranked incident-badged selection if the live version changed", async () => {
+    schemaLabels = { 0: "b", 1: "b", 2: "b" };
+    const selected = await storeSelection("a", true);
+    const run = partialRun(["ok", "ok", "ok"]);
+    const result = await executeVaultDirectStep(
+      incidentStepInput(selected.queryId),
+      run.dependencies,
+    );
+    expect(result).toMatchObject({ state: "failed", errorCode: "service-version-drift" });
+    expect(run.chain.reserve).not.toHaveBeenCalled();
+    expect(run.signedAuthorizations()).toBe(0);
+    expect(await driftEvidence()).toMatchObject({
+      reason: "selection",
+      selectionVersionId: selected.versionId,
+      rankingDecisionId: selected.queryId,
+    });
+  });
+
+  it("does not stop for a plan without a stored selection and records a null selection version", async () => {
+    schemaLabels = { 0: "a", 1: "a", 2: "a" };
+    const run = partialRun(["ok", "ok", "ok"]);
+    const result = await executeVaultDirectStep(stepInput(), run.dependencies);
+    expect(result.state).toBe("done");
+    expect(await driftEvidence()).toBeUndefined();
+  });
+
+  it("keeps settled calls under their saved version and signs no call at a new version", async () => {
+    schemaLabels = { 0: "a", 1: "a", 2: "a" };
+    const first = partialRun(["ok", "error", "error"]);
+    const firstResult = await executeVaultDirectStep(stepInput(), first.dependencies);
+    expect(firstResult.state).toBe("done");
+    const saved = await observationVersions("settled");
+    expect(saved).toHaveLength(1);
+    // The step is re-run for its remaining calls (a new attempt) and the merchant changed its schema.
+    await getPool().query("UPDATE steps SET state='queued' WHERE plan_id=$1", [PLAN_ID]);
+    schemaLabels = { 0: "b", 1: "b", 2: "b" };
+    const second = partialRun(["ok", "ok", "ok"]);
+    const result = await executeVaultDirectStep(stepInput({ attempt: 1 }), second.dependencies);
+    expect(result.state).toBe("done");
+    expect(second.chain.reserve).not.toHaveBeenCalled();
+    expect(second.signedAuthorizations()).toBe(0);
+    expect(await observationVersions("settled")).toEqual(saved);
+    expect(await driftEvidence()).toMatchObject({ reason: "resume", savedVersionId: saved[0] });
+  });
+});
+
+async function observationVersions(filter?: "settled"): Promise<string[]> {
+  const result = await getPool().query<{ version_id: string }>(
+    `SELECT version_id FROM observations WHERE objective_id=$1
+       ${filter === "settled" ? "AND settled_at IS NOT NULL" : ""}
+     ORDER BY call_index`,
+    [OBJECTIVE],
+  );
+  return result.rows.map((row) => row.version_id);
+}
+
+async function driftEvidence(): Promise<Record<string, unknown> | undefined> {
+  const result = await getPool().query<{ payload: Record<string, unknown> }>(
+    `SELECT payload FROM step_executions WHERE plan_id=$1 AND phase='precheck.version-drift'
+     ORDER BY execution_id DESC LIMIT 1`,
+    [PLAN_ID],
+  );
+  return result.rows[0]?.payload;
+}
+
+/** Store a selected version in the ranked or unverified decision entry. */
+async function storeSelection(
+  label: string,
+  incidentRanked = false,
+): Promise<{ queryId: string; versionId: string }> {
+  const versionId = serviceVersionId({
+    payTo: PAYEE,
+    resource: { url: MERCHANT_URL, method: "GET" },
+    schema: {
+      type: "object",
+      properties: { output: { type: "object", properties: { [label]: {} } } },
+    },
+  });
+  const queryId = "00000000-0000-4000-8000-000000000001";
+  const snapshotId = HASH;
+  await getPool().query(
+    `INSERT INTO selection_interim_snapshots(snapshot_id,body_jcs,created_at,last_used_at)
+     VALUES($1,'{}',now(),now()) ON CONFLICT DO NOTHING`,
+    [snapshotId],
+  );
+  await getPool().query(
+    `INSERT INTO ranking_decisions(query_id,snapshot_id,policy_version,decision,created_at)
+     VALUES($1,$2,'pol_0000000000000000',$3::jsonb,now())`,
+    [
+      queryId,
+      snapshotId,
+      JSON.stringify({
+        unverified: incidentRanked
+          ? []
+          : [
+              {
+                service_id: "svc_11111111111111111111111111111111",
+                version_id: versionId,
+                reason: "unrated",
+                n_eff: 0,
+              },
+            ],
+        ranked: incidentRanked
+          ? [
+              {
+                rank: 1,
+                service_id: "svc_11111111111111111111111111111111",
+                version_id: versionId,
+                score: 0.8,
+                features: {
+                  incident: {
+                    incident_id: "inc_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
+                    distinct_owners: 3,
+                    negative_units: 3,
+                    opened_at: "2026-10-20T00:00:00Z",
+                  },
+                },
+                evidence_refs: [],
+                evidence_age_days: 0,
+                missing: [],
+                badges: ["incident-open"],
+                explanation: "ranked with open incident",
+              },
+            ]
+          : [],
+      }),
+    ],
+  );
+  return { queryId, versionId };
+}
+
+function incidentStepInput(rankingDecisionId: string): VaultDirectInput {
+  const input = stepInput({ rankingDecisionIds: [rankingDecisionId] });
+  return {
+    ...input,
+    plan: { ...input.plan, schemaVersion: "1.4", approvalReasons: ["incident-open"] },
+  };
+}
+
+function partialRun(
+  modes: readonly MerchantMode[],
+  options: { receiptStored?: boolean; crashPaidIndex?: number } = {},
+) {
   let current = new Date("2026-10-21T00:00:00Z");
   const chainNow = () => BigInt(Math.floor(current.getTime() / MS_PER_SECOND));
   const used = new Set<number>();
   const settled = new Set<number>();
   let final = false;
+  let crashPending = options.crashPaidIndex;
   const receipts: number[] = [];
+  const receiptContexts: SettledReceiptContext[] = [];
   const sign = vi.fn(async (_caller: string, request: SignRequest): Promise<SignResult> => {
     if (request.kind === "usdc-3009")
       return { signature: `0x${"ab".repeat(65)}`, digest: HASH as `0x${string}` };
@@ -238,12 +748,31 @@ function partialRun(modes: readonly MerchantMode[], options: { receiptStored?: b
       const index = Number(new URL(url).searchParams.get("q")?.replace("call-", ""));
       const mode = modes[index];
       if (mode === undefined) throw new Error(`No merchant mode for call ${index}.`);
+      if (crashPending === index) {
+        crashPending = undefined;
+        used.add(index);
+        throw new Error("simulated worker crash");
+      }
+      if (mode === "blocked") throw new SafeFetchError("fetch-blocked", "url");
+      if (mode === "dns-failure") {
+        used.add(index);
+        throw new SafeFetchError("fetch-blocked", "dns");
+      }
+      if (mode === "no-response") {
+        used.add(index);
+        throw new SafeFetchError("upstream-unavailable", "transport", "connection-reset");
+      }
+      if (mode === "response-interrupted") {
+        used.add(index);
+        throw new SafeFetchError("upstream-unavailable", "transport", "connection-reset", true);
+      }
       return merchantResponse(url, mode, () => used.add(index));
     },
   );
   const boundary = vi.fn(async (context: BoundaryInput) => boundaryResult(context));
   const recordReceipt = vi.fn(async (context: SettledReceiptContext) => {
     receipts.push(context.index);
+    receiptContexts.push(context);
     return options.receiptStored ?? true;
   });
   const dependencies: VaultDirectDependencies = {
@@ -257,7 +786,23 @@ function partialRun(modes: readonly MerchantMode[], options: { receiptStored?: b
       current = new Date(current.getTime() + milliseconds);
     },
     boundary,
+    noResponseBoundary: async (context) => ({
+      schemaVersion: "1.1",
+      stepIndex: 0,
+      callIndex: context.index,
+      obsId: context.obsId,
+      status: "no-response",
+      source: {
+        origin: "http://127.0.0.1:4021",
+        payTo: PAYEE,
+        paymentRefHash: paymentRefHash(context.paymentRef),
+      },
+      fields: [],
+      flags: [],
+      bodyCommit: NO_RESPONSE_COMMIT,
+    }),
     recordReceipt,
+    findExactTransferTx: async () => HASH,
     objects: { put: async () => "body-ref", get: async () => new Uint8Array() },
   };
   return {
@@ -266,10 +811,25 @@ function partialRun(modes: readonly MerchantMode[], options: { receiptStored?: b
     finalized: () => final,
     settledIndices: () => [...settled].toSorted((left, right) => left - right),
     receiptIndices: () => [...new Set(receipts)].toSorted((left, right) => left - right),
+    receiptContexts: () => [...receiptContexts],
+    signedAuthorizations: () =>
+      sign.mock.calls.filter(([, request]) => request.kind === "usdc-3009").length,
   };
 }
 
+async function healthFactCount(): Promise<number> {
+  const result = await getPool().query<{ count: string }>(
+    "SELECT count(*)::text AS count FROM supplier_health WHERE fact='settled-not-delivered'",
+  );
+  return Number(result.rows[0]?.count ?? "0");
+}
+
+/** SCR-163: the Bazaar output-schema label each call's live 402 declares (absent = no schema). */
+let schemaLabels: Record<number, string> = {};
+
 function paymentRequired(url: string) {
+  const index = Number(new URL(url).searchParams.get("q")?.replace("call-", ""));
+  const label = schemaLabels[index];
   const offer = buildPaymentRequired({
     url: MERCHANT_URL,
     description: "local test merchant",
@@ -280,10 +840,26 @@ function paymentRequired(url: string) {
     payTo: PAYEE,
     maxTimeoutSeconds: OFFER_TIMEOUT_SECONDS,
   });
+  const declared =
+    label === undefined
+      ? offer
+      : {
+          ...offer,
+          extensions: {
+            ...offer.extensions,
+            bazaar: {
+              info: { input: {}, output: {} },
+              schema: {
+                type: "object",
+                properties: { output: { type: "object", properties: { [label]: {} } } },
+              },
+            },
+          },
+        };
   return {
     status: 402,
     url,
-    headers: { "payment-required": encodePaymentRequired(offer) },
+    headers: { "payment-required": encodePaymentRequired(declared as typeof offer) },
     body: new Uint8Array(),
   };
 }
@@ -321,8 +897,10 @@ function boundaryResult(context: BoundaryInput): StepResult {
     context.response.status < 300 &&
     context.response.body.byteLength > 0;
   return {
-    schemaVersion: "1.0",
+    schemaVersion: "1.1",
     stepIndex: 0,
+    callIndex: context.index,
+    obsId: context.obsId,
     status: usable ? "delivered" : "http-error",
     source: { origin: "http://127.0.0.1:4021", payTo: PAYEE, paymentRefHash: HASH },
     fields: usable ? [{ name: "answer", value: "42", confidence: 1 }] : [],
@@ -331,8 +909,11 @@ function boundaryResult(context: BoundaryInput): StepResult {
   };
 }
 
-function stepInput(): VaultDirectInput {
+function stepInput(
+  options: { rankingDecisionIds?: readonly string[]; attempt?: number } = {},
+): VaultDirectInput {
   return {
+    ...(options.attempt === undefined ? {} : { attempt: options.attempt }),
     planId: PLAN_ID,
     envelopeRef: ENVELOPE_REF,
     envelopeId: 1n,
@@ -354,6 +935,9 @@ function stepInput(): VaultDirectInput {
       steps: [],
       payeeLeaves: [{ payee: PAYEE, kind: 1, stepIndex: 0, stepCap: STEP_CAP.toString() }],
       payeeRoot: TREE.root,
+      ...(options.rankingDecisionIds === undefined
+        ? {}
+        : { rankingDecisionIds: [...options.rankingDecisionIds] }),
       shadow: false,
       createdAt: "2026-10-21T00:00:00.000Z",
       taskSpec: {} as never,

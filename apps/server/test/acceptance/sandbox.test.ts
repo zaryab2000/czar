@@ -12,6 +12,7 @@ const input: SandboxInput = {
   bodyBytes: 2,
   mimeType: "application/json",
   expectedKeys: [],
+  genericDelivery: false,
   historyShapeHash: null,
   deliveredAsIs: false,
 };

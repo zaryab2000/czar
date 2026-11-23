@@ -1,0 +1,153 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://czar.dev/schemas/social-experience-card.schema.json",
+  "title": "ExperienceCard",
+  "description": "The public, structured projection of one paid step's outcome for one supplier (spec 02 §4.29, SCR-164 §3.6). The only thing that leaves the server about a purchase. Never carries evidence ids (obs_ ids are derivable from public chain data and would link a handle to a vault; the server keeps the mapping in social_evidence_links), subjects, topic, context, file names, soul text, exact amounts, addresses, payment hashes or objective ids.",
+  "type": "object",
+  "x-privacyClass": "public",
+  "additionalProperties": false,
+  "required": [
+    "cardVersion",
+    "network",
+    "supplierKind",
+    "serviceId",
+    "versionId",
+    "taskClass",
+    "capabilityTag",
+    "outputFormat",
+    "deliveryOutcome",
+    "rating",
+    "callsPaid",
+    "callsDelivered",
+    "amountBand",
+    "controlled",
+    "observedAt"
+  ],
+  "properties": {
+    "cardVersion": {
+      "type": "string",
+      "const": "1",
+      "description": "Card version.",
+      "x-privacyClass": "public"
+    },
+    "network": {
+      "$ref": "common.schema.json#/$defs/Caip2",
+      "description": "The step's network.",
+      "x-privacyClass": "public"
+    },
+    "supplierKind": {
+      "type": "string",
+      "enum": [
+        "x402",
+        "erc8183"
+      ],
+      "description": "x402-exact and gateway-batched rails → x402; erc8183-job → erc8183.",
+      "x-privacyClass": "public"
+    },
+    "serviceId": {
+      "$ref": "common.schema.json#/$defs/SlServiceId",
+      "description": "Czar's service id (not a URL).",
+      "x-privacyClass": "public"
+    },
+    "versionId": {
+      "anyOf": [
+        {
+          "$ref": "common.schema.json#/$defs/SlVersionId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The observations' version id; ver_unknown is published as null.",
+      "x-privacyClass": "public"
+    },
+    "taskClass": {
+      "type": "string",
+      "maxLength": 128,
+      "description": "The observations' task class (SCR-160 §9.1).",
+      "x-privacyClass": "public"
+    },
+    "capabilityTag": {
+      "$ref": "common.schema.json#/$defs/CapabilityTag",
+      "description": "The step's capability.",
+      "x-privacyClass": "public"
+    },
+    "outputFormat": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "markdown-table",
+            "csv",
+            "json",
+            "markdown-list",
+            "prose"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The objective's requested output format; format only.",
+      "x-privacyClass": "public"
+    },
+    "deliveryOutcome": {
+      "type": "string",
+      "enum": [
+        "delivered",
+        "partial",
+        "not-delivered",
+        "unknown"
+      ],
+      "description": "Over the step's settled, unreleased calls: all known delivered → delivered; all known undelivered → not-delivered; a mix → partial; no known facts → unknown.",
+      "x-privacyClass": "public"
+    },
+    "rating": {
+      "type": "string",
+      "enum": [
+        "good",
+        "bad",
+        "none"
+      ],
+      "description": "The owner's effective rating for this step (ratings_effective), or none. The only quality judgement on the card.",
+      "x-privacyClass": "public"
+    },
+    "callsPaid": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4096,
+      "description": "Settled, unreleased observations of the step (jobs in Refunded or Expired are not counted; such a step gets no card).",
+      "x-privacyClass": "public"
+    },
+    "callsDelivered": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4096,
+      "description": "Of those, delivered = 1.",
+      "x-privacyClass": "public"
+    },
+    "amountBand": {
+      "type": "string",
+      "enum": [
+        "lt-0.01",
+        "0.01-0.1",
+        "0.1-1",
+        "1-5",
+        "gt-5"
+      ],
+      "description": "Total paid for the step in USDC, bucketed: the step's unitAmount × callsPaid (a job: unitAmount, its listed price).",
+      "x-privacyClass": "public"
+    },
+    "controlled": {
+      "type": "boolean",
+      "description": "True for a Czar-seeded controlled representative.",
+      "x-privacyClass": "public"
+    },
+    "observedAt": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T00:00:00Z$",
+      "description": "Latest settled_at of the step, truncated to the UTC day (RFC 3339, T00:00:00Z).",
+      "x-privacyClass": "public"
+    }
+  }
+}

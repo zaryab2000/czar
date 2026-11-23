@@ -8,6 +8,7 @@ import {
   H,
   inputCommit,
   jobDescription,
+  NO_RESPONSE_COMMIT,
   objectiveHash,
   paymentRefHash,
   planHash,
@@ -28,6 +29,10 @@ const hash = (c: string) => `0x${c.repeat(64)}` as Hash32;
 const VAULT = "0x00000000000000000000000000000000000c2a21";
 
 describe("named hashes (02 §5.2)", () => {
+  it("uses the fixed no-response marker rather than an empty-body commitment", () => {
+    expect(NO_RESPONSE_COMMIT).toBe(keccak256(new TextEncoder().encode("czar:no-response:v1")));
+    expect(NO_RESPONSE_COMMIT).not.toBe(keccak256(new Uint8Array()));
+  });
   const taskSpec: TaskSpec = {
     schemaVersion: "1.1",
     kind: "table-fill",

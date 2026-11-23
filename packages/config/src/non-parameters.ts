@@ -2,6 +2,17 @@
 // (socket methods, step-log and event names, file names, hosts, object field paths). Used by the
 // spec-coverage test so every other such token must exist in the registry.
 export const NON_PARAMETERS: readonly { readonly token: string; readonly reason: string }[] = [
+  ...[
+    "selection.halfLifeDays",
+    "selection.nMin",
+    "selection.riskQuantile",
+    "selection.wCost",
+    "selection.wLatency",
+  ].map((token) => ({ token, reason: "superseded by SCR-160 §12" })),
+  {
+    token: "deploy.sh",
+    reason: "a script file name, not a parameter",
+  },
   {
     token: "memory.db.corrupt-<ts>",
     reason: "file name of a moved-aside corrupt database",

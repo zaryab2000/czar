@@ -9,9 +9,9 @@
   "properties": {
     "schemaVersion": {
       "type": "string",
-      "description": "Schema version, major.minor; this file is 1.2 (SCR-160: unverified[].reason gains unrated; score is the Wilson lower bound of the rated share; features and badges per SCR-160 §9.3). 1.1: snapshot_anchor_tx may be null (SCR-137).",
+      "description": "Schema version, major.minor; this file is 1.3 (SCR-163 §6: unverified[].version_id, the probed version an unrated candidate was selected at). 1.2: SCR-160 (unverified[].reason unrated; score = Wilson lower bound). 1.1: snapshot_anchor_tx may be null (SCR-137).",
       "x-privacyClass": "server-only",
-      "const": "1.2"
+      "const": "1.3"
     },
     "query_id": {
       "type": "string",
@@ -160,7 +160,7 @@
           },
           "features": {
             "type": "object",
-            "description": "Features (SCR-160 §9.3): good, bad, owners_rated, owners_bad, lower_bound, health_facts[], price_atomic.",
+            "description": "Features (SCR-160 §9.3): good, bad, owners_rated, owners_bad, lower_bound, health_facts[], price_atomic; incident (SCR-164 §3.13.1, when an incident is open): {incident_id, distinct_owners, negative_units, opened_at}; it records the incident overlay so the stored decision reproduces the final order.",
             "x-privacyClass": "server-only"
           },
           "evidence_refs": {
@@ -236,6 +236,11 @@
           "service_id": {
             "$ref": "common.schema.json#/$defs/SlServiceId",
             "description": "Service.",
+            "x-privacyClass": "server-only"
+          },
+          "version_id": {
+            "$ref": "common.schema.json#/$defs/SlVersionId",
+            "description": "The version this candidate was probed at in this query (SCR-163 §1); the expected version CZ-15 checks before paying (SCR-163 §6). Absent only when the query had no successful probe for it.",
             "x-privacyClass": "server-only"
           },
           "reason": {

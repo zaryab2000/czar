@@ -1,0 +1,300 @@
+# Czar public alpha: the whole stack on the one cloud VM (PM-014; SCR-170 §1–§5).
+#
+#   CZAR_IMAGE_TAG=<git-sha> docker compose -f ops/cloud/compose.yaml up -d
+#
+# CZAR_IMAGE_TAG is the short commit ops/cloud/docker/build-all.sh tagged the images with. It has no
+# default, so the stack can never start from a floating or stale tag.
+#
+# Shape:
+#   - every container runs with network_mode: host and binds 127.0.0.1 only; Caddy on the host is the
+#     only public listener (SCR-170 §1, §2), so no service publishes a port
+#   - start order postgres → postgres-init → indexer → server → signer → merchants, and web after the
+#     server, each step gated on the previous one's healthcheck (as ops/local/process-compose.yaml)
+#   - each service sees only its own credential folder, read-only: /run/czar/secrets/<service>, a
+#     host tmpfs written by czar-secrets.service (SCR-170 §4)
+#   - environment variables are pointers only: the config file, a database URL without a password,
+#     the RPC URL and the port. No credential is ever in this file, an image or the environment.
+#   - relative paths resolve against this folder, so ../../env/cloud.toml is the repository's
+#     env/cloud.toml (copied from env/cloud.example.toml and edited on the VM; never committed)
+#
+# Logs: Czar's own app containers (server, signer, merchants, web) use Docker's default json-file
+# driver, which the Ops Agent (PM-051) reads and ships. Postgres, its init job and the indexer
+# (Ponder) use the `local` driver: their raw stdout stays on the VM (`docker compose logs` still
+# works) and is never shipped, because a Postgres error DETAIL line can carry a real key value and
+# Ponder's lines are not filtered by the logging allowlist (cross-cutting §4). Never gcplogs.
+name: czar
+
+x-app: &app
+  network_mode: host
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+
+x-unshipped-logs: &unshipped-logs
+  logging:
+    driver: local
+    options:
+      max-size: 32m
+      max-file: "4"
+
+x-cloud-config: &cloud-config
+  type: bind
+  source: ../../env/cloud.toml
+  target: /etc/czar/cloud.toml
+  read_only: true
+
+x-deployment: &deployment
+  type: bind
+  source: ../../deployments/arc-testnet.json
+  target: /app/deployments/arc-testnet.json
+  read_only: true
+
+x-signer-run: &signer-run
+  # The host folder PM-011's cloud-init creates (0750, 10002:10010). A bind mount, never a named
+  # volume: a volume's mount point would be owned by root, and the signer refuses a socket folder
+  # it does not own. Clients need write access to connect(); the folder's mode lets only the
+  # signer create entries.
+  type: bind
+  source: /run/czar/signer
+  target: /run/czar/signer
+
+services:
+  postgres:
+    # The digest ops/local/compose.yaml pins (SCR-170 §5): Postgres 16.15.
+    image: postgres:16.15@sha256:ca0bd484cb98bf4b24eb1010e73fb3fcbd6714d240fbc1a10eea5b7dbecb641d
+    network_mode: host
+    restart: unless-stopped
+    <<: *unshipped-logs
+    # start.sh runs initdb itself (peer for the superuser on the socket, scram for every TCP role),
+    # so no superuser password exists anywhere; see that file for why the stock entrypoint is not
+    # used. It starts as root only to own the data folder, then drops to the image's postgres user.
+    entrypoint: ["/bin/sh", "/etc/czar/postgres/start.sh"]
+    command: ["-c", "config_file=/etc/czar/postgres/postgresql.conf"]
+    environment:
+      PGDATA: /var/lib/postgresql/data
+    volumes:
+      - type: bind
+        source: /var/lib/czar/postgres
+        target: /var/lib/postgresql/data
+      - type: bind
+        source: ./postgres
+        target: /etc/czar/postgres
+        read_only: true
+      # The unix socket, shared with postgres-init only (the superuser's one way in).
+      - type: volume
+        source: postgres-socket
+        target: /var/run/postgresql
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "pg_isready",
+          "--host",
+          "/var/run/postgresql",
+          "--port",
+          "5432",
+          "--username",
+          "postgres",
+          "--dbname",
+          "postgres",
+        ]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+      start_period: 30s
+    stop_grace_period: 60s
+
+  postgres-init:
+    # One-shot, at every `up`: database czar, the five service roles, their passwords from files,
+    # and every grant (ops/cloud/postgres/init-roles.sh, grants.sql). Idempotent.
+    image: postgres:16.15@sha256:ca0bd484cb98bf4b24eb1010e73fb3fcbd6714d240fbc1a10eea5b7dbecb641d
+    network_mode: host
+    restart: "no"
+    <<: *unshipped-logs
+    # The image's own postgres user, so peer authentication on the socket maps it to the superuser.
+    user: "999:999"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    entrypoint: ["/bin/sh", "/etc/czar/postgres/init-roles.sh"]
+    environment:
+      PGHOST: /var/run/postgresql
+      PGPORT: "5432"
+    volumes:
+      - type: bind
+        source: ./postgres
+        target: /etc/czar/postgres
+        read_only: true
+      - type: volume
+        source: postgres-socket
+        target: /var/run/postgresql
+      - type: bind
+        source: /run/czar/secrets/postgres-init
+        target: /run/czar/secrets/postgres-init
+        read_only: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  indexer:
+    <<: [*app, *unshipped-logs]
+    image: czar-indexer:${CZAR_IMAGE_TAG:?set CZAR_IMAGE_TAG to the commit build-all.sh tagged}
+    user: "10001:10010"
+    # The image's CMD: ponder start --schema public --port 42069 --hostname 127.0.0.1. `public` is
+    # the schema every unqualified reader uses (SCR-170 §5, PM-024 F8).
+    environment:
+      CZAR_CLOUD_CONFIG: /etc/czar/cloud.toml
+      CZAR_DATABASE_URL: postgres://czar_indexer@127.0.0.1:5432/czar
+      CZAR_INDEXER_RPC_URL: https://rpc.testnet.arc.io
+      CZAR_INDEXER_DEPLOYMENT_PATH: /app/deployments/arc-testnet.json
+      # The first block to index; 0 (the indexer's own default) when unset.
+      CZAR_INDEXER_START_BLOCK: ${CZAR_INDEXER_START_BLOCK:-0}
+    volumes:
+      - *cloud-config
+      - *deployment
+      - type: bind
+        source: /run/czar/secrets/indexer
+        target: /run/czar/secrets/indexer
+        read_only: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
+
+  server:
+    <<: *app
+    image: czar-server:${CZAR_IMAGE_TAG:?set CZAR_IMAGE_TAG to the commit build-all.sh tagged}
+    user: "10001:10010"
+    # The image's CMD: node --experimental-strip-types apps/server/src/cloud-main.ts, from /app.
+    environment:
+      CZAR_CLOUD_CONFIG: /etc/czar/cloud.toml
+      CZAR_DATABASE_URL: postgres://czar_api@127.0.0.1:5432/czar
+      CZAR_ARC_RPC_URL: https://rpc.testnet.arc.io
+      CZAR_SERVER_PORT: "3000"
+    volumes:
+      - *cloud-config
+      - *deployment
+      - *signer-run
+      - type: bind
+        source: /run/czar/secrets/server
+        target: /run/czar/secrets/server
+        read_only: true
+      # deploy.objectStorePath, on the persistent disk (cloud-init: 0750, 10001).
+      - type: bind
+        source: /var/lib/czar/objects
+        target: /var/lib/czar/objects
+    depends_on:
+      postgres:
+        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
+      indexer:
+        condition: service_healthy
+
+  signer:
+    <<: *app
+    image: czar-signer:${CZAR_IMAGE_TAG:?set CZAR_IMAGE_TAG to the commit build-all.sh tagged}
+    # UID 10002 is the only non-root UID the metadata guard lets reach the metadata server
+    # (SCR-170 §4); group 10010 is signer.socketGroupGid, so clients can open the socket.
+    user: "10002:10010"
+    environment:
+      CZAR_CLOUD_CONFIG: /etc/czar/cloud.toml
+      CZAR_DATABASE_URL: postgres://czar_signer@127.0.0.1:5432/czar
+      CZAR_SIGNER_RPC_URL: https://rpc.testnet.arc.io
+    volumes:
+      - *cloud-config
+      - *deployment
+      - *signer-run
+      - type: bind
+        source: /run/czar/secrets/signer
+        target: /run/czar/secrets/signer
+        read_only: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
+      indexer:
+        condition: service_healthy
+      # As ops/local/process-compose.yaml: the signer starts after the server is healthy.
+      server:
+        condition: service_healthy
+
+  merchants:
+    <<: *app
+    image: czar-merchants:${CZAR_IMAGE_TAG:?set CZAR_IMAGE_TAG to the commit build-all.sh tagged}
+    user: "10001:10010"
+    environment:
+      CZAR_CLOUD_CONFIG: /etc/czar/cloud.toml
+      CZAR_DATABASE_URL: postgres://czar_merchants@127.0.0.1:5432/czar
+      CZAR_ARC_RPC_URL: https://rpc.testnet.arc.io
+      CZAR_MERCHANT_PORT: "8787"
+    volumes:
+      - *cloud-config
+      - *deployment
+      - *signer-run
+      - type: bind
+        source: /run/czar/secrets/merchants
+        target: /run/czar/secrets/merchants
+        read_only: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
+      server:
+        condition: service_healthy
+      # K10 payTo addresses come from the signer socket at start.
+      signer:
+        condition: service_healthy
+
+  social-worker:
+    <<: *app
+    image: czar-server:${CZAR_IMAGE_TAG:?set CZAR_IMAGE_TAG to the commit build-all.sh tagged}
+    user: "10001:10010"
+    command:
+      [
+        node,
+        --experimental-strip-types,
+        --disable-warning=ExperimentalWarning,
+        apps/server/src/social/cloud-worker-main.ts,
+      ]
+    healthcheck:
+      disable: true
+    logging:
+      driver: json-file
+    environment:
+      CZAR_CLOUD_CONFIG: /etc/czar/cloud.toml
+      CZAR_DATABASE_URL: postgres://czar_api@127.0.0.1:5432/czar
+      CZAR_ARC_RPC_URL: https://rpc.testnet.arc.io
+    volumes:
+      - *cloud-config
+      - *deployment
+      - type: bind
+        source: /run/czar/secrets/social-worker
+        target: /run/czar/secrets/social-worker
+        read_only: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      postgres-init:
+        condition: service_completed_successfully
+      server:
+        condition: service_healthy
+
+  web:
+    <<: *app
+    image: czar-web:${CZAR_IMAGE_TAG:?set CZAR_IMAGE_TAG to the commit build-all.sh tagged}
+    user: "10001:10010"
+    # next start on 127.0.0.1:3100; /v1/* is rewritten to the server at 127.0.0.1:3000 (built in).
+    # No credential, no config file and no signer socket.
+    depends_on:
+      server:
+        condition: service_healthy
+
+volumes:
+  postgres-socket:

@@ -14,7 +14,8 @@
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
     "test:local": "CZAR_LOCAL_CHAIN=1 vitest run test/local-chain.test.ts",
-    "start:local": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/local-main.ts"
+    "start:local": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/local-main.ts",
+    "start:cloud": "node --experimental-strip-types --disable-warning=ExperimentalWarning src/cloud-main.ts"
   },
   "dependencies": {
     "@czar/config": "workspace:*",

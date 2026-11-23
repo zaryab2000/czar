@@ -193,6 +193,56 @@ describe("redirects", () => {
 });
 
 describe("limits", () => {
+  it.each([
+    ["ECONNREFUSED", "connection-refused"],
+    ["ECONNRESET", "connection-reset"],
+    ["ENETUNREACH", "network-unreachable"],
+  ])("classifies %s without exposing transport details", async (code, outcome) => {
+    const { safeFetch } = fetcherWith({ "api.example.com": [PUBLIC] }, async () => {
+      throw Object.assign(new Error("private transport detail"), { code });
+    });
+    await expect(safeFetch("https://api.example.com/x")).rejects.toMatchObject({
+      code: "upstream-unavailable",
+      outcome,
+      message: "upstream-unavailable: transport",
+    });
+  });
+
+  it("keeps DNS failure outside seller-side outcomes", async () => {
+    const { safeFetch } = fetcherWith({}, slow);
+    await expect(safeFetch("https://missing.example/x")).rejects.toMatchObject({
+      code: "fetch-blocked",
+      rule: "dns",
+    });
+  });
+
+  it("distinguishes a timeout after connection from one before connection", async () => {
+    const connected = fetcherWith(
+      { "api.example.com": [PUBLIC] },
+      (target) => {
+        target.onConnected?.();
+        return new Promise(() => undefined);
+      },
+      { timeoutMs: 10 },
+    );
+    await expect(connected.safeFetch("https://api.example.com/x")).rejects.toMatchObject({
+      outcome: "connected-timeout",
+    });
+    const before = fetcherWith({ "api.example.com": [PUBLIC] }, slow, { timeoutMs: 10 });
+    await expect(before.safeFetch("https://api.example.com/x")).rejects.toMatchObject({
+      outcome: "timeout-before-connect",
+    });
+  });
+
+  it("classifies a local abort without blaming the seller", async () => {
+    const { safeFetch } = fetcherWith({ "api.example.com": [PUBLIC] }, async () => {
+      throw Object.assign(new Error("local"), { code: "ABORT_ERR" });
+    });
+    await expect(safeFetch("https://api.example.com/x")).rejects.toMatchObject({
+      outcome: "local-abort",
+    });
+  });
+
   it("refuses a body over the caller's byte cap", async () => {
     const { transport } = scripted({
       "api.example.com/big": { status: 200, body: "x".repeat(2048) },
@@ -279,6 +329,33 @@ describe("own interfaces and the local merchant exception", () => {
     const response = await safeFetch(`${origin}/v1/balances`);
     expect(new TextDecoder().decode(response.body)).toBe("merchant");
     expect(await blockedRule(() => safeFetch("http://127.0.0.1:4998/v1/balances"))).toBe("scheme");
+  });
+
+  it("reports response arrival when the body stream resets after HTTP headers", async () => {
+    const interrupted = createServer((_req, res) => {
+      res.writeHead(200, { "content-type": "text/plain" });
+      res.flushHeaders();
+      res.write("partial");
+      setImmediate(() => res.socket?.destroy());
+    });
+    await new Promise<void>((resolve) => interrupted.listen(0, "127.0.0.1", resolve));
+    const interruptedOrigin = `http://127.0.0.1:${(interrupted.address() as AddressInfo).port}`;
+    const safeFetch = createSafeFetch({
+      localMerchantOrigins: [interruptedOrigin],
+      interfaceAddresses: () => [],
+      version: "0.0.0",
+      maxRedirects: 0,
+      maxBytes: 1024,
+      timeoutMs: 2000,
+    });
+    try {
+      await expect(safeFetch(`${interruptedOrigin}/paid`)).rejects.toMatchObject({
+        code: "upstream-unavailable",
+        responseArrived: true,
+      });
+    } finally {
+      await new Promise<void>((resolve) => interrupted.close(() => resolve()));
+    }
   });
 });
 

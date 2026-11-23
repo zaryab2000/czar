@@ -1,0 +1,28 @@
+{
+  "displayName": "czar-alpha: /health check failing",
+  "combiner": "OR",
+  "conditions": [
+    {
+      "displayName": "An uptime check fails from at least 2 of 3 regions for 2 minutes",
+      "conditionThreshold": {
+        "filter": "metric.type=\"monitoring.googleapis.com/uptime_check/check_passed\" AND resource.type=\"uptime_url\"",
+        "aggregations": [
+          {
+            "alignmentPeriod": "60s",
+            "perSeriesAligner": "ALIGN_NEXT_OLDER",
+            "crossSeriesReducer": "REDUCE_COUNT_FALSE",
+            "groupByFields": ["resource.label.*"]
+          }
+        ],
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 1,
+        "duration": "120s",
+        "trigger": { "count": 1 }
+      }
+    }
+  ],
+  "documentation": {
+    "mimeType": "text/markdown",
+    "content": "The /health check on the host named in this incident (app. or merchants.) has failed from at least 2 of 3 regions for 2 minutes.\n\n- Open the VM over IAP SSH and run `docker ps` and `systemctl status caddy`.\n- Caddy answers 502 when the container behind it is down."
+  }
+}

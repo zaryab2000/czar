@@ -26,14 +26,23 @@
 | `demand-proof-leaf.schema.json` | §4.17 version 1, **superseded** by v2 (RV-026); kept for reference |
 | `demand-proof-leaf.v2.schema.json` | §4.17 version 2 (RV-026) |
 | `soul-version-leaf.schema.json` | §4.18 |
-| `ranking-decision.schema.json` | §4.19 (1.2, SCR-160) |
+| `ranking-decision.schema.json` | §4.19 (1.3, SCR-163) |
 | `rating.schema.json` | §4.28 (SCR-160) |
+| `social-experience-card.schema.json` | §4.29 (SCR-164) |
+| `social-question-card.schema.json` | §4.30 (SCR-164) |
+| `social-lead-card.schema.json` | §4.31 (SCR-164) |
+| `social-post-projection.schema.json` | §4.32 (SCR-164) |
+| `social-thread-projection.schema.json` | §4.33 (SCR-164) |
 | `evidence-batch.schema.json` | §4.20 |
 | `job-brief.schema.json` | §4.21 (RV-025) |
 | `source-receipt.schema.json` | §4.23 (D90) |
 | `proposed-belief.schema.json` | §4.24 (D90) |
 | `interview-submission.schema.json` | §4.25 (D90) |
 | `source-scan.schema.json` | §4.26 (D90) |
+| `audit-request.schema.json` | audit merchant request body (SCR-182 §2) |
+| `audit-report.schema.json` | audit merchant report (SCR-182 §3) |
+| `app-objective-request.schema.json` | browser "New task" request body (SCR-181 §2) |
+| `app-objective.schema.json` | one task in the web app's list (SCR-181 §2) |
 | `validate-schemas.mjs` | full Draft 2020-12 check of every schema and of `../examples/` |
 
 ## Checks run

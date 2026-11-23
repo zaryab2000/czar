@@ -1,16 +1,26 @@
 import { randomUUID } from "node:crypto";
-import { H } from "@czar/hashing";
+import { H, serviceVersionId } from "@czar/hashing";
 import type { Config } from "@czar/config";
 import type { CapabilityCard, RankingDecision } from "@czar/schemas";
 import {
+  classifyOffer,
   readPaymentRequired,
   type PaymentRequirements,
   type SafeFetch,
   type SafeFetchOptions,
+  type SanitizedExtensions,
 } from "@czar/x402";
 import { keccak256, toBytes } from "viem";
 import type { Pool } from "pg";
 import type { RankingQuery, PlannerService } from "#src/planner/ports";
+import { isInjectionBlocked, openOwnerFacts } from "#src/evidence/health";
+import { readSupplierCountSnapshot } from "#src/selection/ranking/counts";
+import { makeRankingDecision, rankingPolicyVersion } from "#src/selection/ranking/decision";
+import { saveRankingDecision } from "#src/selection/ranking/decision-store";
+import { orderCandidates } from "#src/selection/ranking/order";
+import { recordServiceVersion } from "#src/selection/service-versions";
+import { createCircleDiscovery, type CircleCandidate } from "#src/selection/discovery/circle";
+import { openIncidentsFor, overlayIncidents } from "#src/social/incidents";
 
 interface ProbeInput {
   readonly query?: Readonly<Record<string, string>>;
@@ -43,9 +53,11 @@ interface RegisteredRecord {
   readonly serviceId: string;
   readonly registration: Registration;
   readonly accepts: readonly PaymentRequirements[];
+  readonly extensions402: SanitizedExtensions;
   readonly outputSchema: Readonly<Record<string, unknown>> | null;
   readonly inputFields: readonly CardField[];
   readonly outputFields: readonly CardField[];
+  readonly versionIds: ReadonlyMap<string, string>;
 }
 
 interface ProbeOutcome {
@@ -64,9 +76,8 @@ interface SnapshotOffer {
   readonly asset: string | null;
   readonly amount: string;
   readonly payTo: string;
-  readonly siwx: boolean;
-  readonly siwxOnly: boolean;
-  readonly batchSettlement: boolean;
+  readonly classification: "vanilla" | "gateway" | "unsupported";
+  readonly versionId: string | null;
 }
 
 type SnapshotProbe =
@@ -82,21 +93,23 @@ interface SnapshotService {
   readonly probe: SnapshotProbe;
 }
 
-interface InterimPolicyDescriptor {
-  readonly policy: "czar-registered-interim";
-  readonly scr: "SCR-138";
+interface ProbePolicyDescriptor {
+  readonly policy: "czar-registered-probe-snapshot";
+  readonly scr: "SCR-187";
   readonly network: string;
   readonly usdcAsset: string;
-  readonly offerRule: "scheme-exact,asset-usdc,no-siwx,no-siwx-only,no-batch-settlement";
+  readonly offerRule: "scheme-exact,asset-usdc,classify-offer,gateway-switch";
+  readonly gatewayEnabled: boolean;
+  readonly gatewayWalletAddress: string;
   readonly unverifiedWithApproval: boolean;
   readonly exploration: "lowest-eligible-live-price-then-serviceId";
-  readonly ranked: "none";
+  readonly ranked: "current-version-wilson";
 }
 
-interface InterimSnapshot {
-  readonly kind: "czar-registered-interim-snapshot";
+interface ProbeSnapshot {
+  readonly kind: "czar-registered-probe-snapshot";
   readonly policy_version: string;
-  readonly descriptor: InterimPolicyDescriptor;
+  readonly descriptor: ProbePolicyDescriptor;
   readonly network: string;
   readonly services: readonly SnapshotService[];
 }
@@ -106,6 +119,7 @@ interface RegisteredSelectionOptions {
   readonly safeFetch: SafeFetch;
   readonly pool: Pool;
   readonly now?: () => Date;
+  readonly circleDiscovery?: Pick<ReturnType<typeof createCircleDiscovery>, "discover">;
 }
 
 export interface RegisteredSelection {
@@ -126,12 +140,14 @@ export function createRegisteredSelection(
   const pending = new Map<string, Promise<ProbeOutcome>>();
   const now = options.now ?? (() => new Date());
   const registrations = readRegistrations(options.config);
+  const circleDiscovery = options.circleDiscovery ?? createCircleDiscovery(options);
+  const circleDirectory = new Map<string, CircleCandidate>();
   const recrawlMs = Number(options.config.get("selection.registeredRecrawlHours")) * 3600000;
   const timeoutMs = Number(options.config.get("selection.probeTimeoutMs"));
   const network = String(options.config.get("selection.paymentNetwork"));
   const usdcAsset = String(options.config.get("chain.usdcAddress")).toLowerCase();
   const unverifiedWithApproval = Boolean(options.config.get("selection.unverifiedWithApproval"));
-  const descriptor = policyDescriptor(network, usdcAsset, unverifiedWithApproval);
+  const descriptor = policyDescriptor(network, usdcAsset, unverifiedWithApproval, options.config);
 
   async function getProbe(serviceId: string): Promise<ProbeOutcome | null> {
     const registration = registrations.get(serviceId);
@@ -140,7 +156,12 @@ export function createRegisteredSelection(
     if (cached && now().getTime() - cached.fetchedAt < recrawlMs) return cached.outcome;
     const active = pending.get(serviceId);
     if (active) return active;
-    const request = probe(serviceId, registration, options.safeFetch, timeoutMs, now)
+    const request = probe(serviceId, registration, options.safeFetch, {
+      pool: options.pool,
+      network,
+      timeoutMs,
+      now,
+    })
       .then((outcome) => {
         probes.set(serviceId, { outcome, fetchedAt: now().getTime() });
         return outcome;
@@ -153,12 +174,16 @@ export function createRegisteredSelection(
   return {
     directory: {
       async get(serviceId) {
+        const circle = circleDirectory.get(serviceId);
+        if (circle) return { ...circle, probeInput: circle.probeInput ?? {} };
         const outcome = await getProbe(serviceId);
         return outcome?.record ? toPlannerService(outcome.record) : null;
       },
     },
     outputSchema: {
       async forService(serviceId) {
+        const circle = circleDirectory.get(serviceId);
+        if (circle) return objectAt(circle.card, "outputSchema");
         return (await getProbe(serviceId))?.record?.outputSchema ?? null;
       },
     },
@@ -171,21 +196,59 @@ export function createRegisteredSelection(
             outcome: (await getProbe(serviceId))!,
           })),
         );
+        const registeredKeys = new Set(
+          [...registrations.values()].map((registration) => resourceKey(registration.resource)),
+        );
+        const discovered = await circleDiscovery.discover(query.capability);
+        for (const candidate of discovered) {
+          const key = resourceKey(candidate.resource);
+          if (registeredKeys.has(key) || registrations.has(candidate.serviceId)) continue;
+          registeredKeys.add(key);
+          circleDirectory.set(candidate.serviceId, candidate);
+          services.push(circleDecisionService(candidate, query.capability, now()));
+        }
         return createDecision({
           query,
           services,
           descriptor,
-          riskQuantile: Number(options.config.get("selection.riskQuantile")),
-          weights: {
-            cost: Number(options.config.get("selection.wCost")),
-            latency: Number(options.config.get("selection.wLatency")),
-          },
+          config: options.config,
           retentionDays: Number(options.config.get("selection.decisionRetentionDays")),
           pool: options.pool,
           now,
         });
       },
     },
+  };
+}
+
+function resourceKey(resource: { readonly url: string; readonly method: string }): string {
+  return `${resource.url.toLowerCase().replace(/\/+$/, "")}\0${resource.method.toLowerCase()}`;
+}
+
+function circleDecisionService(candidate: CircleCandidate, capability: string, now: Date) {
+  const registration: Registration = {
+    serviceName: String(candidate.card["serviceName"] ?? "Circle merchant"),
+    resource: {
+      url: candidate.resource.url,
+      method: candidate.resource.method as "GET" | "POST",
+    },
+    probeInput: candidate.probeInput ?? {},
+    capabilities: [capability],
+  };
+  const record: RegisteredRecord = {
+    serviceId: candidate.serviceId,
+    registration,
+    accepts: [candidate.probe.matchedOffer],
+    extensions402: candidate.probe.extensions402,
+    outputSchema: objectAt(candidate.card, "outputSchema"),
+    inputFields: [],
+    outputFields: [],
+    versionIds: new Map([[candidate.probe.matchedOffer.payTo.toLowerCase(), candidate.versionId]]),
+  };
+  return {
+    serviceId: candidate.serviceId,
+    registration,
+    outcome: { record, probedAt: now.toISOString() },
   };
 }
 
@@ -228,12 +291,43 @@ async function probe(
   serviceId: string,
   registration: Registration,
   safeFetch: SafeFetch,
-  timeoutMs: number,
-  now: () => Date,
+  options: {
+    readonly pool: Pool;
+    readonly network: string;
+    readonly timeoutMs: number;
+    readonly now: () => Date;
+  },
 ): Promise<ProbeOutcome> {
-  const probedAt = now().toISOString();
+  const outcome = await readRegisteredProbe(serviceId, registration, safeFetch, options);
+  if (!outcome.record) return outcome;
+  for (const versionId of new Set(outcome.record.versionIds.values())) {
+    await recordServiceVersion({
+      pool: options.pool,
+      network: options.network,
+      serviceId,
+      versionId,
+      now: new Date(outcome.probedAt),
+    });
+  }
+  return outcome;
+}
+
+async function readRegisteredProbe(
+  serviceId: string,
+  registration: Registration,
+  safeFetch: SafeFetch,
+  options: {
+    readonly network: string;
+    readonly timeoutMs: number;
+    readonly now: () => Date;
+  },
+): Promise<ProbeOutcome> {
+  const probedAt = options.now().toISOString();
   try {
-    const response = await safeFetch(probeUrl(registration), probeOptions(registration, timeoutMs));
+    const response = await safeFetch(
+      probeUrl(registration),
+      probeOptions(registration, options.timeoutMs),
+    );
     if (
       response.status !== 402 ||
       new URL(response.url).origin !== new URL(registration.resource.url).origin
@@ -248,17 +342,30 @@ async function probe(
       return { record: null, probedAt };
     const declared = result.extensions.bazaar?.schema;
     const outputSchema = responseSchema(declared);
+    const versionIds = new Map<string, string>();
+    for (const offer of result.paymentRequired.accepts) {
+      if (offer.network !== options.network) continue;
+      const payTo = offer.payTo.toLowerCase();
+      const versionId = serviceVersionId({
+        payTo,
+        resource: registration.resource,
+        schema: declared ?? null,
+      });
+      versionIds.set(payTo, versionId);
+    }
     return {
       probedAt,
       record: {
         serviceId,
         registration,
         accepts: result.paymentRequired.accepts,
+        extensions402: result.extensions,
         outputSchema,
         inputFields: cardFields(
           objectAt(declared, ...declaredInputPath(registration.resource.method), "properties"),
         ),
         outputFields: cardFields(objectAt(outputSchema, "properties")),
+        versionIds,
       },
     };
   } catch {
@@ -352,7 +459,7 @@ function toPlannerService(record: RegisteredRecord): PlannerService & { probeInp
 
 interface EligibilityResult {
   readonly excluded: RankingDecision["excluded"];
-  readonly eligible: readonly { serviceId: string; amount: bigint }[];
+  readonly eligible: readonly { serviceId: string; amount: bigint; versionId: string }[];
   readonly candidatesConsidered: number;
 }
 
@@ -363,56 +470,80 @@ async function createDecision(args: {
     registration: Registration;
     outcome: ProbeOutcome;
   }[];
-  readonly descriptor: InterimPolicyDescriptor;
-  readonly riskQuantile: number;
-  readonly weights: Readonly<Record<string, number>>;
+  readonly descriptor: ProbePolicyDescriptor;
+  readonly config: Config;
   readonly retentionDays: number;
   readonly pool: Pool;
   readonly now: () => Date;
 }): Promise<RankingDecision> {
-  const { query, services, descriptor, riskQuantile, weights, now } = args;
-  const policy = policyVersion(descriptor);
-  const snapshot = makeSnapshot(services, descriptor);
+  const { query, services, descriptor, now } = args;
+  const snapshot = makeSnapshot(services, descriptor, args.config);
   const eligibility = evaluateSnapshot(
     snapshot.services,
     query,
     descriptor.network,
     descriptor.usdcAsset,
+    descriptor.gatewayEnabled,
   );
-  const snapshotId = await persistSnapshot(args.pool, snapshot, now(), args.retentionDays);
-  return {
-    schemaVersion: "1.2",
-    query_id: randomUUID(),
-    received_at: now().toISOString(),
-    policy_version: policy,
-    snapshot_id: snapshotId,
-    snapshot_anchor_tx: null,
-    query: {
-      task: query.capability,
-      task_class: query.taskClass,
-      constraints: { max_price_atomic: query.max_price_atomic },
-      risk_quantile: riskQuantile,
-      weights,
-    },
-    candidates_considered: eligibility.candidatesConsidered,
-    excluded: eligibility.excluded,
-    ranked: [],
-    unverified: eligibility.eligible.map(({ serviceId }) => ({
-      service_id: serviceId,
-      reason: "n_eff_below_min",
-      n_eff: 0,
-    })),
-    missing_dimensions_for_class: [],
-    insufficient_evidence: true,
-    ...(descriptor.unverifiedWithApproval && eligibility.eligible[0]
-      ? {
-          exploration_slot: {
-            service_id: eligibility.eligible[0].serviceId,
-            reason: "no-ranked-candidate" as const,
-          },
-        }
-      : {}),
-  };
+  await persistSnapshot(args.pool, snapshot, now(), args.retentionDays);
+  const confidenceZ = Number(args.config.get("selection.confidenceZ"));
+  const consecutiveFailures = Number(args.config.get("health.consecutiveFailures"));
+  const activePolicyVersion = rankingPolicyVersion({ confidenceZ, consecutiveFailures });
+  const countSnapshot = await readSupplierCountSnapshot({
+    pool: args.pool,
+    network: descriptor.network,
+    policyVersion: activePolicyVersion,
+    now: now(),
+    retentionDays: args.retentionDays,
+  });
+  const candidates = await Promise.all(
+    eligibility.eligible.map(async ({ serviceId, amount, versionId }) => {
+      const count = countSnapshot.counts.find(
+        (row) =>
+          row.service_id === serviceId &&
+          row.version_id === versionId &&
+          row.task_class === query.taskClass,
+      );
+      const healthFacts = query.userId
+        ? await openOwnerFacts(args.pool, query.userId, descriptor.network, serviceId)
+        : [];
+      return {
+        serviceId,
+        versionId,
+        priceAtomic: amount.toString(),
+        good: count?.good ?? 0,
+        bad: count?.bad ?? 0,
+        lowerBound: count?.lower_bound ?? null,
+        ownersRated: count?.owners_rated ?? 0,
+        ownersBad: count?.owners_bad ?? 0,
+        computedAt: count?.computed_at ?? now(),
+        lineageRoot: count?.lineage_root ?? null,
+        healthFacts,
+        injectionBlocked: await isInjectionBlocked(args.pool, descriptor.network, serviceId),
+      };
+    }),
+  );
+  const ordered = orderCandidates(candidates, confidenceZ, now(), consecutiveFailures);
+  const incidents = await openIncidentsFor(
+    args.pool,
+    descriptor.network,
+    ordered.ranked.map((row) => row.service_id),
+    query.taskClass,
+  );
+  const decision = makeRankingDecision({
+    query,
+    candidatesConsidered: eligibility.candidatesConsidered,
+    ranked: overlayIncidents(ordered.ranked, incidents),
+    unverified: ordered.unverified,
+    excluded: [...eligibility.excluded, ...ordered.excluded],
+    policyVersion: activePolicyVersion,
+    snapshotId: countSnapshot.snapshotId,
+    receivedAt: now(),
+    queryId: randomUUID(),
+    unverifiedWithApproval: descriptor.unverifiedWithApproval,
+  });
+  await saveRankingDecision(args.pool, decision);
+  return decision;
 }
 
 function makeSnapshot(
@@ -421,10 +552,11 @@ function makeSnapshot(
     registration: Registration;
     outcome: ProbeOutcome;
   }[],
-  descriptor: InterimPolicyDescriptor,
-): InterimSnapshot {
+  descriptor: ProbePolicyDescriptor,
+  config: Config,
+): ProbeSnapshot {
   return {
-    kind: "czar-registered-interim-snapshot",
+    kind: "czar-registered-probe-snapshot",
     policy_version: policyVersion(descriptor),
     descriptor,
     network: descriptor.network,
@@ -441,7 +573,12 @@ function makeSnapshot(
             ? {
                 state: "ok" as const,
                 probedAt: outcome.probedAt,
-                offers: outcome.record.accepts.map(reduceOffer).toSorted(compareSnapshotOffer),
+                offers: outcome.record.accepts
+                  .map((offer) => ({
+                    ...reduceOffer(offer, outcome.record!.extensions402, config),
+                    versionId: outcome.record!.versionIds.get(offer.payTo.toLowerCase()) ?? null,
+                  }))
+                  .toSorted(compareSnapshotOffer),
               }
             : { state: "failed" as const, probedAt: outcome.probedAt },
         };
@@ -454,12 +591,13 @@ function evaluateSnapshot(
   query: RankingQuery,
   network: string,
   usdcAsset: string,
+  gatewayEnabled: boolean,
 ): EligibilityResult {
   const candidates = services.filter((service) => service.capabilities.includes(query.capability));
   const excluded: RankingDecision["excluded"] = [];
-  const eligible: Array<{ serviceId: string; amount: bigint }> = [];
+  const eligible: Array<{ serviceId: string; amount: bigint; versionId: string }> = [];
   for (const service of candidates) {
-    const result = evaluateService(service, network, usdcAsset, query.max_price_atomic);
+    const result = evaluateService(service, network, usdcAsset, query, gatewayEnabled);
     if (result.excluded) excluded.push(result.excluded);
     if (result.eligible) eligible.push(result.eligible);
   }
@@ -471,10 +609,11 @@ function evaluateService(
   service: SnapshotService,
   network: string,
   usdcAsset: string,
-  maxPrice: string,
+  query: RankingQuery,
+  gatewayEnabled: boolean,
 ): {
   excluded?: RankingDecision["excluded"][number];
-  eligible?: { serviceId: string; amount: bigint };
+  eligible?: { serviceId: string; amount: bigint; versionId: string };
 } {
   if (service.probe.state === "failed")
     return {
@@ -489,16 +628,29 @@ function evaluateService(
     return {
       excluded: { service_id: service.serviceId, gate: "network", detail: "wrong-network" },
     };
-  const usable = onNetwork.filter((offer) => isUsableOffer(offer, usdcAsset));
+  const usable = onNetwork.filter((offer) =>
+    isUsableOffer(offer, usdcAsset, query, gatewayEnabled),
+  );
   if (usable.length === 0)
     return {
       excluded: {
         service_id: service.serviceId,
         gate: "offer",
-        detail: "no-payable-live-offer",
+        detail:
+          !gatewayEnabled &&
+          onNetwork.some(
+            (offer) =>
+              offer.scheme === "exact" &&
+              offer.asset === usdcAsset &&
+              offer.classification === "gateway",
+          )
+            ? "gateway-off"
+            : "no-payable-live-offer",
       },
     };
-  const affordable = usable.filter((offer) => BigInt(offer.amount) <= BigInt(maxPrice));
+  const affordable = usable.filter(
+    (offer) => BigInt(offer.amount) <= BigInt(query.max_price_atomic),
+  );
   if (affordable.length === 0)
     return {
       excluded: {
@@ -510,19 +662,35 @@ function evaluateService(
   const cheapest = affordable.reduce((left, right) =>
     BigInt(left.amount) <= BigInt(right.amount) ? left : right,
   );
-  return { eligible: { serviceId: service.serviceId, amount: BigInt(cheapest.amount) } };
+  if (!cheapest.versionId)
+    return {
+      excluded: {
+        service_id: service.serviceId,
+        gate: "probe-failed",
+        detail: "version-unavailable",
+      },
+    };
+  return {
+    eligible: {
+      serviceId: service.serviceId,
+      amount: BigInt(cheapest.amount),
+      versionId: cheapest.versionId,
+    },
+  };
 }
 
-function reduceOffer(offer: PaymentRequirements): SnapshotOffer {
+function reduceOffer(
+  offer: PaymentRequirements,
+  extensions402: SanitizedExtensions,
+  config: Config,
+): Omit<SnapshotOffer, "versionId"> {
   return {
     network: /^eip155:[1-9][0-9]{0,19}$/.test(offer.network) ? offer.network : null,
     scheme: /^[a-z0-9-]{1,32}$/.test(offer.scheme) ? offer.scheme : null,
     asset: /^0x[0-9a-fA-F]{40}$/.test(offer.asset) ? offer.asset.toLowerCase() : null,
     amount: offer.amount,
     payTo: offer.payTo.toLowerCase(),
-    siwx: offer.extra["siwx"] === true,
-    siwxOnly: offer.extra["siwxOnly"] === true,
-    batchSettlement: offer.extra["paymentFlow"] === "batch-settlement",
+    classification: classifyOffer(offer, extensions402, config),
   };
 }
 
@@ -550,7 +718,7 @@ function compareNullableText(left: string | null, right: string | null): number 
 
 async function persistSnapshot(
   pool: Pool,
-  snapshot: InterimSnapshot,
+  snapshot: ProbeSnapshot,
   usedAt: Date,
   retentionDays: number,
 ) {
@@ -581,20 +749,23 @@ function policyDescriptor(
   network: string,
   usdcAsset: string,
   unverifiedWithApproval: boolean,
-): InterimPolicyDescriptor {
+  config: Config,
+): ProbePolicyDescriptor {
   return {
-    policy: "czar-registered-interim",
-    scr: "SCR-138",
+    policy: "czar-registered-probe-snapshot",
+    scr: "SCR-187",
     network,
     usdcAsset,
-    offerRule: "scheme-exact,asset-usdc,no-siwx,no-siwx-only,no-batch-settlement",
+    offerRule: "scheme-exact,asset-usdc,classify-offer,gateway-switch",
+    gatewayEnabled: Boolean(config.get("routing.gatewayEnabled")),
+    gatewayWalletAddress: String(config.get("chain.gatewayWalletAddress")).toLowerCase(),
     unverifiedWithApproval,
     exploration: "lowest-eligible-live-price-then-serviceId",
-    ranked: "none",
+    ranked: "current-version-wilson",
   };
 }
 
-function policyVersion(descriptor: InterimPolicyDescriptor): string {
+function policyVersion(descriptor: ProbePolicyDescriptor): string {
   return `pol_${H(descriptor).slice(2, 18)}`;
 }
 
@@ -628,13 +799,20 @@ function compareText(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
-function isUsableOffer(offer: SnapshotOffer, usdcAsset: string): boolean {
+function isUsableOffer(
+  offer: SnapshotOffer,
+  usdcAsset: string,
+  query: RankingQuery,
+  gatewayEnabled: boolean,
+): boolean {
   return (
     offer.scheme === "exact" &&
     offer.asset === usdcAsset &&
-    !offer.siwx &&
-    !offer.siwxOnly &&
-    !offer.batchSettlement
+    (offer.classification === "vanilla"
+      ? query.rails.includes("x402-exact")
+      : offer.classification === "gateway" &&
+        gatewayEnabled &&
+        query.rails.includes("gateway-batched"))
   );
 }
 

@@ -1,0 +1,210 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://czar.dev/schemas/social-post-projection.schema.json",
+  "title": "PostProjection",
+  "description": "What public readers and the social worker see of one post (spec 02 §4.32, SCR-164 §3.7).",
+  "type": "object",
+  "x-privacyClass": "public",
+  "additionalProperties": false,
+  "required": [
+    "postId",
+    "threadId",
+    "parentPostId",
+    "author",
+    "kind",
+    "stance",
+    "card",
+    "revision",
+    "supersededBy",
+    "tombstoned",
+    "createdAt"
+  ],
+  "properties": {
+    "postId": {
+      "$ref": "common.schema.json#/$defs/PostId",
+      "description": "Post id.",
+      "x-privacyClass": "public"
+    },
+    "threadId": {
+      "$ref": "common.schema.json#/$defs/ThreadId",
+      "description": "Thread id.",
+      "x-privacyClass": "public"
+    },
+    "parentPostId": {
+      "anyOf": [
+        {
+          "$ref": "common.schema.json#/$defs/PostId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Parent post for replies.",
+      "x-privacyClass": "public"
+    },
+    "author": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "representativeId",
+            "handle",
+            "controlled"
+          ],
+          "properties": {
+            "representativeId": {
+              "$ref": "common.schema.json#/$defs/RepresentativeId",
+              "description": "Author representative (a random id, not time-ordered).",
+              "x-privacyClass": "public"
+            },
+            "handle": {
+              "type": "string",
+              "pattern": "^Rep-[0-9A-HJKMNP-TV-Z]{4}$",
+              "description": "Display handle: Rep- plus the last four characters of the random representative id.",
+              "x-privacyClass": "public"
+            },
+            "controlled": {
+              "type": "boolean",
+              "description": "True for a controlled representative.",
+              "x-privacyClass": "public"
+            }
+          },
+          "description": "Author.",
+          "x-privacyClass": "public"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The author, or null for a system post.",
+      "x-privacyClass": "public"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "experience",
+        "question",
+        "reply",
+        "lead",
+        "system"
+      ],
+      "description": "Post kind.",
+      "x-privacyClass": "public"
+    },
+    "stance": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "corroborates",
+            "contradicts",
+            "answers",
+            "neutral"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Replies only.",
+      "x-privacyClass": "public"
+    },
+    "card": {
+      "anyOf": [
+        {
+          "$ref": "social-experience-card.schema.json"
+        },
+        {
+          "$ref": "social-question-card.schema.json"
+        },
+        {
+          "$ref": "social-lead-card.schema.json"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "tombstoned"
+          ],
+          "properties": {
+            "tombstoned": {
+              "type": "boolean",
+              "const": true,
+              "description": "Removed by its owner.",
+              "x-privacyClass": "public"
+            }
+          },
+          "description": "Tombstone.",
+          "x-privacyClass": "public"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "template",
+            "values"
+          ],
+          "properties": {
+            "template": {
+              "type": "string",
+              "enum": [
+                "system.incident.opened",
+                "system.incident.closed",
+                "system.lead.probed"
+              ],
+              "description": "System template id (SCR-164 §3.8).",
+              "x-privacyClass": "public"
+            },
+            "values": {
+              "type": "object",
+              "maxProperties": 12,
+              "additionalProperties": {
+                "type": [
+                  "string",
+                  "integer"
+                ],
+                "maxLength": 256
+              },
+              "description": "Template values: ids, counts, enum words only.",
+              "x-privacyClass": "public"
+            }
+          },
+          "description": "System post body.",
+          "x-privacyClass": "public"
+        }
+      ],
+      "description": "The structured body.",
+      "x-privacyClass": "public"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Revision number; the latest is shown.",
+      "x-privacyClass": "public"
+    },
+    "supersededBy": {
+      "anyOf": [
+        {
+          "$ref": "common.schema.json#/$defs/PostId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The newer revision, if any.",
+      "x-privacyClass": "public"
+    },
+    "tombstoned": {
+      "type": "boolean",
+      "description": "Removed by its owner.",
+      "x-privacyClass": "public"
+    },
+    "createdAt": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T00:00:00Z$",
+      "description": "Created, truncated to the UTC day. Feed order uses the server's internal sequence.",
+      "x-privacyClass": "public"
+    }
+  }
+}

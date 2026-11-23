@@ -83,6 +83,51 @@ describe("createLogger", () => {
     expect(JSON.parse(lines.at(-1) ?? "{}")["droppedFields"]).toBe(1);
   });
 
+  it("keeps the K21a and K21b test-provider key ids, and never a key reference or another suffix (PM-058)", () => {
+    const { logger, lines } = capture();
+    for (const keyId of ["K21a", "K21b"]) logger.error("signer_gas_alert", { keyId });
+    expect(lines.map((line) => JSON.parse(line)["keyId"])).toEqual(["K21a", "K21b"]);
+    for (const keyId of [
+      "K21c",
+      "K21A",
+      "K21ab",
+      "K3a ",
+      "K123",
+      "Ka",
+      "K21a:0x00000000000000000000000000000000000000c1",
+      "K4:0x00000000000000000000000000000000000000c1",
+      "relayera",
+    ]) {
+      logger.error("signer_gas_alert", { keyId });
+      const line = JSON.parse(lines.at(-1) ?? "{}");
+      expect(line["keyId"]).toBeUndefined();
+      expect(line["droppedFields"]).toBe(1);
+    }
+  });
+
+  it("allows only the bounded rating event fields", () => {
+    const { logger, last } = capture();
+    logger.info("ratings_prompt_shown", { surface: "cli", steps: 2 });
+    expect(last()).toMatchObject({ surface: "cli", steps: 2 });
+    logger.info("ratings_posted", { surface: "web", value: "good" });
+    expect(last()).toMatchObject({ surface: "web", value: "good" });
+    logger.info("ratings_corrected", {
+      surface: "private user text",
+      value: "merchant response",
+      steps: -1,
+      merchantLabel: "Private seller",
+      resultBody: FORBIDDEN.merchantBody,
+      path: FORBIDDEN.path,
+    });
+    expect(last()["surface"]).toBeUndefined();
+    expect(last()["value"]).toBeUndefined();
+    expect(last()["steps"]).toBeUndefined();
+    expect(last()["merchantLabel"]).toBeUndefined();
+    expect(last()["resultBody"]).toBeUndefined();
+    expect(last()["path"]).toBeUndefined();
+    expect(last()["droppedFields"]).toBe(6);
+  });
+
   it("drops every field outside the allowlist and counts it", () => {
     const { logger, last } = capture();
     logger.info("objective_received", {

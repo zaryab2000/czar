@@ -52,6 +52,8 @@ beforeEach(async () => {
   await getPool().query("DELETE FROM executor_leases");
   await getPool().query("DELETE FROM step_executions");
   await getPool().query("DELETE FROM steps");
+  await getPool().query("DELETE FROM supplier_health");
+  await getPool().query("DELETE FROM observations");
   await getPool().query("DELETE FROM plans");
   await getPool().query("DELETE FROM objectives");
   const submission = makeObjectiveSubmission(OBJECTIVE);
@@ -484,10 +486,11 @@ const PAID_PHASES = [
   "reserve.mined",
   "auth.signed",
   "call.sent",
-  "call.result",
+  "call.attempt",
+  "call.response",
   "settle.sent",
   "settle.mined",
-  "step.result.prepared",
+  "call.result",
   "finalize.sent",
   "finalize.mined",
   "step.result",
@@ -703,8 +706,10 @@ function paidRun(options: { readonly receiptStoredOnTry?: number; readonly calls
     },
     objects: { put: async () => "body-ref", get: async () => new Uint8Array() },
     boundary: async (context) => ({
-      schemaVersion: "1.0",
+      schemaVersion: "1.1",
       stepIndex: 0,
+      callIndex: context.index,
+      obsId: context.obsId,
       status: "delivered",
       source: {
         origin: "http://127.0.0.1:4021",

@@ -282,7 +282,8 @@ export interface PairingCode {
 export interface Device {
   readonly deviceId: string;
   readonly deviceName: string;
-  readonly platform: "macos" | "linux" | "windows";
+  /** `web` is the one browser device a user's web tasks belong to (SCR-181 §1). */
+  readonly platform: "macos" | "linux" | "windows" | "web";
   readonly createdAt: string;
   readonly revokedAt?: string;
 }

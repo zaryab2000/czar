@@ -15,7 +15,7 @@ export interface ExecutionPhase {
  */
 export interface CallError {
   readonly index: number;
-  readonly code: "unpaid" | "delivery-failed";
+  readonly code: "unpaid" | "delivery-failed" | "service-version-drift";
 }
 
 export interface ExecutorLeaseGuard {
@@ -181,6 +181,48 @@ export async function markStepDoneWithResults(
         ],
       );
     }
+    await insertCallErrors(client, input);
+    const updated = await client.query(
+      "UPDATE steps SET state='done',calls_used=GREATEST(calls_used,$3) WHERE plan_id=$1 AND step_index=$2",
+      [input.planId, input.stepIndex, input.callsUsed],
+    );
+    if (updated.rowCount !== 1) throw new Error("Payer step is missing while marking it done.");
+    await client.query(
+      `INSERT INTO step_executions (plan_id,step_index,attempt,phase,payload)
+       VALUES ($1,$2,$3,'step.done',$4::jsonb)`,
+      [
+        input.planId,
+        input.stepIndex,
+        input.attempt,
+        JSON.stringify({ callsUsed: input.callsUsed }),
+      ],
+    );
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * SCR-163 §5: a resumed, partly paid step whose live version drifted signs nothing more. Its settled
+ * calls and their stored results stand; the remaining indices are recorded per call.
+ */
+export async function markStepDoneKeepingResults(
+  pool: Pool,
+  input: {
+    readonly planId: string;
+    readonly stepIndex: number;
+    readonly attempt: number;
+    readonly callsUsed: number;
+    readonly callErrors: readonly CallError[];
+  },
+): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
     await insertCallErrors(client, input);
     const updated = await client.query(
       "UPDATE steps SET state='done',calls_used=GREATEST(calls_used,$3) WHERE plan_id=$1 AND step_index=$2",

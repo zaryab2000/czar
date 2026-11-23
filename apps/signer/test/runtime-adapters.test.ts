@@ -11,12 +11,30 @@ describe("local signer runtime adapters", () => {
 
     expect(policy.allowedCallers).toEqual({
       server: ["cz-15", "cz-16", "cz-17", "cz-24"],
-      merchants: ["cz-20"],
+      merchants: ["cz-20", "czar-provider-a", "czar-provider-b"],
       "relayer-jobs": ["relayer"],
     });
     expect(policy.callers["cz-15"]).toEqual(["K3", "K4"]);
     expect(policy.callers["cz-17"]).toEqual(["K8"]);
     expect(policy.callers["cz-20"]).toEqual(["K10"]);
+  });
+
+  it("gives each CZ-20 §5.11 test-provider instance its own key only (PM-046)", () => {
+    const policy = createLocalSignerPolicy();
+    expect(policy.callers["czar-provider-a"]).toEqual(["K21a"]);
+    expect(policy.callers["czar-provider-b"]).toEqual(["K21b"]);
+    // No other caller owns a test-provider key, and the merchant seller caller keeps K10 only.
+    for (const [caller, keys] of Object.entries(policy.callers)) {
+      if (caller === "czar-provider-a" || caller === "czar-provider-b") continue;
+      expect(keys).not.toContain("K21a");
+      expect(keys).not.toContain("K21b");
+    }
+    // The provider runs under the merchants service identity; no other service may present its callers.
+    for (const [service, callers] of Object.entries(policy.allowedCallers)) {
+      if (service === "merchants") continue;
+      expect(callers).not.toContain("czar-provider-a");
+      expect(callers).not.toContain("czar-provider-b");
+    }
   });
 
   it("prepares an EIP-1559 transaction from the RPC account and call", async () => {

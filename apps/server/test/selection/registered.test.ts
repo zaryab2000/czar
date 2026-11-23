@@ -1,17 +1,24 @@
 import { loadConfig } from "@czar/config";
-import { H, jcsString } from "@czar/hashing";
+import { H, jcsString, serviceVersionId } from "@czar/hashing";
 import { encodeBase64Json, type SafeFetch } from "@czar/x402";
 import { validateSchema } from "@czar/schemas";
 import { keccak256, toBytes } from "viem";
+import type { Pool } from "pg";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createAcceptancePorts } from "#src/acceptance/ports";
 import type { RankingQuery } from "#src/planner/ports";
 import { createRegisteredSelection } from "#src/selection/registered/index";
+import type { CircleCandidate } from "#src/selection/discovery/circle";
+import { rankingPolicyVersion } from "#src/selection/ranking/decision";
+import { readRankingDecision } from "#src/selection/ranking/decision-store";
 import { setupDatabase } from "#test/db";
+import { seedDevice, TEST_USER_ID } from "#test/fixtures";
 
 const getPool = setupDatabase();
 const SERVICE_A = `svc_${"a".repeat(32)}`;
 const SERVICE_B = `svc_${"b".repeat(32)}`;
+const SERVICE_VERSION = `svc_${"c".repeat(32)}`;
+const SERVICE_RATED = `svc_${"d".repeat(32)}`;
 const NETWORK = "eip155:5042002";
 const USDC_ASSET = "0x3600000000000000000000000000000000000000";
 const RESOURCE = "https://merchant.example/v1/search";
@@ -22,6 +29,7 @@ interface SnapshotForReconstruction {
   readonly descriptor: {
     readonly usdcAsset: string;
     readonly unverifiedWithApproval: boolean;
+    readonly gatewayEnabled: boolean;
   };
   readonly services: Array<{
     serviceId: string;
@@ -39,7 +47,8 @@ function reconstructEligibility(
     service.capabilities.includes(capability),
   );
   const excluded: Array<{ service_id: string; gate: string; detail: string }> = [];
-  const eligible: Array<{ service_id: string; amount: bigint }> = [];
+  const eligible: Array<{ service_id: string; amount: bigint; version_id: string | undefined }> =
+    [];
   for (const service of candidates) {
     if (service.probe.state === "failed") {
       excluded.push({
@@ -60,21 +69,32 @@ function reconstructEligibility(
       (reducedOffer) =>
         reducedOffer["scheme"] === "exact" &&
         reducedOffer["asset"] === snapshot.descriptor.usdcAsset &&
-        reducedOffer["siwx"] === false &&
-        reducedOffer["siwxOnly"] === false &&
-        reducedOffer["batchSettlement"] === false,
+        (reducedOffer["classification"] === "vanilla" ||
+          (snapshot.descriptor.gatewayEnabled && reducedOffer["classification"] === "gateway")),
     );
     if (payable.length === 0) {
       excluded.push({
         service_id: service.serviceId,
         gate: "offer",
-        detail: "no-payable-live-offer",
+        detail:
+          !snapshot.descriptor.gatewayEnabled &&
+          offers.some(
+            (reducedOffer) =>
+              reducedOffer["scheme"] === "exact" &&
+              reducedOffer["asset"] === snapshot.descriptor.usdcAsset &&
+              reducedOffer["classification"] === "gateway",
+          )
+            ? "gateway-off"
+            : "no-payable-live-offer",
       });
       continue;
     }
-    const affordable = payable
-      .map((reducedOffer) => BigInt(String(reducedOffer["amount"])))
-      .filter((amount) => amount <= maxPrice);
+    const affordableOffers = payable.filter(
+      (reducedOffer) => BigInt(String(reducedOffer["amount"])) <= maxPrice,
+    );
+    const affordable = affordableOffers.map((reducedOffer) =>
+      BigInt(String(reducedOffer["amount"])),
+    );
     if (affordable.length === 0) {
       excluded.push({
         service_id: service.serviceId,
@@ -83,9 +103,15 @@ function reconstructEligibility(
       });
       continue;
     }
+    const amount = affordable.reduce((minimum, value) => (value < minimum ? value : minimum));
+    const cheapest = affordableOffers.find(
+      (reducedOffer) => BigInt(String(reducedOffer["amount"])) === amount,
+    );
     eligible.push({
       service_id: service.serviceId,
-      amount: affordable.reduce((minimum, amount) => (amount < minimum ? amount : minimum)),
+      amount,
+      // SCR-163 §6: the snapshot records each offer's probed version, so the decision reproduces.
+      version_id: cheapest?.["versionId"] === null ? undefined : String(cheapest?.["versionId"]),
     });
   }
   eligible.sort((left, right) =>
@@ -247,11 +273,359 @@ function setup(
   return createRegisteredSelection({ config, safeFetch: fetchImpl, pool: getPool(), now });
 }
 
+function readProbeSnapshot() {
+  return getPool().query<{ snapshot_id: string; body_jcs: string; last_used_at: Date }>(
+    `SELECT snapshot_id,body_jcs,last_used_at FROM selection_interim_snapshots
+     WHERE body_jcs::jsonb->>'kind'='czar-registered-probe-snapshot'
+     ORDER BY last_used_at DESC,snapshot_id DESC LIMIT 1`,
+  );
+}
+
 beforeEach(async () => {
   await getPool().query("DELETE FROM selection_interim_snapshots");
 });
 
 describe("registered selection", () => {
+  it("merges Circle candidates with registered services and keeps registered duplicates", async () => {
+    const registeredUrl = "https://merchant.example/v1/search";
+    const circleUrl = "https://circle-merchant.example/v1/search";
+    const circleOffer = offer("20", "0xbbb");
+    const candidate = (serviceId: string, url: string): CircleCandidate => ({
+      serviceId,
+      resource: { url, method: "GET" },
+      probeInput: { query: { q: "probe" } },
+      accepts: [circleOffer],
+      extensions: {
+        czar: {
+          claim: { status: "unclaimed" },
+          evidence: null,
+          card: {
+            serviceName: "Circle merchant",
+            inputFields: [{ name: "q", type: "string" }],
+            outputSchema: { type: "object" },
+          },
+          source: "circle-registry",
+        },
+      },
+      source: "circle-registry",
+      card: {
+        serviceName: "Circle merchant",
+        inputFields: [{ name: "q", type: "string" }],
+        outputSchema: { type: "object" },
+      },
+      versionId: serviceVersionId({
+        payTo: circleOffer.payTo.toLowerCase(),
+        resource: { url, method: "GET" },
+        schema: null,
+      }),
+      priceAtomic: "20",
+      probe: { matchedOffer: circleOffer, extensions402: { dropped: [] } },
+    });
+    const fetchImpl = vi.fn<SafeFetch>(async () => response("30", "0xaaa"));
+    const config = loadConfig({
+      envFile: {
+        "selection.czarRegisteredServices": { [SERVICE_A]: registration(registeredUrl) },
+        "selection.circleDiscovery.enabled": true,
+      },
+    });
+    const discovery = {
+      discover: vi.fn(async () => [
+        candidate(SERVICE_B, circleUrl),
+        candidate(SERVICE_RATED, `${registeredUrl}/`),
+      ]),
+    };
+    const selection = createRegisteredSelection({
+      config,
+      safeFetch: fetchImpl,
+      pool: getPool(),
+      now: () => new Date("2026-11-05T12:00:00Z"),
+      circleDiscovery: discovery,
+    });
+    const decision = await selection.rank.rank(query());
+    expect(decision.unverified.map((item) => item.service_id).toSorted()).toEqual([
+      SERVICE_A,
+      SERVICE_B,
+    ]);
+    expect(decision.candidates_considered).toBe(2);
+    expect(await selection.directory.get(SERVICE_B)).toMatchObject({ serviceId: SERVICE_B });
+    expect(await selection.outputSchema.forService(SERVICE_B)).toEqual({ type: "object" });
+    expect(await selection.directory.get(SERVICE_RATED)).toBeNull();
+    expect(discovery.discover).toHaveBeenCalledWith("web-search");
+  });
+
+  it("excludes a Gateway-only offer while Gateway is off", async () => {
+    const gatewayOnly = {
+      extra: {
+        name: "GatewayWalletBatched",
+        verifyingContract: "0x0077777d7eba4688bdef3e311b846f25870a19b9",
+      },
+    };
+    const fetchImpl = vi.fn<SafeFetch>(async () =>
+      response("100", "0xaaa", NETWORK, undefined, RESOURCE, gatewayOnly),
+    );
+    const services = { [SERVICE_A]: registration() };
+    const at = new Date("2026-11-05T12:00:00Z");
+    const now = () => at;
+
+    const off = await setup(fetchImpl, services, now).rank.rank(query());
+    expect(off.excluded).toContainEqual({
+      service_id: SERVICE_A,
+      gate: "offer",
+      detail: "gateway-off",
+    });
+    expect(off.unverified).toEqual([]);
+    const on = await setup(fetchImpl, services, now, {
+      "routing.gatewayEnabled": true,
+    }).rank.rank(query());
+    expect(on.excluded).toEqual([]);
+    expect(on.unverified.map((candidate) => candidate.service_id)).toEqual([SERVICE_A]);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(
+      fetchImpl.mock.calls.every(([, options]) => !options?.headers?.["payment-signature"]),
+    ).toBe(true);
+  });
+
+  it("keeps evidence counts, health and every decision field stable after 100 social posts", async () => {
+    const serviceId = `svc_${"f".repeat(32)}`;
+    const now = new Date("2026-11-05T00:00:00Z");
+    const fetchImpl = vi.fn<SafeFetch>(async (url) =>
+      response("25", "0xaaa", NETWORK, undefined, bareUrl(url)),
+    );
+    const services = { [serviceId]: registration(RESOURCE) };
+    const selection = setup(fetchImpl, services, () => now);
+    await selection.rank.rank(query());
+    const version = (
+      await getPool().query<{ version_id: string }>(
+        "SELECT version_id FROM service_versions WHERE service_id=$1",
+        [serviceId],
+      )
+    ).rows[0]!.version_id;
+    await getPool().query(
+      `INSERT INTO supplier_counts(network,service_id,version_id,task_class,good,bad,
+         owners_rated,owners_bad,lower_bound,lineage_root,policy_version,computed_at)
+       VALUES($1,$2,$3,'data-json',3,0,1,0,0.4385,'0x' || repeat('a',64),$4,$5)`,
+      [
+        NETWORK,
+        serviceId,
+        version,
+        rankingPolicyVersion({ confidenceZ: 1.959964, consecutiveFailures: 3 }),
+        now,
+      ],
+    );
+    const first = await setup(fetchImpl, services, () => now).rank.rank(query());
+    const countBefore = (
+      await getPool().query(
+        "SELECT row_to_json(s)::text AS body FROM supplier_counts s ORDER BY service_id",
+      )
+    ).rows;
+    const healthBefore = (
+      await getPool().query(
+        "SELECT row_to_json(h)::text AS body FROM supplier_health h ORDER BY obs_id",
+      )
+    ).rows;
+    const userId = `usr_${"9".repeat(26)}`;
+    const repId = `rep_${"9".repeat(26)}`;
+    const threadId = `thr_${"9".repeat(26)}`;
+    await getPool().query("INSERT INTO users(user_id) VALUES($1)", [userId]);
+    await getPool().query(
+      `INSERT INTO social_representatives(representative_id,user_id,handle)
+       VALUES($1,$2,'Rep-9999')`,
+      [repId, userId],
+    );
+    await getPool().query(
+      `INSERT INTO social_threads(thread_id,kind,network,service_id,subject_key)
+       VALUES($1,'service',$2,$3,$4)`,
+      [threadId, NETWORK, serviceId, `service:${NETWORK}:${serviceId}`],
+    );
+    for (let index = 0; index < 100; index += 1)
+      await getPool().query(
+        `INSERT INTO social_posts(post_id,thread_id,author_id,kind,card,action_id)
+         VALUES($1,$2,$3,$4,'{}'::jsonb,$5)`,
+        [
+          `pst_${String(index).padStart(26, "0")}`,
+          threadId,
+          repId,
+          index % 2 ? "reply" : "experience",
+          `zero-weight:${index}`,
+        ],
+      );
+    const second = await setup(fetchImpl, services, () => now).rank.rank(query());
+    const omitGenerated = (decision: typeof first) => {
+      const { query_id, received_at, snapshot_id, snapshot_anchor_tx, ...stable } = decision;
+      void query_id;
+      void received_at;
+      void snapshot_id;
+      void snapshot_anchor_tx;
+      return stable;
+    };
+    expect(omitGenerated(second)).toEqual(omitGenerated(first));
+    expect(
+      (
+        await getPool().query(
+          "SELECT row_to_json(s)::text AS body FROM supplier_counts s ORDER BY service_id",
+        )
+      ).rows,
+    ).toEqual(countBefore);
+    expect(
+      (
+        await getPool().query(
+          "SELECT row_to_json(h)::text AS body FROM supplier_health h ORDER BY obs_id",
+        )
+      ).rows,
+    ).toEqual(healthBefore);
+  });
+
+  it("propagates a failed version-ledger write instead of treating it as a merchant probe failure", async () => {
+    const config = loadConfig({
+      envFile: { "selection.czarRegisteredServices": { [SERVICE_B]: registration(RESOURCE) } },
+    });
+    const pool = {
+      connect: async () => {
+        throw new Error("version-ledger-unavailable");
+      },
+    } as unknown as Pool;
+    const selection = createRegisteredSelection({
+      config,
+      safeFetch: async (url) => response("25", "0xaaa", NETWORK, undefined, bareUrl(url)),
+      pool,
+    });
+    await expect(selection.directory.get(SERVICE_B)).rejects.toThrow("version-ledger-unavailable");
+  });
+
+  it("ranks only ratings for the current verified probe version", async () => {
+    let schema = { type: "object", properties: { answer: { type: "string" } } };
+    const fetchImpl = vi.fn<SafeFetch>(async (url) =>
+      response("25", "0xaaa", NETWORK, schema, bareUrl(url)),
+    );
+    const services = { [SERVICE_RATED]: registration(RESOURCE) };
+    const at = new Date("2026-10-25T00:00:00Z");
+    const initial = setup(fetchImpl, services, () => at);
+    expect((await initial.rank.rank(query())).ranked).toEqual([]);
+    const rows = await getPool().query<{ version_id: string }>(
+      "SELECT version_id FROM service_versions WHERE service_id=$1",
+      [SERVICE_RATED],
+    );
+    const versionA = rows.rows[0]!.version_id;
+    const policyVersion = rankingPolicyVersion({ confidenceZ: 1.959964, consecutiveFailures: 3 });
+    await getPool().query(
+      `INSERT INTO supplier_counts(network,service_id,version_id,task_class,good,bad,
+         owners_rated,owners_bad,lower_bound,lineage_root,policy_version,computed_at)
+       VALUES($1,$2,$3,'data-json',3,0,1,0,0.4385,'0x' || repeat('a',64),$4,$5)`,
+      [NETWORK, SERVICE_RATED, versionA, policyVersion, at],
+    );
+    const rated = await setup(fetchImpl, services, () => at).rank.rank(query());
+    expect(rated.ranked).toMatchObject([
+      { service_id: SERVICE_RATED, version_id: versionA, features: { good: 3, bad: 0 } },
+    ]);
+    expect(rated.ranked[0]?.score).toBe(0.4385);
+    expect(validateSchema("ranking-decision", rated)).toBe(true);
+    expect(await readRankingDecision(getPool(), rated.query_id)).toEqual(rated);
+    await seedDevice(getPool());
+    const objectiveId = "obj_01K7ZT9P4N5Q6R7S8T9V0W1X2R";
+    const obsId = `obs_${"d".repeat(32)}`;
+    const vault = `0x${"1".repeat(40)}`;
+    await getPool().query(
+      `INSERT INTO objectives(objective_id,user_id,device_id,submission,objective_hash,state)
+       VALUES($1,$2,(SELECT device_id FROM devices WHERE user_id=$2 LIMIT 1),
+         '{}'::jsonb,'0x' || repeat('a',64),'delivered')`,
+      [objectiveId, TEST_USER_ID],
+    );
+    await getPool().query(
+      `INSERT INTO observations(obs_id,user_id,vault,network,rail,service_id,version_id,
+         task_class,objective_id,envelope_ref,step_index,call_index,payment_ref_hash,
+         payment_id,dedup_key,settled_at,delivered)
+       VALUES($1,$2,$3,$4,'x402-exact',$5,$6,'data-json',$7,$8,0,0,
+         '0x' || repeat('b',64),'payment-h4',$9,$10,0)`,
+      [
+        obsId,
+        TEST_USER_ID,
+        vault,
+        NETWORK,
+        SERVICE_RATED,
+        versionA,
+        objectiveId,
+        `${NETWORK}:${vault}:1`,
+        `x402-exact:${NETWORK}:${vault}:${vault}:0x${"c".repeat(64)}`,
+        at,
+      ],
+    );
+    await getPool().query(
+      `INSERT INTO supplier_health(fact,obs_id,user_id,network,service_id,version_id)
+       VALUES('settled-not-delivered',$1,$2,$3,$4,$5)`,
+      [obsId, TEST_USER_ID, NETWORK, SERVICE_RATED, versionA],
+    );
+    const flagged = await setup(fetchImpl, services, () => at).rank.rank({
+      ...query(),
+      userId: TEST_USER_ID,
+    });
+    expect(flagged.ranked[0]?.badges).toContain("health-flagged");
+    expect(flagged.ranked[0]?.features["health_facts"]).toEqual(["settled-not-delivered"]);
+    expect(
+      (await setup(fetchImpl, services, () => at).rank.rank(query())).ranked[0]?.badges,
+    ).not.toContain("health-flagged");
+    await getPool().query(
+      `INSERT INTO supplier_health(fact,obs_id,user_id,network,service_id,version_id)
+       VALUES('injection-blocked',$1,$2,$3,$4,$5)`,
+      [obsId, TEST_USER_ID, NETWORK, SERVICE_RATED, versionA],
+    );
+    const blocked = await setup(fetchImpl, services, () => at).rank.rank({
+      ...query(),
+      userId: TEST_USER_ID,
+    });
+    expect(blocked.excluded).toContainEqual({
+      service_id: SERVICE_RATED,
+      gate: "health-blocked",
+      detail: "injection-blocked",
+    });
+    expect(blocked.ranked).toEqual([]);
+    schema = { type: "object", properties: { answer: { type: "number" } } };
+    const changed = await setup(fetchImpl, services, () => at).rank.rank(query());
+    expect(changed.ranked).toEqual([]);
+    const versionB = changed.unverified[0]?.version_id;
+    expect(versionB).toMatch(/^ver_[0-9a-f]{32}$/);
+    expect(versionB).not.toBe(versionA);
+    expect(changed.unverified).toEqual([
+      { service_id: SERVICE_RATED, version_id: versionB, reason: "unrated", n_eff: 0 },
+    ]);
+    expect(
+      (await getPool().query("SELECT good FROM supplier_counts WHERE version_id=$1", [versionA]))
+        .rows[0]?.good,
+    ).toBe(3);
+    expect(
+      (
+        await getPool().query(
+          "SELECT cleared_at FROM supplier_health WHERE obs_id=$1 AND fact='injection-blocked'",
+          [obsId],
+        )
+      ).rows[0]?.cleared_at,
+    ).toEqual(at);
+  });
+
+  it("records the verified probe version and only advances its last seen time", async () => {
+    let current = new Date("2026-10-25T00:00:00Z");
+    const fetchImpl = vi.fn<SafeFetch>(async (url) =>
+      response("25", "0xaaa", NETWORK, undefined, bareUrl(url)),
+    );
+    const services = { [SERVICE_VERSION]: registration(RESOURCE) };
+    await setup(fetchImpl, services, () => current).directory.get(SERVICE_VERSION);
+    const read = () =>
+      getPool().query<{ version_id: string; first_seen_at: Date; last_seen_at: Date }>(
+        "SELECT version_id,first_seen_at,last_seen_at FROM service_versions WHERE service_id=$1",
+        [SERVICE_VERSION],
+      );
+    const first = await read();
+    expect(first.rows).toEqual([
+      {
+        version_id: expect.stringMatching(/^ver_[0-9a-f]{32}$/),
+        first_seen_at: current,
+        last_seen_at: current,
+      },
+    ]);
+    current = new Date("2026-10-25T00:01:00Z");
+    await setup(fetchImpl, services, () => current).directory.get(SERVICE_VERSION);
+    expect((await read()).rows).toEqual([{ ...first.rows[0], last_seen_at: current }]);
+  });
+
   it("returns an unanchored schema-valid decision and persists exact JCS bytes", async () => {
     const fetchImpl = vi.fn<SafeFetch>(async (url) =>
       response("25", "0xaaa", NETWORK, undefined, bareUrl(url)),
@@ -266,25 +640,17 @@ describe("registered selection", () => {
     );
 
     const decision = await selection.rank.rank(query());
-    const saved = await getPool().query<{ body_jcs: string }>(
+    const countSaved = await getPool().query<{ body_jcs: string }>(
       "SELECT body_jcs FROM selection_interim_snapshots WHERE snapshot_id = $1",
       [decision.snapshot_id],
     );
+    const saved = await readProbeSnapshot();
     const body = JSON.parse(saved.rows[0]!.body_jcs) as Record<string, unknown>;
 
     expect(validateSchema("ranking-decision", decision)).toBe(true);
-    expect(decision.schemaVersion).toBe("1.2");
+    expect(decision.schemaVersion).toBe("1.3");
     expect(decision.policy_version).toBe(
-      `pol_${H({
-        policy: "czar-registered-interim",
-        scr: "SCR-138",
-        network: NETWORK,
-        usdcAsset: USDC_ASSET,
-        offerRule: "scheme-exact,asset-usdc,no-siwx,no-siwx-only,no-batch-settlement",
-        unverifiedWithApproval: true,
-        exploration: "lowest-eligible-live-price-then-serviceId",
-        ranked: "none",
-      }).slice(2, 18)}`,
+      rankingPolicyVersion({ confidenceZ: 1.959964, consecutiveFailures: 3 }),
     );
     expect(decision.snapshot_anchor_tx).toBeNull();
     expect(body["descriptor"]).toMatchObject({
@@ -292,11 +658,12 @@ describe("registered selection", () => {
       usdcAsset: USDC_ASSET,
       unverifiedWithApproval: true,
     });
-    expect(`pol_${H(body["descriptor"]).slice(2, 18)}`).toBe(decision.policy_version);
+    expect(`pol_${H(body["descriptor"]).slice(2, 18)}`).toBe(body["policy_version"]);
     expect(decision.ranked).toEqual([]);
     expect(decision.unverified.map((row) => row.service_id)).toEqual([SERVICE_A, SERVICE_B]);
     expect(decision.exploration_slot?.service_id).toBe(SERVICE_A);
-    expect(keccak256(toBytes(saved.rows[0]!.body_jcs))).toBe(decision.snapshot_id);
+    expect(keccak256(toBytes(countSaved.rows[0]!.body_jcs))).toBe(decision.snapshot_id);
+    expect(keccak256(toBytes(saved.rows[0]!.body_jcs))).toBe(saved.rows[0]!.snapshot_id);
     expect(saved.rows[0]!.body_jcs).toBe(jcsString(body));
     expect(saved.rows[0]!.body_jcs).not.toContain("private merchant description");
     expect((body["services"] as Array<Record<string, unknown>>)[0]).toMatchObject({
@@ -314,9 +681,7 @@ describe("registered selection", () => {
             asset: USDC_ASSET,
             amount: "25",
             payTo: `0x${"aaa".padStart(40, "0")}`,
-            siwx: false,
-            siwxOnly: false,
-            batchSettlement: false,
+            classification: "vanilla",
           },
         ],
       },
@@ -362,18 +727,14 @@ describe("registered selection", () => {
       services,
       () => new Date("2026-10-25T00:00:00Z"),
     ).rank.rank(query("100"));
-    const saved = await getPool().query<{ body_jcs: string }>(
-      "SELECT body_jcs FROM selection_interim_snapshots WHERE snapshot_id = $1",
-      [decision.snapshot_id],
-    );
+    const saved = await readProbeSnapshot();
     const snapshot = JSON.parse(saved.rows[0]!.body_jcs) as SnapshotForReconstruction;
     const maxPrice = BigInt(String(decision.query.constraints["max_price_atomic"]));
     const reconstructed = reconstructEligibility(snapshot, decision.query.task, maxPrice);
 
     expect(snapshot.services).toHaveLength(ids.length);
     expect(`pol_${H(snapshot.descriptor).slice(2, 18)}`).toBe(snapshot.policy_version);
-    expect(snapshot.policy_version).toBe(decision.policy_version);
-    expect(keccak256(toBytes(saved.rows[0]!.body_jcs))).toBe(decision.snapshot_id);
+    expect(keccak256(toBytes(saved.rows[0]!.body_jcs))).toBe(saved.rows[0]!.snapshot_id);
     expect(snapshot.services[0]).toMatchObject({
       serviceId: failed,
       probe: { state: "failed", probedAt: "2026-10-25T00:00:00.000Z" },
@@ -397,9 +758,7 @@ describe("registered selection", () => {
           network: NETWORK,
           scheme: "exact",
           asset: USDC_ASSET,
-          siwx: false,
-          siwxOnly: true,
-          batchSettlement: false,
+          classification: "unsupported",
         },
       ],
     });
@@ -409,9 +768,10 @@ describe("registered selection", () => {
       detail: "no-payable-live-offer",
     });
     expect(reconstructed.excluded).toEqual(decision.excluded);
-    const reconstructedUnverified = reconstructed.eligible.map(({ service_id }) => ({
+    const reconstructedUnverified = reconstructed.eligible.map(({ service_id, version_id }) => ({
       service_id,
-      reason: "n_eff_below_min",
+      version_id,
+      reason: "unrated",
       n_eff: 0,
     }));
     expect(reconstructedUnverified).toEqual(decision.unverified);
@@ -429,10 +789,7 @@ describe("registered selection", () => {
       { "selection.unverifiedWithApproval": false },
     );
     const decision = await selection.rank.rank(query());
-    const saved = await getPool().query<{ body_jcs: string }>(
-      "SELECT body_jcs FROM selection_interim_snapshots WHERE snapshot_id = $1",
-      [decision.snapshot_id],
-    );
+    const saved = await readProbeSnapshot();
     const snapshot = JSON.parse(saved.rows[0]!.body_jcs) as SnapshotForReconstruction;
     const reconstructed = reconstructEligibility(
       snapshot,
@@ -698,6 +1055,7 @@ describe("registered selection", () => {
     const fetchImpl = vi.fn<SafeFetch>(async () => response("25", "0xaaaa"));
     const selection = setup(fetchImpl, { [SERVICE_A]: registration() }, () => clock);
     const first = await selection.rank.rank(query());
+    const firstProbe = (await readProbeSnapshot()).rows[0]!.snapshot_id;
     clock = new Date(clock.getTime() + 3600000);
     const second = await selection.rank.rank(query());
     const saved = await getPool().query<{ last_used_at: Date }>(
@@ -714,14 +1072,24 @@ describe("registered selection", () => {
       },
       () => clock,
     );
-    expect((await changed.rank.rank(query())).snapshot_id).not.toBe(first.snapshot_id);
+    expect((await changed.rank.rank(query())).snapshot_id).toBe(first.snapshot_id);
+    expect(
+      (
+        await getPool().query(
+          `SELECT snapshot_id FROM selection_interim_snapshots
+           WHERE body_jcs::jsonb->>'kind'='czar-registered-probe-snapshot'
+             AND snapshot_id<>$1`,
+          [firstProbe],
+        )
+      ).rowCount,
+    ).toBe(1);
     clock = new Date(clock.getTime() + 91 * 24 * 3600000);
     await changed.rank.rank(query());
     const retained = await getPool().query<{ snapshot_id: string }>(
       "SELECT snapshot_id FROM selection_interim_snapshots",
     );
-    expect(retained.rows).toHaveLength(1);
-    expect(retained.rows[0]!.snapshot_id).not.toBe(first.snapshot_id);
+    expect(retained.rows.map((row) => row.snapshot_id)).toContain(first.snapshot_id);
+    expect(retained.rows.map((row) => row.snapshot_id)).not.toContain(firstProbe);
   });
 
   it("keeps last_used_at monotonic when snapshot writes arrive in reverse time order", async () => {
@@ -748,10 +1116,12 @@ describe("registered selection", () => {
     const selection = setup(fetchImpl, { [SERVICE_A]: registration() }, () => clock);
     expect((await selection.directory.get(SERVICE_A))?.accepts[0]?.payTo).toContain("aaaa");
     const first = await selection.rank.rank(query());
+    const firstProbe = (await readProbeSnapshot()).rows[0]!.snapshot_id;
     payTo = "0xcccc";
     clock = new Date(clock.getTime() + 25 * 3600000);
     expect((await selection.directory.get(SERVICE_A))?.accepts[0]?.payTo).toContain("cccc");
-    expect((await selection.rank.rank(query())).snapshot_id).not.toBe(first.snapshot_id);
+    expect((await selection.rank.rank(query())).snapshot_id).toBe(first.snapshot_id);
+    expect((await readProbeSnapshot()).rows[0]!.snapshot_id).not.toBe(firstProbe);
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 });

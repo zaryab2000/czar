@@ -2,6 +2,10 @@
 export type SchemaName =
   | "acceptance-report"
   | "activity-event"
+  | "app-objective-request"
+  | "app-objective"
+  | "audit-report"
+  | "audit-request"
   | "capability-card"
   | "demand-proof-leaf"
   | "demand-proof-leaf-v2"
@@ -21,6 +25,11 @@ export type SchemaName =
   | "rating"
   | "receipt"
   | "reservation"
+  | "social-experience-card"
+  | "social-lead-card"
+  | "social-post-projection"
+  | "social-question-card"
+  | "social-thread-projection"
   | "soul-version-leaf"
   | "soul"
   | "source-receipt"
@@ -32,6 +41,10 @@ export type SchemaName =
 export const schemaMetadata = [
   { name: "acceptance-report", typeName: "AcceptanceReport", title: "AcceptanceReport", typeFile: "acceptance-report.d.ts" },
   { name: "activity-event", typeName: "ActivityEvent", title: "ActivityEvent", typeFile: "activity-event.d.ts" },
+  { name: "app-objective-request", typeName: "AppObjectiveRequest", title: "AppObjectiveRequest", typeFile: "app-objective-request.d.ts" },
+  { name: "app-objective", typeName: "AppObjective", title: "AppObjective", typeFile: "app-objective.d.ts" },
+  { name: "audit-report", typeName: "AuditReport", title: "AuditReport", typeFile: "audit-report.d.ts" },
+  { name: "audit-request", typeName: "AuditRequest", title: "AuditRequest", typeFile: "audit-request.d.ts" },
   { name: "capability-card", typeName: "CapabilityCard", title: "CapabilityCard", typeFile: "capability-card.d.ts" },
   { name: "demand-proof-leaf", typeName: "DemandProofLeaf", title: "DemandProofLeaf", typeFile: "demand-proof-leaf.d.ts" },
   { name: "demand-proof-leaf-v2", typeName: "DemandProofLeafV2", title: "DemandProofLeaf (version 2)", typeFile: "demand-proof-leaf-v2.d.ts" },
@@ -51,6 +64,11 @@ export const schemaMetadata = [
   { name: "rating", typeName: "Rating", title: "Rating", typeFile: "rating.d.ts" },
   { name: "receipt", typeName: "Receipt", title: "Receipt", typeFile: "receipt.d.ts" },
   { name: "reservation", typeName: "Reservation", title: "Reservation (mirror)", typeFile: "reservation.d.ts" },
+  { name: "social-experience-card", typeName: "SocialExperienceCard", title: "ExperienceCard", typeFile: "social-experience-card.d.ts" },
+  { name: "social-lead-card", typeName: "SocialLeadCard", title: "LeadCard", typeFile: "social-lead-card.d.ts" },
+  { name: "social-post-projection", typeName: "SocialPostProjection", title: "PostProjection", typeFile: "social-post-projection.d.ts" },
+  { name: "social-question-card", typeName: "SocialQuestionCard", title: "QuestionCard", typeFile: "social-question-card.d.ts" },
+  { name: "social-thread-projection", typeName: "SocialThreadProjection", title: "ThreadProjection", typeFile: "social-thread-projection.d.ts" },
   { name: "soul-version-leaf", typeName: "SoulVersionLeaf", title: "SoulVersionLeaf", typeFile: "soul-version-leaf.d.ts" },
   { name: "soul", typeName: "Soul", title: "soul.json", typeFile: "soul.d.ts" },
   { name: "source-receipt", typeName: "SourceReceipt", title: "SourceReceipt", typeFile: "source-receipt.d.ts" },

@@ -1,7 +1,8 @@
-import type { PaymentRequirements } from "@czar/x402";
+import type { PaymentRequirements, SanitizedExtensions } from "@czar/x402";
 import type { RankingDecision, TaskSpec } from "@czar/schemas";
 
 export interface RankingQuery {
+  readonly userId?: string;
   readonly taskClass: string;
   readonly capability: string;
   readonly taskSpec: Pick<TaskSpec, "kind" | "topic" | "fields" | "output">;
@@ -18,6 +19,8 @@ export interface PlannerService {
     readonly query?: Readonly<Record<string, string>>;
     readonly body?: Readonly<Record<string, unknown>>;
   };
+  readonly inputDefaults?: Readonly<Record<string, string | number | boolean>>;
+  readonly inputMaxChars?: number;
   readonly accepts: readonly PaymentRequirements[];
   readonly providerAddress?: string;
   readonly listedPrice?: string;
@@ -38,16 +41,24 @@ export interface PlannerService {
 }
 
 export type ProbeResult =
-  | { readonly ok: true; readonly offers: readonly PaymentRequirements[] }
+  | {
+      readonly ok: true;
+      readonly offers: readonly PaymentRequirements[];
+      readonly extensions402?: SanitizedExtensions;
+    }
   | { readonly ok: false; readonly reason: "timeout" | "malformed" | "unavailable" };
 
 export interface PlannerPorts {
   readonly ranking: { rank(query: RankingQuery): Promise<RankingDecision> };
   readonly directory: { get(serviceId: string): Promise<PlannerService | null> };
-  readonly profiles: { profileIdFor(taskClass: string): string };
+  readonly profiles: { profileIdFor(taskClass: string, service?: PlannerService): string };
   readonly pocketKeys: { createPocketKey(planId: string): Promise<string> };
   readonly agentHosts: { hasAgentHost(deviceId: string): Promise<boolean> };
   readonly allowance: { remaining(userId: string, categoryId: string): Promise<string> };
+  readonly health?: {
+    openOwnerFacts(userId: string, network: string, serviceId: string): Promise<readonly string[]>;
+    isInjectionBlocked(network: string, serviceId: string): Promise<boolean>;
+  };
   readonly prober: {
     probe(
       resource: PlannerService["resource"],

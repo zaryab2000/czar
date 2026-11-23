@@ -10,7 +10,11 @@ import {
 } from "@czar/x402";
 import { setupDatabase } from "#test/db";
 import { makeObjectiveSubmission, seedDevice, TEST_USER_ID } from "#test/fixtures";
-import { executeVaultDirectStep, type VaultDirectInput } from "#src/payer/vault-direct";
+import {
+  executeVaultDirectStep,
+  type BoundaryInput,
+  type VaultDirectInput,
+} from "#src/payer/vault-direct";
 
 const getPool = setupDatabase();
 const OBJECTIVE_ID = "obj_01K7ZT9P4N5Q6R7S8T9V0W1X2Y";
@@ -32,6 +36,8 @@ beforeAll(async () => seedDevice(getPool()));
 beforeEach(async () => {
   await getPool().query("DELETE FROM step_executions");
   await getPool().query("DELETE FROM steps");
+  await getPool().query("DELETE FROM supplier_health");
+  await getPool().query("DELETE FROM observations");
   await getPool().query("DELETE FROM plans");
   await getPool().query("DELETE FROM objectives");
   const objective = makeObjectiveSubmission(OBJECTIVE_ID);
@@ -107,7 +113,7 @@ describe("payer acceptance boundaries", () => {
       })),
       now: () => fakeNow,
       objects: { put: async () => "body-ref", get: async () => new Uint8Array() },
-      boundary: async () => validStepResult(),
+      boundary: async (context: BoundaryInput) => validStepResult(context),
       recordReceipt: async () => true,
     } as never);
 
@@ -165,7 +171,7 @@ describe("payer acceptance boundaries", () => {
       })),
       now: () => new Date("2026-10-21T00:00:00Z"),
       objects: { put: async () => "body-ref", get: async () => new Uint8Array() },
-      boundary: async () => validStepResult(),
+      boundary: async (context: BoundaryInput) => validStepResult(context),
       recordReceipt: async () => true,
     } as never);
 
@@ -245,7 +251,7 @@ describe("payer acceptance boundaries", () => {
         fakeNow = new Date(fakeNow.getTime() + milliseconds);
       },
       objects: { put: async () => "body-ref", get: async () => new Uint8Array() },
-      boundary: async () => validStepResult(),
+      boundary: async (context) => validStepResult(context),
       recordReceipt: async () => true,
     });
 
@@ -334,10 +340,12 @@ function paidInput(payeeRoot: `0x${string}`): VaultDirectInput {
   };
 }
 
-function validStepResult() {
+function validStepResult(context: BoundaryInput) {
   return {
-    schemaVersion: "1.0" as const,
+    schemaVersion: "1.1" as const,
     stepIndex: 0,
+    callIndex: context.callIndex,
+    obsId: context.obsId,
     status: "delivered" as const,
     source: { origin: "http://127.0.0.1:4021", payTo: PAYEE, paymentRefHash: HASH },
     fields: [],

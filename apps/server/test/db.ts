@@ -3,7 +3,7 @@ import { afterAll, beforeAll } from "vitest";
 import { Pool } from "pg";
 import { migrate } from "#src/db/migrate";
 
-const TEST_DATABASE_URL = "postgres://postgres@127.0.0.1:15432/postgres";
+export const TEST_DATABASE_URL = "postgres://postgres@127.0.0.1:15432/postgres";
 
 export interface TestDatabaseConnection {
   getPool(): Pool;

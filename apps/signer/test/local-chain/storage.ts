@@ -21,11 +21,18 @@ const layouts = new Map<string, Layout>();
 function layoutOf(contract: string): Layout {
   const cached = layouts.get(contract);
   if (cached !== undefined) return cached;
-  const output = execFileSync("arc-forge", ["inspect", contract, "storageLayout", "--json"], {
-    cwd: CONTRACTS_DIR,
-    encoding: "utf8",
-    env: { ...process.env, FOUNDRY_PROFILE: "arc" },
-  });
+  // Honour ARC_FORGE like arc-node.ts does: run 2 is briefed with ARC_FORGE pointing at the pinned
+  // binary, and resolving "arc-forge" by bare name made four run-2 tests fail with ENOENT whenever
+  // the binary was not also on PATH (PM-067).
+  const output = execFileSync(
+    process.env["ARC_FORGE"] ?? "arc-forge",
+    ["inspect", contract, "storageLayout", "--json"],
+    {
+      cwd: CONTRACTS_DIR,
+      encoding: "utf8",
+      env: { ...process.env, FOUNDRY_PROFILE: "arc" },
+    },
+  );
   const layout = JSON.parse(output) as Layout;
   layouts.set(contract, layout);
   return layout;

@@ -11,7 +11,7 @@ import {
   SchemaValidationError,
   validateEnvelope,
 } from "@czar/schemas";
-import type { ObjectiveSubmission, ResultAck } from "@czar/schemas";
+import type { AppObjectiveRequest, ObjectiveSubmission, ResultAck } from "@czar/schemas";
 import type { Plan, SubjectsRevision } from "@czar/schemas";
 import type { Pool } from "pg";
 import { appSessionVerifier, authenticateDevice, digest, type Principal } from "#src/http/auth";
@@ -53,7 +53,10 @@ import {
   type AppReadOptions,
 } from "#src/app/reads";
 import { getAppWalletConfigRoute, resolveAppWalletConfig } from "#src/app/wallet-config";
+import { createAppObjective, getAppObjective, listAppObjectives } from "#src/app/objectives";
 import { acknowledgeResult, getResult } from "#src/results/service";
+import { getRatingPromptRoute, listAppResultsRoute, postRatingRoute } from "#src/ratings-routes";
+import { socialRoutes } from "#src/social/routes";
 
 export interface AppDependencies extends PairDependencies {
   logger: Logger;
@@ -173,9 +176,37 @@ export function createApp(dependencies: AppDependencies): Hono {
     publicAuthRoute(context, appAuthDependencies(dependencies), createSessionRoute),
   );
   app.post("/v1/objectives", (context) => submitRoute(context, dependencies));
+  app.post("/v1/ratings", async (context) => {
+    const auth = await authenticateDevice(context, dependencies.pool);
+    const rate = await applyRateLimit(
+      dependencies.pool,
+      dependencies.config,
+      dependencies.clock.now(),
+      "daemon",
+      auth.principal?.deviceId ?? auth.digest,
+    );
+    setRateHeaders(context, rate);
+    if (!rate.allowed) return problemResponse(context, 429, "rate-limited", true);
+    if (!auth.principal) return problemResponse(context, 401, auth.code ?? "validation");
+    return postRatingRoute(context, dependencies, auth.principal.userId, "cli");
+  });
   app.post("/v1/models/complete", (context) => modelRoute(context, dependencies));
   app.get("/v1/objectives", (context) => listRoute(context, dependencies));
   app.get("/v1/objectives/:objectiveId", (context) => getRoute(context, dependencies));
+  app.get("/v1/objectives/:objectiveId/rating-prompt", async (context) => {
+    const auth = await authenticateDevice(context, dependencies.pool);
+    const rate = await applyRateLimit(
+      dependencies.pool,
+      dependencies.config,
+      dependencies.clock.now(),
+      "daemon",
+      auth.principal?.deviceId ?? auth.digest,
+    );
+    setRateHeaders(context, rate);
+    if (!rate.allowed) return problemResponse(context, 429, "rate-limited", true);
+    if (!auth.principal) return problemResponse(context, 401, auth.code ?? "validation");
+    return getRatingPromptRoute(context, dependencies, auth.principal.userId);
+  });
   app.get("/v1/results/:resultId", async (context) => {
     const auth = await authenticateDevice(context, dependencies.pool);
     const rate = await applyRateLimit(
@@ -225,6 +256,42 @@ export function createApp(dependencies: AppDependencies): Hono {
   app.get("/v1/jobs/:jobKey/brief", (context) => jobBriefRoute(context, dependencies));
   app.post("/v1/jobs/:jobKey/deliverable", (context) => jobDeliverableRoute(context, dependencies));
   app.get("/v1/app/wallet-config", (context) => getAppWalletConfigRoute(context, walletConfig));
+  app.post(
+    "/v1/app/ratings",
+    appSessionVerifier(dependencies.pool, dependencies.config),
+    (context, next) => appRateLimit(context, next, dependencies),
+    (context) =>
+      postRatingRoute(
+        context,
+        dependencies,
+        (context as ServerContext).get("appUserId") as string,
+        "web",
+      ),
+  );
+  app.get(
+    "/v1/app/results",
+    appSessionVerifier(dependencies.pool, dependencies.config),
+    (context, next) => appRateLimit(context, next, dependencies),
+    (context) => listAppResultsRoute(context, dependencies),
+  );
+  app.post(
+    "/v1/app/objectives",
+    appSessionVerifier(dependencies.pool, dependencies.config),
+    (context, next) => appRateLimit(context, next, dependencies),
+    (context) => createAppObjectiveRoute(context, dependencies),
+  );
+  app.get(
+    "/v1/app/objectives",
+    appSessionVerifier(dependencies.pool, dependencies.config),
+    (context, next) => appRateLimit(context, next, dependencies),
+    (context) => listAppObjectivesRoute(context, dependencies),
+  );
+  app.get(
+    "/v1/app/objectives/:objectiveId",
+    appSessionVerifier(dependencies.pool, dependencies.config),
+    (context, next) => appRateLimit(context, next, dependencies),
+    (context) => getAppObjectiveRoute(context, dependencies),
+  );
   app.get(
     "/v1/me",
     appSessionVerifier(dependencies.pool, dependencies.config),
@@ -297,6 +364,7 @@ export function createApp(dependencies: AppDependencies): Hono {
     (context, next) => appRateLimit(context, next, dependencies),
     (context) => soulPointerRoute(context),
   );
+  app.route("/v1/social", socialRoutes(dependencies));
   return app;
 }
 
@@ -610,6 +678,58 @@ async function modelRoute(context: ServerContext, deps: AppDependencies): Promis
   return jsonResponse(context, 200, result.body);
 }
 
+/** Starts a task from the web app (SCR-181 §2); the submission is built server-side. */
+async function createAppObjectiveRoute(
+  context: ServerContext,
+  deps: AppDependencies,
+): Promise<Response> {
+  const key = parseIdempotencyKey(context.req.header("Idempotency-Key"));
+  const raw = await readJson(context, "createAppObjective");
+  const token = /^Bearer (\S+)$/.exec(context.req.header("Authorization") ?? "")?.[1] ?? "";
+  const outcome = await createAppObjective(deps.pool, deps.config, {
+    userId: context.get("appUserId") as string,
+    sessionTokenHash: digest(token),
+    request: raw.value as AppObjectiveRequest,
+    rawBody: raw.bytes,
+    key,
+    now: deps.clock.now(),
+    random: deps.random,
+  });
+  if (outcome.kind === "problem")
+    return problemResponse(context, outcome.status, outcome.code, outcome.code === "rate-limited");
+  assertExchange("createAppObjective", raw.value, 201, outcome.body);
+  if (!outcome.replayed)
+    deps.logger.info("app_objective_received", {
+      objectiveId: outcome.body.objectiveId,
+      removedCount: outcome.removed,
+    });
+  return jsonResponse(context, 201, outcome.body);
+}
+
+async function listAppObjectivesRoute(
+  context: ServerContext,
+  deps: AppDependencies,
+): Promise<Response> {
+  const page = await listAppObjectives(
+    deps.pool,
+    context.get("appUserId") as string,
+    new URL(context.req.url),
+  );
+  assertExchange("listAppObjectives", undefined, 200, page);
+  return jsonResponse(context, 200, page);
+}
+
+async function getAppObjectiveRoute(
+  context: ServerContext,
+  deps: AppDependencies,
+): Promise<Response> {
+  const objectiveId = parseObjectiveId(context.req.param("objectiveId") ?? "");
+  const found = await getAppObjective(deps.pool, context.get("appUserId") as string, objectiveId);
+  if (!found) return problemResponse(context, 404, "validation");
+  assertExchange("getAppObjective", undefined, 200, found);
+  return jsonResponse(context, 200, found);
+}
+
 async function listRoute(context: ServerContext, deps: AppDependencies): Promise<Response> {
   const auth = await authenticateDevice(context, deps.pool);
   const rate = await applyRateLimit(
@@ -920,6 +1040,8 @@ async function safeCzarCode(response: Response): Promise<CzarCode | undefined> {
 function operationFor(path: string, method: string): string {
   if (method === "GET" && path === "/v1/app/wallet-config") return "getAppWalletConfig";
   if (method === "GET" && path === "/v1/me") return "getMe";
+  if (method === "POST" && path === "/v1/app/ratings") return "submitAppRating";
+  if (method === "GET" && path === "/v1/app/results") return "listAppResults";
   if (method === "GET" && path === "/v1/envelopes") return "listEnvelopes";
   if (method === "GET" && /^\/v1\/envelopes\/[^/]+$/.test(path)) return "getEnvelope";
   if (method === "GET" && path === "/v1/ledger/receipts") return "listReceipts";
@@ -932,6 +1054,9 @@ function operationFor(path: string, method: string): string {
   if (method === "GET" && path === "/v1/devices") return "listDevices";
   if (method === "POST" && /^\/v1\/devices\/[^/]+\/revoke$/.test(path)) return "revokeDevice";
   if (method === "POST" && path === "/v1/objectives") return "submitObjective";
+  if (method === "POST" && path === "/v1/ratings") return "submitRating";
+  if (method === "GET" && /^\/v1\/objectives\/[^/]+\/rating-prompt$/.test(path))
+    return "getRatingPrompt";
   if (method === "POST" && /^\/v1\/objectives\/[^/]+\/results\/ack$/.test(path)) return "ackResult";
   if (method === "POST" && path === "/v1/models/complete") return "completeModelCall";
   if (method === "GET" && path === "/v1/objectives") return "listObjectives";
@@ -954,5 +1079,12 @@ function operationFor(path: string, method: string): string {
 }
 
 function isDeviceOperation(operationId: string): boolean {
-  return ["pairDevice", "createPairingCode", "listDevices", "revokeDevice"].includes(operationId);
+  return [
+    "pairDevice",
+    "createPairingCode",
+    "listDevices",
+    "revokeDevice",
+    "submitAppRating",
+    "listAppResults",
+  ].includes(operationId);
 }

@@ -12,6 +12,7 @@ import { testSigner } from "#test/payer/test-signer";
 import { localTemplateProfile } from "#src/acceptance/profile";
 import { createLocalServerMain } from "#src/local-main";
 import { createPlannerPocketKeySource, createPlannerProfileSource } from "#src/main";
+import { insertAtSign } from "#src/evidence/observations";
 
 const getPool = setupDatabase();
 
@@ -148,6 +149,48 @@ describe("server composition root", () => {
       "INSERT INTO steps (plan_id,step_index,step,state) VALUES ($1,0,'{}','queued')",
       [planId],
     );
+    await getPool().query(
+      `INSERT INTO step_executions(plan_id,step_index,attempt,phase,payload)
+       VALUES($1,0,0,'pocket.auth.signed[0]',$2::jsonb)`,
+      [
+        planId,
+        JSON.stringify({
+          index: 0,
+          nonce: `0x${"11".repeat(32)}`,
+          paymentPayload: {
+            payload: {
+              authorization: {
+                to: "0x0000000000000000000000000000000000000003",
+                value: "1000",
+                nonce: `0x${"11".repeat(32)}`,
+              },
+            },
+          },
+        }),
+      ],
+    );
+    await insertAtSign(getPool(), {
+      userId: TEST_USER_ID,
+      vault: "0x0000000000000000000000000000000000000001",
+      network: "eip155:5042002",
+      rail: "gateway-batched",
+      serviceId: "svc_0123456789abcdef0123456789abcdef",
+      versionId: "ver_unknown",
+      taskClass: "lookup",
+      objectiveId: objective.objectiveId,
+      envelopeRef: "eip155:5042002:0x0000000000000000000000000000000000000001:1",
+      stepIndex: 0,
+      paymentRef: {
+        schemaVersion: "1.0",
+        rail: "gateway-batched",
+        network: "eip155:5042002",
+        payer: "0x0000000000000000000000000000000000000005",
+        payTo: "0x0000000000000000000000000000000000000003",
+        amount: "1000",
+        nonce: `0x${"11".repeat(32)}`,
+      },
+      paymentId: `pay_${"11".repeat(16)}`,
+    });
     await getPool().query(
       `INSERT INTO step_executions(plan_id,step_index,attempt,phase,payload)
        VALUES($1,0,0,'pocket.paid[0]',$2::jsonb)`,

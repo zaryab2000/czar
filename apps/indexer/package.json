@@ -17,7 +17,7 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json && tsc -p test/fixtures/resume/tsconfig.json && tsc -p test/fixtures/replay/tsconfig.json",
     "test": "vitest run",
-    "start:local": "ponder dev --port 42069"
+    "start:local": "ponder dev --port 42069 --hostname 127.0.0.1"
   },
   "dependencies": {
     "@czar/config": "workspace:*",
@@ -31,7 +31,9 @@
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.2.13",
+    "@types/pg": "8.23.1",
     "ajv": "8.20.0",
-    "hono": "4.13.13"
+    "hono": "4.13.13",
+    "pg": "8.23.1"
   }
 }

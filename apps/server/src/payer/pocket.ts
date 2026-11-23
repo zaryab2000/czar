@@ -1,3 +1,4 @@
+import { taskClassFor } from "#src/selection/task-class";
 import type { Config } from "@czar/config";
 import {
   PAYEE_KIND,
@@ -5,6 +6,8 @@ import {
   payeeLeaf,
   pocketLeaf,
   verifyProof,
+  dedupKey,
+  obsId,
   type Hash32,
 } from "@czar/hashing";
 import type { PaymentRef, Plan, Step } from "@czar/schemas";
@@ -13,6 +16,7 @@ import {
   buildExactPaymentPayload,
   encodePaymentSignature,
   readPaymentRequired,
+  SafeFetchError,
   selectOffer,
   type SanitizedExtensions,
   type SafeFetch,
@@ -21,6 +25,14 @@ import type { Pool } from "pg";
 import { randomBytes, randomUUID } from "node:crypto";
 import { keccak256, toHex, type Address } from "viem";
 import { isManualReturnWriteOffHeld } from "#src/payer/pullback";
+import {
+  fillResponse,
+  getObservation,
+  insertAtSign,
+  markReleased,
+  markSettled,
+  observationOwner,
+} from "#src/evidence/observations";
 import { savedTransactionState, type SavedTransactionChain } from "#src/payer/saved-transaction";
 import {
   acquireExecutorLease,
@@ -30,6 +42,8 @@ import {
   startExecutorLeaseRenewal,
   type ExecutorLeaseGuard,
 } from "#src/payer/executions";
+
+class GatewayMerchantFailure extends Error {}
 
 const BASIS_POINTS = 10_000n;
 const HALT_PULLBACK_ATTEMPTS = 2;
@@ -603,7 +617,16 @@ async function payGatewayStep(
   const calls = step.callInputs ?? [];
   for (const call of calls) {
     const trace = await getExecutionTrace(dependencies.pool, input.planId, step.stepIndex, attempt);
-    if (trace.some((row) => row.phase === `pocket.paid[${call.callIndex}]`)) continue;
+    if (
+      trace.some((row) => row.phase === `pocket.paid[${call.callIndex}]`) ||
+      trace.some(
+        (row) =>
+          row.phase === "pocket.status" &&
+          row.payload["index"] === call.callIndex &&
+          (row.payload["state"] === "completed" || row.payload["state"] === "failed"),
+      )
+    )
+      continue;
     const request = renderGatewayRequest(step, call.input, call.subjectIndex, input);
     if (!request) {
       await recordGatewayPhase(
@@ -632,12 +655,19 @@ async function payGatewayStep(
       stepCap: BigInt(step.stepCap),
       payees: [step.payee, ...(step.alternates ?? [])].filter(isAddress),
       trustedPayees: [],
+      config: dependencies.config,
+      extensions402: read.extensions,
     });
     if (
       !choice.ok ||
       BigInt(choice.offer.amount) > BigInt(step.stepCap) / BigInt(step.expectedCalls)
     )
       throw new Error("Gateway offer exceeds the approved step cap or payees.");
+    if (
+      choice.offer.payTo.toLowerCase() !== step.payee?.toLowerCase() &&
+      !trace.some((row) => row.phase === `pocket.auth.signed[${call.callIndex}]`)
+    )
+      throw new Error("Gateway alternate payee has no committed service identity.");
     await sendGatewayCall(
       input,
       step,
@@ -689,6 +719,7 @@ async function sendGatewayCall(
     });
     if (!("signature" in signed))
       throw new Error("K4 did not return a Gateway authorization signature.");
+    const mintedPaymentId = `pay_${randomUUID().replaceAll("-", "")}`;
     payload = buildExactPaymentPayload({
       resource,
       accepted: offer,
@@ -701,7 +732,7 @@ async function sendGatewayCall(
         nonce,
       },
       signature: signed.signature,
-      ...(paymentIdentifier ? { advertised: paymentIdentifier, paymentId: randomUUID() } : {}),
+      ...(paymentIdentifier ? { advertised: paymentIdentifier, paymentId: mintedPaymentId } : {}),
     });
     await recordGatewayPhase(
       dependencies,
@@ -713,44 +744,107 @@ async function sendGatewayCall(
         index,
         paymentPayload: payload,
         nonce,
+        paymentId: mintedPaymentId,
       },
     );
   }
+  const signed = (
+    await getExecutionTrace(dependencies.pool, input.planId, step.stepIndex, attempt)
+  ).findLast((row) => row.phase === `pocket.auth.signed[${index}]`);
+  const paymentId = signed?.payload["paymentId"];
+  if (typeof paymentId !== "string")
+    throw new Error("Signed Gateway authorization has no saved payment identifier.");
+  const paymentRef = gatewayPaymentRef(input, payload);
+  const serviceId = step.serviceId;
+  if (!serviceId) throw new Error("Signed Gateway step has no serviceId.");
+  const owner = await observationOwner(dependencies.pool, input.planId);
+  const vault = input.envelopeRef.split(":")[2];
+  if (!vault || !isAddress(vault)) throw new Error("Gateway envelope has no paying vault.");
+  const observationId = await insertAtSign(dependencies.pool, {
+    ...owner,
+    vault,
+    network: input.plan.network,
+    rail: "gateway-batched",
+    serviceId,
+    versionId: "ver_unknown",
+    taskClass: taskClassFor(step.capability, dependencies.config),
+    envelopeRef: input.envelopeRef,
+    stepIndex: step.stepIndex,
+    paymentRef,
+    paymentId,
+  });
   assertLeaseHeld();
+  if (previous) {
+    const state = await dependencies.gatewayStatus({
+      pocket: input.pocket,
+      nonce: payload.payload.authorization.nonce as Hash32,
+    });
+    if (state !== "pending") {
+      await recordGatewayPhase(dependencies, input, step.stepIndex, attempt, "pocket.status", {
+        index,
+        state,
+      });
+      if (state === "completed") {
+        const observation = await getObservation(dependencies.pool, observationId);
+        if (observation?.respondedAt === null)
+          await fillResponse(dependencies.pool, observationId, undefined, 0);
+        await markSettled(dependencies.pool, observationId, dependencies.now());
+      } else {
+        await markReleased(
+          dependencies.pool,
+          observationId,
+          dependencies.now(),
+          Number(dependencies.config.get("health.consecutiveFailures")),
+        );
+      }
+      return;
+    }
+  }
   const headers = {
     ...request.options.headers,
     "payment-signature": encodePaymentSignature(payload),
   };
-  const response = await fetchWithPaymentRetry(
-    input,
-    step.stepIndex,
-    index,
-    request,
-    headers,
-    payload.payload.authorization.nonce,
-    offer.maxTimeoutSeconds,
-    dependencies,
-    attempt,
-    assertLeaseHeld,
-  );
-  if (response.status < 200 || response.status >= 300)
-    throw new Error(`Gateway nanopayment failed with HTTP ${response.status}.`);
+  let response: Awaited<ReturnType<SafeFetch>>;
+  try {
+    response = await fetchWithPaymentRetry(
+      input,
+      step.stepIndex,
+      index,
+      request,
+      headers,
+      payload.payload.authorization.nonce,
+      offer.maxTimeoutSeconds,
+      dependencies,
+      attempt,
+      assertLeaseHeld,
+      observationId,
+    );
+  } catch (error) {
+    if (
+      !(error instanceof GatewayMerchantFailure) &&
+      !(error instanceof SafeFetchError && error.code === "upstream-unavailable")
+    )
+      throw error;
+    const observation = await getObservation(dependencies.pool, observationId);
+    if (observation?.respondedAt)
+      await fillResponse(dependencies.pool, observationId, undefined, 0);
+    await recordGatewayPhase(
+      dependencies,
+      input,
+      step.stepIndex,
+      attempt,
+      `pocket.call.failed[${index}]`,
+      { index, reason: error instanceof Error ? error.name : "unknown" },
+    );
+    return;
+  }
   const transferId = readTransferId(response.headers);
-  const paymentRef: PaymentRef = {
-    schemaVersion: "1.0",
-    rail: "gateway-batched",
-    network: input.plan.network,
-    payer: input.pocket,
-    payTo: payload.payload.authorization.to as Address,
-    amount: payload.payload.authorization.value,
-    nonce: payload.payload.authorization.nonce as Hash32,
-    ...(transferId ? { transferId } : {}),
-  };
+  const completedRef: PaymentRef = { ...paymentRef, ...(transferId ? { transferId } : {}) };
   await recordGatewayPhase(dependencies, input, step.stepIndex, attempt, `pocket.paid[${index}]`, {
     index,
     state: "pending",
     nonce: payload.payload.authorization.nonce,
-    paymentRef,
+    paymentRef: completedRef,
     ...(transferId ? { transferId } : {}),
   });
 }
@@ -766,6 +860,7 @@ async function fetchWithPaymentRetry(
   dependencies: PocketNanopaymentDependencies,
   attempt: number,
   assertLeaseHeld: () => void,
+  observationId: string,
 ): ReturnType<SafeFetch> {
   const retryLimit = Number(dependencies.config.get("payer.callRetries"));
   const timeoutMs = Math.min(
@@ -787,24 +882,47 @@ async function fetchWithPaymentRetry(
       },
     );
     assertLeaseHeld();
+    let response: Awaited<ReturnType<SafeFetch>>;
     try {
-      const response = await dependencies.safeFetch(request.url, {
+      response = await dependencies.safeFetch(request.url, {
         ...request.options,
         headers,
         timeoutMs,
       });
-      if (response.status >= 200 && response.status < 300) return response;
-      if (response.status === 409) {
-        lastError = new Error(`Gateway rejected authorization index ${callIndex} with HTTP 409.`);
-        break;
-      }
-      lastError = new Error(`Gateway nanopayment failed with HTTP ${response.status}.`);
     } catch (error) {
+      if (!(error instanceof SafeFetchError) || error.code !== "upstream-unavailable") throw error;
       lastError = error;
+      continue;
     }
+    await fillResponse(dependencies.pool, observationId, dependencies.now(), undefined);
+    if (response.status >= 200 && response.status < 300) return response;
+    if (response.status === 409) {
+      lastError = new GatewayMerchantFailure(
+        `Gateway rejected authorization index ${callIndex} with HTTP 409.`,
+      );
+      break;
+    }
+    lastError = new GatewayMerchantFailure(
+      `Gateway nanopayment failed with HTTP ${response.status}.`,
+    );
   }
   if (lastError instanceof Error) throw lastError;
   throw new Error("Gateway nanopayment failed after configured retries.");
+}
+
+function gatewayPaymentRef(
+  input: PocketNanopaymentInput,
+  payload: ReturnType<typeof buildExactPaymentPayload>,
+): PaymentRef {
+  return {
+    schemaVersion: "1.0",
+    rail: "gateway-batched",
+    network: input.plan.network,
+    payer: input.pocket,
+    payTo: payload.payload.authorization.to as Address,
+    amount: payload.payload.authorization.value,
+    nonce: payload.payload.authorization.nonce as Hash32,
+  };
 }
 
 interface RenderedGatewayRequest {
@@ -866,19 +984,40 @@ export async function refreshGatewayStatuses(
   const statuses: ("pending" | "completed" | "failed")[] = [];
   for (const step of input.steps.filter((candidate) => candidate.kind === "gateway-nano")) {
     const trace = await getExecutionTrace(dependencies.pool, input.planId, step.stepIndex, attempt);
-    for (const paid of trace.filter((row) => row.phase.startsWith("pocket.paid["))) {
-      const nonce = paid.payload["nonce"];
+    for (const signed of trace.filter((row) => row.phase.startsWith("pocket.auth.signed["))) {
+      const nonce = signed.payload["nonce"];
       if (typeof nonce !== "string") throw new Error("Gateway payment trace has no nonce.");
-      const transferId = paid.payload["transferId"];
+      const index = signed.payload["index"];
+      const paid = trace.findLast((row) => row.phase === `pocket.paid[${index}]`);
+      const transferId = paid?.payload["transferId"];
       const state = await dependencies.gatewayStatus({
         pocket: input.pocket,
         nonce: nonce as Hash32,
         ...(typeof transferId === "string" ? { transferId } : {}),
       });
       await recordGatewayPhase(dependencies, input, step.stepIndex, attempt, "pocket.status", {
-        index: paid.payload["index"],
+        index,
         state,
       });
+      const payload = signed.payload["paymentPayload"];
+      if (!payload || typeof payload !== "object")
+        throw new Error("Signed Gateway authorization has no saved payment payload.");
+      const id = obsId(
+        dedupKey(gatewayPaymentRef(input, payload as ReturnType<typeof buildExactPaymentPayload>)),
+      );
+      if (state === "completed") {
+        const observation = await getObservation(dependencies.pool, id);
+        if (observation?.respondedAt === null)
+          await fillResponse(dependencies.pool, id, undefined, 0);
+        await markSettled(dependencies.pool, id, dependencies.now());
+      } else if (state === "failed") {
+        await markReleased(
+          dependencies.pool,
+          id,
+          dependencies.now(),
+          Number(dependencies.config.get("health.consecutiveFailures")),
+        );
+      }
       statuses.push(state);
     }
   }
@@ -909,7 +1048,12 @@ function readTransferId(headers: Readonly<Record<string, string>>): string | und
     const value = JSON.parse(
       Buffer.from(headers[key] as string, "base64").toString("utf8"),
     ) as Record<string, unknown>;
-    return typeof value["transferId"] === "string" ? value["transferId"] : undefined;
+    if (typeof value["transferId"] === "string") return value["transferId"];
+    const transaction = value["transaction"];
+    return typeof transaction === "string" &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(transaction)
+      ? transaction
+      : undefined;
   } catch {
     return undefined;
   }

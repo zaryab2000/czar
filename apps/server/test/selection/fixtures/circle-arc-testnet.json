@@ -1,0 +1,430 @@
+{
+  "x402Version": 2,
+  "items": [
+    {
+      "resource": "https://x402.quicknode.com/arc-testnet/",
+      "type": "http",
+      "x402Version": 2,
+      "lastUpdated": "2026-09-30T17:02:57.293Z",
+      "accepts": [
+        {
+          "scheme": "exact",
+          "network": "eip155:84532",
+          "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+          "payTo": "0xF46394adDdA95A3d5bCC1124605E3d15D204623C",
+          "amount": "1000000",
+          "maxTimeoutSeconds": 60,
+          "extra": {
+            "name": "USDC",
+            "version": "2"
+          }
+        },
+        {
+          "scheme": "exact",
+          "network": "eip155:84532",
+          "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+          "payTo": "0xF46394adDdA95A3d5bCC1124605E3d15D204623C",
+          "amount": "1000",
+          "maxTimeoutSeconds": 60,
+          "extra": {
+            "name": "USDC",
+            "version": "2"
+          }
+        },
+        {
+          "scheme": "exact",
+          "network": "eip155:84532",
+          "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+          "payTo": "0xF46394adDdA95A3d5bCC1124605E3d15D204623C",
+          "amount": "100",
+          "maxTimeoutSeconds": 604900,
+          "extra": {
+            "name": "GatewayWalletBatched",
+            "version": "1",
+            "verifyingContract": "0x0077777d7EBA4688BDeF3E311b846F25870A19B9"
+          }
+        },
+        {
+          "scheme": "exact",
+          "network": "eip155:8453",
+          "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "payTo": "0xF46394adDdA95A3d5bCC1124605E3d15D204623C",
+          "amount": "10000000",
+          "maxTimeoutSeconds": 60,
+          "extra": {
+            "name": "USD Coin",
+            "version": "2"
+          }
+        },
+        {
+          "scheme": "exact",
+          "network": "eip155:8453",
+          "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "payTo": "0xF46394adDdA95A3d5bCC1124605E3d15D204623C",
+          "amount": "1000",
+          "maxTimeoutSeconds": 60,
+          "extra": {
+            "name": "USD Coin",
+            "version": "2"
+          }
+        },
+        {
+          "scheme": "exact",
+          "network": "eip155:8453",
+          "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "payTo": "0xF46394adDdA95A3d5bCC1124605E3d15D204623C",
+          "amount": "100",
+          "maxTimeoutSeconds": 604900,
+          "extra": {
+            "name": "GatewayWalletBatched",
+            "version": "1",
+            "verifyingContract": "0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE"
+          }
+        },
+        {
+          "scheme": "exact",
+          "network": "eip155:80002",
+          "asset": "0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582",
+          "payTo": "0xF46394adDdA95A3d5bCC1124605E3d15D204623C",
+          "amount": "1000000",
+          "maxTimeoutSeconds": 60,
+          "extra": {
+            "name": "USDC",
+            "version": "2"
+          }
+        },
+        {
+          "scheme": "exact",
+          "network": "eip155:80002",
+          "asset": "0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582",
+          "payTo": "0xF46394adDdA95A3d5bCC1124605E3d15D204623C",
+          "amount": "1000",
+          "maxTimeoutSeconds": 60,
+          "extra": {
+            "name": "USDC",
+            "version": "2"
+          }
+        },
+        {
+          "scheme": "exact",
+          "network": "eip155:80002",
+          "asset": "0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582",
+          "payTo": "0xF46394adDdA95A3d5bCC1124605E3d15D204623C",
+          "amount": "100",
+          "maxTimeoutSeconds": 604900,
+          "extra": {
+            "name": "GatewayWalletBatched",
+            "version": "1",
+            "verifyingContract": "0x0077777d7EBA4688BDeF3E311b846F25870A19B9"
+          }
+        },
+        {
+          "scheme": "exact",
+          "network": "eip155:137",
+          "asset": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+          "payTo": "0xF46394adDdA95A3d5bCC1124605E3d15D204623C",
+          "amount": "10000000",
+          "maxTimeoutSeconds": 60,
+          "extra": {
+            "name": "USD Coin",
+            "version": "2"
+          }
+        },
+        {
+          "scheme": "exact",
+          "network": "eip155:137",
+          "asset": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+          "payTo": "0xF46394adDdA95A3d5bCC1124605E3d15D204623C",
+          "amount": "1000",
+          "maxTimeoutSeconds": 60,
+          "extra": {
+            "name": "USD Coin",
+            "version": "2"
+          }
+        },
+        {
+          "scheme": "exact",
+          "network": "eip155:137",
+          "asset": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+          "payTo": "0xF46394adDdA95A3d5bCC1124605E3d15D204623C",
+          "amount": "100",
+          "maxTimeoutSeconds": 604900,
+          "extra": {
+            "name": "GatewayWalletBatched",
+            "version": "1",
+            "verifyingContract": "0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE"
+          }
+        },
+        {
+          "scheme": "exact",
+          "network": "eip155:5042002",
+          "asset": "0x3600000000000000000000000000000000000000",
+          "payTo": "0xF46394adDdA95A3d5bCC1124605E3d15D204623C",
+          "amount": "100",
+          "maxTimeoutSeconds": 604900,
+          "extra": {
+            "name": "GatewayWalletBatched",
+            "version": "1",
+            "verifyingContract": "0x0077777d7EBA4688BDeF3E311b846F25870A19B9"
+          }
+        },
+        {
+          "scheme": "exact",
+          "network": "eip155:5042",
+          "asset": "0x3600000000000000000000000000000000000000",
+          "payTo": "0xF46394adDdA95A3d5bCC1124605E3d15D204623C",
+          "amount": "100",
+          "maxTimeoutSeconds": 604900,
+          "extra": {
+            "name": "GatewayWalletBatched",
+            "version": "1",
+            "verifyingContract": "0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE"
+          }
+        },
+        {
+          "scheme": "exact",
+          "network": "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
+          "asset": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+          "payTo": "2LWbc9Mi6dRUrdEHBttoNS4udDtH1A4xwBdm1EKqcT57",
+          "amount": "1000000",
+          "maxTimeoutSeconds": 60,
+          "extra": {
+            "feePayer": "CPZSjRmyfTS95UjQD8ZdeTEWbQvW9QvEXnn6aGP7yyMN"
+          }
+        },
+        {
+          "scheme": "exact",
+          "network": "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
+          "asset": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+          "payTo": "2LWbc9Mi6dRUrdEHBttoNS4udDtH1A4xwBdm1EKqcT57",
+          "amount": "1000",
+          "maxTimeoutSeconds": 60,
+          "extra": {
+            "feePayer": "CPZSjRmyfTS95UjQD8ZdeTEWbQvW9QvEXnn6aGP7yyMN"
+          }
+        },
+        {
+          "scheme": "exact",
+          "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+          "asset": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "payTo": "2LWbc9Mi6dRUrdEHBttoNS4udDtH1A4xwBdm1EKqcT57",
+          "amount": "10000000",
+          "maxTimeoutSeconds": 60,
+          "extra": {
+            "feePayer": "CPZSjRmyfTS95UjQD8ZdeTEWbQvW9QvEXnn6aGP7yyMN"
+          }
+        },
+        {
+          "scheme": "exact",
+          "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+          "asset": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "payTo": "2LWbc9Mi6dRUrdEHBttoNS4udDtH1A4xwBdm1EKqcT57",
+          "amount": "1000",
+          "maxTimeoutSeconds": 60,
+          "extra": {
+            "feePayer": "CPZSjRmyfTS95UjQD8ZdeTEWbQvW9QvEXnn6aGP7yyMN"
+          }
+        }
+      ],
+      "metadata": {
+        "provider": {
+          "name": "Quicknode",
+          "website": "https://quicknode.com",
+          "docsUrl": "https://www.quicknode.com/docs",
+          "openApiUrl": "https://x402.quicknode.com/openapi.json",
+          "description": "Multi-chain JSON-RPC nodes across 50+ blockchains",
+          "category": "INFRASTRUCTURE",
+          "tags": ["x402", "blockchain", "rpc", "json-rpc", "nodes", "data"]
+        },
+        "path": "/arc-testnet",
+        "method": "POST",
+        "description": "JSON-RPC proxy — arc-testnet",
+        "mimeType": "application/json",
+        "input": {
+          "body": {
+            "required": ["jsonrpc", "method"],
+            "properties": {
+              "id": {
+                "type": ["number", "string"],
+                "description": "Request identifier"
+              },
+              "method": {
+                "type": "string",
+                "description": "JSON-RPC method name (e.g., eth_blockNumber, eth_call)"
+              },
+              "params": {
+                "type": "array",
+                "description": "Method parameters"
+              },
+              "jsonrpc": {
+                "type": "string",
+                "const": "2.0"
+              }
+            }
+          },
+          "type": "http",
+          "method": "POST",
+          "bodyType": "json"
+        },
+        "output": {
+          "type": "object",
+          "required": ["type"],
+          "properties": {
+            "type": {
+              "type": "string"
+            },
+            "example": {
+              "type": "object"
+            }
+          }
+        },
+        "siwx": true,
+        "supportsVanillax402": true,
+        "supportsCircleGateway": true
+      }
+    },
+    {
+      "resource": "https://api.botpay.network/go",
+      "type": "http",
+      "x402Version": 2,
+      "lastUpdated": "2026-10-12T21:23:56.831Z",
+      "accepts": [
+        {
+          "scheme": "exact",
+          "network": "eip155:8453",
+          "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "payTo": "0x159BE9e316BC5faC8Ce05aec4eaAe46E8f8a4908",
+          "amount": "100000",
+          "maxTimeoutSeconds": 300,
+          "extra": {
+            "name": "USD Coin",
+            "version": "2"
+          }
+        },
+        {
+          "scheme": "exact",
+          "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+          "asset": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "payTo": "d8X2MdS7QMiMFVWzYMVTeKhm1BVx75GoHskf9ws74nM",
+          "amount": "100000",
+          "maxTimeoutSeconds": 300,
+          "extra": {
+            "feePayer": "DeXterR2kQm8AvRHnNPatWkE46TfAcMeBDjb6FySoAb8"
+          }
+        },
+        {
+          "scheme": "exact",
+          "network": "eip155:5042002",
+          "asset": "0x3600000000000000000000000000000000000000",
+          "payTo": "0x159BE9e316BC5faC8Ce05aec4eaAe46E8f8a4908",
+          "amount": "100000",
+          "maxTimeoutSeconds": 604900,
+          "extra": {
+            "name": "GatewayWalletBatched",
+            "assets": [
+              {
+                "symbol": "USDC",
+                "address": "0x3600000000000000000000000000000000000000",
+                "decimals": 6,
+                "authorizationVersions": ["1", "2"]
+              },
+              {
+                "symbol": "cirBTC",
+                "address": "0xf0c4a4ce82a5746abaad9425360ab04fbba432bf",
+                "decimals": 8,
+                "authorizationVersions": ["2"]
+              },
+              {
+                "symbol": "EURC",
+                "address": "0x89b50855aa3be2f677cd6303cec089b5f319d72a",
+                "decimals": 6,
+                "authorizationVersions": ["2"]
+              }
+            ],
+            "version": "1",
+            "verifyingContract": "0x0077777d7eba4688bdef3e311b846f25870a19b9",
+            "minValiditySeconds": 604800
+          }
+        }
+      ],
+      "metadata": {
+        "provider": {
+          "name": "BotPay",
+          "website": "https://botpay.network",
+          "docsUrl": "https://api.botpay.network/llms.txt",
+          "openApiUrl": "https://api.botpay.network/openapi.json",
+          "description": "Escrow vouchers, NFT mints, and paid access receipts",
+          "category": "INFRASTRUCTURE",
+          "tags": ["x402", "payments", "agents"]
+        },
+        "path": "/go",
+        "method": "GET",
+        "description": "Get a verification code through BotPay's paid access",
+        "mimeType": "application/json",
+        "input": {
+          "body": {
+            "type": "object",
+            "example": {},
+            "properties": {
+              "testRunId": {
+                "type": "string",
+                "maxLength": 100,
+                "description": "Optional caller-supplied correlation ID. The GET endpoint also accepts this field as a query parameter."
+              }
+            },
+            "additionalProperties": false
+          },
+          "type": "http",
+          "method": "GET",
+          "bodyType": "json",
+          "queryParams": {
+            "type": "object",
+            "properties": {
+              "testRunId": {
+                "type": "string",
+                "maxLength": 100,
+                "description": "Optional caller-supplied correlation ID for a bounded validation run."
+              }
+            }
+          }
+        },
+        "output": {
+          "type": "object",
+          "required": ["message", "verificationCode", "protocol", "resource"],
+          "properties": {
+            "message": {
+              "type": "string"
+            },
+            "protocol": {
+              "enum": ["x402", "mpp"],
+              "type": "string"
+            },
+            "resource": {
+              "type": "string",
+              "const": "/go"
+            },
+            "testRunId": {
+              "type": "string"
+            },
+            "agentIndex": {
+              "type": "string"
+            },
+            "verificationCode": {
+              "type": "string",
+              "example": "832949",
+              "pattern": "^\\d{6}$"
+            }
+          }
+        },
+        "siwx": false,
+        "supportsVanillax402": true,
+        "supportsCircleGateway": true
+      }
+    }
+  ],
+  "pagination": {
+    "limit": 200,
+    "offset": 0,
+    "total": 134
+  }
+}

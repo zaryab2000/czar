@@ -10,6 +10,8 @@
     "oxlint": "oxlint --deny-warnings"
   },
   "devDependencies": {
+    "@czar/config": "workspace:*",
+    "@czar/signer": "workspace:*",
     "@types/node": "22.20.5",
     "oxfmt": "0.73.0",
     "oxlint": "1.88.0",

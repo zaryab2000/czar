@@ -70,3 +70,64 @@ export function dataJsonProfile(codeHash: string): DataJsonProfile {
   };
   return { profile_id: profileId(core), ...core };
 }
+
+/** Profile for a screened Circle delivery without a declared output schema. */
+export function genericDeliveryProfile(codeHash: string) {
+  const core = {
+    task_class: "generic-delivery" as const,
+    version: 1 as const,
+    name: "generic-delivery.v1",
+    input_generator: { kind: "parametric", spec: {} },
+    checks: [
+      {
+        name: "delivery",
+        kind: "delivery",
+        dimension: "delivery",
+        spec: {
+          statusCode: 200,
+          maxBodyBytes: "acceptance.genericMaxBytes",
+          contentTypes: ["json", "text"],
+          jsonParse: true,
+          screen: "P-01",
+        },
+      },
+      {
+        name: "structural",
+        kind: "structural",
+        dimension: "structural",
+        spec: { jsonParseOnClaimedType: true, schemaMaxBytes: "acceptance.schemaMaxBytes" },
+      },
+      {
+        name: "requirement",
+        kind: "requirement",
+        dimension: "requirement",
+        spec: { keys: [] },
+      },
+    ],
+    tolerances: {},
+    abstain_rules: {},
+    cost_estimate_usd: 0,
+    receipt_checks: ["delivery", "structural", "requirement"],
+    limits: ["no-correctness-check"],
+    code_hash: codeHash,
+  };
+  return { profile_id: profileId(core), ...core };
+}
+
+/** Distinguishes a JSON Schema from a vendor's example-only metadata. */
+export function hasOutputSchema(value: unknown): value is Readonly<Record<string, unknown>> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  return [
+    "$ref",
+    "type",
+    "properties",
+    "items",
+    "allOf",
+    "anyOf",
+    "oneOf",
+    "enum",
+    "const",
+    "required",
+    "additionalProperties",
+  ].some((key) => Object.hasOwn(value, key));
+}

@@ -7,6 +7,8 @@ import type { AcceptanceCheckInput, AcceptanceResult } from "#src/acceptance/typ
 import { completeBoundaryModelCall, type ModelClient } from "#src/models/proxy";
 import type { Logger } from "@czar/logging";
 import type { Pool } from "pg";
+import { getObservation } from "#src/evidence/observations";
+import { healthFacts, writeFacts } from "#src/evidence/health";
 
 export type BoundaryFlag = "injection-suspect" | "pii-suspect";
 export type ScreenLabel = "none" | BoundaryFlag;
@@ -16,6 +18,9 @@ export interface BoundaryInput {
   readonly statusCode: number;
   readonly mimeType: string;
   readonly stepIndex: number;
+  readonly callIndex: number;
+  readonly obsId: string;
+  readonly subjectIndex?: number;
   readonly source: StepResult["source"];
   readonly bodyRef?: string;
   readonly bodyCommit: string;
@@ -170,6 +175,23 @@ export async function runBoundary(
       ? { available: true, label: labelFor(screen.flags) }
       : { available: false },
   });
+  const observation = await getObservation(dependencies.pool, input.obsId);
+  if (observation)
+    await writeFacts(
+      dependencies.pool,
+      healthFacts(
+        [observation],
+        [
+          {
+            kind: "boundary",
+            obsId: input.obsId,
+            flags: acceptance.report.flags ?? [],
+            limits: acceptance.report.limits,
+          },
+        ],
+        { consecutiveFailures: Number(dependencies.config.get("health.consecutiveFailures")) },
+      ),
+    );
   if (quarantined) return { quarantined: true, screen, acceptance };
   const deliveryResult = acceptance.report.checks.find(
     (check) => check.name === "delivery",
@@ -317,8 +339,11 @@ function makeFailureStepResult(
   status: "http-error" | "timeout",
 ): StepResult {
   return {
-    schemaVersion: "1.0",
+    schemaVersion: "1.1",
     stepIndex: input.stepIndex,
+    callIndex: input.callIndex,
+    obsId: input.obsId,
+    ...(input.subjectIndex === undefined ? {} : { subjectIndex: input.subjectIndex }),
     status,
     source: input.source,
     fields: [],
@@ -510,8 +535,11 @@ function makeStepResult(
   const found = new Set(fields.map((field) => field.name));
   const missing = input.expectedKeys.filter((key) => !found.has(key));
   const result = {
-    schemaVersion: "1.0" as const,
+    schemaVersion: "1.1" as const,
     stepIndex: input.stepIndex,
+    callIndex: input.callIndex,
+    obsId: input.obsId,
+    ...(input.subjectIndex === undefined ? {} : { subjectIndex: input.subjectIndex }),
     status: missing.length ? ("unknown" as const) : ("delivered" as const),
     source: input.source,
     fields,

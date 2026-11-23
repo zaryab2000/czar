@@ -1,6 +1,18 @@
 // Key ids, signing kinds and which key may use which kind (CZ-27 §4, §5.1).
 
-export const KEY_IDS = ["K3", "K4", "K5", "K6", "K7", "K8", "K10", "K20", "relayer"] as const;
+export const KEY_IDS = [
+  "K3",
+  "K4",
+  "K5",
+  "K6",
+  "K7",
+  "K8",
+  "K10",
+  "K20",
+  "K21a",
+  "K21b",
+  "relayer",
+] as const;
 export type KeyId = (typeof KEY_IDS)[number];
 
 export const KINDS = [
@@ -19,8 +31,13 @@ export const KINDS = [
   "pocket-delegate",
   "pocket-return",
   "pocket-slow-withdraw",
+  "provider-call",
 ] as const;
 export type Kind = (typeof KINDS)[number];
+
+/** The CZ-20 §5.11 test-provider keys (H7, N12): `provider-call` only, testnet only, never a vault role. */
+export const PROVIDER_KEY_IDS = ["K21a", "K21b"] as const;
+export type ProviderKeyId = (typeof PROVIDER_KEY_IDS)[number];
 
 /** Allowed kinds per key (CZ-27 §5.1). K6 and K20 sign only through the interactive CLI (D80). */
 export const KEY_KINDS: Readonly<Record<KeyId, readonly Kind[]>> = {
@@ -32,10 +49,16 @@ export const KEY_KINDS: Readonly<Record<KeyId, readonly Kind[]>> = {
   K8: ["oel-commit"],
   K10: ["merchant-seller-proof"],
   K20: [],
+  K21a: ["provider-call"],
+  K21b: ["provider-call"],
   relayer: ["relayer-tx", "gas-refill"],
 };
 
-/** Kinds whose result is a signed transaction rather than a 65-byte signature. */
+/**
+ * Kinds whose result is a signed transaction rather than a 65-byte signature. `provider-call` is not listed: its
+ * `setBudget`/`submit` actions are transactions and its `brief-request`/`deliverable-upload` actions are
+ * digests, and no key that holds it is in `NEVER_SENDS`.
+ */
 export const TRANSACTION_KINDS: ReadonlySet<Kind> = new Set<Kind>([
   "vault-call",
   "evaluator-call",

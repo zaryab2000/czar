@@ -1,4 +1,6 @@
 import type {
+  AppObjective,
+  AppObjectiveRequest,
   ApprovalIntent,
   ApprovalIntentRequest,
   ApprovalSummary,
@@ -20,6 +22,8 @@ import type {
   SoulPointer,
   SubjectsRevision,
   SubmittedNotice,
+  SocialPostProjection,
+  SocialThreadProjection,
 } from "@czar/schemas";
 
 const SESSION_KEY = "czar.appSession";
@@ -27,6 +31,117 @@ const SESSION_EXPIRY_KEY = "czar.appSessionExpiresAt";
 const BUNDLERS = ["circle", "pimlico", "alchemy", "zerodev"] as const;
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 let appWalletConfigRequest: Promise<AppWalletConfig> | undefined;
+
+export interface AppResultSupplier {
+  readonly stepIndex: number;
+  readonly merchantLabel: string;
+  readonly merchantIsCzar: boolean;
+  readonly receipts: number;
+  readonly effectiveRating: "good" | "bad" | "none";
+  readonly ratingId?: string;
+  readonly canRate: boolean;
+  readonly canCorrect: boolean;
+}
+
+export interface AppResultCard {
+  readonly objectiveId: string;
+  readonly deliveredAt: string;
+  readonly kind: string;
+  readonly stepCount: number;
+  readonly suppliers: readonly AppResultSupplier[];
+  readonly amountDisplay?: string;
+  readonly windowClosesAt: string;
+}
+
+export interface AppObjectiveAccepted {
+  readonly objectiveId: string;
+  readonly state: "received";
+}
+
+export interface AppRatingRequest {
+  readonly objectiveId: string;
+  readonly stepIndex: number;
+  readonly value: "good" | "bad";
+  readonly supersedes?: string;
+}
+
+export interface AppRatingAccepted {
+  readonly ratingId: string;
+  readonly objectiveId: string;
+  readonly stepIndex: number;
+  readonly value: "good" | "bad";
+  readonly receipts: number;
+  readonly windowClosesAt: string;
+}
+
+export interface SocialRepresentative {
+  readonly representativeId: string;
+  readonly handle: string;
+  readonly sharing: "off" | "structured" | "discuss";
+  readonly paused: boolean;
+  readonly controlled: boolean;
+  readonly consentTextVersion: string | null;
+}
+
+export interface SocialMe {
+  readonly representative: SocialRepresentative;
+  readonly stats: {
+    readonly posts: number;
+    readonly replies: number;
+    readonly lessonsActive: number;
+  };
+}
+
+export interface SocialActivityRun {
+  readonly runId: string;
+  readonly kind: string;
+  readonly action: string;
+  readonly stopReason: string;
+  readonly postId?: string;
+  readonly startedAt: string;
+}
+
+export interface SocialLesson {
+  readonly lessonId: string;
+  readonly network: string;
+  readonly serviceId: string;
+  readonly taskClass: string;
+  readonly proposition: "prefer" | "avoid";
+  readonly strength: number;
+  readonly sourceHandle: string;
+  readonly expiresAt: string;
+  readonly state: "active" | "expired" | "dismissed" | "superseded";
+}
+
+export interface SocialIncident {
+  readonly incidentId: string;
+  readonly network: string;
+  readonly serviceId: string;
+  readonly versionId: string | null;
+  readonly taskClass: string;
+  readonly state: "open" | "closed";
+  readonly distinctOwners: number;
+  readonly negativeUnits: number;
+  readonly positiveUnitsSince: number;
+  readonly openedAt: string;
+  readonly closedAt: string | null;
+  readonly closeReason: string | null;
+  readonly threadId?: string;
+}
+
+export interface SocialThreadDetail {
+  readonly thread: SocialThreadProjection;
+  readonly posts: readonly SocialPostProjection[];
+  readonly incident?: SocialIncident;
+}
+
+export interface SocialLeadRequest {
+  readonly network: string;
+  readonly origin: string;
+  readonly pathHint?: string;
+  readonly capabilityTag: string;
+  readonly claimedOutputFormat?: "markdown-table" | "csv" | "json" | "markdown-list" | "prose";
+}
 
 export async function getAppWalletConfig(): Promise<AppWalletConfig> {
   if (!appWalletConfigRequest) appWalletConfigRequest = fetchAppWalletConfig();
@@ -122,26 +237,38 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 async function requestWithHeaders<T>(
   path: string,
   init: RequestInit = {},
+  options: { readonly public?: boolean } = {},
 ): Promise<{ data: T; headers: Headers }> {
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
-  const token = sessionToken();
+  const token = options.public ? undefined : sessionToken();
   if (token) headers.set("Authorization", `Bearer ${token}`);
   if (init.body !== undefined) headers.set("Content-Type", "application/json");
-  const response = await fetch(path, { ...init, headers, cache: "no-store" });
+  const response = await fetch(path, {
+    ...init,
+    headers,
+    cache: "no-store",
+    ...(options.public ? { credentials: "omit" as const } : {}),
+  });
   if (!response.ok) {
-    if (response.status === 401) clearSession();
+    if (response.status === 401 && !options.public) clearSession();
     const body = (await response.json().catch(() => ({}))) as {
       detail?: string;
       czarCode?: string;
     };
     throw new AppApiError(body.detail ?? response.statusText, response.status, body.czarCode);
   }
-  const data =
-    response.status === 204 || response.status === 202
-      ? (undefined as T)
-      : ((await response.json()) as T);
+  const data = await readResponseBody<T>(response);
   return { data, headers: response.headers };
+}
+
+async function readResponseBody<T>(response: Response): Promise<T> {
+  if (response.status === 204) return undefined as T;
+  if (response.status === 202) {
+    const body = await response.text();
+    return body.length === 0 ? (undefined as T) : (JSON.parse(body) as T);
+  }
+  return (await response.json()) as T;
 }
 
 function idempotencyKey(): string {
@@ -149,6 +276,94 @@ function idempotencyKey(): string {
 }
 
 export const appApi = {
+  listSocialFeed: async (cursor?: string) => {
+    const query = new URLSearchParams();
+    if (cursor) query.set("cursor", cursor);
+    const suffix = query.size ? `?${query}` : "";
+    const result = await requestWithHeaders<AppPage<SocialPostProjection>>(
+      `/v1/social/feed${suffix}`,
+      {},
+      { public: true },
+    );
+    const pollSeconds = Number(result.headers.get("X-Czar-Social-Poll-Seconds"));
+    if (!Number.isSafeInteger(pollSeconds) || pollSeconds < 1) {
+      throw new Error("The server did not provide valid social feed timing settings.");
+    }
+    return { page: result.data, pollSeconds };
+  },
+  listSocialThreads: (
+    query: { kind?: string; serviceId?: string; state?: string; cursor?: string } = {},
+  ) => {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) if (value) params.set(key, value);
+    return requestWithHeaders<AppPage<SocialThreadProjection>>(
+      `/v1/social/threads${params.size ? `?${params}` : ""}`,
+      {},
+      { public: true },
+    ).then((result) => result.data);
+  },
+  getSocialThread: (threadId: string) =>
+    requestWithHeaders<SocialThreadDetail>(
+      `/v1/social/threads/${encodeURIComponent(threadId)}`,
+      {},
+      { public: true },
+    ).then((result) => result.data),
+  listSocialIncidents: (state?: "open" | "closed", cursor?: string) => {
+    const params = new URLSearchParams();
+    if (state) params.set("state", state);
+    if (cursor) params.set("cursor", cursor);
+    return requestWithHeaders<AppPage<SocialIncident>>(
+      `/v1/social/incidents${params.size ? `?${params}` : ""}`,
+      {},
+      { public: true },
+    ).then((result) => result.data);
+  },
+  getSocialServiceSignals: (serviceId: string, network: string) =>
+    requestWithHeaders<{
+      serviceId: string;
+      network: string;
+      openIncident?: SocialIncident;
+      threadId: string | null;
+      recentExperiences: { count: number; delivered: number; ratedBad: number };
+      lastObservedAt: string | null;
+    }>(
+      `/v1/social/services/${encodeURIComponent(serviceId)}/signals?network=${encodeURIComponent(network)}`,
+      {},
+      { public: true },
+    ).then((result) => result.data),
+  getSocialMe: () => request<SocialMe>("/v1/social/me"),
+  updateSocialMe: (body: {
+    sharing?: "off" | "structured" | "discuss";
+    paused?: boolean;
+    consentTextVersion?: string;
+  }) =>
+    request<SocialRepresentative>("/v1/social/me", {
+      method: "PUT",
+      headers: { "Idempotency-Key": idempotencyKey() },
+      body: JSON.stringify(body),
+    }),
+  listSocialActivity: (cursor?: string, limit = 50) => {
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (cursor) query.set("cursor", cursor);
+    return request<AppPage<SocialActivityRun>>(`/v1/social/me/activity?${query}`);
+  },
+  listSocialLessons: () => request<{ lessons: SocialLesson[] }>("/v1/social/me/lessons"),
+  dismissSocialLesson: (lessonId: string) =>
+    request<void>(`/v1/social/me/lessons/${encodeURIComponent(lessonId)}`, {
+      method: "DELETE",
+      headers: { "Idempotency-Key": idempotencyKey() },
+    }),
+  suggestSocialLead: (body: SocialLeadRequest) =>
+    request<{ leadId: string; postId: string }>("/v1/social/leads", {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey() },
+      body: JSON.stringify(body),
+    }),
+  deleteSocialPost: (postId: string) =>
+    request<void>(`/v1/social/posts/${encodeURIComponent(postId)}`, {
+      method: "DELETE",
+      headers: { "Idempotency-Key": idempotencyKey() },
+    }),
   createAuthChallenge: (purpose: "register" | "session") =>
     request<AuthChallenge>("/v1/auth/challenge", {
       method: "POST",
@@ -239,6 +454,32 @@ export const appApi = {
     if (cursor) query.set("cursor", cursor);
     return request<AppPage<LedgerReceipt>>(`/v1/ledger/receipts?${query}`);
   },
+  listAppResults: (cursor?: string) => {
+    const query = new URLSearchParams();
+    if (cursor) query.set("cursor", cursor);
+    return request<AppPage<AppResultCard>>(`/v1/app/results?${query}`);
+  },
+  listAllAppResults: () => listAllAppResults(),
+  submitAppRating: (body: AppRatingRequest, key = idempotencyKey()) =>
+    request<AppRatingAccepted>("/v1/app/ratings", {
+      method: "POST",
+      headers: { "Idempotency-Key": key },
+      body: JSON.stringify(body),
+    }),
+  /** Starts a task from the web app (SCR-181 §2). Retrying with the same key never creates a second task. */
+  createAppObjective: (body: AppObjectiveRequest, key = idempotencyKey()) =>
+    request<AppObjectiveAccepted>("/v1/app/objectives", {
+      method: "POST",
+      headers: { "Idempotency-Key": key },
+      body: JSON.stringify(body),
+    }),
+  listAppObjectives: (cursor?: string) => {
+    const query = new URLSearchParams();
+    if (cursor) query.set("cursor", cursor);
+    return request<AppPage<AppObjective>>(`/v1/app/objectives?${query}`);
+  },
+  getAppObjective: (objectiveId: string) =>
+    request<AppObjective>(`/v1/app/objectives/${encodeURIComponent(objectiveId)}`),
   getSoulPointer: () => request<SoulPointer>("/v1/soul/pointer"),
   createPairingCode: () =>
     request<PairingCode>("/v1/devices/pairing-codes", {
@@ -262,6 +503,22 @@ export const appApi = {
       body: JSON.stringify({ action }),
     }),
 };
+
+async function listAllAppResults(): Promise<AppPage<AppResultCard>> {
+  const items: AppResultCard[] = [];
+  const seenCursors = new Set<string>();
+  let cursor: string | undefined;
+  while (true) {
+    const page = await appApi.listAppResults(cursor);
+    items.push(...page.items);
+    if (page.nextCursor === null) return { items, nextCursor: null };
+    if (seenCursors.has(page.nextCursor)) {
+      throw new Error("The server repeated a result pagination cursor.");
+    }
+    seenCursors.add(page.nextCursor);
+    cursor = page.nextCursor;
+  }
+}
 
 async function listAllManualReturns(): Promise<AppPage<ManualReturn>> {
   const items: ManualReturn[] = [];

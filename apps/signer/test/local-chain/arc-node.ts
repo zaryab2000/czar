@@ -128,6 +128,7 @@ export async function deployCzar(
         node.rpcUrl,
         `../deployments/${keysName}`,
         `../deployments/${outName}`,
+        "--offline",
         "--broadcast",
         "--unlocked",
         "--sender",

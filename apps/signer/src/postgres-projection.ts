@@ -10,6 +10,7 @@ import {
   type Hash,
   type PublicClient,
 } from "viem";
+import { pendingCallCount, pendingNanoTotals, type AuditSpendRow } from "./pending.ts";
 import type { AuditQueryExecutor } from "./postgres-audit.ts";
 import type {
   AutonomyView,
@@ -186,6 +187,8 @@ function indexerProjection(
   | "pocket"
   | "pocketBalances"
   | "nanoSpent"
+  | "pendingNanoSpent"
+  | "pendingCalls"
   | "slowWithdrawTrigger"
   | "pocketSpendAfterObservation"
   | "overdueManualReturnFacts"
@@ -200,6 +203,9 @@ function indexerProjection(
     },
     pocketBalances: (address) => pocketBalances(input, sql, address),
     nanoSpent: (pocket, payTo) => nanoSpend(sql, pocket, payTo),
+    pendingNanoSpent: (pocket, payTo, now) => pendingNanoSpend(sql, pocket, payTo, now),
+    pendingCalls: (vault, envelopeId, stepIndex, now) =>
+      pendingCallsOf(sql, vault, envelopeId, stepIndex, now),
     slowWithdrawTrigger: (address) => slowWithdrawTrigger(input, sql, address),
     pocketSpendAfterObservation: (pocket, observedAt) =>
       pocketSpendAfterObservation(input, sql, pocket, observedAt),
@@ -546,6 +552,75 @@ async function nanoSpend(sql: Sql, pocket: Address, payTo: Address) {
   };
 }
 
+/**
+ * SCR-180 §2 audit prefilter: drops rows whose `validBefore` is a clean decimal at or before `now`. A row whose
+ * `validBefore` is missing or malformed is kept, so `pending.ts` sees it and refuses.
+ */
+const stillValid = (param: string) => `CASE
+         WHEN a.object_ids->0->>'validBefore' ~ '^(0|[1-9][0-9]{0,77})$'
+         THEN (a.object_ids->0->>'validBefore')::numeric > ${param}::numeric
+         ELSE true END`;
+
+const toSpendRows = (rows: SqlRows["rows"]): AuditSpendRow[] =>
+  rows.map((row) => ({
+    ids: row["ids"],
+    amountAtomic: row["amount_atomic"],
+    // Anything but a definite `true` keeps the signature pending (counted), never drops it.
+    indexed: row["indexed"] === true,
+  }));
+
+/**
+ * SCR-180 §2 for `gateway-nano`: this signer's signed rows for the pocket's key, each with whether the indexer
+ * holds a transfer from the pocket with its EIP-3009 nonce in a status `nanoSpend` counts. One statement, so the
+ * audit rows and the indexed nonces come from one snapshot. `policy.ts` reads this before `nanoSpent`, so a
+ * transfer indexed in between is counted twice (refuses) rather than not at all.
+ */
+async function pendingNanoSpend(sql: Sql, pocket: Address, payTo: Address, now: number) {
+  const result = await sql(
+    `SELECT a.object_ids->0 AS ids, a.amount_atomic,
+       EXISTS (
+         SELECT 1 FROM gateway_transfers g
+         WHERE lower(g.from_address)=lower($2)
+           AND lower(g.nonce)=lower(a.object_ids->0->>'nonce')
+           AND g.status IN ('received','batched','confirmed','completed')
+       ) AS indexed
+     FROM audit a
+     WHERE a.action='signer:gateway-nano' AND a.outcome='signed'
+       AND lower(a.object_ids->0->>'keyRef')=lower($1)
+       AND ${stillValid("$3")}`,
+    [`K4:${pocket}`, pocket, now],
+  );
+  return pendingNanoTotals(toSpendRows(result.rows), { pocket, payTo }, now);
+}
+
+/**
+ * SCR-180 §2 for the expected-calls check: this signer's signed `usdc-3009` rows for the vault, each with whether
+ * the indexer has that authorization nonce `used` (the `usedCalls` source in `readEnvelope`).
+ */
+async function pendingCallsOf(
+  sql: Sql,
+  vault: Address,
+  envelopeId: bigint,
+  stepIndex: number,
+  now: number,
+) {
+  const result = await sql(
+    `SELECT a.object_ids->0 AS ids, a.amount_atomic,
+       EXISTS (
+         SELECT 1 FROM authorizations z
+         WHERE lower(z.vault)=lower($1)
+           AND lower(z.nonce)=lower(a.object_ids->0->>'nonce')
+           AND z.used=true
+       ) AS indexed
+     FROM audit a
+     WHERE a.action='signer:usdc-3009' AND a.outcome='signed'
+       AND lower(a.object_ids->0->>'vault')=lower($1)
+       AND ${stillValid("$2")}`,
+    [vault, now],
+  );
+  return pendingCallCount(toSpendRows(result.rows), { vault, envelopeId, stepIndex }, now);
+}
+
 function serverProjection(
   sql: Sql,
 ): Pick<
@@ -553,6 +628,7 @@ function serverProjection(
   | "storedPlan"
   | "settledPayment"
   | "job"
+  | "deliverableAccepted"
   | "reportExists"
   | "checksCommitExists"
   | "latestEvidenceRoot"
@@ -578,6 +654,7 @@ function serverProjection(
     },
     settledPayment: (vault, paymentRef) => hasSettledPayment(sql, vault, paymentRef),
     job: (escrow, id) => readJob(sql, escrow, id),
+    deliverableAccepted: (key, contentHash) => deliverableAccepted(sql, key, contentHash),
     reportExists: (hash) => exists(sql, "acceptance_reports", "report_hash", hash),
     checksCommitExists: (hash) => checksCommitExists(sql, hash),
     latestEvidenceRoot: (publisher, kind) => latestEvidenceRoot(sql, publisher, kind),
@@ -643,7 +720,18 @@ async function readJob(sql: Sql, escrow: Address, jobId: bigint) {
   return {
     evaluator: String(mirror["evaluator"]) as Address,
     clientVault: String(mirror["vault"]) as Address,
+    provider: String(mirror["provider"]) as Address,
   };
+}
+
+/** A deliverable the server's `uploadJobDeliverable` stored for this job (D87); never caller-supplied. */
+async function deliverableAccepted(sql: Sql, key: Hash32, contentHash: Hash32): Promise<boolean> {
+  const result = await sql(
+    `SELECT 1 FROM payer_job_deliverables
+     WHERE lower(job_key)=lower($1) AND lower(content_hash)=lower($2) LIMIT 1`,
+    [key, contentHash],
+  );
+  return result.rows.length > 0;
 }
 
 async function exists(sql: Sql, table: string, column: string, value: string): Promise<boolean> {

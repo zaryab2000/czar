@@ -31,7 +31,7 @@ export function resolveAppWalletConfig(
 }
 
 /** The WebAuthn RP ID: the host name of `app.origin` (SCR-156, SCR-157 §3). */
-function webauthnRpId(config: Config): string {
+export function webauthnRpId(config: Config): string {
   const origin = requiredUrl(config.get("app.origin"), "app.origin");
   return new URL(origin).hostname;
 }

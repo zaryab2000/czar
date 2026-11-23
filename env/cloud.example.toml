@@ -1,0 +1,87 @@
+# Cloud parameters for the public alpha (SCR-170). Copy to env/cloud.toml on the VM and edit.
+#
+# This file holds NO SECRETS. Every credential is a file under deploy.credentialFilesDir, named
+# by a key below; the file's contents never appear here, in an environment variable or on a
+# command line (CLAUDE.md, D70, D78). A key whose name contains passphrase, secret, private,
+# mnemonic or seed is refused by the loader, so none can exist.
+#
+# Runtime ports, the database URL without its password, and CZAR_CLOUD_CONFIG are pointers set by
+# the deployment units, not parameters.
+
+# ── Deployment ────────────────────────────────────────────────────────────────
+# Cloud entry points refuse to start unless this is exactly "cloud-testnet".
+"deploy.environment" = "cloud-testnet"
+# Arc testnet only. Every RPC URL a cloud process uses must have a host in this list.
+"deploy.allowedRpcHosts" = ["rpc.testnet.arc.io"]
+# tmpfs folder holding one file per credential, each 0400 and owned by the process that reads it.
+"deploy.credentialFilesDir" = "/run/czar/secrets"
+"deploy.backupRetentionDays" = 14
+# Relative to the images' working folder /app, where ops/cloud/compose.yaml mounts the file.
+"deploy.deploymentFile" = "deployments/arc-testnet.json"
+"deploy.objectStorePath" = "/var/lib/czar/objects"
+"deploy.indexerUrl" = "http://127.0.0.1:42069"
+
+# ── Public origins (https only in the cloud) ──────────────────────────────────
+# Replace both with the real host names once the domain is bought (tracker PM-006).
+"app.origin" = "https://app.example.com"
+"merchants.publicOrigin" = "https://merchants.example.com"
+
+# ── Signer: Cloud KMS ─────────────────────────────────────────────────────────
+"signer.backend" = "gcp-kms"
+"signer.kms.projectId" = "czar-alpha-000000"
+"signer.kms.location" = "asia-south1"
+"signer.kms.keyRing" = "czar-alpha"
+"signer.kms.pocketKeyRing" = "czar-alpha-pockets"
+# Key reference → full cryptoKeyVersions/N resource name. Filled after key creation (PM-018).
+# The key names inside the braces must be quoted: the parameter loader reads inline tables as JSON.
+# "signer.kms.keyVersions" = { "K3" = "projects/.../cryptoKeyVersions/1" }
+# The signer socket, in the host folder /run/czar/signer (0750, 10002:10010) that
+# ops/cloud/compose.yaml bind-mounts into the signer, the server and the merchants.
+"signer.socketPath" = "/run/czar/signer/signer.sock"
+# Group that may open the signer socket (czar-signer-clients, which UID 10001 joins). Unset keeps
+# today's owner-only socket, which no other container could open.
+"signer.socketGroupGid" = 10010
+
+# ── Model provider (BR-05) ────────────────────────────────────────────────────
+# Anthropic. The server calls the model in two places, both through the per-user budget:
+#   - the boundary, on every delivered merchant response: P-01 screens it, P-02 reads its fields;
+#   - POST /v1/model, the daemon's prompt proxy (P-01, P-02, P-04, P-05, P-06, P-07).
+# The planner makes no model call. Each call is capped by models.<prompt>.maxTokensPerCall and
+# models.<prompt>.timeoutMs; each user by that prompt's models.<prompt>MonthlyTokens and by
+# models.userMonthlyTokens. This file overrides none of them, so the registry defaults apply.
+# The key is read from its file on the first call, not at start. With the file absent a call fails:
+# the boundary falls back to its regex and code checks and POST /v1/model answers 503. Set
+# "models.provider" = "none" to switch the model off.
+"models.provider" = "anthropic"
+"models.anthropic.model" = "claude-haiku-5-5"
+# File NAME inside <deploy.credentialFilesDir>/server, never the key itself.
+"models.anthropic.apiKeyFile" = "anthropic-api-key"
+
+# ── Audit merchants (SCR-182) ─────────────────────────────────────────────────
+# Czar Lab Quick Audit (A) and Czar Lab Deep Audit (B). Switch each on only after its payout key
+# K10:czar-audit-quick / K10:czar-audit-deep exists (tracker MR-03); a switched-on service whose key is
+# missing stops the merchants process at start. The model key is merchants.audit.anthropicApiKeyFile
+# inside <deploy.credentialFilesDir>/merchants (the merchants' own folder), never the key itself.
+# "merchants.audit.quick.enabled" = true
+# "merchants.audit.deep.enabled" = true
+# Catalog entries (SCR-182 §7). Each id follows the SL §5.1 rule (SCR-137): "svc_" + the first 32 hex of
+# keccak256(origin ‖ method ‖ path ‖ registration time). These are for the example origin above,
+# registered 2026-11-05T13:41:25.000Z; derive them again, once, for the real merchants origin.
+"selection.czarRegisteredServices" = { "svc_9ce1cf24007d4800254f04cce952d2ec" = { "serviceName" = "czar-audit-quick", "resource" = { "url" = "https://merchants.example.com/v1/audit/quick", "method" = "POST" }, "probeInput" = { "body" = { "contract" = "contract Probe {}" } }, "capabilities" = [
+  "code-review",
+] }, "svc_891ff515d1c8254f1ff94f1c70dc80c3" = { "serviceName" = "czar-audit-deep", "resource" = { "url" = "https://merchants.example.com/v1/audit/deep", "method" = "POST" }, "probeInput" = { "body" = { "contract" = "contract Probe {}" } }, "capabilities" = [
+  "code-review",
+] } }
+
+# ── Local-only keys that must stay out of this file ───────────────────────────
+# fetch.localStandinOrigins, merchants.facilitatorBaseUrl, chain.gatewayApiBaseUrl,
+# app.circleClientUrl and app.arcRpcUrl are local-stack values. validateCloudConfig refuses to
+# start if fetch.localStandinOrigins is non-empty here.
+
+# ── Test-merchant lab (PM-043, CZ-20 §5.8a) ───────────────────────────────────
+# The free public data sources the lab's handlers read (PM-041 ruling, 2026-11-05). The registry default
+# for this key is still unset; the default change is folded into the post-social spec PR (PM-057).
+"merchants.labSources" = ["czar-fixture-search-corpus", "czar-public-domain-pages", "coinbase-public-spot"]
+# The lab starts only when the merchant entry asks for it, the payment network is a test chain and this
+# price is set (20,000 to 100,000 atomic USDC, spread around the catalog median). Left unset, no lab route exists.
+# "merchants.lab.priceAtomic" = 50000

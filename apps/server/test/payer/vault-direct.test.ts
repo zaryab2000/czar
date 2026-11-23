@@ -1,16 +1,23 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   executeVaultDirectStep,
+  type BoundaryInput,
   type SettledReceiptContext,
   type VaultDirectInput,
 } from "#src/payer/vault-direct";
 import { loadConfig } from "@czar/config";
 import { buildTree, PAYEE_KIND, payeeLeaf } from "@czar/hashing";
-import { buildPaymentRequired, encodeBase64Json, encodePaymentRequired } from "@czar/x402";
+import {
+  buildExactPaymentPayload,
+  buildPaymentRequired,
+  encodeBase64Json,
+  encodePaymentRequired,
+  SafeFetchError,
+} from "@czar/x402";
 import type { SignRequest, SignResult } from "@czar/signer";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { setupDatabase } from "#test/db";
-import { markStepDoneWithResults } from "#src/payer/executions";
+import { appendExecutionPhase, markStepDoneWithResults } from "#src/payer/executions";
 import { makeObjectiveSubmission, seedDevice, TEST_USER_ID } from "#test/fixtures";
 
 const getPool = setupDatabase();
@@ -18,6 +25,7 @@ const OBJECTIVE = "obj_01K7ZT9P4N5Q6R7S8T9V0W1X2Y";
 const PLAN_ID = "pln_01K7ZT9P4N5Q6R7S8T9V0W1X2Y";
 const VAULT = "0x0000000000000000000000000000000000000001" as const;
 const PAYEE = "0x0000000000000000000000000000000000000002" as const;
+const ALTERNATE = "0x0000000000000000000000000000000000000003" as const;
 const HASH = `0x${"01".repeat(32)}`;
 
 beforeAll(async () => seedDevice(getPool()));
@@ -25,6 +33,8 @@ beforeEach(async () => {
   await getPool().query("DELETE FROM executor_leases");
   await getPool().query("DELETE FROM step_executions");
   await getPool().query("DELETE FROM steps");
+  await getPool().query("DELETE FROM supplier_health");
+  await getPool().query("DELETE FROM observations");
   await getPool().query("DELETE FROM plans");
   await getPool().query("DELETE FROM objectives");
   const submission = makeObjectiveSubmission(OBJECTIVE);
@@ -49,6 +59,103 @@ beforeEach(async () => {
     [PLAN_ID],
   );
 });
+
+async function seedMinedAlternateReservation(
+  offer: ReturnType<typeof buildPaymentRequired>,
+  alternate: `0x${string}`,
+): Promise<void> {
+  const accepted = offer.accepts[0];
+  if (!accepted) throw new Error("Alternate x402 fixture has no accepted offer.");
+  const validBefore = Math.floor(Date.parse("2026-10-21T00:00:00Z") / 1000) + 30;
+  await appendExecutionPhase(getPool(), {
+    planId: PLAN_ID,
+    stepIndex: 0,
+    attempt: 0,
+    phase: "reserve.sent",
+    payload: {
+      payee: alternate,
+      unitAmount: "1000",
+      count: 1,
+      validBefore: String(validBefore),
+      txHash: HASH,
+      signedTransaction: "0x02",
+      calls: [
+        {
+          index: 0,
+          offer: accepted,
+          paymentRequired: offer,
+          resource: { url: offer.resource.url },
+        },
+      ],
+    },
+  });
+  await appendExecutionPhase(getPool(), {
+    planId: PLAN_ID,
+    stepIndex: 0,
+    attempt: 0,
+    phase: "reserve.mined",
+    payload: { reservationId: "4", validBefore, txHash: HASH },
+  });
+}
+
+function alternateVaultFixture(): {
+  readonly offer: ReturnType<typeof buildPaymentRequired>;
+  readonly input: VaultDirectInput;
+} {
+  const offer = buildPaymentRequired({
+    url: "http://127.0.0.1:4021/data",
+    description: "alternate seller",
+    serviceName: "alternate",
+    tags: [],
+    network: "eip155:5042002",
+    amount: "1000",
+    payTo: ALTERNATE,
+    maxTimeoutSeconds: 30,
+  });
+  const leaves = [PAYEE, ALTERNATE].map((payee) =>
+    payeeLeaf(payee, PAYEE_KIND.X402_PAY_TO, 0, 1000n),
+  );
+  return {
+    offer,
+    input: {
+      planId: PLAN_ID,
+      envelopeRef: "eip155:5042002:0x0000000000000000000000000000000000000001:1",
+      envelopeId: 1n,
+      envelopeExpiresAt: new Date("2026-10-22T00:00:00Z"),
+      vault: VAULT,
+      plan: {
+        network: "eip155:5042002",
+        expiresAt: "2026-10-22T00:00:00.000Z",
+        payeeLeaves: [PAYEE, ALTERNATE].map((payee) => ({
+          payee,
+          kind: PAYEE_KIND.X402_PAY_TO,
+          stepIndex: 0,
+          stepCap: "1000",
+        })),
+        payeeRoot: buildTree(leaves).root,
+      } as never,
+      step: {
+        stepIndex: 0,
+        stepId: "stp_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
+        kind: "x402-exact",
+        capability: "web-search",
+        serviceId: "svc_11111111111111111111111111111111",
+        resource: { url: "http://127.0.0.1:4021/data", method: "GET" },
+        payee: PAYEE,
+        alternates: [ALTERNATE],
+        unitAmount: "1000",
+        expectedCalls: 1,
+        stepCap: "1000",
+        routingReason: "vault-direct",
+        acceptanceProfileId: "prof_11111111111111111111111111111111",
+        callInputs: [{ callIndex: 0, input: { q: "one" } }],
+      },
+      userId: TEST_USER_ID,
+      deviceId: "dev_01K7ZT9P4N5Q6R7S8T9V0W1X2Y",
+      dispatchLease: { assertHeld: vi.fn() },
+    },
+  };
+}
 
 describe("vault-direct executor", () => {
   it("never reserves, signs, or fetches for an unpaid step", async () => {
@@ -112,6 +219,116 @@ describe("vault-direct executor", () => {
     expect(safeFetch).not.toHaveBeenCalled();
   });
 
+  it("does not sign an alternate x402 payee without a committed service identity", async () => {
+    const { offer, input } = alternateVaultFixture();
+    const sign = vi.fn(async (_caller: string, request: SignRequest) => {
+      throw new Error(`alternate payee reached ${request.kind} signer`);
+    });
+    const dependencies = {
+      pool: getPool(),
+      config: loadConfig(),
+      signer: { sign },
+      chain: {
+        stepUsed: async () => 0n,
+        envelopeCapacity: async () => ({ cap: 1000n, exposure: 0n }),
+        latestBlockTimestamp: async () => 1_761_000_000n,
+        reservationFinal: async () => true,
+        isSettled: async () => false,
+      } as never,
+      safeFetch: vi.fn(async () => ({
+        status: 402,
+        url: "http://127.0.0.1:4021/data",
+        headers: { "payment-required": encodePaymentRequired(offer) },
+        body: new Uint8Array(),
+      })),
+      now: () => new Date("2026-10-21T00:00:00Z"),
+      boundary: vi.fn(),
+      recordReceipt: vi.fn(async () => false),
+      objects: { put: vi.fn(), get: vi.fn() },
+    };
+    const result = await executeVaultDirectStep(input, dependencies);
+
+    expect(result.state).toBe("failed");
+    expect(sign).not.toHaveBeenCalled();
+
+    await seedMinedAlternateReservation(offer, ALTERNATE);
+    await expect(executeVaultDirectStep(input, dependencies)).resolves.toMatchObject({
+      state: "failed",
+      errorCode: "unpaid",
+    });
+    expect(sign).not.toHaveBeenCalled();
+    const signed = await getPool().query(
+      "SELECT execution_id FROM step_executions WHERE plan_id=$1 AND phase='auth.signed'",
+      [PLAN_ID],
+    );
+    expect(signed.rows).toHaveLength(0);
+  });
+
+  it("reconciles a saved alternate x402 authorization without signing it again", async () => {
+    const { offer, input } = alternateVaultFixture();
+    await seedMinedAlternateReservation(offer, ALTERNATE);
+    const accepted = offer.accepts[0];
+    if (!accepted) throw new Error("Alternate x402 fixture has no accepted offer.");
+    const paymentPayload = buildExactPaymentPayload({
+      resource: { url: offer.resource.url },
+      accepted,
+      authorization: {
+        from: VAULT,
+        to: ALTERNATE,
+        value: "1000",
+        validAfter: "0",
+        validBefore: String(Math.floor(Date.parse("2026-10-21T00:00:00Z") / 1000) + 30),
+        nonce: `0x${"11".repeat(32)}`,
+      },
+      signature: `0x${"ab".repeat(65)}`,
+    });
+    await appendExecutionPhase(getPool(), {
+      planId: PLAN_ID,
+      stepIndex: 0,
+      attempt: 0,
+      phase: "auth.signed",
+      payload: {
+        index: 0,
+        paymentPayload,
+        paymentId: "pay_11111111111111111111111111111111",
+      },
+    });
+    const sign = vi.fn();
+    const safeFetch = vi.fn(
+      async (_url: string, options?: { headers?: Record<string, string> }) => {
+        if (!options?.headers?.["payment-signature"])
+          throw new Error("Saved authorization must skip a fresh merchant probe.");
+        throw new SafeFetchError("upstream-unavailable", "transport");
+      },
+    );
+    const result = await executeVaultDirectStep(input, {
+      pool: getPool(),
+      config: loadConfig(),
+      signer: { sign },
+      chain: {
+        reservationFinal: async () => true,
+        isSettled: async () => false,
+        latestBlockTimestamp: async () =>
+          BigInt(Math.floor(Date.parse("2026-10-21T00:00:00Z") / 1000) + 30),
+      } as never,
+      safeFetch,
+      now: () => new Date("2026-10-21T00:00:00Z"),
+      boundary: vi.fn(),
+      recordReceipt: vi.fn(async () => false),
+      objects: { put: vi.fn(), get: vi.fn() },
+    });
+
+    expect(result.state).toBe("failed");
+    expect(sign).not.toHaveBeenCalled();
+    expect(safeFetch).toHaveBeenCalled();
+    const observation = await getPool().query<{ released_at: Date | null }>(
+      "SELECT released_at FROM observations WHERE envelope_ref=$1",
+      [input.envelopeRef],
+    );
+    expect(observation.rows).toHaveLength(1);
+    expect(observation.rows[0]?.released_at).toBeInstanceOf(Date);
+  });
+
   it("keeps the dispatcher lease while running an unpaid step", async () => {
     const envelopeRef = "eip155:5042002:0x0000000000000000000000000000000000000001:1";
     await getPool().query(
@@ -164,8 +381,10 @@ describe("vault-direct executor", () => {
 
   it("rolls back the result when the paid-step done write fails", async () => {
     const stepResult = {
-      schemaVersion: "1.0" as const,
+      schemaVersion: "1.1" as const,
       stepIndex: 0,
+      callIndex: 0,
+      obsId: `obs_${"a".repeat(32)}`,
       status: "delivered" as const,
       source: { origin: "https://merchant.test", payTo: PAYEE, paymentRefHash: HASH },
       fields: [],
@@ -385,15 +604,20 @@ describe("vault-direct executor", () => {
     };
     let current = new Date("2026-10-21T00:00:00Z");
     const stepResult = {
-      schemaVersion: "1.0" as const,
+      schemaVersion: "1.1" as const,
       stepIndex: 0,
+      callIndex: 0,
+      obsId: `obs_${"a".repeat(32)}`,
       status: "delivered" as const,
       source: { origin: "http://127.0.0.1:4021", payTo: PAYEE, paymentRefHash: HASH },
       fields: [],
       flags: [],
       bodyCommit: HASH,
     };
-    const boundary = vi.fn(async () => stepResult);
+    const boundary = vi.fn(async (context: BoundaryInput) => ({
+      ...stepResult,
+      obsId: context.obsId,
+    }));
     let receiptAvailable = false;
     const recordReceipt = vi.fn(async (_input: SettledReceiptContext) => receiptAvailable);
     const dependencies = {
@@ -448,7 +672,17 @@ describe("vault-direct executor", () => {
     );
     const result = await executeVaultDirectStep(input, dependencies);
 
-    expect(result).toMatchObject({ state: "pending", stepResults: [stepResult] });
+    expect(result).toMatchObject({
+      state: "pending",
+      stepResults: [{ ...stepResult, obsId: expect.stringMatching(/^obs_[0-9a-f]{32}$/) }],
+    });
+    const observation = await getPool().query<{ obs_id: string }>(
+      "SELECT obs_id FROM observations WHERE objective_id=$1",
+      [OBJECTIVE],
+    );
+    expect(observation.rows).toHaveLength(1);
+    if (result.state !== "pending") throw new Error("Expected a pending paid result.");
+    expect(result.stepResults[0]).toMatchObject({ obsId: observation.rows[0]?.obs_id });
     await expect(
       getPool().query("SELECT state FROM steps WHERE plan_id=$1 AND step_index=0", [PLAN_ID]),
     ).resolves.toMatchObject({ rows: [{ state: "queued" }] });
@@ -501,7 +735,7 @@ describe("vault-direct executor", () => {
     receiptAvailable = true;
     await expect(executeVaultDirectStep(input, dependencies)).resolves.toMatchObject({
       state: "done",
-      stepResults: [stepResult],
+      stepResults: [{ ...stepResult, obsId: observation.rows[0]?.obs_id }],
     });
     expect(chain.settle).toHaveBeenCalledTimes(1);
     expect(successfulAuthorizationSignatures).toBe(1);
@@ -514,6 +748,8 @@ describe("vault-direct executor", () => {
         "SELECT payload FROM step_executions WHERE plan_id=$1 AND step_index=0 AND phase='step.result'",
         [PLAN_ID],
       ),
-    ).resolves.toMatchObject({ rows: [{ payload: { stepResult } }] });
+    ).resolves.toMatchObject({
+      rows: [{ payload: { stepResult: { ...stepResult, obsId: observation.rows[0]?.obs_id } } }],
+    });
   });
 });

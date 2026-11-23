@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { AppPlan, Me, SubjectsRevision } from "@czar/schemas";
 import { AppApiError, appApi } from "#src/app-api";
 import { assertApprovalIntent, PLAN_MISMATCH_MESSAGE } from "#src/approval-integrity";
+import { approvalReasonSentence } from "#src/approval-why";
 import { useAppData } from "#src/use-app-data";
 import { formatUsd } from "@czar/web/money-format";
 
@@ -256,10 +257,23 @@ function createSubjectsRevision(
   };
 }
 
+/** The payee host of the step the owner's contract is sent to, the only merchant name the plan carries. */
+function contractPayee(plan: AppPlan): string | undefined {
+  const step = plan.steps.find((candidate) => candidate.contextNotice === "contract-sent");
+  return step === undefined ? undefined : (hostFor(step.resource?.url) ?? step.payee);
+}
+
 function StepsPanel({ plan, newPayees }: { readonly plan: AppPlan; readonly newPayees: boolean }) {
   return (
     <section className="panel page-stack">
       <h2>Steps and payees</h2>
+      {plan.approvalReasons && plan.approvalReasons.length > 0 && (
+        <ul aria-label="Why Czar asks you" className="rows">
+          {plan.approvalReasons.map((reason) => (
+            <li key={reason}>{approvalReasonSentence(reason, { payee: contractPayee(plan) })}</li>
+          ))}
+        </ul>
+      )}
       {plan.steps.map((step) => (
         <article key={step.stepIndex} className="step-card">
           <h3>
@@ -293,6 +307,14 @@ function StepsPanel({ plan, newPayees }: { readonly plan: AppPlan; readonly newP
           {step.why?.alternativesLost.map((alternate) => (
             <p key={alternate.serviceId}>
               {alternate.serviceId} not chosen: {alternativeReason(alternate.reason)}
+            </p>
+          ))}
+          {step.why?.lessons?.map((lesson) => (
+            <p key={lesson.lessonId}>
+              Your representative learned from {lesson.handle} that {lesson.serviceId}{" "}
+              {lesson.proposition === "prefer" ? "did" : "did not"} do this kind of task well; it{" "}
+              {lesson.proposition === "prefer" ? "chose" : "avoided"} it within Czar&apos;s ranking
+              margin.
             </p>
           ))}
         </article>

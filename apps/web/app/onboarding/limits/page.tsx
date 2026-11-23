@@ -63,7 +63,7 @@ export default function LimitsOnboardingPage() {
     return <p role="alert">Create your vault before setting spending limits.</p>;
   return (
     <section className="welcome-card page-stack">
-      <p className="eyebrow">Step 4 of 4</p>
+      <p className="eyebrow">Step 4 of 5</p>
       <h1 className="czar-title">Set limits</h1>
       <p>How much may Czar spend per week without asking? You can change this any time.</p>
       <p>Network fee reserve: {formatUsd(data.balances.mscaBalance)}</p>
@@ -88,7 +88,7 @@ export default function LimitsOnboardingPage() {
         Check limits status
       </button>
       {notice && <p role="status">{notice}</p>}
-      <a href="/home">Finish setup</a>
+      <a href="/onboarding/representative">Continue to sharing choice</a>
     </section>
   );
 }

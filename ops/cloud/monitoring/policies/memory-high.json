@@ -1,0 +1,27 @@
+{
+  "displayName": "czar-alpha: memory above 90%",
+  "combiner": "OR",
+  "conditions": [
+    {
+      "displayName": "Memory is more than 90% used for 10 minutes",
+      "conditionThreshold": {
+        "filter": "metric.type=\"agent.googleapis.com/memory/percent_used\" AND resource.type=\"gce_instance\" AND metric.label.state=\"used\"",
+        "aggregations": [
+          {
+            "alignmentPeriod": "60s",
+            "perSeriesAligner": "ALIGN_MEAN",
+            "crossSeriesReducer": "REDUCE_NONE"
+          }
+        ],
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 90,
+        "duration": "600s",
+        "trigger": { "count": 1 }
+      }
+    }
+  ],
+  "documentation": {
+    "mimeType": "text/markdown",
+    "content": "Memory on the Czar VM (4 GB, shared by every container) has been above 90% for 10 minutes.\n\n- Run `docker stats --no-stream` over IAP SSH to see which container is growing."
+  }
+}

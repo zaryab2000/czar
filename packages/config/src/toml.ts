@@ -49,7 +49,7 @@ function parseValue(
   line: number,
 ): void {
   try {
-    values[key] = JSON.parse(rawValue) as unknown;
+    values[key] = JSON.parse(removeTrailingCommas(rawValue)) as unknown;
   } catch {
     try {
       values[key] = parseInlineTable(rawValue);

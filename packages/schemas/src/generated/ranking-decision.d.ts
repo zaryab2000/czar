@@ -5,9 +5,9 @@
  */
 export interface RankingDecision {
   /**
-   * Schema version, major.minor; this file is 1.2 (SCR-160: unverified[].reason gains unrated; score is the Wilson lower bound of the rated share; features and badges per SCR-160 §9.3). 1.1: snapshot_anchor_tx may be null (SCR-137).
+   * Schema version, major.minor; this file is 1.3 (SCR-163 §6: unverified[].version_id, the probed version an unrated candidate was selected at). 1.2: SCR-160 (unverified[].reason unrated; score = Wilson lower bound). 1.1: snapshot_anchor_tx may be null (SCR-137).
    */
-  schemaVersion: "1.2";
+  schemaVersion: "1.3";
   /**
    * Query id.
    */
@@ -103,7 +103,7 @@ export interface RankingDecision {
      */
     score: number;
     /**
-     * Features (SCR-160 §9.3): good, bad, owners_rated, owners_bad, lower_bound, health_facts[], price_atomic.
+     * Features (SCR-160 §9.3): good, bad, owners_rated, owners_bad, lower_bound, health_facts[], price_atomic; incident (SCR-164 §3.13.1, when an incident is open): {incident_id, distinct_owners, negative_units, opened_at}; it records the incident overlay so the stored decision reproduces the final order.
      */
     features: {
       [k: string]: unknown;
@@ -145,6 +145,10 @@ export interface RankingDecision {
      * Service.
      */
     service_id: string;
+    /**
+     * The version this candidate was probed at in this query (SCR-163 §1); the expected version CZ-15 checks before paying (SCR-163 §6). Absent only when the query had no successful probe for it.
+     */
+    version_id?: string;
     /**
      * Reason: unrated (no rating record for the task class, SCR-160) or, for pre-SCR-160 rows, n_eff_below_min.
      */

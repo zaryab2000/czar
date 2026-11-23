@@ -1,5 +1,6 @@
 // Buyer side (02 §11.2, CZ-15): read the 402, validate, pick one offer, build the payload, read settlement.
 import { decodeBase64Json, encodeBase64Json, header, type HeaderBag } from "./codec.ts";
+import type { Config } from "@czar/config";
 import {
   sanitizeExtensions,
   sanitizeResource,
@@ -136,6 +137,8 @@ export interface OfferPolicy {
   /** The step's payee and alternates (its leaves). */
   readonly payees: readonly string[];
   readonly trustedPayees: readonly string[];
+  readonly config: Config;
+  readonly extensions402: SanitizedExtensions;
 }
 
 export type StepErrorCode = "unsupported-offer" | "price-or-payee-drift" | "flow-refused";
@@ -144,8 +147,28 @@ export type OfferChoice =
   | { readonly ok: true; readonly offer: PaymentRequirements }
   | { readonly ok: false; readonly code: StepErrorCode };
 
-const isGateway = (offer: PaymentRequirements) => offer.extra["name"] === GATEWAY_EXTRA_NAME;
 const lower = (s: string) => s.toLowerCase();
+
+/** Classify a probed offer once for selection and pay-time rail checks (SCR-187 §6). */
+export function classifyOffer(
+  offer: PaymentRequirements,
+  extensions402: SanitizedExtensions,
+  config: Config,
+): "vanilla" | "gateway" | "unsupported" {
+  if (
+    offer.extra["siwx"] === true ||
+    offer.extra["siwxOnly"] === true ||
+    extensions402.dropped.includes("sign-in-with-x")
+  )
+    return "unsupported";
+  if (offer.extra["name"] !== GATEWAY_EXTRA_NAME)
+    return offer.extra["paymentFlow"] === "batch-settlement" ? "unsupported" : "vanilla";
+  const contract = offer.extra["verifyingContract"];
+  return typeof contract === "string" &&
+    lower(contract) === lower(String(config.get("chain.gatewayWalletAddress")))
+    ? "gateway"
+    : "unsupported";
+}
 
 /** Steps 3–5 of 02 §11.2. */
 export function selectOffer(paymentRequired: PaymentRequired, policy: OfferPolicy): OfferChoice {
@@ -154,7 +177,8 @@ export function selectOffer(paymentRequired: PaymentRequired, policy: OfferPolic
       offer.scheme === "exact" &&
       offer.network === policy.network &&
       lower(offer.asset) === USDC_ADDRESS &&
-      (policy.rail === "gateway" ? isGateway(offer) : !isGateway(offer)),
+      classifyOffer(offer, policy.extensions402, policy.config) ===
+        (policy.rail === "gateway" ? "gateway" : "vanilla"),
   );
   const offer = usable[0];
   if (offer === undefined) return { ok: false, code: "unsupported-offer" };
@@ -163,7 +187,12 @@ export function selectOffer(paymentRequired: PaymentRequired, policy: OfferPolic
     return { ok: false, code: "price-or-payee-drift" };
   }
   const flow = offer.extra["paymentFlow"];
-  if (flow !== undefined && flow !== "authorization" && flow !== "escrow") {
+  if (
+    flow !== undefined &&
+    flow !== "authorization" &&
+    flow !== "escrow" &&
+    !(policy.rail === "gateway" && flow === "batch-settlement")
+  ) {
     const trusted =
       flow === "upfront" && policy.trustedPayees.map(lower).includes(lower(offer.payTo));
     if (!trusted) return { ok: false, code: "flow-refused" };

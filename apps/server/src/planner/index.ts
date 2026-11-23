@@ -1,3 +1,4 @@
+import { taskClassFor } from "#src/selection/task-class";
 import { loadConfig, type Config } from "@czar/config";
 import {
   buildTree,
@@ -9,7 +10,12 @@ import {
   taskSpecHash,
   type Hash32,
 } from "@czar/hashing";
-import { GATEWAY_EXTRA_NAME, USDC_ADDRESS, type PaymentRequirements } from "@czar/x402";
+import {
+  classifyOffer,
+  USDC_ADDRESS,
+  type PaymentRequirements,
+  type SanitizedExtensions,
+} from "@czar/x402";
 import { keccak256, stringToHex } from "viem";
 import { route, routingParamsFromConfig, type RouteDecision } from "#src/router/index";
 import { createSafeProber } from "#src/planner/probe";
@@ -17,6 +23,8 @@ import type { PlannerPorts, PlannerService } from "#src/planner/ports";
 import type { Plan, RankingDecision, Step, TaskSpec } from "@czar/schemas";
 import { validateSchema, validationErrors } from "@czar/schemas";
 import { ulid, type RandomSource } from "#src/http/ids";
+import { chooseWithLessons, type PersonalLesson } from "#src/social/lessons";
+import { incidentForSelection, type OpenIncident } from "#src/social/incidents";
 
 export interface PlannerRequest {
   readonly objectiveId: string;
@@ -37,6 +45,14 @@ export interface PlannerRequest {
 export interface PlannerDependencies {
   readonly config?: Config;
   readonly ports: Omit<PlannerPorts, "prober"> & Partial<Pick<PlannerPorts, "prober">>;
+  readonly social?: {
+    lessonsFor(userId: string, network: string, taskClass: string): Promise<PersonalLesson[]>;
+    openIncidentsFor(
+      network: string,
+      serviceIds: readonly string[],
+      taskClass: string,
+    ): Promise<OpenIncident[]>;
+  };
 }
 
 export interface PlannerBuild {
@@ -48,21 +64,25 @@ interface Candidate {
   readonly service: PlannerService;
   readonly offer?: import("@czar/x402").PaymentRequirements;
   readonly offers: readonly import("@czar/x402").PaymentRequirements[];
+  readonly extensions402?: SanitizedExtensions;
   readonly amount: bigint;
   readonly rank: number;
   readonly fromExploration: boolean;
   readonly unprobed?: boolean;
   readonly jobProvider?: boolean;
+  readonly incidentOpen?: boolean;
+  readonly lessons?: readonly PersonalLesson[];
 }
 
 interface PaidStepDraft {
   readonly kind: "paid";
   readonly candidate: Candidate;
-  readonly alternates: readonly Candidate[];
   readonly capability: string;
   readonly callInputs: NonNullable<Step["callInputs"]>;
   readonly template?: string;
   readonly oneStringKey?: string;
+  readonly inputDefaults?: PlannerService["inputDefaults"];
+  readonly inputMaxChars?: number;
 }
 
 type CollectedEntry = { readonly kind: "unpaid"; readonly step: Step } | PaidStepDraft;
@@ -94,7 +114,7 @@ export function createPlanner(dependencies: PlannerDependencies) {
   };
   return {
     async build(input: PlannerRequest): Promise<PlannerBuild | null> {
-      return buildPlan(input, config, ports);
+      return buildPlan(input, config, ports, dependencies.social);
     },
   };
 }
@@ -103,14 +123,39 @@ async function buildPlan(
   input: PlannerRequest,
   config: Config,
   ports: PlannerPorts,
+  social?: PlannerDependencies["social"],
 ): Promise<PlannerBuild | null> {
   const planId = ulid("pln_", input.now, input.random);
   const network = String(config.get("selection.paymentNetwork"));
   const category = categoryFor(input.capabilities[0] ?? "general", config);
   const categoryId = keccak256(stringToHex(category));
   const hasAgent = await ports.agentHosts.hasAgentHost(input.deviceId);
-  const collected = await collectSteps({ input, config, ports, network, hasAgent });
-  const { steps, leaves, droppedSteps } = collected;
+  const collected = await collectSteps({ input, config, ports, network, hasAgent, social });
+  const { leaves, droppedSteps } = collected;
+  const healthByStep = await Promise.all(
+    collected.steps.map(async (step) =>
+      step.serviceId
+        ? ((await ports.health?.openOwnerFacts(input.userId, network, step.serviceId)) ?? [])
+        : [],
+    ),
+  );
+  const steps = collected.steps.map((step, index) => {
+    if (!step.serviceId || !step.why) return step;
+    const health = healthByStep[index]?.length ?? 0;
+    const unrated = collected.unratedStepIndices.has(index);
+    const explanation = [
+      ...(unrated ? [" No ratings yet. Czar will ask before using it."] : []),
+      ...(health ? [" A supplier health fact also requires approval."] : []),
+    ].join("");
+    return { ...step, why: { ...step.why, summary: `${step.why.summary}${explanation}` } };
+  });
+  const approvalReasons: NonNullable<Plan["approvalReasons"]> = [];
+  if (collected.unratedStepIndices.size > 0) approvalReasons.push("unrated");
+  if (healthByStep.some((facts) => facts.length > 0)) approvalReasons.push("health-fact");
+  if (collected.hasExploration) approvalReasons.push("exploration-slot");
+  if (collected.incidentStepIndices.size > 0) approvalReasons.push("incident-open");
+  if (steps.some((step) => step.contextNotice === "contract-sent"))
+    approvalReasons.push("contract-sent");
   if (steps.length === 0 && droppedSteps.length === 0) return null;
   const hasPocket = steps.some((step) => step.kind === "gateway-nano");
   const pocket = hasPocket ? await ports.pocketKeys.createPocketKey(planId) : undefined;
@@ -131,7 +176,12 @@ async function buildPlan(
   );
   const expiresAt = expiry(input.now, collected.jobExpiresMs, config);
   const partial = {
-    schemaVersion: "1.3" as const,
+    schemaVersion:
+      collected.incidentStepIndices.size > 0 ||
+      approvalReasons.includes("contract-sent") ||
+      steps.some((step) => (step.why?.lessons?.length ?? 0) > 0)
+        ? ("1.4" as const)
+        : ("1.3" as const),
     planId,
     objectiveId: input.objectiveId,
     objectiveHash: input.objectiveHash,
@@ -151,6 +201,7 @@ async function buildPlan(
     createdAt: input.now.toISOString(),
     ...(droppedSteps.length ? { droppedSteps } : {}),
     taskSpec: input.taskSpec,
+    ...(approvalReasons.length ? { approvalReasons } : {}),
   };
   const hash = recomputePlanHash({ ...partial, planHash: `0x${"0".repeat(64)}` as Hash32 });
   const plan = { ...partial, planHash: hash };
@@ -162,7 +213,7 @@ async function buildPlan(
     approvalNeeded:
       BigInt(plan.cap) > remaining ||
       (Boolean(config.get("planner.newPayeeNeedsApproval")) && leaves.length > 0) ||
-      collected.hasExploration,
+      approvalReasons.length > 0,
   };
 }
 
@@ -172,7 +223,33 @@ interface StepCollection {
   readonly droppedSteps: NonNullable<Plan["droppedSteps"]>;
   readonly rankingIds: string[];
   readonly hasExploration: boolean;
+  readonly unratedStepIndices: ReadonlySet<number>;
+  readonly incidentStepIndices: ReadonlySet<number>;
   readonly jobExpiresMs: number;
+}
+
+/**
+ * The paid-call input each capability's step renders, by capability. A capability with no entry here
+ * has no template: its step is planned only for a job provider, or dropped (`no-template`).
+ */
+const CALL_TEMPLATES: Readonly<Record<string, string>> = {
+  "web-search": "{{subject}} {{topic}} {{field}}",
+  "page-extract": "{{dep.0.url}}",
+  "code-review": "{{contract}}",
+};
+
+/** The capability whose step sends the owner's contract source to the merchant (SCR-182 §5). */
+const CONTRACT_SENT_CAPABILITY = "code-review";
+
+const hasCallTemplate = (capability: string): boolean => Object.hasOwn(CALL_TEMPLATES, capability);
+
+/** `planner.inputMaxChars` for a capability: its own entry, else `default`. */
+function inputMaxCharsFor(capability: string, config: Config): number {
+  const limits = config.get("planner.inputMaxChars") as Record<string, number>;
+  const limit = limits[capability] ?? limits["default"];
+  if (typeof limit !== "number" || !Number.isSafeInteger(limit) || limit < 1)
+    throw new Error(`planner.inputMaxChars has no usable entry for ${capability} or default`);
+  return limit;
 }
 
 async function collectSteps(args: {
@@ -181,8 +258,9 @@ async function collectSteps(args: {
   readonly ports: PlannerPorts;
   readonly network: string;
   readonly hasAgent: boolean;
+  readonly social?: PlannerDependencies["social"];
 }): Promise<StepCollection> {
-  const { input, config, ports, network, hasAgent } = args;
+  const { input, config, ports, network, hasAgent, social } = args;
   const entries: CollectedEntry[] = [];
   const droppedSteps: NonNullable<Plan["droppedSteps"]> = [];
   const rankingIds: string[] = [];
@@ -204,27 +282,21 @@ async function collectSteps(args: {
       droppedSteps.push({ capability, reason: unpaid.drop });
       continue;
     }
-    const result = await selectCandidate(capability, input, config, ports, network);
+    const result = await selectCandidate(capability, input, config, ports, network, social);
     rankingIds.push(result.decision.query_id);
     if (!result.selected) {
-      if (capability !== "web-search" && capability !== "page-extract")
-        droppedSteps.push({ capability, reason: "no-template" });
+      if (!hasCallTemplate(capability)) droppedSteps.push({ capability, reason: "no-template" });
       continue;
     }
-    if (
-      !result.selected.jobProvider &&
-      capability !== "web-search" &&
-      capability !== "page-extract"
-    ) {
+    if (!result.selected.jobProvider && !hasCallTemplate(capability)) {
       droppedSteps.push({ capability, reason: "no-template" });
       continue;
     }
-    const prepared = preparePaidStep(result.selected, capability, input.taskSpec);
+    const prepared = preparePaidStep(result.selected, capability, input.taskSpec, config);
     if (!prepared) continue;
     entries.push({
       kind: "paid",
       candidate: result.selected,
-      alternates: result.alternates,
       capability,
       ...prepared,
     });
@@ -252,11 +324,23 @@ async function completeCollectedSteps(args: {
   readonly ports: PlannerPorts;
   readonly network: string;
   readonly gatewayVolumeAtomic: bigint;
-}): Promise<Pick<StepCollection, "steps" | "leaves" | "hasExploration" | "jobExpiresMs">> {
+}): Promise<
+  Pick<
+    StepCollection,
+    | "steps"
+    | "leaves"
+    | "hasExploration"
+    | "unratedStepIndices"
+    | "incidentStepIndices"
+    | "jobExpiresMs"
+  >
+> {
   const { entries, input, config, ports, network, gatewayVolumeAtomic } = args;
   const steps: Step[] = [];
   const leaves: Plan["payeeLeaves"] = [];
   let hasExploration = false;
+  const unratedStepIndices = new Set<number>();
+  const incidentStepIndices = new Set<number>();
   let jobExpiresMs = input.now.getTime();
   for (const entry of entries) {
     if (entry.kind === "unpaid") {
@@ -275,35 +359,45 @@ async function completeCollectedSteps(args: {
     });
     if (!planStep) continue;
     steps.push(planStep.step);
+    if (entry.candidate.fromExploration) unratedStepIndices.add(planStep.step.stepIndex);
+    if (entry.candidate.incidentOpen) incidentStepIndices.add(planStep.step.stepIndex);
     leaves.push(...planStep.leaves);
     hasExploration ||= entry.candidate.fromExploration;
     if (planStep.jobExpiresMs) jobExpiresMs = Math.max(jobExpiresMs, planStep.jobExpiresMs);
   }
-  return { steps, leaves, hasExploration, jobExpiresMs };
+  return { steps, leaves, hasExploration, unratedStepIndices, incidentStepIndices, jobExpiresMs };
 }
 
 function preparePaidStep(
   candidate: Candidate,
   capability: string,
   taskSpec: TaskSpec,
-): Omit<PaidStepDraft, "kind" | "candidate" | "alternates" | "capability"> | null {
+  config: Config,
+): Omit<PaidStepDraft, "kind" | "candidate" | "capability"> | null {
   const fields = candidate.service.extensions.czar.card["inputFields"];
-  const oneStringKey = getSingleStringInput(fields);
-  const template =
-    capability === "web-search"
-      ? "{{subject}} {{topic}} {{field}}"
-      : capability === "page-extract"
-        ? "{{dep.0.url}}"
-        : null;
+  const inputDefaults = candidate.service.inputDefaults;
+  const oneStringKey = inputDefaults
+    ? getCircleFreeTextInput(fields, inputDefaults)
+    : getSingleStringInput(fields);
+  const template = CALL_TEMPLATES[capability];
   const jobCandidate = candidate.jobProvider === true;
   if ((!template || !oneStringKey) && !jobCandidate) return null;
+  const inputMaxChars = Math.min(
+    inputMaxCharsFor(capability, config),
+    candidate.service.inputMaxChars ?? Number.POSITIVE_INFINITY,
+  );
   const callInputs =
     template && oneStringKey
-      ? renderCalls(template, oneStringKey, taskSpec)
+      ? renderCalls(template, oneStringKey, taskSpec, inputMaxChars).map((call) => ({
+          ...call,
+          input: { ...call.input, ...inputDefaults },
+        }))
       : renderJobCalls(taskSpec);
   return {
     callInputs,
-    ...(template && oneStringKey ? { template, oneStringKey } : {}),
+    ...(template && oneStringKey
+      ? { template, oneStringKey, inputMaxChars, ...(inputDefaults ? { inputDefaults } : {}) }
+      : {}),
   };
 }
 
@@ -315,7 +409,8 @@ function computeGatewayVolume(entries: readonly CollectedEntry[], config: Config
     const gatewayOffer =
       !job && !entry.candidate.unprobed
         ? entry.candidate.offers.find(
-            (offer) => offer.extra["name"] === GATEWAY_EXTRA_NAME && isUsablePlannerOffer(offer),
+            (offer) =>
+              plannerOfferClass(offer, entry.candidate.extensions402, config) === "gateway",
           )
         : undefined;
     return {
@@ -340,6 +435,47 @@ function getSingleStringInput(fields: unknown): string | null {
   )
     return null;
   return field.name;
+}
+
+function getCircleFreeTextInput(
+  fields: unknown,
+  fixedInputs: Readonly<Record<string, string | number | boolean>>,
+): string | null {
+  if (!Array.isArray(fields) || fields.length > 20) return null;
+  const free = fields.filter(
+    (field) =>
+      typeof field === "object" &&
+      field !== null &&
+      field.type === "string" &&
+      typeof field.name === "string" &&
+      !Object.hasOwn(fixedInputs, field.name),
+  );
+  return free.length === 1 ? free[0].name : null;
+}
+
+function buildInputKeys(
+  fields: unknown,
+  freeTextKey: string,
+  fixedInputs: PlannerService["inputDefaults"],
+  maxChars: number,
+): NonNullable<NonNullable<Step["inputTemplate"]>["inputKeys"]> {
+  if (!fixedInputs || !Array.isArray(fields))
+    return [{ name: freeTextKey, type: "string", maxLength: maxChars }];
+  return fields.map((field: { name: string; type: string }) => {
+    const fixed = fixedInputs[field.name];
+    return {
+      name: field.name,
+      type:
+        field.type === "integer"
+          ? ("number" as const)
+          : (field.type as "string" | "number" | "boolean"),
+      ...(field.name === freeTextKey
+        ? { maxLength: maxChars }
+        : typeof fixed === "string"
+          ? { maxLength: Math.max(1, fixed.length) }
+          : {}),
+    };
+  });
 }
 
 async function unpaidStep(args: {
@@ -384,7 +520,8 @@ async function selectCandidate(
   config: Config,
   ports: PlannerPorts,
   network: string,
-): Promise<{ decision: RankingDecision; selected?: Candidate; alternates: Candidate[] }> {
+  social?: PlannerDependencies["social"],
+): Promise<{ decision: RankingDecision; selected?: Candidate }> {
   const defaultMax = BigInt(Number(config.get("planner.defaultMaxUnitAtomic")));
   const max =
     input.constraints?.maxTotal === undefined
@@ -394,6 +531,7 @@ async function selectCandidate(
           defaultMax,
         );
   const decision = await ports.ranking.rank({
+    userId: input.userId,
     taskClass: taskClassFor(capability, config),
     capability,
     taskSpec: {
@@ -418,18 +556,58 @@ async function selectCandidate(
     ports,
     network,
     max,
+    config,
     ...(exploration ? { exploration } : {}),
   });
   const probed =
     candidates.length === 0 && failures.length > 0 && failures.every((value) => value === "timeout")
-      ? await indexFallback({ ranked, input, ports, network, max })
+      ? await indexFallback({
+          ranked,
+          input,
+          ports,
+          network,
+          max,
+          config,
+          ...(exploration ? { exploration } : {}),
+        })
       : candidates;
   probed.sort((a, b) => a.rank - b.rank);
-  const selected = probed[0];
+  const survivors = probed.filter((candidate) => !candidate.fromExploration);
+  const taskClass = taskClassFor(capability, config);
+  const lessons =
+    survivors.length && social ? await social.lessonsFor(input.userId, network, taskClass) : [];
+  const rankedSurvivors = survivors.flatMap((candidate) => {
+    const row = decision.ranked.find((item) => item.service_id === candidate.service.serviceId);
+    return row ? [row] : [];
+  });
+  const choice =
+    rankedSurvivors.length && lessons.length
+      ? chooseWithLessons(
+          rankedSurvivors,
+          lessons,
+          Number(config.get("social.lessonMaxScoreDelta")),
+        )
+      : null;
+  const chosen = choice
+    ? survivors.find((candidate) => candidate.service.serviceId === choice.selected.service_id)
+    : probed[0];
+  const incident =
+    chosen && social
+      ? await social.openIncidentsFor(network, [chosen.service.serviceId], taskClass)
+      : [];
+  const selected = chosen && {
+    ...chosen,
+    incidentOpen:
+      Boolean(incidentForSelection(decision, chosen.service.serviceId, incident)) ||
+      decision.ranked.some(
+        (row) =>
+          row.service_id === chosen.service.serviceId && row.badges.includes("incident-open"),
+      ),
+    ...(choice?.used.length ? { lessons: choice.used } : {}),
+  };
   return {
     decision,
     ...(selected ? { selected } : {}),
-    alternates: selected ? probed.slice(1) : [],
   };
 }
 
@@ -441,13 +619,15 @@ async function probeRanked(args: {
   readonly ports: PlannerPorts;
   readonly network: string;
   readonly max: bigint;
+  readonly config: Config;
   readonly exploration?: string;
 }): Promise<{ candidates: Candidate[]; failures: string[] }> {
-  const { ranked, input, ports, network, max, exploration } = args;
+  const { ranked, input, ports, network, max, config, exploration } = args;
   const candidates: Candidate[] = [];
   const failures: string[] = [];
   for (const [rank, row] of ranked.entries()) {
     if (input.excludedServices?.has(row.serviceId)) continue;
+    if (await ports.health?.isInjectionBlocked(network, row.serviceId)) continue;
     const service = await ports.directory.get(row.serviceId);
     if (
       !service ||
@@ -483,7 +663,9 @@ async function probeRanked(args: {
       continue;
     }
     const offers = probe.offers.filter((offer) => offer.network === network);
-    const offer = offers.find(isUsablePlannerOffer);
+    const offer = offers.find(
+      (item) => plannerOfferClass(item, probe.extensions402, config) !== "unsupported",
+    );
     if (!offer) continue;
     const amount = BigInt(offer.amount);
     if (
@@ -496,6 +678,7 @@ async function probeRanked(args: {
       service,
       offer,
       offers,
+      ...(probe.extensions402 ? { extensions402: probe.extensions402 } : {}),
       amount,
       rank,
       fromExploration: row.serviceId === exploration,
@@ -510,14 +693,18 @@ async function indexFallback(args: {
   readonly ports: PlannerPorts;
   readonly network: string;
   readonly max: bigint;
+  readonly config: Config;
+  readonly exploration?: string;
 }): Promise<Candidate[]> {
-  const { ranked, input, ports, network, max } = args;
+  const { ranked, input, ports, network, max, config, exploration } = args;
   const candidates: Candidate[] = [];
   for (const [rank, row] of ranked.entries()) {
     if (input.excludedServices?.has(row.serviceId)) continue;
+    if (await ports.health?.isInjectionBlocked(network, row.serviceId)) continue;
     const service = await ports.directory.get(row.serviceId);
     const offer = service?.accepts.find(
-      (item) => item.network === network && isUsablePlannerOffer(item),
+      (item) =>
+        item.network === network && plannerOfferClass(item, undefined, config) !== "unsupported",
     );
     if (!service || service.serviceId !== row.serviceId || !offer || BigInt(offer.amount) > max)
       continue;
@@ -527,7 +714,7 @@ async function indexFallback(args: {
       offers: [offer],
       amount: BigInt(offer.amount),
       rank,
-      fromExploration: false,
+      fromExploration: row.serviceId === exploration,
       unprobed: true,
     });
   }
@@ -536,7 +723,6 @@ async function indexFallback(args: {
 
 async function makePaidStep(args: {
   readonly candidate: Candidate;
-  readonly alternates: readonly Candidate[];
   readonly capability: string;
   readonly index: number;
   readonly input: PlannerRequest;
@@ -547,10 +733,11 @@ async function makePaidStep(args: {
   readonly callInputs: NonNullable<Step["callInputs"]>;
   readonly template?: string;
   readonly oneStringKey?: string;
+  readonly inputDefaults?: PlannerService["inputDefaults"];
+  readonly inputMaxChars?: number;
 }): Promise<{ step: Step; leaves: Plan["payeeLeaves"]; jobExpiresMs?: number } | null> {
   const {
     candidate,
-    alternates,
     capability,
     index,
     input,
@@ -561,9 +748,11 @@ async function makePaidStep(args: {
     callInputs,
     template,
     oneStringKey,
+    inputDefaults,
+    inputMaxChars,
   } = args;
   const taskClass = taskClassFor(capability, config);
-  const profile = ports.profiles.profileIdFor(taskClass);
+  const profile = ports.profiles.profileIdFor(taskClass, candidate.service);
   const subjects = input.taskSpec.subjects;
   const expectedCalls = callInputs.length;
   const decision = routeCandidate({
@@ -578,9 +767,9 @@ async function makePaidStep(args: {
     gatewayVolumeAtomic,
   });
   if (!decision) return null;
-  const details = paymentDetails({ decision, candidate, alternates, expectedCalls, index, config });
+  const details = paymentDetails({ decision, candidate, expectedCalls, index, config });
   if (!details) return null;
-  const { job, baseAmount, stepCap, paidTo, pays, leaves } = details;
+  const { job, baseAmount, stepCap, paidTo, leaves } = details;
   const step: Step = {
     stepIndex: index,
     stepId: stepIdentifier(input, index),
@@ -589,7 +778,7 @@ async function makePaidStep(args: {
     resource: candidate.service.resource,
     kind: decision.kind,
     payee: paidTo,
-    ...(pays.length > 1 ? { alternates: pays.slice(1) } : {}),
+    alternates: [],
     unitAmount: baseAmount.toString(),
     expectedCalls,
     stepCap: stepCap.toString(),
@@ -601,13 +790,23 @@ async function makePaidStep(args: {
       ? {
           inputTemplate: {
             [oneStringKey]: template,
-            inputKeys: [{ name: oneStringKey, type: "string" as const, maxLength: 1000 }],
+            ...inputDefaults,
+            inputKeys: buildInputKeys(
+              candidate.service.extensions.czar.card["inputFields"],
+              oneStringKey,
+              inputDefaults,
+              inputMaxChars ?? inputMaxCharsFor(capability, config),
+            ),
           },
         }
       : {}),
     fanOut: subjects.length ? "subjects" : "none",
     callInputs,
-    ...(job ? { contextNotice: "task-description-only" as const } : {}),
+    ...(job
+      ? { contextNotice: "task-description-only" as const }
+      : capability === CONTRACT_SENT_CAPABILITY && template
+        ? { contextNotice: "contract-sent" as const }
+        : {}),
     why: {
       fills: matchedFields(
         input.taskSpec.fields,
@@ -615,6 +814,17 @@ async function makePaidStep(args: {
       ),
       summary: stepWhy(candidate.service.extensions.czar.evidence, expectedCalls, baseAmount),
       alternativesLost: [],
+      ...(candidate.lessons?.length
+        ? {
+            lessons: candidate.lessons.map((lesson) => ({
+              lessonId: lesson.lessonId,
+              serviceId: lesson.serviceId,
+              handle: lesson.handle,
+              proposition: lesson.proposition,
+              taskClass: lesson.taskClass,
+            })),
+          }
+        : {}),
     },
   };
   const jobExpiresMs = job ? jobExpiry(candidate.service, input.now, config) : undefined;
@@ -656,6 +866,8 @@ function routeCandidate(args: {
       acceptanceProfileId: profile,
     },
     offers: candidate.offers,
+    config,
+    ...(candidate.extensions402 ? { extensions402: candidate.extensions402 } : {}),
     planNetwork: network,
     unitAmount: candidate.amount,
     expectedCalls,
@@ -671,7 +883,6 @@ function routeCandidate(args: {
 function paymentDetails(args: {
   readonly decision: RouteDecision;
   readonly candidate: Candidate;
-  readonly alternates: readonly Candidate[];
   readonly expectedCalls: number;
   readonly index: number;
   readonly config: Config;
@@ -680,16 +891,17 @@ function paymentDetails(args: {
   readonly baseAmount: bigint;
   readonly stepCap: bigint;
   readonly paidTo: string;
-  readonly pays: string[];
   readonly leaves: Plan["payeeLeaves"];
 } | null {
-  const { decision, candidate, alternates, expectedCalls, index, config } = args;
+  const { decision, candidate, expectedCalls, index, config } = args;
   const job = decision.kind === "erc8183-job";
   const listedPrice = candidate.service.listedPrice;
   if (job && listedPrice === undefined) return null;
   const offer =
     decision.kind === "gateway-nano"
-      ? candidate.offers.find((item) => item.extra["name"] === GATEWAY_EXTRA_NAME)
+      ? candidate.offers.find(
+          (item) => plannerOfferClass(item, candidate.extensions402, config) === "gateway",
+        )
       : candidate.offer;
   if (!job && !offer) return null;
   const baseAmount = job ? BigInt(listedPrice as string) : BigInt(offer!.amount);
@@ -704,25 +916,9 @@ function paymentDetails(args: {
   if (stepCap < baseAmount * BigInt(expectedCalls)) return null;
   const paidTo = job ? candidate.service.providerAddress : offer!.payTo;
   if (!paidTo) return null;
-  const matchingAlternates = alternates
-    .filter(
-      (row) =>
-        (row.jobProvider ?? false) === job &&
-        (job || row.offer?.extra["name"] === offer?.extra["name"]) &&
-        row.amount * BigInt(expectedCalls) <= stepCap,
-    )
-    .slice(0, Number(config.get("planner.maxAlternates")));
-  const pays = [
-    paidTo,
-    ...matchingAlternates
-      .map((row) => (job ? row.service.providerAddress : row.offer?.payTo))
-      .filter((value): value is string => Boolean(value)),
-  ];
   const kind = job ? PAYEE_KIND.ERC8183_PROVIDER : PAYEE_KIND.X402_PAY_TO;
-  const leaves = pays.map(
-    (payee) => ({ payee, kind, stepIndex: index, stepCap: stepCap.toString() }) as const,
-  );
-  return { job, baseAmount, stepCap, paidTo, pays, leaves };
+  const leaves = [{ payee: paidTo, kind, stepIndex: index, stepCap: stepCap.toString() }];
+  return { job, baseAmount, stepCap, paidTo, leaves };
 }
 
 function jobExpiry(service: PlannerService, now: Date, config: Config): number {
@@ -734,14 +930,25 @@ function jobExpiry(service: PlannerService, now: Date, config: Config): number {
   );
 }
 
+/** SCR-182 §5: the contract is the TaskSpec context when present, else the first subject's label. */
+function contractFor(task: TaskSpec): string {
+  return task.context !== undefined && task.context !== ""
+    ? task.context
+    : (task.subjects[0]?.label ?? "");
+}
+
 function renderCalls(
   template: string,
   key: string,
   task: TaskSpec,
+  maxChars: number,
 ): NonNullable<Step["callInputs"]> {
   const subjects = task.subjects.length ? task.subjects : [{ label: "" }];
   return subjects.map((subject, subjectIndex) => {
     const input = template
+      // A replacer function, not a string: a contract may contain `$&` or `$1`, which a replacement
+      // string would expand, so the text sent would no longer be the text the owner approved.
+      .replaceAll("{{contract}}", () => contractFor(task))
       .replaceAll("{{subject}}", subject.label)
       .replaceAll("{{topic}}", task.topic)
       .replaceAll("{{field}}", task.fields[0] ?? "")
@@ -749,7 +956,7 @@ function renderCalls(
     return {
       callIndex: subjectIndex,
       ...(task.subjects.length ? { subjectIndex } : {}),
-      input: { [key]: input.trim().slice(0, 1000) },
+      input: { [key]: input.trim().slice(0, maxChars) },
     };
   });
 }
@@ -791,11 +998,6 @@ function categoryFor(capability: string, config: Config): string {
   );
 }
 
-function taskClassFor(capability: string, config: Config): string {
-  const mapping = config.get("planner.capabilityToTaskClass") as Record<string, string>;
-  return mapping[capability] ?? capability;
-}
-
 function matchedFields(fields: readonly string[], outputs: unknown): string[] {
   if (!Array.isArray(outputs)) return [];
   const available = new Set(
@@ -811,14 +1013,14 @@ function matchedFields(fields: readonly string[], outputs: unknown): string[] {
   return fields.filter((field) => available.has(field.trim().toLowerCase()));
 }
 
-function isUsablePlannerOffer(offer: PaymentRequirements): boolean {
-  return (
-    offer.scheme === "exact" &&
-    offer.asset.toLowerCase() === USDC_ADDRESS.toLowerCase() &&
-    offer.extra["siwx"] !== true &&
-    offer.extra["siwxOnly"] !== true &&
-    offer.extra["paymentFlow"] !== "batch-settlement"
-  );
+function plannerOfferClass(
+  offer: PaymentRequirements,
+  extensions402: SanitizedExtensions | undefined,
+  config: Config,
+): "vanilla" | "gateway" | "unsupported" {
+  if (offer.scheme !== "exact" || offer.asset.toLowerCase() !== USDC_ADDRESS.toLowerCase())
+    return "unsupported";
+  return classifyOffer(offer, extensions402 ?? { dropped: [] }, config);
 }
 
 function stepWhy(

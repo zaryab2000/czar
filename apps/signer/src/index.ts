@@ -1,5 +1,8 @@
 export * from "./abi.ts";
 export type { BackendName, MerchantServiceId, SignerBackend } from "./backend.ts";
+export * from "./file-identity.ts";
+export * from "./gcp-auth.ts";
+export * from "./gcp-kms-backend.ts";
 export * from "./kinds.ts";
 export * from "./local-backend.ts";
 export * from "./passphrase.ts";
@@ -14,8 +17,9 @@ export {
   SELLER_PROOF_LIFETIME_SEC,
   usdcPaysGas,
 } from "./policy.ts";
-export type { Decision, PolicyContext, PurposeIds, SignerNetwork } from "./policy.ts";
+export type { Decision, PolicyContext, PurposeIds, SignerNetwork, SigningKey } from "./policy.ts";
 export type * from "./projection.ts";
+export type { CallSpendRecord, NanoSpendRecord, SpendRecord } from "./pending.ts";
 export { coerceArgs, parseRequest, SHAPES, ShapeError } from "./requests.ts";
 export * from "./service.ts";
 export * from "./socket.ts";

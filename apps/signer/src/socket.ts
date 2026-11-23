@@ -1,5 +1,5 @@
 import { createHash, timingSafeEqual } from "node:crypto";
-import { chmod, lstat, mkdir, unlink } from "node:fs/promises";
+import { chmod, chown, lstat, mkdir, unlink } from "node:fs/promises";
 import { connect, createServer, type Server, type Socket } from "node:net";
 import { dirname, resolve } from "node:path";
 import { loadConfig } from "@czar/config";
@@ -10,8 +10,15 @@ import type { KeychainOpen } from "./passphrase.ts";
 import { expandHome } from "./local-backend.ts";
 
 const SOCKET_MODE = 0o600;
+const DIRECTORY_MODE = 0o700;
+/**
+ * With `signer.socketGroupGid` set (SCR-170 §4) the socket's group may open it, so clients running as
+ * another UID can connect. The owner checks still require the signer's own UID.
+ */
+const GROUP_SOCKET_MODE = 0o660;
+const GROUP_DIRECTORY_MODE = 0o750;
 const MAX_LINE_BYTES = 1_048_576;
-const SOCKET_SERVICES = ["server", "merchants", "relayer-jobs"] as const;
+export const SOCKET_SERVICES = ["server", "merchants", "relayer-jobs"] as const;
 export type SignerService = (typeof SOCKET_SERVICES)[number];
 
 export interface SignerSocketIdentity {
@@ -50,14 +57,20 @@ export interface SignerSocketOptions {
   readonly audit: AuditSink;
   readonly identity: SignerSocketIdentity;
   readonly allowedCallers: Readonly<Record<string, readonly string[]>>;
+  /**
+   * `signer.socketGroupGid` (SCR-170 §4). Unset keeps today's owner-only socket: folder 0700, socket
+   * 0600. Set makes the folder 0750 and the socket 0660, group-owned by that GID.
+   */
+  readonly socketGroupGid?: number;
 }
 
 export async function startSignerSocket(
   options: SignerSocketOptions,
 ): Promise<() => Promise<void>> {
   const socketPath = resolve(expandHome(options.socketPath));
+  const gid = options.socketGroupGid;
   await options.identity.load?.();
-  await ensurePrivateSocketDirectory(dirname(socketPath));
+  await ensurePrivateSocketDirectory(dirname(socketPath), gid);
   await clearOwnedSocket(socketPath);
   const clients = new Set<Socket>();
   const server = createServer((socket) => {
@@ -67,8 +80,13 @@ export async function startSignerSocket(
   });
   await listen(server, socketPath);
   try {
-    await chmod(socketPath, SOCKET_MODE);
-    await verifyOwnedSocket(socketPath);
+    if (gid === undefined) {
+      await chmod(socketPath, SOCKET_MODE);
+    } else {
+      await chown(socketPath, ownUid(), gid);
+      await chmod(socketPath, GROUP_SOCKET_MODE);
+    }
+    await verifyOwnedSocket(socketPath, gid);
   } catch (error) {
     await closeServer(server);
     await unlink(socketPath).catch(ignoreMissingSocket);
@@ -87,6 +105,8 @@ export interface SignerClientOptions {
   readonly identity?: SignerSocketIdentity;
   readonly keychainService?: string;
   readonly keychainOpen?: KeychainOpen;
+  /** `signer.socketGroupGid` when the signer runs as another UID (SCR-170 §4). */
+  readonly socketGroupGid?: number;
 }
 
 export interface SignerClient {
@@ -105,30 +125,43 @@ export async function createSignerClient(options: SignerClientOptions): Promise<
   const token = await identity.tokenFor(options.service);
   if (token === undefined) throw new Error(`unknown signer client service ${options.service}`);
   const socketPath = resolve(expandHome(options.socketPath));
+  const gid = options.socketGroupGid;
   return {
     sign: (caller, request) =>
-      callSocket(socketPath, {
-        service: options.service,
-        token,
-        caller,
-        method: "sign",
-        request,
-      }),
+      callSocket(
+        socketPath,
+        {
+          service: options.service,
+          token,
+          caller,
+          method: "sign",
+          request,
+        },
+        gid,
+      ),
     createPocketKey: (caller) =>
-      callSocket(socketPath, {
-        service: options.service,
-        token,
-        caller,
-        method: "createPocketKey",
-      }),
+      callSocket(
+        socketPath,
+        {
+          service: options.service,
+          token,
+          caller,
+          method: "createPocketKey",
+        },
+        gid,
+      ),
     keyAddress: (caller, keyRef) =>
-      callSocket(socketPath, {
-        service: options.service,
-        token,
-        caller,
-        method: "keyAddress",
-        keyRef,
-      }),
+      callSocket(
+        socketPath,
+        {
+          service: options.service,
+          token,
+          caller,
+          method: "keyAddress",
+          keyRef,
+        },
+        gid,
+      ),
   };
 }
 
@@ -233,8 +266,9 @@ function sameToken(expected: string, supplied: string): boolean {
 async function callSocket<T extends SignResult | Address>(
   socketPath: string,
   request: SocketRequest,
+  socketGroupGid?: number,
 ): Promise<T> {
-  await verifyOwnedSocket(socketPath);
+  await verifyReachableSocket(socketPath, socketGroupGid);
   const response = await new Promise<SocketResponse>((resolveResponse, reject) => {
     const socket = connect(socketPath);
     let buffer = "";
@@ -267,22 +301,52 @@ async function clearOwnedSocket(path: string): Promise<void> {
   }
 }
 
-async function ensurePrivateSocketDirectory(path: string): Promise<void> {
-  await mkdir(path, { recursive: true, mode: 0o700 });
+/** The signer's own UID; the group option is POSIX-only. */
+function ownUid(): number {
+  const uid = process.getuid?.();
+  if (uid === undefined)
+    throw new Error("signer.socketGroupGid needs a platform with user and group ids");
+  return uid;
+}
+
+async function ensurePrivateSocketDirectory(path: string, gid?: number): Promise<void> {
+  const mode = gid === undefined ? DIRECTORY_MODE : GROUP_DIRECTORY_MODE;
+  await mkdir(path, { recursive: true, mode });
+  if (gid !== undefined) await chown(path, ownUid(), gid);
   const directory = await lstat(path);
   if (!directory.isDirectory() || directory.uid !== process.getuid?.())
     throw new Error("signer socket directory must be a user-owned directory");
-  await chmod(path, 0o700);
+  if (gid !== undefined && directory.gid !== gid)
+    throw new Error("signer socket directory must be owned by signer.socketGroupGid");
+  await chmod(path, mode);
 }
 
-async function verifyOwnedSocket(path: string): Promise<void> {
+/** The signer's own check: it owns the socket, and with a group it is that group's, mode 0660. */
+async function verifyOwnedSocket(path: string, gid?: number): Promise<void> {
   const socket = await lstat(path);
   if (
     !socket.isSocket() ||
     socket.uid !== process.getuid?.() ||
-    (socket.mode & 0o777) !== SOCKET_MODE
+    (socket.mode & 0o777) !== (gid === undefined ? SOCKET_MODE : GROUP_SOCKET_MODE) ||
+    (gid !== undefined && socket.gid !== gid)
   )
-    throw new Error("signer socket must be a user-owned Unix socket with mode 0600");
+    throw new Error(
+      gid === undefined
+        ? "signer socket must be a user-owned Unix socket with mode 0600"
+        : "signer socket must be a user-owned Unix socket with mode 0660 and the configured group",
+    );
+}
+
+/**
+ * A client's check. Without a group it is today's: the socket is the caller's own, mode 0600. With one
+ * the signer runs as another UID, which the client cannot know, so the check is the socket's group and
+ * mode 0660 — file access alone grants nothing, because the per-service token is still required.
+ */
+async function verifyReachableSocket(path: string, gid?: number): Promise<void> {
+  if (gid === undefined) return verifyOwnedSocket(path);
+  const socket = await lstat(path);
+  if (!socket.isSocket() || socket.gid !== gid || (socket.mode & 0o777) !== GROUP_SOCKET_MODE)
+    throw new Error("signer socket must be a Unix socket with mode 0660 and the configured group");
 }
 
 async function probeOrRemoveStaleSocket(path: string): Promise<void> {

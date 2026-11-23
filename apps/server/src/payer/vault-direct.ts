@@ -1,3 +1,5 @@
+import { AmbiguousTransferError } from "#src/evidence/indexer-settlement";
+import { taskClassFor } from "#src/selection/task-class";
 import type { Config } from "@czar/config";
 import {
   derivedNonce,
@@ -8,12 +10,18 @@ import {
   slRequestCommit,
   slResponseCommit,
   verifyProof,
+  dedupKey,
+  obsId,
+  paymentRefHash,
+  NO_RESPONSE_COMMIT,
+  serviceVersionId,
   type Hash32,
 } from "@czar/hashing";
 import {
   validateSchema,
   type PaymentRef,
   type Plan,
+  type RankingDecision,
   type Step,
   type StepResult,
 } from "@czar/schemas";
@@ -23,10 +31,12 @@ import {
   encodePaymentSignature,
   readPaymentRequired,
   readSettlement,
+  SafeFetchError,
   selectOffer,
   type PaymentPayload,
   type PaymentRequired,
   type PaymentRequirements,
+  type SafeFetchOutcome,
 } from "@czar/x402";
 import type { SafeFetch, SafeFetchOptions, SafeFetchResponse } from "@czar/x402";
 import type { Pool } from "pg";
@@ -36,6 +46,7 @@ import {
   acquireExecutorLease,
   appendExecutionPhase,
   getExecutionTrace,
+  markStepDoneKeepingResults,
   markStepDoneWithResults,
   markStepFailed,
   markStepHandedOff,
@@ -51,6 +62,13 @@ import {
   type SavedTransactionChain,
 } from "#src/payer/saved-transaction";
 import { MAX_AUTHORIZATIONS_PER_RESERVATION } from "#src/router/index";
+import {
+  fillResponse,
+  insertAtSign,
+  markReleased,
+  markSettled,
+  observationOwner,
+} from "#src/evidence/observations";
 
 export const FINALIZE_CHUNK = 32;
 /** The vault's `MIN_RESERVATION_TTL` (`CzarConstants.sol`): `validBefore ≥ block.timestamp + this`. */
@@ -66,6 +84,10 @@ const BAD_TTL = "BadTtl";
  */
 const NEW_ATTEMPTS_AFTER_BAD_TTL = 1;
 const RESERVE_FAILED = "reserve-failed";
+/** SCR-163 §5–§6: the supplier's live version differs within a step, from its settled calls or from selection. */
+const SERVICE_VERSION_DRIFT = "service-version-drift";
+const VERSION_ID = /^ver_[0-9a-f]{32}$/;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** SCR-159 §2: the outcome a saved transaction's status-0 receipt is recorded with, and the reserve's message. */
 const REVERTED = "reverted";
 /** Cross-cutting §5.2 `StepError` codes for a call, or a step, without an accepted paid result (SCR-159 §3). */
@@ -137,6 +159,10 @@ export interface VaultDirectDependencies {
   readonly safeFetch: SafeFetch;
   readonly now: () => Date;
   readonly boundary: (input: BoundaryInput) => Promise<unknown>;
+  readonly noResponseBoundary?: (input: NoResponseBoundaryInput) => Promise<unknown>;
+  readonly findExactTransferTx?: (
+    payment: Extract<PaymentRef, { rail: "x402-exact" }>,
+  ) => Promise<string | null>;
   readonly recordReceipt: (input: SettledReceiptContext) => Promise<boolean>;
   readonly objects: {
     put(bytes: Uint8Array): Promise<string>;
@@ -204,6 +230,9 @@ export interface BoundaryInput {
   readonly paymentRef: PaymentRef;
   readonly paymentPayload: PaymentPayload;
   readonly index: number;
+  readonly callIndex: number;
+  readonly obsId: string;
+  readonly subjectIndex?: number;
   readonly requestedAt: Date;
   readonly signedAt: Date;
   readonly maxTimeoutSeconds: number;
@@ -218,9 +247,25 @@ export interface BoundaryInput {
   };
 }
 
-export interface SettledReceiptContext extends BoundaryInput {
-  readonly stepResult: unknown;
+export interface NoResponseBoundaryInput {
+  readonly input: VaultDirectInput;
+  readonly paymentRef: PaymentRef;
+  readonly index: number;
+  readonly obsId: string;
+  readonly attempt: number;
+  readonly requestedAt: Date;
+  readonly maxTimeoutSeconds: number;
 }
+
+export type SettledReceiptContext =
+  | (BoundaryInput & { readonly stepResult: unknown })
+  | (NoResponseBoundaryInput & {
+      readonly signedAt: Date;
+      readonly stepResult: unknown;
+      readonly verifiedTransferTx: string;
+      readonly bodyRef?: never;
+      readonly response?: never;
+    });
 
 export type VaultDirectResult =
   | { readonly state: "handed_off"; readonly assembly: readonly AssemblyEntry[] }
@@ -276,6 +321,8 @@ async function executeStep(
   }
   if (input.step.kind !== "x402-exact")
     return { state: "failed", errorCode: "unsupported-step-kind" };
+  if (!input.step.serviceId)
+    throw new Error("Approved x402 step has no serviceId for its payment observation.");
   const usage = await remainingExpectedCalls(
     dependencies.pool,
     input.planId,
@@ -304,9 +351,12 @@ async function executeStep(
         : { callInputs: input.step.callInputs.slice(usage.used) }),
     },
   };
-  const prechecked =
-    savedPreparedCalls(executionInput, trace) ??
-    (await precheckCalls(executionInput, dependencies));
+  const saved = savedPreparedCalls(executionInput, trace);
+  const prechecked = saved ?? (await precheckCalls(executionInput, dependencies));
+  if (!saved && !prechecked.errorCode) {
+    const drift = await versionDrift(executionInput, dependencies, prechecked.calls);
+    if (drift) return stopForVersionDrift(input, dependencies, attempt, usage, drift);
+  }
   if (prechecked.errorCode) {
     await markStepFailed(dependencies.pool, {
       planId: input.planId,
@@ -323,6 +373,44 @@ async function executeStep(
   // SCR-153 §2: the saved reserve reverted BadTtl, so start again from step 1 as `attempt + 1`.
   if (result === STALE_RESERVE) return executeStep(input, dependencies);
   return result;
+}
+
+/** SCR-163 §5–§6: record the evidence, then stop before any reserve or signature. */
+async function stopForVersionDrift(
+  input: VaultDirectInput,
+  dependencies: VaultDirectDependencies,
+  attempt: number,
+  usage: { readonly used: number; readonly remaining: number },
+  drift: VersionDrift,
+): Promise<VaultDirectResult> {
+  dependencies.assertLeaseHeld?.();
+  await appendExecutionPhase(dependencies.pool, {
+    planId: input.planId,
+    stepIndex: input.step.stepIndex,
+    attempt,
+    phase: "precheck.version-drift",
+    payload: { serviceId: input.step.serviceId ?? null, ...drift },
+  });
+  if (drift.reason === "resume") {
+    await markStepDoneKeepingResults(dependencies.pool, {
+      planId: input.planId,
+      stepIndex: input.step.stepIndex,
+      attempt,
+      callsUsed: usage.used,
+      callErrors: Array.from({ length: usage.remaining }, (_, offset) => ({
+        index: usage.used + offset,
+        code: "service-version-drift" as const,
+      })),
+    });
+    return { state: "done", stepResults: [] };
+  }
+  await markStepFailed(dependencies.pool, {
+    planId: input.planId,
+    stepIndex: input.step.stepIndex,
+    attempt,
+    errorCode: SERVICE_VERSION_DRIFT,
+  });
+  return { state: "failed", errorCode: SERVICE_VERSION_DRIFT };
 }
 
 /**
@@ -374,6 +462,8 @@ interface PreparedCall {
     readonly description?: string;
     readonly mimeType?: string;
   };
+  /** SCR-163 §1: the service version computed from this call's live pre-check; null when unknown. */
+  readonly versionId: string | null;
 }
 
 interface RenderedRequest {
@@ -386,6 +476,7 @@ interface RenderedRequest {
 /** The pre-check's offer for one call, saved in `reserve.sent` so a resumed attempt needs no new probe. */
 interface SavedCall {
   readonly index: number;
+  readonly versionId?: string | null;
   readonly offer: PaymentRequirements;
   readonly paymentRequired: PaymentRequired;
   readonly paymentIdentifier?: { readonly required: boolean };
@@ -395,6 +486,7 @@ interface SavedCall {
 function savedCall(call: PreparedCall): SavedCall {
   return {
     index: call.index,
+    versionId: call.versionId,
     offer: call.offer,
     paymentRequired: call.paymentRequired,
     ...(call.paymentIdentifier === undefined ? {} : { paymentIdentifier: call.paymentIdentifier }),
@@ -440,6 +532,8 @@ function restorePreparedCall(input: VaultDirectInput, entry: unknown): PreparedC
       ? {}
       : { paymentIdentifier: saved.paymentIdentifier }),
     resource: saved.resource,
+    // Rows saved before SCR-163 carry no version; their observations stay ver_unknown.
+    versionId: typeof saved.versionId === "string" ? saved.versionId : null,
   };
 }
 
@@ -474,8 +568,12 @@ async function precheckCalls(input: VaultDirectInput, dependencies: VaultDirectD
       stepCap: BigInt(input.step.stepCap),
       payees: [input.step.payee, ...(input.step.alternates ?? [])].filter(isAddress),
       trustedPayees: [],
+      config: dependencies.config,
+      extensions402: read.extensions,
     });
     if (!choice.ok || BigInt(choice.offer.amount) > BigInt(input.step.stepCap) / BigInt(maxCount))
+      return { calls: prepared, errorCode: "price-or-payee-drift" };
+    if (choice.offer.payTo.toLowerCase() !== input.step.payee?.toLowerCase())
       return { calls: prepared, errorCode: "price-or-payee-drift" };
     const firstOffer = prepared[0]?.offer;
     if (
@@ -493,9 +591,101 @@ async function precheckCalls(input: VaultDirectInput, dependencies: VaultDirectD
         ? {}
         : { paymentIdentifier: read.extensions.paymentIdentifier }),
       resource: read.resource,
+      versionId: liveVersionId(input, choice.offer.payTo, read.extensions.bazaar?.schema),
     });
   }
   return { calls: prepared, errorCode: prepared.length === 0 ? "unsupported-offer" : undefined };
+}
+
+/**
+ * SCR-163 §1: the version of the step's service from one live 402: its payee, the step's registered
+ * resource and the sanitized Bazaar schema. Null when the resource method has no version identity.
+ */
+function liveVersionId(
+  input: VaultDirectInput,
+  payTo: string,
+  schema: Readonly<Record<string, unknown>> | undefined,
+): string | null {
+  const resource = input.step.resource;
+  if (!resource || (resource.method !== "GET" && resource.method !== "POST")) return null;
+  return serviceVersionId({
+    payTo,
+    resource: { url: resource.url, method: resource.method },
+    schema: schema ?? null,
+  });
+}
+
+type VersionDrift =
+  | { readonly reason: "precheck"; readonly liveVersionIds: readonly string[] }
+  | {
+      readonly reason: "resume";
+      readonly savedVersionId: string;
+      readonly liveVersionIds: readonly string[];
+    }
+  | {
+      readonly reason: "selection";
+      readonly selectionVersionId: string;
+      readonly liveVersionId: string;
+      readonly rankingDecisionId: string;
+    };
+
+/**
+ * SCR-163 §5–§6: before any reserve or signature, the live versions of a fresh pre-check must agree with
+ * each other, with the version saved on the step's settled calls, and with the version the selection used.
+ */
+async function versionDrift(
+  input: VaultDirectInput,
+  dependencies: VaultDirectDependencies,
+  calls: readonly PreparedCall[],
+): Promise<VersionDrift | undefined> {
+  const live = [...new Set(calls.map((call) => call.versionId).filter(isVersionId))];
+  if (live.length > 1) return { reason: "precheck", liveVersionIds: live };
+  const liveVersion = live[0];
+  if (liveVersion === undefined) return undefined;
+  const saved = await dependencies.pool.query<{ version_id: string }>(
+    `SELECT DISTINCT o.version_id FROM observations o JOIN plans p ON p.objective_id=o.objective_id
+     WHERE p.plan_id=$1 AND o.step_index=$2 AND o.settled_at IS NOT NULL AND o.released_at IS NULL
+       AND o.version_id <> 'ver_unknown'`,
+    [input.planId, input.step.stepIndex],
+  );
+  const savedVersion = saved.rows.find((row) => row.version_id !== liveVersion)?.version_id;
+  if (savedVersion !== undefined)
+    return { reason: "resume", savedVersionId: savedVersion, liveVersionIds: live };
+  const selection = await selectedVersion(dependencies.pool, input);
+  if (selection && selection.versionId !== liveVersion)
+    return {
+      reason: "selection",
+      selectionVersionId: selection.versionId,
+      liveVersionId: liveVersion,
+      rankingDecisionId: selection.rankingDecisionId,
+    };
+  return undefined;
+}
+
+/** SCR-163 §6: the version the plan's stored RankingDecision used for this step's service, if any. */
+async function selectedVersion(
+  pool: Pool,
+  input: VaultDirectInput,
+): Promise<{ readonly versionId: string; readonly rankingDecisionId: string } | undefined> {
+  const ids = (input.plan.rankingDecisionIds ?? []).filter((id) => UUID.test(id));
+  if (ids.length === 0 || !input.step.serviceId) return undefined;
+  const stored = await pool.query<{ query_id: string; decision: Partial<RankingDecision> }>(
+    "SELECT query_id::text AS query_id,decision FROM ranking_decisions WHERE query_id = ANY($1::uuid[])",
+    [ids],
+  );
+  for (const id of ids.toReversed()) {
+    const decision = stored.rows.find((row) => row.query_id === id)?.decision;
+    const entry = [...(decision?.ranked ?? []), ...(decision?.unverified ?? [])].find(
+      (candidate) => candidate.service_id === input.step.serviceId,
+    );
+    const versionId = entry && "version_id" in entry ? entry.version_id : undefined;
+    if (isVersionId(versionId)) return { versionId, rankingDecisionId: id };
+  }
+  return undefined;
+}
+
+function isVersionId(value: unknown): value is string {
+  return typeof value === "string" && VERSION_ID.test(value);
 }
 
 async function executeReservedCalls(
@@ -947,6 +1137,8 @@ async function settleAndFinalize(
     responseSize: number;
     mimeType: string;
   }[] = [];
+  const noResponses: number[] = [];
+  const interruptedResponses: number[] = [];
   for (const call of calls) {
     const result = await authorizeAndCall(
       input,
@@ -960,6 +1152,8 @@ async function settleAndFinalize(
     );
     if (result.response)
       completed.push({ ...result.response, maxTimeoutSeconds: call.offer.maxTimeoutSeconds });
+    else if (result.noResponse) noResponses.push(call.index);
+    else if (result.responseInterrupted) interruptedResponses.push(call.index);
     else if (result.errorCode) {
       await appendExecutionPhase(dependencies.pool, {
         planId: input.planId,
@@ -977,15 +1171,19 @@ async function settleAndFinalize(
   }[] = [];
   const authorized: number[] = [];
   let receiptPending = false;
-  for (const entry of completed) {
+  for (const index of [
+    ...completed.map((entry) => entry.index),
+    ...noResponses,
+    ...interruptedResponses,
+  ]) {
     const authorizationUsed = await waitForAuthorization(
       dependencies,
       reservationId,
-      entry.index,
+      index,
       validBefore,
     );
     if (!authorizationUsed) continue;
-    authorized.push(entry.index);
+    authorized.push(index);
   }
   const unsettled: number[] = [];
   for (const index of authorized) {
@@ -998,9 +1196,10 @@ async function settleAndFinalize(
       args: { reservationId: reservationId.toString(), indices: batch.map(String) },
     });
     let revertedHash = settle.kind === "reverted" ? settle.txHash : undefined;
+    let settledHash: string | undefined = settle.kind === "mined" ? settle.txHash : undefined;
     if (settle.kind === "send") {
       try {
-        await dependencies.chain.settle({
+        settledHash = await dependencies.chain.settle({
           reservationId,
           indices: batch,
           signedTransaction: settle.signedTransaction,
@@ -1027,17 +1226,21 @@ async function settleAndFinalize(
       stepIndex: input.step.stepIndex,
       attempt,
       phase: "settle.mined",
-      payload: { indices: batch },
+      payload: { indices: batch, ...(settledHash ? { txHash: settledHash } : {}) },
     });
   }
   const receiptsRecorded = new Set<number>();
   const contexts = new Map<number, Parameters<VaultDirectDependencies["recordReceipt"]>[0]>();
   for (const entry of completed) {
     if (!authorized.includes(entry.index)) continue;
+    const call = input.step.callInputs?.find((candidate) => candidate.callIndex === entry.index);
     const context = {
       response: entry.response,
       bodyRef: entry.bodyRef,
       input,
+      callIndex: entry.index,
+      obsId: obsId(dedupKey(entry.paymentRef)),
+      ...(call?.subjectIndex === undefined ? {} : { subjectIndex: call.subjectIndex }),
       paymentRef: entry.paymentRef,
       paymentPayload: entry.payload,
       index: entry.index,
@@ -1055,21 +1258,14 @@ async function settleAndFinalize(
       },
     };
     const priorResult = trace.findLast(
-      (row) =>
-        (row.phase === "step.result" || row.phase === "step.result.prepared") &&
-        row.payload["index"] === entry.index,
+      (row) => row.phase === "call.result" && row.payload["callIndex"] === entry.index,
     );
-    if (priorResult && !Object.hasOwn(priorResult.payload, "stepResult"))
-      throw new Error("Stored step result cannot be recovered safely.");
-    const candidate = priorResult
-      ? priorResult.payload["stepResult"]
-      : await dependencies.boundary(context);
+    const candidate = priorResult?.payload ?? (await dependencies.boundary(context));
     if (!validateSchema("step-result", candidate))
       throw new TypeError("Boundary returned an invalid StepResult for the paid call.");
     const stepResult = candidate as StepResult;
-    const call = input.step.callInputs?.find(
-      (callCandidate) => callCandidate.callIndex === entry.index,
-    );
+    if (stepResult.callIndex !== entry.index || stepResult.obsId !== context.obsId)
+      throw new TypeError("Boundary StepResult does not identify its paid authorization.");
     completedResults.push({
       index: entry.index,
       ...(call?.subjectIndex === undefined ? {} : { subjectIndex: call.subjectIndex }),
@@ -1080,12 +1276,8 @@ async function settleAndFinalize(
         planId: input.planId,
         stepIndex: input.step.stepIndex,
         attempt,
-        phase: "step.result.prepared",
-        payload: {
-          index: entry.index,
-          ...(call?.subjectIndex === undefined ? {} : { subjectIndex: call.subjectIndex }),
-          stepResult,
-        },
+        phase: "call.result",
+        payload: { ...stepResult },
       });
     }
     contexts.set(entry.index, { ...context, stepResult });
@@ -1161,6 +1353,133 @@ async function settleAndFinalize(
     start += finalizeCount;
   }
   if (!final) throw new Error("Reservation is not final after finalizing every reserved index.");
+  const signedTrace = await getExecutionTrace(
+    dependencies.pool,
+    input.planId,
+    input.step.stepIndex,
+    attempt,
+  );
+  for (const row of signedTrace.filter((phase) => phase.phase === "auth.signed")) {
+    const index = row.payload["index"];
+    const payload = row.payload["paymentPayload"];
+    const call = calls.find((candidate) => candidate.index === index);
+    if (!call || !payload || typeof payload !== "object")
+      throw new Error("Signed authorization cannot be reconciled to an observation.");
+    const id = obsId(
+      dedupKey(
+        signedPaymentRef(input, call, reservationId, validBefore, payload as PaymentPayload),
+      ),
+    );
+    if (await dependencies.chain.isSettled({ reservationId, index: call.index })) {
+      const noResponse = signedTrace.findLast(
+        (phase) => phase.phase === "call.no-response" && phase.payload["index"] === call.index,
+      );
+      const settleTx = signedTrace.findLast(
+        (phase) =>
+          phase.phase === "settle.mined" &&
+          phase.payload["outcome"] !== REVERTED &&
+          Array.isArray(phase.payload["indices"]) &&
+          phase.payload["indices"].includes(call.index),
+      )?.payload["txHash"];
+      await markSettled(
+        dependencies.pool,
+        id,
+        dependencies.now(),
+        !noResponse && typeof settleTx === "string" && /^0x[0-9a-f]{64}$/.test(settleTx)
+          ? settleTx
+          : undefined,
+      );
+    } else {
+      await markReleased(
+        dependencies.pool,
+        id,
+        dependencies.now(),
+        Number(dependencies.config.get("health.consecutiveFailures")),
+      );
+    }
+  }
+  for (const index of noResponses) {
+    if (!(await dependencies.chain.isSettled({ reservationId, index }))) continue;
+    const call = calls.find((candidate) => candidate.index === index);
+    const auth = signedTrace.findLast(
+      (row) => row.phase === "auth.signed" && row.payload["index"] === index,
+    );
+    const sent = signedTrace.findLast(
+      (row) => row.phase === "call.sent" && row.payload["index"] === index,
+    );
+    if (!call || !auth || !sent || !dependencies.noResponseBoundary)
+      throw new Error("Settled no-response call lacks its durable signed request or boundary.");
+    const payload = auth.payload["paymentPayload"] as PaymentPayload;
+    const paymentRef = signedPaymentRef(input, call, reservationId, validBefore, payload);
+    const observationId = obsId(dedupKey(paymentRef));
+    const priorResult = signedTrace.findLast(
+      (row) => row.phase === "call.result" && row.payload["callIndex"] === index,
+    );
+    const candidate =
+      priorResult?.payload ??
+      (await dependencies.noResponseBoundary({
+        input,
+        paymentRef,
+        index,
+        obsId: observationId,
+        attempt,
+        requestedAt: sent.at,
+        maxTimeoutSeconds: call.offer.maxTimeoutSeconds,
+      }));
+    if (!validateSchema("step-result", candidate))
+      throw new TypeError("No-response boundary returned an invalid StepResult.");
+    const stepResult = candidate as StepResult;
+    if (
+      stepResult.status !== "no-response" ||
+      stepResult.obsId !== observationId ||
+      stepResult.callIndex !== index ||
+      stepResult.bodyCommit !== NO_RESPONSE_COMMIT ||
+      stepResult.source.paymentRefHash !== paymentRefHash(paymentRef) ||
+      stepResult.fields.length !== 0 ||
+      stepResult.flags.length !== 0 ||
+      "bodyRef" in stepResult
+    )
+      throw new TypeError("No-response StepResult does not match its paid authorization.");
+    completedResults.push({ index, stepResult });
+    if (!priorResult)
+      await appendExecutionPhase(dependencies.pool, {
+        planId: input.planId,
+        stepIndex: input.step.stepIndex,
+        attempt,
+        phase: "call.result",
+        payload: { ...stepResult },
+      });
+    const transferTx = await waitForExactTransfer(dependencies, paymentRef);
+    if (!transferTx) {
+      await appendExecutionPhase(dependencies.pool, {
+        planId: input.planId,
+        stepIndex: input.step.stepIndex,
+        attempt,
+        phase: "settlement-unproven",
+        payload: { index },
+      });
+      continue;
+    }
+    const receiptStored = await dependencies.recordReceipt({
+      input,
+      paymentRef,
+      index,
+      obsId: observationId,
+      attempt,
+      requestedAt: sent.at,
+      signedAt: auth.at,
+      maxTimeoutSeconds: call.offer.maxTimeoutSeconds,
+      stepResult,
+      verifiedTransferTx: transferTx,
+    });
+    if (!receiptStored) receiptPending = true;
+    else if (
+      signedTrace.findLast(
+        (row) => row.phase === "call.no-response" && row.payload["index"] === index,
+      )?.payload["sellerFailureEvidenced"] === true
+    )
+      await fillResponse(dependencies.pool, observationId, undefined, 0);
+  }
   // Review M2: an index left unsettled by a reverted settle is booked by finalize; record its receipt now.
   for (const [index, context] of contexts) {
     if (receiptsRecorded.has(index)) continue;
@@ -1349,14 +1668,6 @@ async function authorizeAndCall(
   attempt: number,
   trace: readonly ExecutionPhaseRow[],
 ) {
-  const priorResult = trace.findLast(
-    (row) => row.phase === "call.result" && row.payload["index"] === call.index,
-  );
-  if (priorResult) return restoreCallResult(dependencies, priorResult, call);
-  const priorUnpaid = trace.findLast(
-    (row) => row.phase === "call.unpaid" && row.payload["index"] === call.index,
-  );
-  if (priorUnpaid) return { errorCode: String(priorUnpaid.payload["errorCode"] ?? "unpaid") };
   const nonce = derivedNonce(input.vault, reservationId, call.index);
   const signedAt = dependencies.now();
   const savedAuth = trace.findLast(
@@ -1365,13 +1676,21 @@ async function authorizeAndCall(
   const storedPayload = savedAuth?.payload["paymentPayload"];
   let payload: PaymentPayload;
   let paymentSignature: string | undefined;
+  let paymentId: string;
   if (storedPayload && typeof storedPayload === "object") {
     payload = storedPayload as PaymentPayload;
+    const savedPaymentId = savedAuth?.payload["paymentId"];
+    if (typeof savedPaymentId !== "string")
+      throw new Error("Stored signed authorization is missing its paymentId.");
+    paymentId = savedPaymentId;
     const storedSignature = savedAuth?.payload["paymentSignature"];
     if (typeof storedSignature === "string") paymentSignature = storedSignature;
   } else if (savedAuth) {
     throw new Error("Stored signed payment payload is invalid.");
   } else {
+    if (call.offer.payTo.toLowerCase() !== input.step.payee?.toLowerCase())
+      return { errorCode: "price-or-payee-drift" };
+    paymentId = `pay_${randomUUID().replaceAll("-", "")}`;
     const signed = await dependencies.signer.sign("cz-15", {
       keyId: "K3",
       kind: "usdc-3009",
@@ -1397,7 +1716,7 @@ async function authorizeAndCall(
         nonce,
       },
       signature: signed.signature,
-      ...(call.paymentIdentifier ? { paymentId: randomUUID().replaceAll("-", "") } : {}),
+      ...(call.paymentIdentifier ? { paymentId } : {}),
       ...(call.paymentIdentifier ? { advertised: call.paymentIdentifier } : {}),
     });
     paymentSignature = encodePaymentSignature(payload);
@@ -1406,9 +1725,62 @@ async function authorizeAndCall(
       stepIndex: input.step.stepIndex,
       attempt,
       phase: "auth.signed",
-      payload: { index: call.index, paymentPayload: payload, paymentSignature },
+      payload: { index: call.index, paymentPayload: payload, paymentSignature, paymentId },
     });
   }
+  const signedRef = signedPaymentRef(input, call, reservationId, validBefore, payload);
+  const serviceId = input.step.serviceId;
+  if (!serviceId) throw new Error("Signed x402 step is missing its serviceId.");
+  const owner = await observationOwner(dependencies.pool, input.planId);
+  if (owner.userId !== input.userId)
+    throw new Error("Signed x402 step owner does not match its plan objective.");
+  const observationId = await insertAtSign(dependencies.pool, {
+    ...owner,
+    vault: input.vault,
+    network: call.offer.network,
+    rail: "x402-exact",
+    serviceId,
+    versionId: call.versionId ?? "ver_unknown",
+    taskClass: taskClassFor(input.step.capability, dependencies.config),
+    envelopeRef: input.envelopeRef,
+    stepIndex: input.step.stepIndex,
+    paymentRef: signedRef,
+    paymentId,
+  });
+  const priorResult = trace.findLast(
+    (row) => row.phase === "call.response" && row.payload["index"] === call.index,
+  );
+  if (priorResult) return restoreCallResult(dependencies, priorResult, call);
+  const priorInterrupted = trace.findLast(
+    (row) => row.phase === "call.response-interrupted" && row.payload["index"] === call.index,
+  );
+  const interruptedAttempt = trace.some(
+    (row) =>
+      row.phase === "call.attempt" &&
+      row.payload["index"] === call.index &&
+      row.payload["responseArrived"] === true,
+  );
+  if (priorInterrupted || interruptedAttempt) {
+    if (!priorInterrupted)
+      await appendExecutionPhase(dependencies.pool, {
+        planId: input.planId,
+        stepIndex: input.step.stepIndex,
+        attempt,
+        phase: "call.response-interrupted",
+        payload: { index: call.index },
+      });
+    return { responseInterrupted: true };
+  }
+  const priorNoResponse = trace.findLast(
+    (row) => row.phase === "call.no-response" && row.payload["index"] === call.index,
+  );
+  if (priorNoResponse) return { noResponse: true };
+  const priorUnpaid = trace.findLast(
+    (row) => row.phase === "call.unpaid" && row.payload["index"] === call.index,
+  );
+  if (priorUnpaid) return { errorCode: String(priorUnpaid.payload["errorCode"] ?? "unpaid") };
+  const expiredBeforeSend =
+    Boolean(savedAuth) && (await dependencies.chain.latestBlockTimestamp()) >= validBefore;
   paymentSignature ??= encodePaymentSignature(payload);
   const headers = { ...call.request.headers, "payment-signature": paymentSignature };
   const requestedAt = dependencies.now();
@@ -1423,19 +1795,60 @@ async function authorizeAndCall(
   // response is kept so the call reaches settle, the boundary (CZ-16 delivery fails) and the receipt.
   let settledResponse: SafeFetchResponse | undefined;
   let errorCode = "unpaid";
+  let responseArrived = false;
+  let responseInterrupted = false;
+  let finalOutcome: SafeFetchOutcome = "unknown-transport";
   for (let retry = 0; retry < Number(dependencies.config.get("payer.callRetries")); retry += 1) {
     // 02 §7.5: retries only within validBefore, by chain time (SCR-157 §1); USDC refuses the authorization
     // once `block.timestamp ≥ validBefore`.
     if (retry > 0 && (await dependencies.chain.latestBlockTimestamp()) >= validBefore) break;
     dependencies.assertLeaseHeld?.();
-    const response = await dependencies.safeFetch(call.request.url, {
-      ...requestOptions(call.request),
-      headers,
-      timeoutMs: Math.min(
-        Number(dependencies.config.get("payer.callTimeoutMs")),
-        call.offer.maxTimeoutSeconds * 1000,
-      ),
+    let response: SafeFetchResponse;
+    try {
+      response = await dependencies.safeFetch(call.request.url, {
+        ...requestOptions(call.request),
+        headers,
+        timeoutMs: Math.min(
+          Number(dependencies.config.get("payer.callTimeoutMs")),
+          call.offer.maxTimeoutSeconds * 1000,
+        ),
+      });
+    } catch (error) {
+      if (
+        !(error instanceof SafeFetchError) ||
+        (error.code !== "upstream-unavailable" && error.rule !== "dns")
+      )
+        throw error;
+      finalOutcome = error.outcome;
+      if (error.responseArrived) {
+        responseArrived = true;
+        responseInterrupted = true;
+        await fillResponse(dependencies.pool, observationId, dependencies.now(), undefined);
+      }
+      await appendExecutionPhase(dependencies.pool, {
+        planId: input.planId,
+        stepIndex: input.step.stepIndex,
+        attempt,
+        phase: "call.attempt",
+        payload: {
+          index: call.index,
+          retry,
+          outcome: finalOutcome,
+          ...(error.responseArrived ? { responseArrived: true } : {}),
+        },
+      });
+      errorCode = "upstream-unavailable";
+      continue;
+    }
+    responseArrived = true;
+    await appendExecutionPhase(dependencies.pool, {
+      planId: input.planId,
+      stepIndex: input.step.stepIndex,
+      attempt,
+      phase: "call.attempt",
+      payload: { index: call.index, retry, outcome: "response" },
     });
+    await fillResponse(dependencies.pool, observationId, dependencies.now(), undefined);
     const attemptSettlement = readSettlement(response.headers);
     const moved = attemptSettlement.state === "settled" || attemptSettlement.state === "pending";
     if (moved) settledResponse = response;
@@ -1447,7 +1860,41 @@ async function authorizeAndCall(
     if (response.status >= 200 && response.status < 300 && moved) break;
   }
   const response = settledResponse;
-  if (!response) return { errorCode };
+  if (!response) {
+    dependencies.assertLeaseHeld?.();
+    if (responseInterrupted) {
+      await appendExecutionPhase(dependencies.pool, {
+        planId: input.planId,
+        stepIndex: input.step.stepIndex,
+        attempt,
+        phase: "call.response-interrupted",
+        payload: { index: call.index },
+      });
+      return { responseInterrupted: true };
+    }
+    if (responseArrived || expiredBeforeSend)
+      return { errorCode: expiredBeforeSend ? "authorization-expired" : errorCode };
+    await appendExecutionPhase(dependencies.pool, {
+      planId: input.planId,
+      stepIndex: input.step.stepIndex,
+      attempt,
+      phase: "call.no-response",
+      payload: {
+        index: call.index,
+        paymentRef: signedRef,
+        requestCommit: slRequestCommit({
+          ...call.request,
+          body: call.request.body ?? new Uint8Array(),
+        }),
+        requirementsHashSeen: H(call.paymentRequired),
+        requestSize: call.request.body?.byteLength ?? 0,
+        sellerFailureEvidenced:
+          !savedAuth &&
+          ["connection-refused", "connection-reset", "connected-timeout"].includes(finalOutcome),
+      },
+    });
+    return { noResponse: true };
+  }
   const settlement = readSettlement(response.headers);
   if (settlement.state !== "settled" && settlement.state !== "pending")
     return { errorCode: "unpaid" };
@@ -1465,7 +1912,7 @@ async function authorizeAndCall(
     planId: input.planId,
     stepIndex: input.step.stepIndex,
     attempt,
-    phase: "call.result",
+    phase: "call.response",
     payload: {
       index: call.index,
       status: response.status,
@@ -1562,20 +2009,17 @@ function getHeader(headers: Readonly<Record<string, string>>, name: string): str
   return key === undefined ? undefined : headers[key];
 }
 
-function makePaymentRef(
+function signedPaymentRef(
   input: VaultDirectInput,
   call: PreparedCall,
   reservationId: bigint,
   validBefore: bigint,
   payload: PaymentPayload,
-  settlement: ReturnType<typeof readSettlement>,
-): PaymentRef {
+): Extract<PaymentRef, { rail: "x402-exact" }> {
   const reservationNumber = Number(reservationId);
   const expiryNumber = Number(validBefore);
   if (!Number.isSafeInteger(reservationNumber) || !Number.isSafeInteger(expiryNumber))
     throw new RangeError("PaymentRef reservation and expiry must fit safe integer fields.");
-  if (settlement.state !== "settled" && settlement.state !== "pending")
-    throw new Error("PaymentRef requires a facilitator transaction response.");
   return {
     schemaVersion: "1.0",
     rail: "x402-exact",
@@ -1586,9 +2030,24 @@ function makePaymentRef(
     amount: payload.payload.authorization.value,
     nonce: payload.payload.authorization.nonce,
     validBefore: expiryNumber,
-    settlementTx: settlement.transaction,
     reservationId: reservationNumber,
     index: call.index,
+  };
+}
+
+function makePaymentRef(
+  input: VaultDirectInput,
+  call: PreparedCall,
+  reservationId: bigint,
+  validBefore: bigint,
+  payload: PaymentPayload,
+  settlement: ReturnType<typeof readSettlement>,
+): PaymentRef {
+  if (settlement.state !== "settled" && settlement.state !== "pending")
+    throw new Error("PaymentRef requires a facilitator transaction response.");
+  return {
+    ...signedPaymentRef(input, call, reservationId, validBefore, payload),
+    settlementTx: settlement.transaction,
   };
 }
 
@@ -1719,6 +2178,29 @@ async function waitForAuthorization(
     await sleepReconcileInterval(dependencies);
   }
   return false;
+}
+
+async function waitForExactTransfer(
+  dependencies: VaultDirectDependencies,
+  payment: Extract<PaymentRef, { rail: "x402-exact" }>,
+): Promise<string | null> {
+  const until =
+    BigInt(payment.validBefore) +
+    BigInt(Number(dependencies.config.get("payer.reconcileGraceSeconds")));
+  for (;;) {
+    let transferTx: string | null | undefined;
+    try {
+      transferTx = await dependencies.findExactTransferTx?.(payment);
+    } catch (error) {
+      // SCR-163 §7: ambiguity fails closed (no receipt, no H1) and the step moves on; the indexer
+      // raises `indexer_transfer_ambiguous`. Any other lookup error still stops the step.
+      if (error instanceof AmbiguousTransferError) return null;
+      throw error;
+    }
+    if (transferTx) return transferTx;
+    if ((await dependencies.chain.latestBlockTimestamp()) > until) return null;
+    await sleepReconcileInterval(dependencies);
+  }
 }
 
 function sleepReconcileInterval(dependencies: VaultDirectDependencies): Promise<void> {

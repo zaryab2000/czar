@@ -5,6 +5,9 @@ import type { LedgerReceipt, Me } from "@czar/schemas";
 import { appApi } from "#src/app-api";
 import { ACCOUNT_REFRESH_EVENT } from "#src/app-shell";
 import { receiptStatusText } from "#src/receipt-status";
+import { ResultCard } from "#src/result-card";
+import { resultsThisWeek, thisWeekHeading } from "#src/result-cards";
+import { taskStateLabel } from "#src/tasks";
 import { useAppData } from "#src/use-app-data";
 import { getStoredPasskey, sendOwnerUserOperation } from "#src/wallet";
 import { formatUsd } from "@czar/web/money-format";
@@ -39,6 +42,9 @@ export default function HomePage() {
       />
       {data.me.mode === "shadow" && <ShadowSummaryCard />}
       <OwnerControls me={data.me} refresh={refresh} />
+      <TasksSection />
+      <ThisWeekSection />
+      <RepresentativeTile />
       <section className="panel">
         <h2>Weekly limits</h2>
         {data.me.limits.length === 0 ? (
@@ -87,6 +93,79 @@ export default function HomePage() {
         <a href="/receipts">View receipts</a>
       </section>
     </div>
+  );
+}
+
+function RepresentativeTile() {
+  const load = useCallback(() => appApi.getSocialMe(), []);
+  const { data, error, loading, refresh } = useAppData(load);
+  return (
+    <section className="panel page-stack">
+      <h2>Your representative</h2>
+      {loading && !data && <p role="status">Loading representative activity…</p>}
+      {data && (
+        <p>
+          Your representative: {data.stats.posts} experiences shared, {data.stats.replies} replies,{" "}
+          {data.stats.lessonsActive} lessons
+        </p>
+      )}
+      {error && <DataError message={error} refresh={refresh} />}
+      <a href="/social/me">Manage your representative</a>
+    </section>
+  );
+}
+
+/** SCR-181 §6: browser and device tasks together, each tagged with where it started. */
+function TasksSection() {
+  const load = useCallback(() => appApi.listAppObjectives(), []);
+  const { data, error, loading, refresh } = useAppData(load);
+  return (
+    <section aria-label="Your tasks" className="panel page-stack">
+      <h2>Your tasks</h2>
+      <a className="primary-link" href="/tasks/new">
+        New task
+      </a>
+      {loading && !data && <p role="status">Loading tasks…</p>}
+      {error && <DataError message={error} refresh={refresh} />}
+      {data &&
+        (data.items.length === 0 ? (
+          <p>No tasks yet.</p>
+        ) : (
+          <ul className="rows">
+            {data.items.map((task) => (
+              <li key={task.objectiveId}>
+                <a href={`/tasks/${encodeURIComponent(task.objectiveId)}`}>
+                  {task.title === "" ? "Untitled task" : task.title}
+                </a>
+                <span className="badge">{task.origin === "web" ? "Web" : "Device"}</span>
+                <span>{taskStateLabel(task.state)}</span>
+              </li>
+            ))}
+          </ul>
+        ))}
+    </section>
+  );
+}
+
+function ThisWeekSection() {
+  const load = useCallback(() => appApi.listAllAppResults(), []);
+  const { data, error, loading, refresh } = useAppData(load);
+  const thisWeek = resultsThisWeek(data?.items ?? [], new Date());
+
+  return (
+    <section className="page-stack" aria-label="This week">
+      <h2>This week</h2>
+      {loading && !data && <p role="status">Loading results…</p>}
+      {error && <DataError message={error} refresh={refresh} />}
+      {data && (
+        <>
+          <p>{thisWeekHeading(thisWeek.length)}</p>
+          {thisWeek.map((card) => (
+            <ResultCard card={card} key={card.objectiveId} />
+          ))}
+        </>
+      )}
+    </section>
   );
 }
 

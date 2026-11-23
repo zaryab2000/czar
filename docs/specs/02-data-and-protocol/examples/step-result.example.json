@@ -1,6 +1,9 @@
 {
-  "schemaVersion": "1.0",
+  "schemaVersion": "1.1",
   "stepIndex": 0,
+  "callIndex": 0,
+  "subjectIndex": 0,
+  "obsId": "obs_11111111111111111111111111111111",
   "status": "delivered",
   "source": {
     "origin": "example",

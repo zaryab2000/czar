@@ -14,8 +14,11 @@ import {
   PAYEE_KIND,
   buildTree,
   categoryHash,
+  dedupKey,
+  obsId,
   payeeLeaf,
   paymentRefHash,
+  NO_RESPONSE_COMMIT,
   verifyProof,
   type Hash32,
 } from "@czar/hashing";
@@ -25,7 +28,7 @@ import type { Signer } from "@czar/signer";
 import type { SafeFetch } from "@czar/x402";
 import type { Pool } from "pg";
 import { createAcceptanceChecker } from "#src/acceptance/index";
-import { localTemplateProfile } from "#src/acceptance/profile";
+import { hasOutputSchema, localTemplateProfile } from "#src/acceptance/profile";
 import type { AcceptancePorts } from "#src/acceptance/types";
 import { runBoundary } from "#src/boundary/index";
 import { createApp } from "#src/app";
@@ -38,7 +41,11 @@ import {
   createRegisteredSelection,
   type RegisteredSelection,
 } from "#src/selection/registered/index";
+import { startSupplierCountsRefresh } from "#src/selection/ranking/counts";
+import { rankingPolicyVersion } from "#src/selection/ranking/decision";
 import { createPlanner } from "#src/planner/index";
+import { openIncidentsFor } from "#src/social/incidents";
+import { lessonsFor } from "#src/social/lessons";
 import type { PlannerPorts } from "#src/planner/ports";
 import { createSafeProber } from "#src/planner/probe";
 import { createPlannerOperations } from "#src/planner/service";
@@ -53,10 +60,13 @@ import {
   type PaymentReceiptDependencies,
 } from "#src/evidence/receipts";
 import { createReceiptInputFromTrace } from "#src/evidence/receipt-input";
+import { fillResponse } from "#src/evidence/observations";
+import { isInjectionBlocked, openOwnerFacts } from "#src/evidence/health";
 import { computePromptHash, type ModelClient } from "#src/models/proxy";
 import {
   executeVaultDirectStep,
   type BoundaryInput,
+  type NoResponseBoundaryInput,
   type SettledReceiptContext,
   type VaultDirectChain,
   type VaultDirectInput,
@@ -110,6 +120,7 @@ import {
   createIndexerGatewayStatus,
   createIndexerSettlement,
   verifyX402Transfer,
+  createIndexerExactTransferLookup,
 } from "#src/evidence/indexer-settlement";
 
 export interface ServerMainOptions extends PairDependencies {
@@ -131,7 +142,7 @@ export interface ServerMainOptions extends PairDependencies {
   readonly safeFetch: SafeFetch;
   readonly settlement?: PaymentReceiptDependencies["settlement"];
   readonly receiptInput?: (
-    context: SettledReceiptContext,
+    context: BoundaryInput & { readonly stepResult: unknown },
     stepResult: unknown,
     reportHashes: readonly string[],
   ) => PaymentReceiptInput;
@@ -228,6 +239,7 @@ export async function createServerMain(options: ServerMainOptions): Promise<Serv
     signerClient,
     objects,
     boundary,
+    createPayerNoResponseBoundary(options, acceptance),
     recordReceipt,
   );
   const workers = startPlannerWorkers(options, plannerOperations);
@@ -265,6 +277,30 @@ export async function createServerMain(options: ServerMainOptions): Promise<Serv
       }),
   });
   const app = createServerApp(options, objects, plannerOperations);
+  const rankingRefresh = startSupplierCountsRefresh({
+    pool: options.pool,
+    config: options.config,
+    network: String(options.config.get("selection.paymentNetwork")),
+    policyVersion: rankingPolicyVersion({
+      confidenceZ: Number(options.config.get("selection.confidenceZ")),
+      consecutiveFailures: Number(options.config.get("health.consecutiveFailures")),
+    }),
+    now: options.clock.now,
+    onError: () =>
+      options.logger.error("supplier_counts_refresh_failed", {
+        rule: "supplier-counts",
+        state: "error",
+      }),
+  });
+  try {
+    await rankingRefresh.ready;
+  } catch (error) {
+    await rankingRefresh.stop();
+    await workers.stop();
+    await dispatcher.stop();
+    payerRuntime.stop();
+    throw error;
+  }
   return {
     app,
     acceptance,
@@ -275,6 +311,7 @@ export async function createServerMain(options: ServerMainOptions): Promise<Serv
     async close() {
       await workers.stop();
       await dispatcher.stop();
+      await rankingRefresh.stop();
       payerRuntime.stop();
     },
   };
@@ -332,6 +369,12 @@ function createPlannerOperationsIfConfigured(
   const planner = createPlanner({
     config: options.config,
     ports: createPlannerPorts(options, acceptance, selection, signer),
+    social: {
+      lessonsFor: (userId, network, taskClass) =>
+        lessonsFor(options.pool, userId, network, taskClass, options.clock.now()),
+      openIncidentsFor: (network, serviceIds, taskClass) =>
+        openIncidentsFor(options.pool, network, serviceIds, taskClass),
+    },
   });
   return createPlannerOperations({
     pool: options.pool,
@@ -403,6 +446,7 @@ function createPayerDependencies(
   signer: ServerSigner,
   objects: ObjectStore,
   boundary: ReturnType<typeof createPayerBoundary>,
+  noResponseBoundary: ReturnType<typeof createPayerNoResponseBoundary>,
   recordReceipt: ReturnType<typeof createReceiptBuilder>,
 ) {
   return {
@@ -413,6 +457,11 @@ function createPayerDependencies(
     now: options.clock.now,
     objects,
     boundary,
+    noResponseBoundary,
+    findExactTransferTx: createIndexerExactTransferLookup(
+      options.appReadOptions.indexerUrl,
+      Number(options.config.get("fetch.timeoutMs")),
+    ),
     recordReceipt,
   };
 }
@@ -1271,6 +1320,9 @@ function createPayerBoundary(
       payTo,
       paymentRefHash: paymentRefHash(paymentRef),
     };
+    const subjectIndex = input.step.callInputs?.find(
+      (call) => call.callIndex === context.index,
+    )?.subjectIndex;
     const profileId = input.step.acceptanceProfileId;
     const outputSchema = await acceptancePorts.outputSchema.forService(serviceId);
     const result = await runBoundary(
@@ -1279,6 +1331,9 @@ function createPayerBoundary(
         statusCode: response.status,
         mimeType,
         stepIndex: input.step.stepIndex,
+        callIndex: context.index,
+        obsId: obsId(dedupKey(paymentRef)),
+        ...(subjectIndex === undefined ? {} : { subjectIndex }),
         source,
         bodyRef: context.bodyRef,
         bodyCommit,
@@ -1292,7 +1347,7 @@ function createPayerBoundary(
         idempotencyKey: randomUUID(),
         now: options.clock.now(),
         acceptance: {
-          obsId: `obs_${options.random.bytes(16).toString("hex")}`,
+          obsId: obsId(dedupKey(paymentRef)),
           profileId,
           envelopeRef: input.envelopeRef,
           stepIndex: input.step.stepIndex,
@@ -1322,9 +1377,77 @@ function createPayerBoundary(
         obsId: result.acceptance.report.obs_id,
       },
     });
+    const delivery = result.acceptance.report.checks.find(
+      (check) => check.name === "delivery",
+    )?.result;
+    const delivered = !result.screen.available
+      ? undefined
+      : result.quarantined
+        ? 0
+        : delivery === "pass"
+          ? 1
+          : delivery === "fail"
+            ? 0
+            : undefined;
+    await fillResponse(
+      options.pool,
+      result.acceptance.report.obs_id,
+      options.clock.now(),
+      delivered,
+    );
     return (
       result.result ?? quarantinedStepResult(context, source, bodyCommit, result.acceptance.report)
     );
+  };
+}
+
+function createPayerNoResponseBoundary(
+  options: ServerMainOptions,
+  acceptance: Awaited<ReturnType<typeof createAcceptanceChecker>>,
+) {
+  return async (context: NoResponseBoundaryInput): Promise<StepResult> => {
+    const { input, paymentRef } = context;
+    if (paymentRef.rail !== "x402-exact" || !input.step.serviceId || !input.step.resource)
+      throw new TypeError("No-response x402 call lacks its approved supplier identity.");
+    const payTo = paymentRef.payTo;
+    const report = await acceptance.check({
+      obsId: context.obsId,
+      profileId: input.step.acceptanceProfileId,
+      envelopeRef: input.envelopeRef,
+      stepIndex: input.step.stepIndex,
+      serviceId: input.step.serviceId,
+      step: input.step,
+      bodyText: null,
+      statusCode: null,
+      responseArrived: false,
+      elapsedMs: Math.max(0, options.clock.now().getTime() - context.requestedAt.getTime()),
+      maxTimeoutSeconds: context.maxTimeoutSeconds,
+      mimeType: "",
+      paid: true,
+      screen: { available: true, label: "none" },
+    });
+    await appendExecutionPhase(options.pool, {
+      planId: input.planId,
+      stepIndex: input.step.stepIndex,
+      attempt: context.attempt,
+      phase: "acceptance.result",
+      payload: { index: context.index, reportHash: report.report.reportHash, obsId: context.obsId },
+    });
+    return {
+      schemaVersion: "1.1",
+      stepIndex: input.step.stepIndex,
+      callIndex: context.index,
+      obsId: context.obsId,
+      status: "no-response",
+      source: {
+        origin: new URL(input.step.resource.url).origin,
+        payTo,
+        paymentRefHash: paymentRefHash(paymentRef),
+      },
+      fields: [],
+      flags: [],
+      bodyCommit: NO_RESPONSE_COMMIT,
+    };
   };
 }
 
@@ -1347,7 +1470,8 @@ function createReceiptBuilder(options: ServerMainOptions, signer: Pick<Signer, "
       checks: AcceptanceReport["checks"];
     }>(
       `SELECT report_hash,obs_id,checks FROM acceptance_reports
-       WHERE report_hash=$1 AND obs_id=$2 AND envelope_ref=$3 AND step_index=$4 AND body_ref=$5`,
+       WHERE report_hash=$1 AND obs_id=$2 AND envelope_ref=$3 AND step_index=$4
+         AND body_ref IS NOT DISTINCT FROM $5`,
       [
         acceptanceRef.report_hash,
         acceptanceRef.obs_id,
@@ -1357,18 +1481,19 @@ function createReceiptBuilder(options: ServerMainOptions, signer: Pick<Signer, "
       ],
     );
     const reportHashes = reports.rows.map((row) => row.report_hash);
-    const input = options.receiptInput
-      ? options.receiptInput(context, context.stepResult, reportHashes)
-      : createReceiptInputFromTrace(
-          context,
-          await getExecutionTrace(
-            options.pool,
-            context.input.planId,
-            context.input.step.stepIndex,
-            context.attempt,
-          ),
-          reports.rows,
-        );
+    const input =
+      options.receiptInput && context.response
+        ? options.receiptInput(context, context.stepResult, reportHashes)
+        : createReceiptInputFromTrace(
+            context,
+            await getExecutionTrace(
+              options.pool,
+              context.input.planId,
+              context.input.step.stepIndex,
+              context.attempt,
+            ),
+            reports.rows,
+          );
     const settlement =
       options.settlement ??
       createIndexerSettlement(
@@ -1403,6 +1528,12 @@ function createPlannerPorts(
     profiles: createPlannerProfileSource(acceptance),
     pocketKeys: createPlannerPocketKeySource(signer),
     agentHosts: { hasAgentHost: async () => false },
+    health: {
+      openOwnerFacts: (userId, network, serviceId) =>
+        openOwnerFacts(options.pool, userId, network, serviceId),
+      isInjectionBlocked: (network, serviceId) =>
+        isInjectionBlocked(options.pool, network, serviceId),
+    },
     allowance: {
       async remaining(userId, categoryId) {
         try {
@@ -1442,10 +1573,14 @@ export function createPlannerProfileSource(
   acceptance: Pick<Awaited<ReturnType<typeof createAcceptanceChecker>>, "profileIdFor">,
 ): PlannerPorts["profiles"] {
   return {
-    profileIdFor(taskClass) {
+    profileIdFor(taskClass, service) {
+      const circle = service?.extensions.czar.source === "circle-registry";
+      const schema = service?.extensions.czar.card["outputSchema"];
+      if (circle && !hasOutputSchema(schema)) return acceptance.profileIdFor("generic-delivery");
       if (taskClass === "data-json.search" || taskClass === "data-json.extract")
         return acceptance.profileIdFor("data-json");
       if (taskClass === "local") return localTemplateProfile().profile_id;
+      if (circle) return acceptance.profileIdFor("generic-delivery");
       return acceptance.profileIdFor(taskClass);
     },
   };
@@ -1473,9 +1608,15 @@ function quarantinedStepResult(
   bodyCommit: string,
   report: AcceptanceReport,
 ): StepResult {
+  const subjectIndex = context.input.step.callInputs?.find(
+    (call) => call.callIndex === context.index,
+  )?.subjectIndex;
   return {
-    schemaVersion: "1.0",
+    schemaVersion: "1.1",
     stepIndex: context.input.step.stepIndex,
+    callIndex: context.index,
+    obsId: obsId(dedupKey(context.paymentRef)),
+    ...(subjectIndex === undefined ? {} : { subjectIndex }),
     status: "unknown",
     source,
     fields: [],
